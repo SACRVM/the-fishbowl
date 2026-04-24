@@ -441,6 +441,323 @@ var notes = new List<Note>
       "If no blockers in 72h, retag as v2.4.0 and publish.",
       "work", "releases"),
 
+    // ── Markdown spec coverage ──
+    //
+    // One note per CommonMark / GFM feature so the editor can be
+    // eyeball-tested end-to-end. Tagged spec:commonmark or spec:gfm
+    // (plus a category subtag) — filter the notes view to those and
+    // you get the whole suite grouped.
+    // References:
+    //   https://spec.commonmark.org/0.31.2/
+    //   https://github.github.com/gfm/
+    N("spec: ATX headings h1–h6",
+      """
+      # H1 heading
+      ## H2 heading
+      ### H3 heading
+      #### H4 heading
+      ##### H5 heading
+      ###### H6 heading
+
+      Trailing hashes are optional:
+      ## Heading with trailing hashes ##
+
+      At least one space after the hash is required:
+      #not a heading (should render as a paragraph)
+      """,
+      "spec:commonmark", "spec:headings"),
+
+    N("spec: setext headings",
+      """
+      Setext H1 uses `=`
+      ==================
+
+      Setext H2 uses `-`
+      ------------------
+
+      Either underline accepts any length.
+      """,
+      "spec:commonmark", "spec:headings"),
+
+    N("spec: paragraphs, hard breaks, escapes",
+      """
+      This is one paragraph. Wrapped lines without a blank separator
+      are part of the same paragraph.
+
+      Trailing-space hard breaks are not exercised here because editors
+      routinely strip trailing whitespace. The GFM backslash form is
+      tested instead:\
+      Like so — the line above ends with a literal backslash.
+
+      Escapes: \*not emphasis\*, \[not a link\], literal backslash: \\.
+
+      HTML entities pass through: &amp;, &copy;, &hellip;.
+      """,
+      "spec:commonmark"),
+
+    N("spec: emphasis and strong",
+      """
+      *single-star italic* and _single-underscore italic_.
+
+      **double-star bold** and __double-underscore bold__.
+
+      ***both at once*** and ___both at once___.
+
+      Nested: **bold with _italic inside_ bold**.
+
+      Mid-word emphasis should NOT fire:
+      - snake_case_ident stays literal
+      - x*y*z stays literal (letters around the star)
+
+      Inside a `code span *asterisks* are literal`.
+      """,
+      "spec:commonmark", "spec:inline"),
+
+    N("spec: strikethrough (GFM)",
+      """
+      ~~single-line strike~~
+
+      Mixed: ~~strike with **bold** inside~~ and **bold with ~~strike~~ inside**.
+
+      Should not fire mid-word: ~not~single~tilde~.
+      """,
+      "spec:gfm", "spec:inline"),
+
+    N("spec: unordered and ordered lists",
+      """
+      Unordered with `-`:
+      - alpha
+      - bravo
+      - charlie
+
+      Unordered with `*`:
+      * one
+      * two
+
+      Ordered:
+      1. first
+      2. second
+      3. third
+
+      Custom start (CommonMark respects the first number, then increments):
+      7. seven
+      8. eight
+
+      Nested:
+      - outer
+        - inner
+          - deepest
+      - back to outer
+      """,
+      "spec:commonmark", "spec:lists"),
+
+    N("spec: task lists (GFM)",
+      """
+      - [ ] open task
+      - [x] closed task
+      - [X] uppercase X also closed
+      - [ ] parent
+        - [x] sub-one
+        - [ ] sub-two
+      """,
+      "spec:gfm", "spec:lists"),
+
+    N("spec: blockquotes",
+      """
+      > A plain blockquote.
+      > Second line in the same quote.
+
+      > Nested:
+      > > inner quote
+      > > > deeper still
+
+      > Quote with a heading:
+      > ### inside a quote
+      >
+      > And a list inside:
+      > - one
+      > - two
+      """,
+      "spec:commonmark"),
+
+    N("spec: fenced code blocks",
+      """
+      Plain fence:
+
+      ```
+      plain fence, no language hint
+      ```
+
+      With language hint:
+
+      ```python
+      def hello(name: str) -> str:
+          return f"hi {name}"
+      ```
+
+      Tilde fence:
+
+      ~~~js
+      console.log("tilde fence");
+      ~~~
+      """,
+      "spec:commonmark", "spec:code"),
+
+    N("spec: indented code blocks",
+      """
+      A paragraph first.
+
+          def legacy():
+              return "four-space indent means code"
+
+      Back to prose after a blank line.
+      """,
+      "spec:commonmark", "spec:code"),
+
+    N("spec: inline code spans",
+      """
+      Single backtick: `code`.
+
+      Double-backtick wraps embedded backticks: ``inline `code` with backticks``.
+
+      Inside a span, `*asterisks* and [brackets](url)` stay literal.
+      """,
+      "spec:commonmark", "spec:code"),
+
+    N("spec: links and autolinks",
+      """
+      Inline link: [CommonMark](https://spec.commonmark.org/).
+
+      Titled link: [GFM spec](https://github.github.com/gfm/ "GitHub Flavored Markdown").
+
+      Autolink (angle-wrapped): <https://example.org/>.
+
+      Bare URL (GFM autolink): https://example.org/path.
+
+      Email autolink: <hello@example.com>.
+
+      Reference link: [Raft paper][raft] — repeated: [the paper][raft].
+
+      [raft]: https://raft.github.io/raft.pdf "In Search of an Understandable Consensus Algorithm"
+      """,
+      "spec:commonmark", "spec:links"),
+
+    N("spec: images",
+      """
+      Inline image: ![alt text](https://example.org/img.png).
+
+      Titled image: ![logo](https://example.org/logo.svg "Site logo").
+
+      Reference image: ![banner][banner].
+
+      [banner]: https://example.org/banner.png
+      """,
+      "spec:commonmark", "spec:images"),
+
+    N("spec: horizontal rules (three forms)",
+      """
+      Above first rule.
+
+      ---
+
+      Between dash and star.
+
+      ***
+
+      Between star and underscore.
+
+      ___
+
+      Below underscore rule.
+      """,
+      "spec:commonmark"),
+
+    N("spec: tables (GFM)",
+      """
+      | left     | center   | right    |
+      | :---     | :---:    | ---:     |
+      | a        | b        | c        |
+      | longer   | data     |       42 |
+      | `code`   | **bold** | *italic* |
+
+      Without outer pipes:
+
+      col1 | col2
+      -----|-----
+      x    | y
+      """,
+      "spec:gfm", "spec:tables"),
+
+    N("spec: raw HTML (escaped, not parsed)",
+      """
+      Fishbowl policy: inline HTML is always escaped, never parsed as live
+      DOM. Reasons: content fidelity (DOMPurify-stripped tags would silently
+      vanish from the source), and defense-in-depth (self-hosted memory
+      should never execute arbitrary HTML from notes).
+
+      All of the following should render as literal text, not markup:
+
+      <em>this will show as "<em>this will show as …"</em>
+      <strong>same for strong</strong>
+      <script>alert(1)</script>
+      <iframe src="https://evil.example/"></iframe>
+      <img src=x onerror=alert(1) />
+
+      <div class="custom">
+        <p>block-level HTML is literal text too</p>
+      </div>
+      """,
+      "spec:commonmark", "spec:html"),
+
+    N("spec: kitchen sink",
+      """
+      # Kitchen sink
+
+      Paragraph with **bold**, *italic*, ~~strike~~, `code`, and a [link](https://example.org/).
+
+      ## A table with inline formatting
+
+      | feature  | state    |
+      | :---     | :---:    |
+      | bold     | **yes**  |
+      | italic   | *yes*    |
+      | strike   | ~~yes~~  |
+
+      ## A list with mixed content
+
+      1. Ordered item with `inline code`.
+      2. Ordered item with a [link](https://example.org/).
+         - Nested unordered child.
+         - [ ] nested task.
+      3. Third item.
+
+      ## A quote with a code block inside
+
+      > The only way to discover the limits of the possible
+      > is to go beyond them into the impossible.
+      >
+      > ```python
+      > def beyond():
+      >     return float("inf")
+      > ```
+
+      ## A secret block inside markdown
+
+      Before the block.
+
+      ::secret
+      apikey: fb_live_REDACTED_FOR_SEED
+      passphrase: correct-horse-battery-staple
+      ::end
+
+      After the block.
+
+      ---
+
+      See <https://spec.commonmark.org/0.31.2/> for the authoritative spec.
+      """,
+      "spec:commonmark", "spec:gfm", "spec:kitchen-sink"),
+
     // ── review:pending probes (for includePending filter) ──
     //
     // These simulate notes captured by an MCP client that haven't been

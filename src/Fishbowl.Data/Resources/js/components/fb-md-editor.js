@@ -36,14 +36,13 @@
  * ::secret / ::end blocks: lines stay editable in v1; visual masking of
  * secret bodies is intentionally deferred - secrets in preview would be a
  * separate feature touching the crypto path, not just rendering.
+ *
+ * Dependencies (loaded as globals before this script):
+ *   marked     - CommonMark + GFM tokenizer. We only use marked.Lexer.lexInline
+ *                and walk the token tree ourselves (see renderInline below).
+ *   DOMPurify  - HTML sanitiser. Second line of defence behind our own
+ *                escape-don't-parse policy for inline HTML.
  */
-
-// Private-use sentinels for token parking during inline transforms. PUA
-// codepoints can't appear in escapeHtml output, so collisions with real
-// text are impossible. Built at runtime so this source stays ASCII-only.
-const TOK_OPEN  = String.fromCharCode(0xE000);
-const TOK_CLOSE = String.fromCharCode(0xE001);
-const TOK_RE    = new RegExp(TOK_OPEN + "(\\d+)" + TOK_CLOSE, "g");
 
 class FbMdEditor extends HTMLElement {
     static observedAttributes = ["placeholder", "readonly"];
@@ -1290,7 +1289,7 @@ class FbMdEditor extends HTMLElement {
 // ---------------------------------------------------------------------------
 
 const BLOCK_PREFIX_RE = {
-    heading: /^(#{1,3}\s)/,
+    heading: /^(#{1,6}\s)/,
     ul:      /^(\s*[-*]\s)/,
     ol:      /^(\s*\d+\.\s)/,
     quote:   /^(>\s?)/,
@@ -1298,7 +1297,7 @@ const BLOCK_PREFIX_RE = {
 
 function parseLineBlock(src) {
     if (src === "") return { type: "empty", classes: "" };
-    const h = src.match(/^(#{1,3})\s+/);
+    const h = src.match(/^(#{1,6})\s+/);
     if (h) return { type: "heading", classes: `heading h${h[1].length}` };
     // Task lists get their own type so the `[ ]`/`[x]` render as a checkbox.
     // Tested before plain lists because the pattern is a strict superset.
@@ -1321,61 +1320,103 @@ function parseLineBlock(src) {
 // DOM (wrapped in <span class="marker">), so the line's textContent equals
 // the original source. This is the invariant that makes active/inactive
 // flipping safe and keeps `value` round-tripping exactly.
+//
+// Tokenization is delegated to marked v15 (CommonMark + GFM). We walk the
+// token tree ourselves so we can re-inject the raw marker characters as
+// hidden-but-present spans — marked's own renderer strips them.
+//
+// Inline HTML is ALWAYS escaped (never parsed as live DOM). This is a
+// deliberate deviation from CommonMark: inline <tag> content gets rendered
+// as literal text, not as real HTML. Two reasons:
+//   1. Content fidelity: DOMPurify-stripped tags would silently disappear
+//      from the inactive render, and then from line.textContent, corrupting
+//      the user's source on the next save.
+//   2. Defense in depth: a self-hosted memory tool should never execute
+//      arbitrary HTML typed into a note. DOMPurify below is a second gate
+//      in case anything slips through the walker.
 // ---------------------------------------------------------------------------
+
+const PURIFY_CONFIG = {
+    ALLOWED_TAGS: ["span", "strong", "em", "del", "code", "a", "br"],
+    ALLOWED_ATTR: ["class", "href", "target", "rel"],
+    ALLOW_DATA_ATTR: false,
+    KEEP_CONTENT: true,
+};
+
+const SAFE_HREF_RE = /^(https?:|mailto:|#)/i;
 
 function renderInline(text) {
     if (!text) return "";
-    let s = escapeHtml(text);
-    const tokens = [];
-    const park = (html) => {
-        tokens.push(html);
-        return TOK_OPEN + (tokens.length - 1) + TOK_CLOSE;
-    };
+    // Graceful degradation if vendor scripts haven't loaded yet (e.g. in a
+    // unit test harness that imports just the component file).
+    if (typeof marked === "undefined" || typeof DOMPurify === "undefined") {
+        return escapeHtml(text);
+    }
+    let tokens;
+    try {
+        tokens = marked.Lexer.lexInline(text, { gfm: true, breaks: false });
+    } catch { return escapeHtml(text); }
+    return DOMPurify.sanitize(walkInlineTokens(tokens), PURIFY_CONFIG);
+}
 
-    // Code spans first - their contents must not be re-processed.
-    s = s.replace(/`([^`\n]+)`/g, (_, body) =>
-        park(`<span class="marker">&#96;</span><code>${body}</code><span class="marker">&#96;</span>`)
-    );
+function walkInlineTokens(tokens) {
+    let out = "";
+    for (const t of tokens) out += renderInlineToken(t);
+    return out;
+}
 
-    // Bold - both ** and __ variants. Must run before italic so the outer
-    // pair gets parked as one token before the single-delimiter italic rule
-    // could grab the inner characters. The __ variant demands a leading
-    // non-wordchar so `snake__case` stays literal.
-    s = s.replace(/\*\*([^*\n]+)\*\*/g, (_, body) =>
-        park(`<span class="marker">**</span><strong>${body}</strong><span class="marker">**</span>`)
-    );
-    s = s.replace(/(^|[^A-Za-z0-9_])__([^_\n]+)__/g, (_, pre, body) =>
-        pre + park(`<span class="marker">__</span><strong>${body}</strong><span class="marker">__</span>`)
-    );
-
-    // Strikethrough.
-    s = s.replace(/~~([^~\n]+)~~/g, (_, body) =>
-        park(`<span class="marker">~~</span><del>${body}</del><span class="marker">~~</span>`)
-    );
-
-    // Italic - single * or _. Require a leading non-wordchar so mid-word
-    // `x*y*z` / `snake_case` stay literal (CommonMark convention).
-    s = s.replace(/(^|[^A-Za-z0-9_])\*([^*\n]+)\*/g, (_, pre, body) =>
-        pre + park(`<span class="marker">*</span><em>${body}</em><span class="marker">*</span>`)
-    );
-    s = s.replace(/(^|[^A-Za-z0-9])_([^_\n]+)_/g, (_, pre, body) =>
-        pre + park(`<span class="marker">_</span><em>${body}</em><span class="marker">_</span>`)
-    );
-
-    // Links.
-    s = s.replace(/\[([^\]\n]+)\]\(([^)\s]+)\)/g, (_, label, url) => {
-        const safe = /^(https?:|mailto:|#)/i.test(url) ? url : "#";
-        return park(`<span class="marker">[</span><a href="${safe}" target="_blank" rel="noopener noreferrer">${label}</a><span class="marker">](${url})</span>`);
-    });
-
-    // Autolinks - http(s) bare URLs. Skip those already inside a token to
-    // avoid double-wrapping markdown links.
-    s = s.replace(/(^|[\s(])(https?:\/\/[^\s<>)]+)/g, (_, pre, url) =>
-        pre + park(`<a href="${url}" target="_blank" rel="noopener noreferrer">${url}</a>`)
-    );
-
-    s = s.replace(TOK_RE, (_, idx) => tokens[+idx]);
-    return s;
+function renderInlineToken(t) {
+    switch (t.type) {
+        case "text":
+            return escapeHtml(t.text);
+        case "escape":
+            // raw like "\\*" — keep the backslash visible as a marker so
+            // textContent round-trips; show the escaped char as content.
+            return `<span class="marker">\\</span>${escapeHtml(t.text)}`;
+        case "strong": {
+            const delim = t.raw.startsWith("__") ? "__" : "**";
+            return `<span class="marker">${delim}</span><strong>${walkInlineTokens(t.tokens || [])}</strong><span class="marker">${delim}</span>`;
+        }
+        case "em": {
+            const delim = t.raw.charAt(0); // "*" or "_"
+            return `<span class="marker">${delim}</span><em>${walkInlineTokens(t.tokens || [])}</em><span class="marker">${delim}</span>`;
+        }
+        case "del":
+            return `<span class="marker">~~</span><del>${walkInlineTokens(t.tokens || [])}</del><span class="marker">~~</span>`;
+        case "codespan": {
+            const m = t.raw.match(/^(`+)/);
+            const delim = m ? m[1] : "`";
+            return `<span class="marker">${delim}</span><code>${escapeHtml(t.text)}</code><span class="marker">${delim}</span>`;
+        }
+        case "br":
+            // Hard break — keep the raw source chars visible as a marker so
+            // textContent stays faithful; the <br> is the visual break.
+            return `<span class="marker">${escapeHtml(t.raw.replace(/\n$/, ""))}</span><br>`;
+        case "link": {
+            const href = t.href || "";
+            const safe = SAFE_HREF_RE.test(href) ? href : "#";
+            // Autolinks: <url>, <email>, or bare URL — one contiguous anchor,
+            // no outer bracket markers.
+            if (t.raw === href || t.raw === `<${href}>` || t.raw === `<${t.text}>`) {
+                return `<a href="${escapeAttr(safe)}" target="_blank" rel="noopener noreferrer">${escapeHtml(t.raw)}</a>`;
+            }
+            // Inline link [label](href) — preserve the `](...)` tail literally.
+            const tailIdx = t.raw.lastIndexOf("](");
+            if (tailIdx < 0) return escapeHtml(t.raw);
+            const tail = t.raw.substring(tailIdx);
+            return `<span class="marker">[</span><a href="${escapeAttr(safe)}" target="_blank" rel="noopener noreferrer">${walkInlineTokens(t.tokens || [])}</a><span class="marker">${escapeHtml(tail)}</span>`;
+        }
+        case "image":
+            // Don't actually render images — too many layout/network surprises
+            // for a personal-memory editor. Keep the source visible as markers
+            // so textContent round-trips.
+            return `<span class="marker">${escapeHtml(t.raw)}</span>`;
+        case "html":
+            // Policy: escape, don't parse. See header comment for why.
+            return escapeHtml(t.raw);
+        default:
+            return escapeHtml(t.raw || "");
+    }
 }
 
 function escapeHtml(s) {
@@ -1383,6 +1424,8 @@ function escapeHtml(s) {
         "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;", "'": "&#39;"
     }[c]));
 }
+
+function escapeAttr(s) { return escapeHtml(s); }
 
 // ---------------------------------------------------------------------------
 // Shadow DOM template
@@ -1514,6 +1557,9 @@ const TEMPLATE = `
     .line.h1 { font-size: 1.85em; }
     .line.h2 { font-size: 1.4em; }
     .line.h3 { font-size: 1.15em; }
+    .line.h4 { font-size: 1.05em; }
+    .line.h5 { font-size: 0.95em; }
+    .line.h6 { font-size: 0.88em; color: var(--text-muted, #888); }
     .line.heading:not(.active) .block-marker { display: none; }
 
     /* Blockquote. A continuous left bar across a run of quote lines, plus
