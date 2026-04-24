@@ -15,6 +15,38 @@
       "outputPath": "src/Fishbowl.Data/Resources/js/vendor/purify.min.js",
       "license": "Apache-2.0 OR MPL-2.0",
       "sha256": "9220e3279e003c4ffd53a6d5e2d5615c8d6649f4d65c2569973ec5e135805fd3"
+    },
+    {
+      "name": "inter-latin",
+      "version": "v20",
+      "url": "https://fonts.gstatic.com/s/inter/v20/UcC73FwrK3iLTeHuS_nVMrMxCp50SjIa1ZL7.woff2",
+      "outputPath": "src/Fishbowl.Data/Resources/fonts/inter-latin.woff2",
+      "license": "OFL-1.1",
+      "sha256": "3100e775e8616cd2611beecfa23a4263d7037586789b43f035236a2e6fbd4c62"
+    },
+    {
+      "name": "inter-latin-ext",
+      "version": "v20",
+      "url": "https://fonts.gstatic.com/s/inter/v20/UcC73FwrK3iLTeHuS_nVMrMxCp50SjIa25L7SUc.woff2",
+      "outputPath": "src/Fishbowl.Data/Resources/fonts/inter-latin-ext.woff2",
+      "license": "OFL-1.1",
+      "sha256": "34b9c504cab7a73e37b746343a449132e56cf7b5481af2cb81dc74dcff25c956"
+    },
+    {
+      "name": "outfit-latin",
+      "version": "v15",
+      "url": "https://fonts.gstatic.com/s/outfit/v15/QGYvz_MVcBeNP4NJtEtq.woff2",
+      "outputPath": "src/Fishbowl.Data/Resources/fonts/outfit-latin.woff2",
+      "license": "OFL-1.1",
+      "sha256": "6c18d579fd87c3776be068b762cbc83fde3acb543d49eabd3ade842eb987e887"
+    },
+    {
+      "name": "outfit-latin-ext",
+      "version": "v15",
+      "url": "https://fonts.gstatic.com/s/outfit/v15/QGYvz_MVcBeNP4NJuktqQ4E.woff2",
+      "outputPath": "src/Fishbowl.Data/Resources/fonts/outfit-latin-ext.woff2",
+      "license": "OFL-1.1",
+      "sha256": "0f53d1c03b3918d744a843b5039001ee31695ca1e255e3914188df81beb461e9"
     }
   ]
 }
