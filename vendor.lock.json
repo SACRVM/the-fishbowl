@@ -1,0 +1,20 @@
+{
+  "entries": [
+    {
+      "name": "marked",
+      "version": "15.0.12",
+      "url": "https://cdn.jsdelivr.net/npm/marked@15/marked.min.js",
+      "outputPath": "src/Fishbowl.Data/Resources/js/vendor/marked.min.js",
+      "license": "MIT",
+      "sha256": "3e7e7d7feb3e5d58cb6c804f68ab5c24cc7e5eb6270fd6e5cbb9124739217d0c"
+    },
+    {
+      "name": "dompurify",
+      "version": "3.2.0",
+      "url": "https://cdn.jsdelivr.net/npm/dompurify@3.2.0/dist/purify.min.js",
+      "outputPath": "src/Fishbowl.Data/Resources/js/vendor/purify.min.js",
+      "license": "Apache-2.0 OR MPL-2.0",
+      "sha256": "9220e3279e003c4ffd53a6d5e2d5615c8d6649f4d65c2569973ec5e135805fd3"
+    }
+  ]
+}
