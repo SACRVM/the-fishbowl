@@ -15,12 +15,21 @@ public static class SecretStripper
         @"::secret\s*\r?\n.*?\r?\n\s*::end",
         RegexOptions.Singleline | RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
+    // Post-encryption marker form (Phase 3): `::secret#N::end` on a single
+    // line, where N is the ciphertext index in content_secret. These markers
+    // contain no secret data themselves, but leaking them reveals which
+    // notes contain secrets and how many — strip anyway, same placeholder.
+    private static readonly Regex Marker = new(
+        @"::secret#\d+::end",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
     private const string Placeholder = "[secret content hidden]";
 
     public static string? Strip(string? content)
     {
         if (string.IsNullOrEmpty(content)) return content;
-        return Block.Replace(content, Placeholder);
+        var stripped = Block.Replace(content, Placeholder);
+        return Marker.Replace(stripped, Placeholder);
     }
 
     // Returns a shallow copy of the note with content stripped and the

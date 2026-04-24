@@ -64,8 +64,117 @@
         return request(`${ctx("/notes")}?${qs.toString()}`);
     }
 
-    const notes = crud("notes");
-    notes.list = listNotes;
+    // ── Secret block transforms (Phase 3 encryption) ───────────────────────
+    //
+    // Outbound: extract ::secret\n…\n::end bodies from note.content, encrypt
+    //           each via fb.vault, write them to contentSecret as a JSON
+    //           envelope, and replace the inline body with ::secret#N::end
+    //           marker. The server never sees plaintext secrets.
+    // Inbound:  inverse — decrypt each entry in contentSecret and splice the
+    //           body back between ::secret and ::end so the editor sees the
+    //           normal inline form.
+    //
+    // Legacy notes with inline bodies and no contentSecret round-trip through
+    // here unchanged until they're saved; that save triggers lazy migration.
+    // A failure to unlock (user cancels) leaves markers + ciphertext in
+    // place; the editor renders them as "[decryption failed]" inside each
+    // ::secret block so the user sees something's encrypted rather than
+    // silently losing data.
+
+    // ::secret (optional label) \n <body> \n ::end (rest of line). `m` for
+    // per-line anchors; non-greedy body so adjacent blocks don't collapse.
+    // IMPORTANT: the optional label uses `[ \t]` (horizontal whitespace
+    // only), NOT `\s`. With `\s`, the engine greedily consumes the `\n`
+    // after `::secret` into the optional group AND then `[^\n]*` eats the
+    // first body line — so the capture group loses the first body line.
+    // Bug squashed: always keep the label-matcher confined to the boundary
+    // line by using [ \t] to forbid newlines.
+    const INLINE_SECRET_RE = /^::secret(?:[ \t][^\n]*)?\n([\s\S]*?)\n::end[^\n]*$/gm;
+    const MARKER_SECRET_RE = /::secret#(\d+)::end/g;
+
+    async function transformNoteOutbound(note) {
+        const content = note?.content || "";
+        const bodies = [];
+        const rewritten = content.replace(INLINE_SECRET_RE, (_m, body) => {
+            const i = bodies.length;
+            bodies.push(body);
+            return `::secret#${i}::end`;
+        });
+        if (bodies.length === 0) {
+            // User removed every secret block. Null contentSecret to avoid
+            // orphaned ciphertext sitting on the row. Leftover markers
+            // without matching inline bodies is a weird state we don't
+            // auto-clean — preserve whatever's there so the user can fix it.
+            const hasMarkers = /::secret#\d+::end/.test(content);
+            if (!hasMarkers && note?.contentSecret) {
+                return { ...note, contentSecret: null };
+            }
+            return note;
+        }
+        if (!window.fb?.vault) throw new Error("fb.vault unavailable — secret encryption disabled");
+        await fb.vault.ensureUnlocked();
+        const ciphertexts = [];
+        for (const body of bodies) ciphertexts.push(await fb.vault.encryptBlock(body));
+        const payload = JSON.stringify({ v: 1, blocks: ciphertexts });
+        // Base64 of UTF-8 JSON bytes — what the server deserialises into
+        // the byte[] ContentSecret column.
+        const bytes = new TextEncoder().encode(payload);
+        const contentSecret = btoa(String.fromCharCode(...bytes));
+        return { ...note, content: rewritten, contentSecret };
+    }
+
+    async function transformNoteInbound(note) {
+        if (!note) return note;
+        const content = note.content || "";
+        if (!content.includes("::secret#")) return note;
+        if (!note.contentSecret) return note;
+
+        let payload;
+        try {
+            const raw = Uint8Array.from(atob(note.contentSecret), c => c.charCodeAt(0));
+            payload = JSON.parse(new TextDecoder().decode(raw));
+        } catch (e) {
+            console.warn("fb.api.notes: invalid content_secret JSON:", e);
+            return note;
+        }
+        if (payload.v !== 1 || !Array.isArray(payload.blocks)) return note;
+
+        try { if (window.fb?.vault) await fb.vault.ensureUnlocked(); }
+        catch { return note; } // user cancelled unlock — leave markers visible
+
+        const decrypted = {};
+        for (const [, idx] of content.matchAll(MARKER_SECRET_RE)) {
+            if (decrypted[idx] !== undefined) continue;
+            const n = Number(idx);
+            if (n < 0 || n >= payload.blocks.length) {
+                decrypted[idx] = `[no ciphertext #${idx}]`;
+                continue;
+            }
+            try { decrypted[idx] = await fb.vault.decryptBlock(payload.blocks[n]); }
+            catch (e) {
+                console.warn(`fb.api.notes: decryptBlock #${n} failed:`, e);
+                decrypted[idx] = "[decryption failed]";
+            }
+        }
+        const restored = content.replace(MARKER_SECRET_RE,
+            (_m, idx) => `::secret\n${decrypted[idx]}\n::end`);
+        return { ...note, content: restored };
+    }
+
+    const rawNotes = crud("notes");
+    rawNotes.list = listNotes;
+
+    const notes = {
+        list:   async (opts)     => {
+            const arr = await rawNotes.list(opts);
+            if (!Array.isArray(arr)) return arr;
+            return Promise.all(arr.map(transformNoteInbound));
+        },
+        get:    async (id)       => transformNoteInbound(await rawNotes.get(id)),
+        create: async (body)     => transformNoteInbound(await rawNotes.create(await transformNoteOutbound(body))),
+        update: async (id, body) => rawNotes.update(id, await transformNoteOutbound(body)),
+        delete: rawNotes.delete,
+    };
 
     // Contacts list accepts an optional filter: { includeArchived?: boolean }.
     function listContacts(opts) {

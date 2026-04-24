@@ -188,6 +188,43 @@ public class SecretStripInvariantTests : IClassFixture<WebApplicationFactory<Pro
         Assert.Contains(SecretMarker, rawContent);
     }
 
+    [Fact]
+    public async Task MarkerForm_AlsoStripped()
+    {
+        // Phase 3 encrypted secrets leave `::secret#N::end` markers in the
+        // public content. They carry no plaintext themselves, but leaking
+        // them reveals how many secrets a note has and which indices
+        // exist — strip to the same placeholder.
+        await _notes.CreateAsync(
+            new ContextRef(ContextType.User, UserId), UserId,
+            new Note
+            {
+                Title = "note-with-marker",
+                Content = "Prefix.\n::secret#0::end\nMiddle.\n::secret#1::end\nSuffix.",
+                ContentSecret = Encoding.UTF8.GetBytes("{\"v\":1,\"blocks\":[\"opaque\",\"opaque\"]}"),
+            },
+            NoteSource.Mcp,
+            TestContext.Current.CancellationToken);
+
+        var issued = await _keys.IssueAsync(UserId, ContextRef.User(UserId), "marker-probe",
+            new[] { "read:notes" }, TestContext.Current.CancellationToken);
+        var client = _factory.CreateClient();
+        client.DefaultRequestHeaders.Authorization =
+            new AuthenticationHeaderValue("Bearer", issued.RawToken);
+
+        var resp = await client.PostAsync("/mcp",
+            RpcBody("search_memory", new { query = "note-with-marker" }),
+            TestContext.Current.CancellationToken);
+        resp.EnsureSuccessStatusCode();
+        var body = await resp.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
+
+        Assert.DoesNotContain("::secret#0::end", body);
+        Assert.DoesNotContain("::secret#1::end", body);
+        Assert.DoesNotContain("contentSecret", body, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Prefix.", body);
+        Assert.Contains("Suffix.", body);
+    }
+
     public void Dispose()
     {
         _factory.Dispose();
