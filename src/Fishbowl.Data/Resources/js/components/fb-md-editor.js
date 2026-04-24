@@ -1437,13 +1437,17 @@ function parseLineBlock(src) {
 // ---------------------------------------------------------------------------
 
 const PURIFY_CONFIG = {
-    ALLOWED_TAGS: ["span", "strong", "em", "del", "code", "a", "br"],
-    ALLOWED_ATTR: ["class", "href", "target", "rel"],
+    ALLOWED_TAGS: ["span", "strong", "em", "del", "code", "a", "br", "img"],
+    ALLOWED_ATTR: ["class", "href", "target", "rel", "src", "alt", "title",
+                   "loading", "referrerpolicy"],
     ALLOW_DATA_ATTR: false,
     KEEP_CONTENT: true,
 };
 
 const SAFE_HREF_RE = /^(https?:|mailto:|#)/i;
+// Images: http/https only. Block data: URIs (SVG-XSS, canvas leaks),
+// javascript:, and anything else that could exfil or execute.
+const SAFE_IMG_SRC_RE = /^https?:/i;
 
 function renderInline(text) {
     if (!text) return "";
@@ -1506,11 +1510,21 @@ function renderInlineToken(t) {
             const tail = t.raw.substring(tailIdx);
             return `<span class="marker">[</span><a href="${escapeAttr(safe)}" target="_blank" rel="noopener noreferrer">${walkInlineTokens(t.tokens || [])}</a><span class="marker">${escapeHtml(tail)}</span>`;
         }
-        case "image":
-            // Don't actually render images — too many layout/network surprises
-            // for a personal-memory editor. Keep the source visible as markers
-            // so textContent round-trips.
-            return `<span class="marker">${escapeHtml(t.raw)}</span>`;
+        case "image": {
+            // Preserve the raw source as a marker span (hidden on inactive
+            // lines via the existing .line:not(.active) .marker rule), then
+            // render the real <img> alongside. textContent of the line stays
+            // equal to the source (markers contribute text, <img> doesn't).
+            const srcMarker = `<span class="marker">${escapeHtml(t.raw)}</span>`;
+            const href = t.href || "";
+            if (!SAFE_IMG_SRC_RE.test(href)) return srcMarker;
+            const altAttr   = escapeAttr(t.text || "");
+            const titleAttr = t.title ? ` title="${escapeAttr(t.title)}"` : "";
+            // referrerpolicy=no-referrer so the image host can't see which
+            // note you're viewing. loading=lazy skips off-screen fetches.
+            return `${srcMarker}<img src="${escapeAttr(href)}" alt="${altAttr}"${titleAttr}` +
+                   ` loading="lazy" referrerpolicy="no-referrer">`;
+        }
         case "html":
             // Policy: escape, don't parse. See header comment for why.
             return escapeHtml(t.raw);
@@ -2020,6 +2034,20 @@ const TEMPLATE = `
         text-underline-offset: 2px;
     }
     .line a:hover { text-decoration-color: var(--accent, #3b82f6); }
+
+    /* Inline images — cap so a giant remote image doesn't blow out the
+       line. The source marker sits next to it; on inactive lines markers
+       are hidden, so only the image shows. */
+    .line img {
+        max-width: 100%;
+        max-height: 320px;
+        height: auto;
+        border-radius: 4px;
+        vertical-align: middle;
+        display: inline-block;
+    }
+    /* Active line flattens innerHTML to plain text — no <img> rendered then.
+       That's the desired editing state. */
 </style>
 <div class="toolbar" part="toolbar">
     <button type="button" data-fmt="bold"   title="Bold (Ctrl+B)"><b>B</b></button>
