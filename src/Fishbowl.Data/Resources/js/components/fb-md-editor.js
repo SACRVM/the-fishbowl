@@ -33,9 +33,16 @@
  *   Backspace at start of non-first line   merge with previous line
  *   Tab                                    two-space soft tab
  *
- * ::secret / ::end blocks: lines stay editable in v1; visual masking of
- * secret bodies is intentionally deferred - secrets in preview would be a
- * separate feature touching the crypto path, not just rendering.
+ * ::secret / ::end blocks: lines between the boundaries get the
+ * .secret-body class and a CSS blur so the content isn't readable
+ * over someone's shoulder. A reveal toggle (eye icon, contenteditable=
+ * false) sits on the ::secret boundary line — clicking it flips
+ * .secret-revealed on every line of the block for session-only
+ * unmasking. The active (caret) line inside a secret block still
+ * flattens to raw text for editing. This is a purely visual layer:
+ * the plaintext is still in the DOM and still in the saved `content`
+ * column. Encryption of the actual bytes is the separate Phase 3
+ * that swaps the source into content_secret.
  *
  * Dependencies (loaded as globals before this script):
  *   marked     - CommonMark + GFM tokenizer. We only use marked.Lexer.lexInline
@@ -43,6 +50,17 @@
  *   DOMPurify  - HTML sanitiser. Second line of defence behind our own
  *                escape-don't-parse policy for inline HTML.
  */
+
+// Reveal-toggle SVG: open eye with a diagonal slash that's hidden by default
+// and surfaced via CSS when the block carries .secret-revealed. One-line so
+// no whitespace text nodes end up in line.textContent and break round-trip.
+const REVEAL_EYE_SVG =
+    `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" ` +
+    `stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">` +
+    `<path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>` +
+    `<circle cx="12" cy="12" r="3"/>` +
+    `<line class="fb-eye-slash" x1="3" y1="3" x2="21" y2="21"/>` +
+    `</svg>`;
 
 class FbMdEditor extends HTMLElement {
     static observedAttributes = ["placeholder", "readonly"];
@@ -106,7 +124,7 @@ class FbMdEditor extends HTMLElement {
         // Always at least one line - an empty document still needs a caret target.
         if (lines.length === 0) lines.push("");
         this._activeLine = null;
-        const state = { inFence: false };
+        const state = { inFence: false, inSecret: false };
         this._editor.replaceChildren(
             ...lines.map(src => this._buildRenderedLine(src, state))
         );
@@ -157,7 +175,7 @@ class FbMdEditor extends HTMLElement {
         }
 
         // Seed with a single empty line so the caret has somewhere to go.
-        this._editor.replaceChildren(this._buildRenderedLine("", { inFence: false }));
+        this._editor.replaceChildren(this._buildRenderedLine("", { inFence: false, inSecret: false }));
         this._resetHistory();
 
         // Host-level input listener: catches both the native input events
@@ -173,6 +191,21 @@ class FbMdEditor extends HTMLElement {
         this._editor.addEventListener("cut",         (e) => this._handleCut(e));
         this._editor.addEventListener("copy",        (e) => this._handleCopy(e));
         this._editor.addEventListener("focusout",    (e) => this._handleFocusOut(e));
+
+        // Reveal-toggle click (eye icon on ::secret lines). mousedown.prevent
+        // keeps the caret in the surrounding line rather than leaping into
+        // the non-editable span. Use closest() because the real click target
+        // is the inner <svg> (or a path/circle/line) — classList on e.target
+        // would miss the wrapping .fb-reveal-toggle span.
+        this._editor.addEventListener("mousedown", (e) => {
+            if (e.target.closest?.(".fb-reveal-toggle")) e.preventDefault();
+        });
+        this._editor.addEventListener("click", (e) => {
+            const toggle = e.target.closest?.(".fb-reveal-toggle");
+            if (!toggle) return;
+            const line = this._lineContaining(toggle);
+            if (line) this._toggleSecretReveal(line);
+        });
 
         // Toolbar: mousedown.preventDefault keeps caret focus in the editor so
         // format actions can read the current selection. The click still fires.
@@ -199,18 +232,27 @@ class FbMdEditor extends HTMLElement {
 
     /** Render a line's inner DOM from its source. Adds marker spans and
      *  inline wrappers while preserving textContent exactly. `state` carries
-     *  the cross-line code-fence tracker so lines inside ``` get monospaced. */
+     *  the cross-line trackers: inFence (``` group) and inSecret (::secret
+     *  group) — each must advance on every line even when rendering wouldn't
+     *  otherwise change the output. */
     _renderLine(line, src = null, state = null) {
         if (src === null) src = line.textContent;
 
-        // Fence state advances on every line - must be updated even if this
-        // line isn't going to be rendered differently.
         const isFenceBoundary = /^```/.test(src);
         const insideFenceNow = state ? state.inFence : false;
         if (isFenceBoundary && state) state.inFence = !state.inFence;
 
+        // Secret boundary: ::secret opens, ::end closes. Only honoured outside
+        // a code fence — inside a fence these are literal text.
+        const isSecretOpen  = !insideFenceNow && /^::secret(\s|$)/.test(src);
+        const isSecretClose = !insideFenceNow && /^::end(\s|$)/.test(src);
+        const insideSecretNow = state ? state.inSecret : false;
+        if (state && isSecretOpen)  state.inSecret = true;
+        if (state && isSecretClose) state.inSecret = false;
+        const isSecretBoundary = isSecretOpen || isSecretClose;
+
         line.classList.remove("active");
-        this._applyBlockClass(line, src, insideFenceNow, isFenceBoundary);
+        this._applyBlockClass(line, src, insideFenceNow, isFenceBoundary, insideSecretNow, isSecretBoundary);
 
         const blockType = line.dataset.block || "";
         if (blockType === "fence-body") {
@@ -248,8 +290,36 @@ class FbMdEditor extends HTMLElement {
                 return;
             }
         }
-        if (blockType === "secret-open" || blockType === "secret-close") {
+        if (blockType === "secret-open") {
+            // Reveal toggle is a contenteditable=false span carrying an
+            // inline SVG eye. SVG shape children (path/circle/line) have no
+            // text nodes, so line.textContent stays equal to the source —
+            // critical for `value` round-trip, _flattenLine, etc. Slash
+            // line is always rendered but hidden by CSS unless the block
+            // has .secret-revealed. All SVG attributes sit on one line so
+            // no whitespace text nodes creep in. The editor-level click
+            // listener below wires the interaction.
+            line.innerHTML =
+                `<span class="block-marker">${escapeHtml(src)}</span>` +
+                `<span class="fb-reveal-toggle" contenteditable="false" ` +
+                `      role="button" tabindex="-1" ` +
+                `      aria-label="Toggle secret reveal" ` +
+                `      title="Show / hide secret body">` +
+                REVEAL_EYE_SVG +
+                `</span>`;
+            return;
+        }
+        if (blockType === "secret-close") {
             line.innerHTML = `<span class="block-marker">${escapeHtml(src)}</span>`;
+            return;
+        }
+        if (blockType === "secret-body") {
+            // Content wrapped in .secret-body-text so the blur can be applied
+            // to just the text — blurring the whole line would smear the
+            // card's left border too. Source is preserved (line.textContent
+            // still equals src).
+            const inner = src === "" ? "" : renderInline(src);
+            line.innerHTML = `<span class="secret-body-text">${inner}</span>`;
             return;
         }
         // Plain paragraph (or empty line).
@@ -282,21 +352,32 @@ class FbMdEditor extends HTMLElement {
     _applyBlockClassFor(line, src = null) {
         if (src === null) src = line.textContent;
         const state = this._stateBefore(line);
-        this._applyBlockClass(line, src, state.inFence, /^```/.test(src));
+        const isFenceBoundary = /^```/.test(src);
+        const isSecretBoundary = !state.inFence &&
+            (/^::secret(\s|$)/.test(src) || /^::end(\s|$)/.test(src));
+        this._applyBlockClass(line, src, state.inFence, isFenceBoundary,
+                              state.inSecret, isSecretBoundary);
     }
 
     /** Recompute the line's block-level class without touching its inner DOM.
      *  Called on every keystroke so that as you type `# `, the font jumps to
-     *  heading size live. Also stores the block type in dataset.block. */
-    _applyBlockClass(line, src, inFence, isFenceBoundary) {
-        const active = line.classList.contains("active");
+     *  heading size live. Also stores the block type in dataset.block.
+     *
+     *  Preserves the .secret-revealed class across re-classification so a
+     *  keystroke on a revealed boundary line doesn't re-mask the block. */
+    _applyBlockClass(line, src, inFence, isFenceBoundary, inSecret, isSecretBoundary) {
+        const active   = line.classList.contains("active");
+        const revealed = line.classList.contains("secret-revealed");
         const block = inFence && !isFenceBoundary
             ? { type: "fence-body", classes: "fence-body" }
             : isFenceBoundary
                 ? { type: "fence", classes: "fence" }
-                : parseLineBlock(src);
+                : inSecret && !isSecretBoundary
+                    ? { type: "secret-body", classes: "secret-body" }
+                    : parseLineBlock(src);
         const classes = ["line"];
-        if (active) classes.push("active");
+        if (active)    classes.push("active");
+        if (revealed)  classes.push("secret-revealed");
         if (block.classes) classes.push(block.classes);
         if (src === "") classes.push("empty");
         line.className = classes.join(" ");
@@ -306,7 +387,7 @@ class FbMdEditor extends HTMLElement {
     /** Rebuild classes + inner DOM for every line. Use after multi-line state
      *  may have shifted (blur, paste, programmatic value set). */
     _renderAllInactive() {
-        const state = { inFence: false };
+        const state = { inFence: false, inSecret: false };
         for (const line of Array.from(this._editor.children)) {
             this._renderLine(line, null, state);
         }
@@ -633,11 +714,12 @@ class FbMdEditor extends HTMLElement {
         // relatedTarget is null when focus leaves the whole page OR the shadow
         // boundary. If it's still inside our component, ignore.
         if (e.relatedTarget && this.contains(e.relatedTarget)) return;
-        // Sweep every line carrying .active, not just _activeLine - in case
-        // any earlier edit left a stale one around.
-        for (const line of this._editor.querySelectorAll(".line.active")) {
-            this._renderLine(line, null, this._stateBefore(line));
-        }
+        // Full re-render on blur. We used to just re-render active lines, but
+        // that left cross-line state drift — e.g. typing ::secret on a line
+        // doesn't mask the lines below until every subsequent line is re-
+        // classified with the new inSecret state. Doing it on blur is cheap
+        // and guarantees the "resting" view is always correct.
+        this._renderAllInactive();
         // Drop the multi-line selection band too. The `:focus-within` CSS
         // already hides it, but clearing the class means the DOM is clean
         // if anything inspects it.
@@ -1272,15 +1354,33 @@ class FbMdEditor extends HTMLElement {
         }));
     }
 
-    /** Compute the fence state just before a given line - lets us render a
-     *  single line correctly without re-rendering the whole document. */
+    /** Compute the fence + secret state just before a given line — lets us
+     *  render a single line correctly without re-rendering the whole document. */
     _stateBefore(line) {
-        const state = { inFence: false };
+        const state = { inFence: false, inSecret: false };
         for (const sib of Array.from(this._editor.children)) {
             if (sib === line) return state;
-            if (/^```/.test(sib.textContent)) state.inFence = !state.inFence;
+            const text = sib.textContent;
+            if (/^```/.test(text)) state.inFence = !state.inFence;
+            else if (!state.inFence) {
+                if (/^::secret(\s|$)/.test(text)) state.inSecret = true;
+                else if (/^::end(\s|$)/.test(text)) state.inSecret = false;
+            }
         }
         return state;
+    }
+
+    /** Reveal-toggle click handler. Finds the bounded block from the ::secret
+     *  line the eye icon lives on, walks forward until ::end (or end of doc),
+     *  and flips .secret-revealed on every line in the range. Session-only —
+     *  any full re-render (paste, value set) drops the class. */
+    _toggleSecretReveal(openLine) {
+        const reveal = !openLine.classList.contains("secret-revealed");
+        openLine.classList.toggle("secret-revealed", reveal);
+        for (let cur = openLine.nextElementSibling; cur; cur = cur.nextElementSibling) {
+            cur.classList.toggle("secret-revealed", reveal);
+            if (cur.dataset.block === "secret-close") break;
+        }
     }
 }
 
@@ -1310,8 +1410,8 @@ function parseLineBlock(src) {
     if (/^>\s?/.test(src))          return { type: "quote", classes: "quote" };
     if (/^\s*(---|\*\*\*|___)\s*$/.test(src)) return { type: "hr", classes: "hr" };
     if (/^```/.test(src))           return { type: "fence", classes: "fence" };
-    if (/^::secret(\s|$)/.test(src)) return { type: "secret-open",  classes: "secret-marker" };
-    if (/^::end(\s|$)/.test(src))    return { type: "secret-close", classes: "secret-marker" };
+    if (/^::secret(\s|$)/.test(src)) return { type: "secret-open",  classes: "secret-marker secret-open" };
+    if (/^::end(\s|$)/.test(src))    return { type: "secret-close", classes: "secret-marker secret-close" };
     return { type: "paragraph", classes: "" };
 }
 
@@ -1733,17 +1833,127 @@ const TEMPLATE = `
         background: rgba(255, 255, 255, 0.09);
     }
 
-    /* Secret marker lines stay visible - they're structural boundaries
-       the user needs to see. */
+    /* Secret block — a warm-tinted card (same visual vocabulary as code
+       fence, but orange). Applies to the two boundary lines + every
+       secret-body line, so a multi-line block reads as one shape. When a
+       boundary line goes active, the card treatment stays but the raw
+       ::secret / ::end chars come back (like fence active). */
+    .line.secret-marker,
+    .line.secret-body {
+        background: rgba(245, 158, 11, 0.045);
+        margin: 0 -10px;
+        padding-left: 14px;
+        padding-right: 14px;
+        border-left: 3px solid rgba(245, 158, 11, 0.35);
+        border-radius: 0;
+    }
     .line.secret-marker {
+        color: var(--accent-warm, #f59e0b);
+        font-family: 'Inter', sans-serif;
+        font-size: 0.9em;
+    }
+
+    /* Inactive boundaries: hide the literal '::secret' / '::end' chars so
+       they don't look like code. Chars stay in textContent (font-size: 0),
+       so the round-trip invariant holds. */
+    .line.secret-marker:not(.active) .block-marker {
+        color: transparent;
+        font-size: 0;
+    }
+
+    /* Open boundary (inactive): "🔒 Secret" pill via ::before. Pseudo
+       content is invisible to textContent, safe to use for labels. */
+    .line.secret-open:not(.active) {
+        padding-top: 6px;
+        padding-bottom: 4px;
+    }
+    .line.secret-open:not(.active)::before {
+        content: "🔒 Secret";
+        display: inline-block;
+        padding: 2px 10px;
+        font-size: 0.78em;
+        font-weight: 600;
+        letter-spacing: 0.02em;
+        color: var(--accent-warm, #f59e0b);
+        background: rgba(245, 158, 11, 0.12);
+        border: 1px solid rgba(245, 158, 11, 0.25);
+        border-radius: 999px;
+    }
+
+    /* Close boundary (inactive): collapse to a thin footer — the card's
+       visual "bottom edge" with no visible '::end' text. */
+    .line.secret-close:not(.active) {
+        min-height: 6px;
+        height: 6px;
+        padding-top: 0;
+        padding-bottom: 0;
+        overflow: hidden;
+    }
+
+    /* Active boundaries drop the caret-ready padding. The card bg + border
+       remain (consistency with fence active). */
+    .line.secret-marker.active {
+        padding-top: 2px;
+        padding-bottom: 2px;
+    }
+
+    /* Body lines: inline markdown still renders, but a CSS blur on the
+       inner .secret-body-text span prevents incidental over-the-shoulder
+       reads. Blurring the whole line would smear the card's left border
+       too — applying it to a child leaves the chrome sharp. Active (caret)
+       line drops the mask so it's editable. Reveal-toggle click adds
+       .secret-revealed to every line in the block for session-only
+       unmasking. */
+    .line.secret-body {
         color: var(--accent-warm, #f59e0b);
         font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
         font-size: 0.9em;
     }
-    .line.secret-marker .block-marker {
-        color: inherit;
-        opacity: 0.85;
+    .line.secret-body:not(.active):not(.secret-revealed) .secret-body-text {
+        filter: blur(4px);
+        user-select: none;
+        transition: filter 0.15s ease;
+        display: inline-block;
     }
+    .line.secret-body:not(.active):not(.secret-revealed):hover .secret-body-text {
+        filter: blur(3px);
+    }
+
+    /* Reveal toggle — inline SVG eye on the ::secret boundary. SVG shape
+       children have no text nodes, so line.textContent stays equal to the
+       source (the whole editor model depends on that invariant).
+       contenteditable=false on the span keeps the caret from landing in
+       it. The diagonal slash is always rendered; we hide it unless the
+       block carries .secret-revealed. */
+    .fb-reveal-toggle {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        margin-left: 8px;
+        padding: 2px 3px;
+        opacity: 0.6;
+        cursor: pointer;
+        user-select: none;
+        border-radius: 3px;
+        transition: opacity 0.12s, background 0.12s;
+        vertical-align: middle;
+        color: var(--accent-warm, #f59e0b);
+    }
+    /* Scaled to sit alongside the "Secret" pill text — slightly taller than
+       the pill glyph so the icon reads with matching visual weight. */
+    .fb-reveal-toggle svg {
+        width: 14px;
+        height: 14px;
+        display: block;
+    }
+    .fb-reveal-toggle .fb-eye-slash { visibility: hidden; }
+    .fb-reveal-toggle:hover {
+        opacity: 1;
+        background: rgba(245, 158, 11, 0.14);
+    }
+    /* Revealed state: surface the slash through the eye. */
+    .line.secret-revealed .fb-reveal-toggle { opacity: 0.95; }
+    .line.secret-revealed .fb-reveal-toggle .fb-eye-slash { visibility: visible; }
 
     /* Task list: render [ ] / [x] as a visual checkbox while inactive. The
        bracket characters stay in textContent (font-size: 0 hides them
