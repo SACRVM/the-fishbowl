@@ -156,6 +156,33 @@ public class NoteRepositoryEmbeddingTests : IDisposable
     }
 
     [Fact]
+    public async Task CreateAsync_StripsEncryptedSecretMarkerFromEmbeddingInput()
+    {
+        // Vault encryption (commit 71987ad) replaces inline ::secret blocks
+        // with `::secret#N::end` markers and stores the ciphertext in
+        // content_secret. The marker carries no plaintext, but feeding it
+        // to the embedding model would still leak structural information
+        // (every note with a marker clusters together in vector space).
+        // Strip it for the same reason the MCP wire strips it.
+        var fake = new FakeEmbeddingService();
+        var repo = BuildRepo(fake);
+
+        await repo.CreateAsync(_ctx, UserId,
+            new Note
+            {
+                Title = "title",
+                Content = "before\n::secret#0::end\nbetween\n::secret#1::end\nafter",
+                ContentSecret = new byte[] { 1, 2, 3 },
+            },
+            TestContext.Current.CancellationToken);
+
+        Assert.NotNull(fake.LastText);
+        Assert.DoesNotContain("::secret", fake.LastText, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("before", fake.LastText);
+        Assert.Contains("after", fake.LastText);
+    }
+
+    [Fact]
     public async Task ReEmbedAllAsync_ProcessesEveryNote()
     {
         var fake = new FakeEmbeddingService();
