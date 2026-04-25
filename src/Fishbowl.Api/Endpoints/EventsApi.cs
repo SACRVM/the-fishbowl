@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.Routing;
 using System.Security.Claims;
 using Fishbowl.Core.Models;
 using Fishbowl.Core.Repositories;
+using Fishbowl.Core.Util;
 
 namespace Fishbowl.Api.Endpoints;
 
@@ -64,6 +65,10 @@ public static class EventsApi
                 var id = await repo.CreateAsync(userId, evt, ct);
                 return Results.Created($"/api/v1/events/{id}", evt);
             }
+            catch (ResourceValidationException ex)
+            {
+                return ValidationResults.PayloadTooLarge(ex);
+            }
             catch (ArgumentException ex)
             {
                 return Results.BadRequest(new { error = ex.Message });
@@ -73,6 +78,7 @@ public static class EventsApi
         .Produces<Event>(StatusCodes.Status201Created)
         .Produces(StatusCodes.Status400BadRequest)
         .Produces(StatusCodes.Status401Unauthorized)
+        .Produces(StatusCodes.Status413PayloadTooLarge)
         .RequireScope("write:events");
 
         group.MapPut("/{id}", async (
@@ -88,6 +94,10 @@ public static class EventsApi
                 var updated = await repo.UpdateAsync(userId, evt, ct);
                 return updated ? Results.NoContent() : Results.NotFound();
             }
+            catch (ResourceValidationException ex)
+            {
+                return ValidationResults.PayloadTooLarge(ex);
+            }
             catch (ArgumentException ex)
             {
                 return Results.BadRequest(new { error = ex.Message });
@@ -98,6 +108,7 @@ public static class EventsApi
         .Produces(StatusCodes.Status400BadRequest)
         .Produces(StatusCodes.Status404NotFound)
         .Produces(StatusCodes.Status401Unauthorized)
+        .Produces(StatusCodes.Status413PayloadTooLarge)
         .RequireScope("write:events");
 
         group.MapDelete("/{id}", async (

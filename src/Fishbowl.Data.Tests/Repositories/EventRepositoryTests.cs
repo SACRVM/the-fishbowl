@@ -251,6 +251,36 @@ public class EventRepositoryTests : IDisposable
         Assert.Equal("team", team[0].Title);
     }
 
+    [Fact]
+    public async Task Create_RejectsOversizedDescription()
+    {
+        var evt = new Event
+        {
+            Title = "ok",
+            StartAt = DateTime.UtcNow,
+            Description = new string('d', Fishbowl.Core.Util.EventLimits.MaxDescriptionLength + 1),
+        };
+
+        var ex = await Assert.ThrowsAsync<Fishbowl.Core.Util.ResourceValidationException>(() =>
+            _repo.CreateAsync(TestUserId, evt, TestContext.Current.CancellationToken));
+        Assert.Equal("event", ex.Error.Resource);
+        Assert.Equal("description", ex.Error.Field);
+    }
+
+    [Fact]
+    public async Task Update_RejectsOversizedRRule()
+    {
+        var evt = new Event { Title = "ok", StartAt = DateTime.UtcNow };
+        var id = await _repo.CreateAsync(TestUserId, evt, TestContext.Current.CancellationToken);
+
+        var loaded = await _repo.GetByIdAsync(TestUserId, id, TestContext.Current.CancellationToken);
+        Assert.NotNull(loaded);
+        loaded!.RRule = new string('r', Fishbowl.Core.Util.EventLimits.MaxRRuleLength + 1);
+
+        await Assert.ThrowsAsync<Fishbowl.Core.Util.ResourceValidationException>(() =>
+            _repo.UpdateAsync(TestUserId, loaded, TestContext.Current.CancellationToken));
+    }
+
     public void Dispose()
     {
         SqliteConnection.ClearAllPools();

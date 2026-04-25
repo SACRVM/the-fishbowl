@@ -311,6 +311,25 @@ public class EventsApiTests : IClassFixture<WebApplicationFactory<Program>>, IDi
         Assert.Equal(HttpStatusCode.Forbidden, writeResp.StatusCode);
     }
 
+    [Fact]
+    public async Task CreateEvent_OversizedDescription_413()
+    {
+        var client = _factory.CreateClient();
+        var resp = await client.SendAsync(Req(HttpMethod.Post, "/api/v1/events", UserA,
+            new Event
+            {
+                Title = "ok",
+                StartAt = DateTime.UtcNow,
+                Description = new string('d', Fishbowl.Core.Util.EventLimits.MaxDescriptionLength + 1),
+            }),
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal(HttpStatusCode.RequestEntityTooLarge, resp.StatusCode);
+        var body = await resp.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
+        Assert.Contains("event", body);
+        Assert.Contains("description", body);
+    }
+
     public void Dispose()
     {
         SqliteConnection.ClearAllPools();

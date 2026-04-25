@@ -582,6 +582,10 @@ public static class TeamsApi
                     ContextRef.Team(resolved.Team!.Id), actorId, evt, ct);
                 return Results.Created($"/api/v1/teams/{slug}/events/{id}", evt);
             }
+            catch (ResourceValidationException ex)
+            {
+                return ValidationResults.PayloadTooLarge(ex);
+            }
             catch (ArgumentException ex)
             {
                 return Results.BadRequest(new { error = ex.Message });
@@ -604,6 +608,10 @@ public static class TeamsApi
             {
                 var ok = await events.UpdateAsync(ContextRef.Team(resolved.Team!.Id), evt, ct);
                 return ok ? Results.NoContent() : Results.NotFound();
+            }
+            catch (ResourceValidationException ex)
+            {
+                return ValidationResults.PayloadTooLarge(ex);
             }
             catch (ArgumentException ex)
             {

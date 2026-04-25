@@ -2,6 +2,7 @@ using Dapper;
 using Fishbowl.Core;
 using Fishbowl.Core.Models;
 using Fishbowl.Core.Repositories;
+using Fishbowl.Core.Util;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 
@@ -68,6 +69,7 @@ public class EventRepository : IEventRepository
         // strictly inverted windows are invalid.
         if (evt.EndAt is not null && evt.EndAt < evt.StartAt)
             throw new ArgumentException("Event end_at cannot be before start_at", nameof(evt));
+        EnforceLimits(evt);
 
         if (string.IsNullOrEmpty(evt.Id))
             evt.Id = Ulid.NewUlid().ToString();
@@ -118,6 +120,7 @@ public class EventRepository : IEventRepository
         // strictly inverted windows are invalid.
         if (evt.EndAt is not null && evt.EndAt < evt.StartAt)
             throw new ArgumentException("Event end_at cannot be before start_at", nameof(evt));
+        EnforceLimits(evt);
 
         evt.UpdatedAt = DateTime.UtcNow;
 
@@ -167,6 +170,12 @@ public class EventRepository : IEventRepository
             new { id }, cancellationToken: ct));
 
         return affected > 0;
+    }
+
+    private static void EnforceLimits(Event evt)
+    {
+        var error = EventLimits.Validate(evt);
+        if (error is not null) throw new ResourceValidationException(error);
     }
 
     // ────────── Legacy personal-context aliases ──────────
