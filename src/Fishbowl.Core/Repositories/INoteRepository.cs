@@ -25,6 +25,18 @@ public interface INoteRepository
         string match,
         CancellationToken ct = default);
 
+    // Pagination overload. `limit` null → no LIMIT clause (existing
+    // behaviour, used by the SPA which renders all notes today). When
+    // set, `offset` defaults to 0. Both clamped at the repo so a typo'd
+    // ?limit=999999 can't tip over Dapper or the JSON serialiser.
+    Task<IEnumerable<Note>> GetAllAsync(
+        ContextRef ctx,
+        IReadOnlyCollection<string>? tags,
+        string match,
+        int? limit,
+        int offset,
+        CancellationToken ct = default);
+
     Task<string> CreateAsync(ContextRef ctx, string actorUserId, Note note, CancellationToken ct = default);
     Task<string> CreateAsync(ContextRef ctx, string actorUserId, Note note, NoteSource source, CancellationToken ct = default);
     Task<bool> UpdateAsync(ContextRef ctx, Note note, CancellationToken ct = default);

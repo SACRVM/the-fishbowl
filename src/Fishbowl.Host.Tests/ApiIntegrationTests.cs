@@ -151,6 +151,33 @@ public class ApiIntegrationTests : IClassFixture<WebApplicationFactory<Program>>
     }
 
     [Fact]
+    public async Task ListNotes_PaginationParams_RestrictReturnedSlice_Test()
+    {
+        var client = _factory.CreateClient();
+
+        for (var i = 0; i < 5; i++)
+        {
+            var req = new HttpRequestMessage(HttpMethod.Post, "/api/v1/notes");
+            req.Headers.Add(TestAuthHandler.UserIdHeader, UserA);
+            req.Content = JsonContent.Create(new Note { Title = $"page-{i}" });
+            (await client.SendAsync(req, TestContext.Current.CancellationToken)).EnsureSuccessStatusCode();
+        }
+
+        var pageReq = new HttpRequestMessage(HttpMethod.Get, "/api/v1/notes?limit=2&offset=1");
+        pageReq.Headers.Add(TestAuthHandler.UserIdHeader, UserA);
+        var pageResp = await client.SendAsync(pageReq, TestContext.Current.CancellationToken);
+        pageResp.EnsureSuccessStatusCode();
+
+        var page = await pageResp.Content.ReadFromJsonAsync<List<Note>>(
+            TestContext.Current.CancellationToken);
+        Assert.NotNull(page);
+        Assert.Equal(2, page!.Count);
+        // Newest first → offset 1 starts at page-3, then page-2.
+        Assert.Equal("page-3", page[0].Title);
+        Assert.Equal("page-2", page[1].Title);
+    }
+
+    [Fact]
     public async Task Get_Version_ReturnsVersionString_Test()
     {
         var client = _factory.CreateClient();

@@ -113,7 +113,7 @@ public static class TeamsApi
         // readonly members blocked from writes.
 
         group.MapGet("/{slug}/notes", async (
-            string slug, string[]? tag, string? match,
+            string slug, string[]? tag, string? match, int? limit, int? offset,
             ClaimsPrincipal user, ITeamRepository teams, INoteRepository notes, CancellationToken ct) =>
         {
             var resolved = await ResolveTeamAsync(slug, user, teams, ct);
@@ -122,7 +122,8 @@ public static class TeamsApi
 
             var tags = tag is { Length: > 0 } ? tag : null;
             var matchMode = match == "all" ? "all" : "any";
-            return Results.Ok(await notes.GetAllAsync(ContextRef.Team(team.Id), tags, matchMode, ct));
+            return Results.Ok(await notes.GetAllAsync(
+                ContextRef.Team(team.Id), tags, matchMode, limit, offset ?? 0, ct));
         })
         .WithName("ListTeamNotes")
         .RequireScope("read:notes");

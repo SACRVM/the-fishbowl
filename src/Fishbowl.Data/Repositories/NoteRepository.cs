@@ -46,28 +46,47 @@ public class NoteRepository : INoteRepository
     public Task<IEnumerable<Note>> GetAllAsync(ContextRef ctx, CancellationToken ct = default)
         => GetAllAsync(ctx, tags: null, match: "any", ct);
 
-    public async Task<IEnumerable<Note>> GetAllAsync(
+    public Task<IEnumerable<Note>> GetAllAsync(
         ContextRef ctx,
         IReadOnlyCollection<string>? tags,
         string match,
         CancellationToken ct = default)
+        => GetAllAsync(ctx, tags, match, limit: null, offset: 0, ct);
+
+    public async Task<IEnumerable<Note>> GetAllAsync(
+        ContextRef ctx,
+        IReadOnlyCollection<string>? tags,
+        string match,
+        int? limit,
+        int offset,
+        CancellationToken ct = default)
     {
         using var db = _dbFactory.CreateContextConnection(ctx);
+
+        // Clamp + normalise paging. Negative offset and oversized limit
+        // become defaults — saves clients from having to validate these
+        // and matches the lenient pattern the rest of the API uses.
+        var clampedLimit = limit is { } l ? Math.Clamp(l, 1, 500) : (int?)null;
+        var clampedOffset = offset < 0 ? 0 : offset;
+        var pagingClause = clampedLimit is { } lim
+            ? $" LIMIT {lim} OFFSET {clampedOffset}"
+            : string.Empty;
 
         if (tags is null || tags.Count == 0)
         {
             return await db.QueryAsync<Note>(new CommandDefinition(
-                "SELECT * FROM notes ORDER BY updated_at DESC", cancellationToken: ct));
+                "SELECT * FROM notes ORDER BY updated_at DESC" + pagingClause,
+                cancellationToken: ct));
         }
 
-        var sql = match == "all"
+        var sql = (match == "all"
             ? @"SELECT * FROM notes
                 WHERE (SELECT COUNT(DISTINCT je.value) FROM json_each(notes.tags) je
                        WHERE je.value IN @tags) = @count
                 ORDER BY updated_at DESC"
             : @"SELECT * FROM notes
                 WHERE EXISTS (SELECT 1 FROM json_each(notes.tags) je WHERE je.value IN @tags)
-                ORDER BY updated_at DESC";
+                ORDER BY updated_at DESC") + pagingClause;
 
         return await db.QueryAsync<Note>(new CommandDefinition(
             sql, new { tags, count = tags.Count }, cancellationToken: ct));

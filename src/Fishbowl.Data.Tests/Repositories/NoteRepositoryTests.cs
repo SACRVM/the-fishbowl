@@ -177,6 +177,65 @@ public class NoteRepositoryTests : IDisposable
     }
 
     [Fact]
+    public async Task GetAll_Paginated_ReturnsRequestedSlice()
+    {
+        // Seed 7 notes; ask for window 2..5 (limit=3, offset=2). Newest first
+        // because updated_at DESC, so we created in reverse expected order
+        // but they sort by mutation time.
+        for (var i = 0; i < 7; i++)
+        {
+            await _repo.CreateAsync(TestUserId,
+                new Note { Title = $"note-{i:D2}" },
+                TestContext.Current.CancellationToken);
+        }
+
+        var page = (await _repo.GetAllAsync(
+            Fishbowl.Core.ContextRef.User(TestUserId),
+            tags: null, match: "any", limit: 3, offset: 2,
+            ct: TestContext.Current.CancellationToken)).ToList();
+
+        Assert.Equal(3, page.Count);
+        // Newest is note-06 at offset 0; offset 2 starts at note-04.
+        Assert.Equal("note-04", page[0].Title);
+        Assert.Equal("note-02", page[2].Title);
+    }
+
+    [Fact]
+    public async Task GetAll_NullLimit_ReturnsEverything()
+    {
+        for (var i = 0; i < 4; i++)
+        {
+            await _repo.CreateAsync(TestUserId,
+                new Note { Title = $"all-{i}" },
+                TestContext.Current.CancellationToken);
+        }
+
+        var all = (await _repo.GetAllAsync(
+            Fishbowl.Core.ContextRef.User(TestUserId),
+            tags: null, match: "any", limit: null, offset: 0,
+            ct: TestContext.Current.CancellationToken)).ToList();
+
+        Assert.Equal(4, all.Count);
+    }
+
+    [Fact]
+    public async Task GetAll_OversizedLimit_ClampedTo500()
+    {
+        // Just verify we don't blow up; assert behavior is "returns up to
+        // 500" without populating that many.
+        await _repo.CreateAsync(TestUserId,
+            new Note { Title = "lone" },
+            TestContext.Current.CancellationToken);
+
+        var page = (await _repo.GetAllAsync(
+            Fishbowl.Core.ContextRef.User(TestUserId),
+            tags: null, match: "any", limit: 999_999, offset: 0,
+            ct: TestContext.Current.CancellationToken)).ToList();
+
+        Assert.Single(page);
+    }
+
+    [Fact]
     public async Task Create_RejectsNoteAboveContentLimit()
     {
         var note = new Note

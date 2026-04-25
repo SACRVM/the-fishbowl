@@ -41,6 +41,8 @@ public static class NotesApi
         group.MapGet("/", async (
             string[]? tag,
             string? match,
+            int? limit,
+            int? offset,
             ClaimsPrincipal user,
             INoteRepository repo,
             CancellationToken ct) =>
@@ -50,10 +52,11 @@ public static class NotesApi
 
             var tags = tag is { Length: > 0 } ? tag : null;
             var matchMode = match == "all" ? "all" : "any";
-            return Results.Ok(await repo.GetAllAsync(ctx.Value, tags, matchMode, ct));
+            return Results.Ok(await repo.GetAllAsync(
+                ctx.Value, tags, matchMode, limit, offset ?? 0, ct));
         })
         .WithName("ListNotes")
-        .WithSummary("Lists notes for the resolved context. Optional ?tag=foo&tag=bar&match=any|all filter.")
+        .WithSummary("Lists notes for the resolved context. Optional ?tag=foo&tag=bar&match=any|all filter and ?limit=&offset= paging.")
         .Produces<IEnumerable<Note>>()
         .Produces(StatusCodes.Status401Unauthorized)
         .RequireScope("read:notes");
