@@ -2,6 +2,7 @@ using System.Security.Claims;
 using System.Text.Json;
 using Fishbowl.Core;
 using Fishbowl.Core.Mcp;
+using Fishbowl.Core.Util;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
@@ -52,6 +53,23 @@ public static class McpEndpoint
         try
         {
             (result, error) = await DispatchAsync(request, ctx);
+        }
+        catch (NoteValidationException ex)
+        {
+            // The tool sent oversized/invalid note data — that's a caller
+            // error, not a server fault. JSON-RPC's InvalidParams (-32602)
+            // tells the client "fix your input and retry", whereas the
+            // generic InternalError suggests "this might work next time".
+            logger.LogDebug("MCP {Method} rejected on note validation: {Field}", request.Method, ex.Error.Field);
+            error = new McpError(McpErrorCodes.InvalidParams, ex.Message);
+        }
+        catch (ArgumentException ex)
+        {
+            // Tools throw ArgumentException for missing required fields
+            // (e.g. RememberTool's "title is required"). Same logic — the
+            // caller can fix the input.
+            logger.LogDebug("MCP {Method} rejected on argument validation: {Message}", request.Method, ex.Message);
+            error = new McpError(McpErrorCodes.InvalidParams, ex.Message);
         }
         catch (Exception ex)
         {

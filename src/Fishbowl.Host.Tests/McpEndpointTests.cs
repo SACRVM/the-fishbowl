@@ -291,6 +291,60 @@ public class McpEndpointTests : IClassFixture<WebApplicationFactory<Program>>, I
     }
 
     [Fact]
+    public async Task Remember_MissingRequiredTitle_ReturnsInvalidParams()
+    {
+        // RememberTool throws ArgumentException for "title is required". The
+        // dispatcher must surface that as JSON-RPC InvalidParams (-32602)
+        // so the MCP client knows to fix its input — not InternalError,
+        // which suggests retry-might-help.
+        var client = await BearerClientAsync("read:notes", "write:notes");
+        var resp = await client.PostAsync("/mcp",
+            JsonRpc(new
+            {
+                jsonrpc = "2.0",
+                id = 1,
+                method = "tools/call",
+                @params = new { name = "remember", arguments = new { content = "no title here" } },
+            }),
+            TestContext.Current.CancellationToken);
+        resp.EnsureSuccessStatusCode();
+
+        using var doc = JsonDocument.Parse(
+            await resp.Content.ReadAsStringAsync(TestContext.Current.CancellationToken));
+        var err = doc.RootElement.GetProperty("error");
+        Assert.Equal(-32602, err.GetProperty("code").GetInt32());
+        Assert.Contains("title", err.GetProperty("message").GetString() ?? "",
+            StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task Remember_OversizedContent_ReturnsInvalidParams()
+    {
+        // NoteValidationException must also come back as InvalidParams. Use
+        // a title (cheap field) past its 8KB cap rather than a 4MB content
+        // body — the test stays cheap while exercising the same code path.
+        var client = await BearerClientAsync("read:notes", "write:notes");
+        var oversizedTitle = new string('x', Fishbowl.Core.Util.NoteLimits.MaxTitleLength + 1);
+
+        var resp = await client.PostAsync("/mcp",
+            JsonRpc(new
+            {
+                jsonrpc = "2.0",
+                id = 1,
+                method = "tools/call",
+                @params = new { name = "remember", arguments = new { title = oversizedTitle } },
+            }),
+            TestContext.Current.CancellationToken);
+        resp.EnsureSuccessStatusCode();
+
+        using var doc = JsonDocument.Parse(
+            await resp.Content.ReadAsStringAsync(TestContext.Current.CancellationToken));
+        var err = doc.RootElement.GetProperty("error");
+        Assert.Equal(-32602, err.GetProperty("code").GetInt32());
+        Assert.Contains("title", err.GetProperty("message").GetString() ?? "");
+    }
+
+    [Fact]
     public async Task Mcp_UnknownTool_ReturnsMethodNotFound()
     {
         var client = await BearerClientAsync("read:notes");
