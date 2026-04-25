@@ -119,6 +119,27 @@ public class HybridSearchServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task HybridSearch_TruncatesOversizedQuery_StillReturnsHits()
+    {
+        // A pasted megabyte shouldn't 500 the embedding pipeline. Confirm
+        // the service silently truncates and still returns sensible results.
+        var fake = new ScriptedEmbeddingService();
+        var repo = BuildRepo(fake);
+        await repo.CreateAsync(_ctx, UserId,
+            new Note { Title = "needle", Content = "body" },
+            TestContext.Current.CancellationToken);
+
+        var bigQuery = "needle " + new string('x', HybridSearchService.MaxQueryLength * 4);
+
+        var svc = BuildService(fake);
+        var result = await svc.HybridSearchAsync(_ctx, bigQuery, 5, true,
+            TestContext.Current.CancellationToken);
+
+        Assert.NotEmpty(result.Hits);
+        Assert.Equal("needle", result.Hits[0].Note.Title);
+    }
+
+    [Fact]
     public async Task HybridSearch_ExcludesArchivedNotes()
     {
         var fake = new ScriptedEmbeddingService();

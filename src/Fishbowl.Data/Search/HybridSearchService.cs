@@ -23,6 +23,13 @@ public sealed class HybridSearchService : ISearchService
     private const double FtsWeight = 0.3;
     private const int CandidatePool = 50;
 
+    // Hard cap on the query string. A real search query is short — anything
+    // past a kilobyte is either a copy-paste accident, a misuse of the
+    // endpoint as a fuzzy text-similarity API, or an attempt to overload
+    // the embedding model / FTS5 tokenizer. Truncate (don't 400) so the
+    // user gets *some* result back; log so the host operator notices.
+    public const int MaxQueryLength = 1024;
+
     private readonly DatabaseFactory _factory;
     private readonly IEmbeddingService _embeddings;
     private readonly ILogger<HybridSearchService> _logger;
@@ -42,6 +49,13 @@ public sealed class HybridSearchService : ISearchService
     {
         limit = Math.Clamp(limit, 1, 100);
         query = query?.Trim() ?? string.Empty;
+        if (query.Length > MaxQueryLength)
+        {
+            _logger.LogDebug(
+                "Search query truncated from {OriginalLength} to {MaxQueryLength} chars",
+                query.Length, MaxQueryLength);
+            query = query.Substring(0, MaxQueryLength);
+        }
         if (string.IsNullOrEmpty(query))
             return new HybridSearchResult(Array.Empty<MemorySearchResult>(), Degraded: false);
 
