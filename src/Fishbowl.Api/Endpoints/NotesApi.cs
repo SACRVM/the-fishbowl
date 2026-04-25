@@ -96,6 +96,7 @@ public static class NotesApi
         .WithSummary("Creates a new note in the resolved context.")
         .Produces<Note>(StatusCodes.Status201Created)
         .Produces(StatusCodes.Status401Unauthorized)
+        .Produces(StatusCodes.Status413PayloadTooLarge)
         .RequireScope("write:notes");
 
         group.MapPut("/{id}", async (string id, Note note, ClaimsPrincipal user, INoteRepository repo, CancellationToken ct) =>
@@ -119,6 +120,7 @@ public static class NotesApi
         .Produces(StatusCodes.Status204NoContent)
         .Produces(StatusCodes.Status404NotFound)
         .Produces(StatusCodes.Status401Unauthorized)
+        .Produces(StatusCodes.Status413PayloadTooLarge)
         .RequireScope("write:notes");
 
         group.MapDelete("/{id}", async (string id, ClaimsPrincipal user, INoteRepository repo, CancellationToken ct) =>

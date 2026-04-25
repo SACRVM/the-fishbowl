@@ -88,6 +88,7 @@ public static class ContactsApi
         .Produces<Contact>(StatusCodes.Status201Created)
         .Produces(StatusCodes.Status400BadRequest)
         .Produces(StatusCodes.Status401Unauthorized)
+        .Produces(StatusCodes.Status413PayloadTooLarge)
         .RequireScope("write:contacts");
 
         group.MapPut("/{id}", async (
@@ -115,6 +116,7 @@ public static class ContactsApi
         .Produces(StatusCodes.Status400BadRequest)
         .Produces(StatusCodes.Status404NotFound)
         .Produces(StatusCodes.Status401Unauthorized)
+        .Produces(StatusCodes.Status413PayloadTooLarge)
         .RequireScope("write:contacts");
 
         group.MapDelete("/{id}", async (

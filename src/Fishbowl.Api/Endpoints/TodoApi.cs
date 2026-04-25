@@ -60,6 +60,7 @@ public static class TodoApi
         .WithSummary("Creates a new todo.")
         .Produces<TodoItem>(StatusCodes.Status201Created)
         .Produces(StatusCodes.Status401Unauthorized)
+        .Produces(StatusCodes.Status413PayloadTooLarge)
         .RequireScope("write:tasks");
 
         group.MapPut("/{id}", async (string id, TodoItem item, ClaimsPrincipal user, ITodoRepository repo, CancellationToken ct) =>
@@ -83,6 +84,7 @@ public static class TodoApi
         .Produces(StatusCodes.Status204NoContent)
         .Produces(StatusCodes.Status404NotFound)
         .Produces(StatusCodes.Status401Unauthorized)
+        .Produces(StatusCodes.Status413PayloadTooLarge)
         .RequireScope("write:tasks");
 
         group.MapDelete("/{id}", async (string id, ClaimsPrincipal user, ITodoRepository repo, CancellationToken ct) =>
