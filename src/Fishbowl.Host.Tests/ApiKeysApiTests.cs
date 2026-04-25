@@ -207,6 +207,31 @@ public class ApiKeysApiTests : IClassFixture<WebApplicationFactory<Program>>, ID
     }
 
     [Fact]
+    public async Task CreateKey_UnknownScope_400_WithUnknownList()
+    {
+        var client = _factory.CreateClient();
+        var resp = await client.SendAsync(
+            Req(HttpMethod.Post, "/api/v1/keys", Alice, new
+            {
+                name = "typo-scope",
+                contextType = "user",
+                contextId = (string?)null,
+                scopes = new[] { "read:notes", "read:nots", "delete:everything" },
+            }),
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal(HttpStatusCode.BadRequest, resp.StatusCode);
+
+        var body = await resp.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
+        // The response must surface the bad strings so the user can fix
+        // them, but should also list the valid ones for discoverability.
+        Assert.Contains("read:nots", body);
+        Assert.Contains("delete:everything", body);
+        Assert.Contains("read:notes", body); // present in the "valid" list
+        Assert.DoesNotContain("fb_live_", body); // no token leaked into the failure path
+    }
+
+    [Fact]
     public async Task ListKeys_ReturnsOnlyCallersKeys_WithoutHash()
     {
         // Names must be distinctive enough not to collide with random chars

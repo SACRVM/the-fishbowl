@@ -73,6 +73,15 @@ public static class ApiKeysApi
             if (body.Scopes is null || body.Scopes.Count == 0)
                 return Results.BadRequest(new { error = "at least one scope is required" });
 
+            var unknownScopes = ScopeCatalog.UnknownScopes(body.Scopes);
+            if (unknownScopes.Count > 0)
+                return Results.BadRequest(new
+                {
+                    error = "unknown scope(s) requested",
+                    unknown = unknownScopes,
+                    valid = ScopeCatalog.All,
+                });
+
             ContextRef context;
             if (body.ContextType == "user")
             {

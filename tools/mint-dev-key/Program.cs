@@ -1,5 +1,6 @@
 using Dapper;
 using Fishbowl.Core;
+using Fishbowl.Core.Mcp;
 using Fishbowl.Data;
 using Fishbowl.Data.Repositories;
 
@@ -46,6 +47,14 @@ if (scopes.Length == 0)
 {
     Console.Error.WriteLine("error: --scopes must contain at least one non-empty entry (e.g. read:notes)");
     return 4;
+}
+
+var unknownScopes = ScopeCatalog.UnknownScopes(scopes);
+if (unknownScopes.Count > 0)
+{
+    Console.Error.WriteLine($"error: unknown scope(s): {string.Join(", ", unknownScopes)}");
+    Console.Error.WriteLine($"       valid scopes: {string.Join(", ", ScopeCatalog.All)}");
+    return 9;
 }
 
 var factory = new DatabaseFactory(dataPath);

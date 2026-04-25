@@ -158,6 +158,37 @@ public class ApiKeyRepositoryTests : IDisposable
     }
 
     [Fact]
+    public async Task IssueAsync_RejectsEmptyScopeList()
+    {
+        await Assert.ThrowsAsync<ArgumentException>(() =>
+            _repo.IssueAsync(Alice, ContextRef.User(Alice), "no-scopes",
+                Array.Empty<string>(), TestContext.Current.CancellationToken));
+    }
+
+    [Fact]
+    public async Task IssueAsync_RejectsUnknownScope()
+    {
+        // Defense in depth: the API endpoint validates too, but a typo
+        // through any other caller (mint-dev-key, future automation) must
+        // still be caught at the repository layer rather than minting a
+        // dead token.
+        var ex = await Assert.ThrowsAsync<ArgumentException>(() =>
+            _repo.IssueAsync(Alice, ContextRef.User(Alice), "typo",
+                new[] { "read:nots" }, TestContext.Current.CancellationToken));
+        Assert.Contains("read:nots", ex.Message);
+    }
+
+    [Fact]
+    public async Task IssueAsync_RejectsMixedValidAndUnknown()
+    {
+        var ex = await Assert.ThrowsAsync<ArgumentException>(() =>
+            _repo.IssueAsync(Alice, ContextRef.User(Alice), "mixed",
+                new[] { "read:notes", "delete:everything" },
+                TestContext.Current.CancellationToken));
+        Assert.Contains("delete:everything", ex.Message);
+    }
+
+    [Fact]
     public async Task TouchLastUsedAsync_UpdatesTimestamp()
     {
         var issued = await _repo.IssueAsync(

@@ -2,6 +2,7 @@ using System.Security.Cryptography;
 using System.Text;
 using Dapper;
 using Fishbowl.Core;
+using Fishbowl.Core.Mcp;
 using Fishbowl.Core.Models;
 using Fishbowl.Core.Repositories;
 using Microsoft.Extensions.Logging;
@@ -37,6 +38,18 @@ public class ApiKeyRepository : IApiKeyRepository
             throw new ArgumentException("userId is required", nameof(userId));
         if (string.IsNullOrWhiteSpace(name))
             throw new ArgumentException("name is required", nameof(name));
+        if (scopes is null || scopes.Count == 0)
+            throw new ArgumentException("at least one scope is required", nameof(scopes));
+
+        // Defense in depth: the API endpoint validates scopes too, but the
+        // repository is the choke-point shared by the HTTP handler, the
+        // mint-dev-key tool, and any future automation. A typo like
+        // "read:nots" silently mints a key that can't authorise anything,
+        // so reject at issue time and surface the bad strings.
+        var unknown = ScopeCatalog.UnknownScopes(scopes);
+        if (unknown.Count > 0)
+            throw new ArgumentException(
+                $"unknown scope(s): {string.Join(", ", unknown)}", nameof(scopes));
 
         var rawToken = GenerateRawToken();
         var hash = HashToken(rawToken);
