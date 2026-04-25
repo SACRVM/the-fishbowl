@@ -386,6 +386,13 @@ public class NoteRepository : INoteRepository
     // Mcp writes gain `source:mcp` + `review:pending` so the human notices
     // them in the review inbox. Human writes strip `review:pending` —
     // editing a pending note is implicit approval.
+    //
+    // Audit integrity: a Human write must not be able to forge `source:mcp`
+    // (or any other UserAssignable=false system tag) by stuffing it into
+    // the request body. SystemTags.Seeds is the source of truth — anything
+    // marked UserAssignable=false gets stripped from incoming tags on the
+    // Human path. Mcp writes bypass the strip because the MCP path *is*
+    // the legitimate origin for those tags.
     private static void ApplySourceTags(Note note, NoteSource source)
     {
         note.Tags ??= new List<string>();
@@ -399,6 +406,10 @@ public class NoteRepository : INoteRepository
         else
         {
             tags.Remove("review:pending");
+            foreach (var spec in SystemTags.Seeds)
+            {
+                if (!spec.UserAssignable) tags.Remove(spec.Name);
+            }
         }
 
         note.Tags = tags.ToList();

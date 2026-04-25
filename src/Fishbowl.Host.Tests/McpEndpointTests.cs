@@ -477,6 +477,49 @@ public class McpEndpointTests : IClassFixture<WebApplicationFactory<Program>>, I
     }
 
     [Fact]
+    public async Task HumanCreate_CannotForgeSourceMcpTag()
+    {
+        // Audit invariant: source:mcp is provenance, not user-assignable.
+        // A cookie/Human path that stuffs source:mcp into the tags array
+        // must not be able to claim agent attribution for a manual write.
+        var repo = new Fishbowl.Data.Repositories.NoteRepository(_dbFactory,
+            new Fishbowl.Data.Repositories.TagRepository(_dbFactory));
+
+        var id = await repo.CreateAsync(AliceId,
+            new Fishbowl.Core.Models.Note
+            {
+                Title = "human-tries-to-forge",
+                Tags = new List<string> { "source:mcp", "custom" },
+            },
+            TestContext.Current.CancellationToken);
+
+        var stored = await repo.GetByIdAsync(AliceId, id, TestContext.Current.CancellationToken);
+        Assert.DoesNotContain("source:mcp", stored!.Tags);
+        Assert.Contains("custom", stored.Tags);
+    }
+
+    [Fact]
+    public async Task HumanCreate_CannotForgeReviewPending()
+    {
+        // review:pending is also UserAssignable=false. A human can't mark
+        // their own write as needing-review by injecting the tag — only
+        // MCP writes get that flag.
+        var repo = new Fishbowl.Data.Repositories.NoteRepository(_dbFactory,
+            new Fishbowl.Data.Repositories.TagRepository(_dbFactory));
+
+        var id = await repo.CreateAsync(AliceId,
+            new Fishbowl.Core.Models.Note
+            {
+                Title = "human-tries-to-flag",
+                Tags = new List<string> { "review:pending" },
+            },
+            TestContext.Current.CancellationToken);
+
+        var stored = await repo.GetByIdAsync(AliceId, id, TestContext.Current.CancellationToken);
+        Assert.DoesNotContain("review:pending", stored!.Tags);
+    }
+
+    [Fact]
     public async Task CookieWrite_DoesNotAddSourceMcp()
     {
         // Direct repository call with the default (Human) overload — proves
