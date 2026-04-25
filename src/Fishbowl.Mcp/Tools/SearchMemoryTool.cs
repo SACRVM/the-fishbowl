@@ -83,6 +83,7 @@ public class SearchMemoryTool : IMcpTool
                 tags = h.Note.Tags,
                 created_at = h.Note.CreatedAt,
                 updated_at = h.Note.UpdatedAt,
+                pinned = h.Note.Pinned,
                 score = h.Score,
             }).ToList(),
             degraded = result.Degraded,

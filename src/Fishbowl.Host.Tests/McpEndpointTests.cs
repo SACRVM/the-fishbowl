@@ -251,6 +251,33 @@ public class McpEndpointTests : IClassFixture<WebApplicationFactory<Program>>, I
     }
 
     [Fact]
+    public async Task Mcp_SearchMemory_SurfacesPinnedFlag()
+    {
+        // Pinned is the user's signal that a note matters. Agents asking
+        // search_memory should see it so they can prioritise the user's
+        // own emphasis. The other note shape fields already round-trip.
+        var repo = new Fishbowl.Data.Repositories.NoteRepository(_dbFactory,
+            new Fishbowl.Data.Repositories.TagRepository(_dbFactory));
+
+        await repo.CreateAsync(AliceId,
+            new Fishbowl.Core.Models.Note
+            {
+                Title = "pin-marked-title",
+                Content = "important",
+                Pinned = true,
+            },
+            TestContext.Current.CancellationToken);
+
+        var client = await BearerClientAsync("read:notes", "write:notes");
+        var search = await CallToolAsync(client, "search_memory", new { query = "pin-marked-title" });
+        var text = search.GetProperty("result").GetProperty("content")[0].GetProperty("text").GetString();
+        using var doc = JsonDocument.Parse(text!);
+        var first = doc.RootElement.GetProperty("notes")[0];
+
+        Assert.True(first.GetProperty("pinned").GetBoolean());
+    }
+
+    [Fact]
     public async Task Mcp_SearchMemory_TagFilter_ScopesResults()
     {
         var client = await BearerClientAsync("read:notes", "write:notes");
