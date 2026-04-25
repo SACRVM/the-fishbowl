@@ -185,7 +185,7 @@ public class NoteRepositoryTests : IDisposable
             Content = new string('x', Fishbowl.Core.Util.NoteLimits.MaxContentLength + 1),
         };
 
-        var ex = await Assert.ThrowsAsync<Fishbowl.Core.Util.NoteValidationException>(() =>
+        var ex = await Assert.ThrowsAsync<Fishbowl.Core.Util.ResourceValidationException>(() =>
             _repo.CreateAsync(TestUserId, note, TestContext.Current.CancellationToken));
         Assert.Equal("content", ex.Error.Field);
     }
@@ -200,7 +200,7 @@ public class NoteRepositoryTests : IDisposable
         Assert.NotNull(loaded);
         loaded!.ContentSecret = new byte[Fishbowl.Core.Util.NoteLimits.MaxContentSecretBytes + 1];
 
-        await Assert.ThrowsAsync<Fishbowl.Core.Util.NoteValidationException>(() =>
+        await Assert.ThrowsAsync<Fishbowl.Core.Util.ResourceValidationException>(() =>
             _repo.UpdateAsync(TestUserId, loaded, TestContext.Current.CancellationToken));
     }
 

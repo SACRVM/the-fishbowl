@@ -279,6 +279,35 @@ public class ContactRepositoryTests : IDisposable
         Assert.Equal("team-only", team[0].Name);
     }
 
+    [Fact]
+    public async Task Create_RejectsContactWithOversizedNotes()
+    {
+        var contact = new Contact
+        {
+            Name = "ok",
+            Notes = new string('x', Fishbowl.Core.Util.ContactLimits.MaxNotesLength + 1),
+        };
+
+        var ex = await Assert.ThrowsAsync<Fishbowl.Core.Util.ResourceValidationException>(() =>
+            _repo.CreateAsync(TestUserId, contact, TestContext.Current.CancellationToken));
+        Assert.Equal("contact", ex.Error.Resource);
+        Assert.Equal("notes", ex.Error.Field);
+    }
+
+    [Fact]
+    public async Task Update_RejectsOversizedName()
+    {
+        var contact = new Contact { Name = "ok" };
+        var id = await _repo.CreateAsync(TestUserId, contact, TestContext.Current.CancellationToken);
+
+        var loaded = await _repo.GetByIdAsync(TestUserId, id, TestContext.Current.CancellationToken);
+        Assert.NotNull(loaded);
+        loaded!.Name = new string('n', Fishbowl.Core.Util.ContactLimits.MaxNameLength + 1);
+
+        await Assert.ThrowsAsync<Fishbowl.Core.Util.ResourceValidationException>(() =>
+            _repo.UpdateAsync(TestUserId, loaded, TestContext.Current.CancellationToken));
+    }
+
     public void Dispose()
     {
         SqliteConnection.ClearAllPools();

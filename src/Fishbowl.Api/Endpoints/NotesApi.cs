@@ -84,14 +84,9 @@ public static class NotesApi
                 var id = await repo.CreateAsync(ctx.Value, actor, note, SourceForPrincipal(user), ct);
                 return Results.Created($"/api/v1/notes/{id}", note);
             }
-            catch (NoteValidationException ex)
+            catch (ResourceValidationException ex)
             {
-                return Results.Json(new
-                {
-                    error = "note exceeds size limits",
-                    field = ex.Error.Field,
-                    reason = ex.Error.Reason,
-                }, statusCode: StatusCodes.Status413PayloadTooLarge);
+                return ValidationResults.PayloadTooLarge(ex);
             }
         })
         .WithName("CreateNote")
@@ -111,14 +106,9 @@ public static class NotesApi
                 var updated = await repo.UpdateAsync(ctx.Value, note, SourceForPrincipal(user), ct);
                 return updated ? Results.NoContent() : Results.NotFound();
             }
-            catch (NoteValidationException ex)
+            catch (ResourceValidationException ex)
             {
-                return Results.Json(new
-                {
-                    error = "note exceeds size limits",
-                    field = ex.Error.Field,
-                    reason = ex.Error.Reason,
-                }, statusCode: StatusCodes.Status413PayloadTooLarge);
+                return ValidationResults.PayloadTooLarge(ex);
             }
         })
         .WithName("UpdateNote")

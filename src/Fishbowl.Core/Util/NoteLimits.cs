@@ -12,6 +12,8 @@ namespace Fishbowl.Core.Util;
 // a friendlier 413 with the offending field name.
 public static class NoteLimits
 {
+    public const string Resource = "note";
+
     // 8 KB titles. The UI's title field is single-line; anything bigger is
     // pasted accidentally or programmatically.
     public const int MaxTitleLength = 8 * 1024;
@@ -35,34 +37,29 @@ public static class NoteLimits
     // *name* itself wants to fit on one line of UI chrome.
     public const int MaxTagLength = 128;
 
-    public sealed record ValidationError(string Field, string Reason)
-    {
-        public override string ToString() => $"{Field}: {Reason}";
-    }
-
     // Returns the first validation error, or null if everything fits.
     // Single-error return keeps the API response small and unambiguous —
     // the client fixes one thing and retries.
-    public static ValidationError? Validate(Note note)
+    public static ResourceValidationError? Validate(Note note)
     {
         if (note.Title is { Length: > MaxTitleLength })
-            return new ValidationError("title", $"exceeds {MaxTitleLength} characters");
+            return new ResourceValidationError(Resource, "title", $"exceeds {MaxTitleLength} characters");
 
         if (note.Content is { Length: > MaxContentLength })
-            return new ValidationError("content", $"exceeds {MaxContentLength} characters");
+            return new ResourceValidationError(Resource, "content", $"exceeds {MaxContentLength} characters");
 
         if (note.ContentSecret is { Length: > MaxContentSecretBytes })
-            return new ValidationError("contentSecret", $"exceeds {MaxContentSecretBytes} bytes");
+            return new ResourceValidationError(Resource, "contentSecret", $"exceeds {MaxContentSecretBytes} bytes");
 
         if (note.Tags is { Count: > MaxTagCount })
-            return new ValidationError("tags", $"exceeds {MaxTagCount} entries");
+            return new ResourceValidationError(Resource, "tags", $"exceeds {MaxTagCount} entries");
 
         if (note.Tags is not null)
         {
             foreach (var tag in note.Tags)
             {
                 if (tag is { Length: > MaxTagLength })
-                    return new ValidationError("tags", $"a tag exceeds {MaxTagLength} characters");
+                    return new ResourceValidationError(Resource, "tags", $"a tag exceeds {MaxTagLength} characters");
             }
         }
 

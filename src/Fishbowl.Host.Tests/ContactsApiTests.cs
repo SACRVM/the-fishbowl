@@ -354,6 +354,24 @@ public class ContactsApiTests : IClassFixture<WebApplicationFactory<Program>>, I
         Assert.Equal(HttpStatusCode.Forbidden, writeResp.StatusCode);
     }
 
+    [Fact]
+    public async Task CreateContact_OversizedNotes_413()
+    {
+        var client = _factory.CreateClient();
+        var resp = await client.SendAsync(Req(HttpMethod.Post, "/api/v1/contacts", UserA,
+            new Contact
+            {
+                Name = "ok",
+                Notes = new string('x', Fishbowl.Core.Util.ContactLimits.MaxNotesLength + 1),
+            }),
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal(HttpStatusCode.RequestEntityTooLarge, resp.StatusCode);
+        var body = await resp.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
+        Assert.Contains("notes", body);
+        Assert.Contains("contact", body);
+    }
+
     public void Dispose()
     {
         SqliteConnection.ClearAllPools();

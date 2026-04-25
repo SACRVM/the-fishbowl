@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.Routing;
 using System.Security.Claims;
 using Fishbowl.Core.Models;
 using Fishbowl.Core.Repositories;
+using Fishbowl.Core.Util;
 
 namespace Fishbowl.Api.Endpoints;
 
@@ -73,8 +74,15 @@ public static class ContactsApi
             if (string.IsNullOrWhiteSpace(contact.Name))
                 return Results.BadRequest(new { error = "name is required" });
 
-            var id = await repo.CreateAsync(userId, contact, ct);
-            return Results.Created($"/api/v1/contacts/{id}", contact);
+            try
+            {
+                var id = await repo.CreateAsync(userId, contact, ct);
+                return Results.Created($"/api/v1/contacts/{id}", contact);
+            }
+            catch (ResourceValidationException ex)
+            {
+                return ValidationResults.PayloadTooLarge(ex);
+            }
         })
         .WithName("CreateContact")
         .Produces<Contact>(StatusCodes.Status201Created)
@@ -92,8 +100,15 @@ public static class ContactsApi
                 return Results.BadRequest(new { error = "name is required" });
 
             contact.Id = id;
-            var updated = await repo.UpdateAsync(userId, contact, ct);
-            return updated ? Results.NoContent() : Results.NotFound();
+            try
+            {
+                var updated = await repo.UpdateAsync(userId, contact, ct);
+                return updated ? Results.NoContent() : Results.NotFound();
+            }
+            catch (ResourceValidationException ex)
+            {
+                return ValidationResults.PayloadTooLarge(ex);
+            }
         })
         .WithName("UpdateContact")
         .Produces(StatusCodes.Status204NoContent)

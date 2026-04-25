@@ -3,6 +3,7 @@ using Dapper;
 using Fishbowl.Core;
 using Fishbowl.Core.Models;
 using Fishbowl.Core.Repositories;
+using Fishbowl.Core.Util;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 
@@ -86,6 +87,7 @@ public class ContactRepository : IContactRepository
     {
         if (string.IsNullOrWhiteSpace(contact.Name))
             throw new ArgumentException("Contact name is required", nameof(contact));
+        EnforceLimits(contact);
 
         if (string.IsNullOrEmpty(contact.Id))
             contact.Id = Ulid.NewUlid().ToString();
@@ -127,6 +129,7 @@ public class ContactRepository : IContactRepository
     {
         if (string.IsNullOrWhiteSpace(contact.Name))
             throw new ArgumentException("Contact name is required", nameof(contact));
+        EnforceLimits(contact);
 
         contact.UpdatedAt = DateTime.UtcNow;
 
@@ -172,6 +175,12 @@ public class ContactRepository : IContactRepository
 
             return affected > 0;
         }, ct);
+    }
+
+    private static void EnforceLimits(Contact contact)
+    {
+        var error = ContactLimits.Validate(contact);
+        if (error is not null) throw new ResourceValidationException(error);
     }
 
     private static async Task SyncFtsInsertAsync(

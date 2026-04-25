@@ -3,6 +3,7 @@ using Dapper;
 using Fishbowl.Core;
 using Fishbowl.Core.Models;
 using Fishbowl.Core.Repositories;
+using Fishbowl.Core.Util;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 
@@ -43,6 +44,8 @@ public class TodoRepository : ITodoRepository
 
     public async Task<string> CreateAsync(ContextRef ctx, string actorUserId, TodoItem item, CancellationToken ct = default)
     {
+        EnforceLimits(item);
+
         if (string.IsNullOrEmpty(item.Id))
         {
             item.Id = Ulid.NewUlid().ToString();
@@ -77,6 +80,7 @@ public class TodoRepository : ITodoRepository
 
     public async Task<bool> UpdateAsync(ContextRef ctx, TodoItem item, CancellationToken ct = default)
     {
+        EnforceLimits(item);
         item.UpdatedAt = DateTime.UtcNow;
 
         using var db = _dbFactory.CreateContextConnection(ctx);
@@ -117,6 +121,12 @@ public class TodoRepository : ITodoRepository
         var affected = await db.ExecuteAsync(new CommandDefinition(
             "DELETE FROM todos WHERE id = @id", new { id }, cancellationToken: ct));
         return affected > 0;
+    }
+
+    private static void EnforceLimits(TodoItem item)
+    {
+        var error = TodoLimits.Validate(item);
+        if (error is not null) throw new ResourceValidationException(error);
     }
 
     // ────────── Legacy (personal-context) aliases ──────────

@@ -320,7 +320,7 @@ public class McpEndpointTests : IClassFixture<WebApplicationFactory<Program>>, I
     [Fact]
     public async Task Remember_OversizedContent_ReturnsInvalidParams()
     {
-        // NoteValidationException must also come back as InvalidParams. Use
+        // ResourceValidationException must also come back as InvalidParams. Use
         // a title (cheap field) past its 8KB cap rather than a 4MB content
         // body — the test stays cheap while exercising the same code path.
         var client = await BearerClientAsync("read:notes", "write:notes");

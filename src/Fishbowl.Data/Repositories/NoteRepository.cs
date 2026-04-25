@@ -353,13 +353,13 @@ public class NoteRepository : INoteRepository
     }
 
     // ────────── Size-limit gate ──────────
-    // Throws NoteValidationException when a field is past the hard cap.
+    // Throws ResourceValidationException when a field is past the hard cap.
     // The API edge catches this and converts to 413; MCP tools see the
     // same exception type and surface it as a tool error to the caller.
     private static void EnforceLimits(Note note)
     {
         var error = NoteLimits.Validate(note);
-        if (error is not null) throw new NoteValidationException(error);
+        if (error is not null) throw new ResourceValidationException(error);
     }
 
     // ────────── Source-tag massage ──────────

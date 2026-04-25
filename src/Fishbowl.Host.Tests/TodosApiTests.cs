@@ -240,6 +240,23 @@ public class TodosApiTests : IClassFixture<WebApplicationFactory<Program>>, IDis
         Assert.Equal(HttpStatusCode.NotFound, resp.StatusCode);
     }
 
+    [Fact]
+    public async Task CreateTodo_OversizedTitle_413()
+    {
+        var client = _factory.CreateClient();
+        var resp = await client.SendAsync(Req(HttpMethod.Post, "/api/v1/todos", UserA,
+            new TodoItem
+            {
+                Title = new string('x', Fishbowl.Core.Util.TodoLimits.MaxTitleLength + 1),
+            }),
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal(HttpStatusCode.RequestEntityTooLarge, resp.StatusCode);
+        var body = await resp.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
+        Assert.Contains("title", body);
+        Assert.Contains("todo", body);
+    }
+
     public void Dispose()
     {
         SqliteConnection.ClearAllPools();

@@ -97,10 +97,10 @@ public class NoteLimitsTests
     }
 
     [Fact]
-    public void NoteValidationException_CarriesStructuredError()
+    public void ResourceValidationException_CarriesStructuredError()
     {
-        var error = new NoteLimits.ValidationError("content", "exceeds X");
-        var ex = new NoteValidationException(error);
+        var error = new ResourceValidationError("note", "content", "exceeds X");
+        var ex = new ResourceValidationException(error);
         Assert.Same(error, ex.Error);
         Assert.Contains("content", ex.Message);
         Assert.Contains("exceeds X", ex.Message);

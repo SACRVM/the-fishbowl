@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.Routing;
 using System.Security.Claims;
 using Fishbowl.Core.Models;
 using Fishbowl.Core.Repositories;
+using Fishbowl.Core.Util;
 
 namespace Fishbowl.Api.Endpoints;
 
@@ -45,8 +46,15 @@ public static class TodoApi
             var userId = user.FindFirst("fishbowl_user_id")?.Value;
             if (string.IsNullOrEmpty(userId)) return Results.Unauthorized();
 
-            var id = await repo.CreateAsync(userId, item, ct);
-            return Results.Created($"/api/v1/todos/{id}", item);
+            try
+            {
+                var id = await repo.CreateAsync(userId, item, ct);
+                return Results.Created($"/api/v1/todos/{id}", item);
+            }
+            catch (ResourceValidationException ex)
+            {
+                return ValidationResults.PayloadTooLarge(ex);
+            }
         })
         .WithName("CreateTodo")
         .WithSummary("Creates a new todo.")
@@ -60,8 +68,15 @@ public static class TodoApi
             if (string.IsNullOrEmpty(userId)) return Results.Unauthorized();
 
             item.Id = id;
-            var updated = await repo.UpdateAsync(userId, item, ct);
-            return updated ? Results.NoContent() : Results.NotFound();
+            try
+            {
+                var updated = await repo.UpdateAsync(userId, item, ct);
+                return updated ? Results.NoContent() : Results.NotFound();
+            }
+            catch (ResourceValidationException ex)
+            {
+                return ValidationResults.PayloadTooLarge(ex);
+            }
         })
         .WithName("UpdateTodo")
         .WithSummary("Updates an existing todo.")

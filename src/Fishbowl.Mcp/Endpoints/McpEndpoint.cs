@@ -54,13 +54,14 @@ public static class McpEndpoint
         {
             (result, error) = await DispatchAsync(request, ctx);
         }
-        catch (NoteValidationException ex)
+        catch (ResourceValidationException ex)
         {
-            // The tool sent oversized/invalid note data — that's a caller
+            // The tool sent oversized/invalid data — that's a caller
             // error, not a server fault. JSON-RPC's InvalidParams (-32602)
             // tells the client "fix your input and retry", whereas the
             // generic InternalError suggests "this might work next time".
-            logger.LogDebug("MCP {Method} rejected on note validation: {Field}", request.Method, ex.Error.Field);
+            logger.LogDebug("MCP {Method} rejected on {Resource} validation: {Field}",
+                request.Method, ex.Error.Resource, ex.Error.Field);
             error = new McpError(McpErrorCodes.InvalidParams, ex.Message);
         }
         catch (ArgumentException ex)

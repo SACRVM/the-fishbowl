@@ -54,6 +54,34 @@ public class TodoRepositoryTests : IDisposable
         Assert.Equal(2, all.Count());
     }
 
+    [Fact]
+    public async Task Create_RejectsOversizedTitle()
+    {
+        var todo = new TodoItem
+        {
+            Title = new string('x', Fishbowl.Core.Util.TodoLimits.MaxTitleLength + 1),
+        };
+
+        var ex = await Assert.ThrowsAsync<Fishbowl.Core.Util.ResourceValidationException>(() =>
+            _repo.CreateAsync(TestUserId, todo, TestContext.Current.CancellationToken));
+        Assert.Equal("todo", ex.Error.Resource);
+        Assert.Equal("title", ex.Error.Field);
+    }
+
+    [Fact]
+    public async Task Update_RejectsOversizedDescription()
+    {
+        var todo = new TodoItem { Title = "ok" };
+        var id = await _repo.CreateAsync(TestUserId, todo, TestContext.Current.CancellationToken);
+
+        var loaded = await _repo.GetByIdAsync(TestUserId, id, TestContext.Current.CancellationToken);
+        Assert.NotNull(loaded);
+        loaded!.Description = new string('d', Fishbowl.Core.Util.TodoLimits.MaxDescriptionLength + 1);
+
+        await Assert.ThrowsAsync<Fishbowl.Core.Util.ResourceValidationException>(() =>
+            _repo.UpdateAsync(TestUserId, loaded, TestContext.Current.CancellationToken));
+    }
+
     public void Dispose()
     {
         SqliteConnection.ClearAllPools();

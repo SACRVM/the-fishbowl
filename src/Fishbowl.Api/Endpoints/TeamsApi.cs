@@ -156,14 +156,9 @@ public static class TeamsApi
                 var created = await notes.CreateAsync(ContextRef.Team(team.Id), userId, note, ct);
                 return Results.Created($"/api/v1/teams/{slug}/notes/{created}", note);
             }
-            catch (NoteValidationException ex)
+            catch (ResourceValidationException ex)
             {
-                return Results.Json(new
-                {
-                    error = "note exceeds size limits",
-                    field = ex.Error.Field,
-                    reason = ex.Error.Reason,
-                }, statusCode: StatusCodes.Status413PayloadTooLarge);
+                return ValidationResults.PayloadTooLarge(ex);
             }
         })
         .WithName("CreateTeamNote")
@@ -184,14 +179,9 @@ public static class TeamsApi
                 var updated = await notes.UpdateAsync(ContextRef.Team(team.Id), note, ct);
                 return updated ? Results.NoContent() : Results.NotFound();
             }
-            catch (NoteValidationException ex)
+            catch (ResourceValidationException ex)
             {
-                return Results.Json(new
-                {
-                    error = "note exceeds size limits",
-                    field = ex.Error.Field,
-                    reason = ex.Error.Reason,
-                }, statusCode: StatusCodes.Status413PayloadTooLarge);
+                return ValidationResults.PayloadTooLarge(ex);
             }
         })
         .WithName("UpdateTeamNote")
@@ -326,9 +316,16 @@ public static class TeamsApi
             if (!resolved.Role!.Value.CanWrite()) return Results.Forbid();
 
             var actorUserId = user.FindFirst(McpContextClaims.UserId)!.Value;
-            var id = await todos.CreateAsync(
-                ContextRef.Team(resolved.Team!.Id), actorUserId, item, ct);
-            return Results.Created($"/api/v1/teams/{slug}/todos/{id}", item);
+            try
+            {
+                var id = await todos.CreateAsync(
+                    ContextRef.Team(resolved.Team!.Id), actorUserId, item, ct);
+                return Results.Created($"/api/v1/teams/{slug}/todos/{id}", item);
+            }
+            catch (ResourceValidationException ex)
+            {
+                return ValidationResults.PayloadTooLarge(ex);
+            }
         })
         .WithName("CreateTeamTodo")
         .RequireScope("write:tasks");
@@ -342,8 +339,15 @@ public static class TeamsApi
             if (!resolved.Role!.Value.CanWrite()) return Results.Forbid();
 
             item.Id = id;
-            var ok = await todos.UpdateAsync(ContextRef.Team(resolved.Team!.Id), item, ct);
-            return ok ? Results.NoContent() : Results.NotFound();
+            try
+            {
+                var ok = await todos.UpdateAsync(ContextRef.Team(resolved.Team!.Id), item, ct);
+                return ok ? Results.NoContent() : Results.NotFound();
+            }
+            catch (ResourceValidationException ex)
+            {
+                return ValidationResults.PayloadTooLarge(ex);
+            }
         })
         .WithName("UpdateTeamTodo")
         .RequireScope("write:tasks");
@@ -416,9 +420,16 @@ public static class TeamsApi
                 return Results.BadRequest(new { error = "name is required" });
 
             var actorId = user.FindFirst(McpContextClaims.UserId)!.Value;
-            var id = await contacts.CreateAsync(
-                ContextRef.Team(resolved.Team!.Id), actorId, contact, ct);
-            return Results.Created($"/api/v1/teams/{slug}/contacts/{id}", contact);
+            try
+            {
+                var id = await contacts.CreateAsync(
+                    ContextRef.Team(resolved.Team!.Id), actorId, contact, ct);
+                return Results.Created($"/api/v1/teams/{slug}/contacts/{id}", contact);
+            }
+            catch (ResourceValidationException ex)
+            {
+                return ValidationResults.PayloadTooLarge(ex);
+            }
         })
         .WithName("CreateTeamContact")
         .RequireScope("write:contacts");
@@ -435,8 +446,15 @@ public static class TeamsApi
                 return Results.BadRequest(new { error = "name is required" });
 
             contact.Id = id;
-            var ok = await contacts.UpdateAsync(ContextRef.Team(resolved.Team!.Id), contact, ct);
-            return ok ? Results.NoContent() : Results.NotFound();
+            try
+            {
+                var ok = await contacts.UpdateAsync(ContextRef.Team(resolved.Team!.Id), contact, ct);
+                return ok ? Results.NoContent() : Results.NotFound();
+            }
+            catch (ResourceValidationException ex)
+            {
+                return ValidationResults.PayloadTooLarge(ex);
+            }
         })
         .WithName("UpdateTeamContact")
         .RequireScope("write:contacts");
