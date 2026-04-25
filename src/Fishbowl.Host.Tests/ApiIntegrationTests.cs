@@ -178,6 +178,23 @@ public class ApiIntegrationTests : IClassFixture<WebApplicationFactory<Program>>
     }
 
     [Fact]
+    public async Task Health_Anonymous_ReturnsOk()
+    {
+        // No X-Test-User-Id header. Liveness must be reachable from
+        // unauthenticated probes (orchestrator health checks, monitors).
+        var client = _factory.CreateClient();
+        var resp = await client.GetAsync("/api/v1/health",
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal(System.Net.HttpStatusCode.OK, resp.StatusCode);
+        var body = await resp.Content.ReadFromJsonAsync<Dictionary<string, string>>(
+            TestContext.Current.CancellationToken);
+        Assert.NotNull(body);
+        Assert.Equal("ok", body!["status"]);
+        Assert.True(body.ContainsKey("time"));
+    }
+
+    [Fact]
     public async Task Get_Version_ReturnsVersionString_Test()
     {
         var client = _factory.CreateClient();
