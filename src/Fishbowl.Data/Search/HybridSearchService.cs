@@ -45,9 +45,17 @@ public sealed class HybridSearchService : ISearchService
     }
 
     public async Task<HybridSearchResult> HybridSearchAsync(
-        ContextRef ctx, string query, int limit, bool includePending, CancellationToken ct = default)
+        ContextRef ctx, string query, int limit, bool includePending,
+        IReadOnlyCollection<string>? tags = null,
+        string match = "any",
+        CancellationToken ct = default)
     {
         limit = Math.Clamp(limit, 1, 100);
+        // Normalise once outside the per-hit loop. "all" is the strict
+        // mode; everything else (including null/empty/typo) collapses to
+        // "any" — same lenient default as NoteRepository.GetAllAsync uses.
+        var requireAll = string.Equals(match, "all", StringComparison.OrdinalIgnoreCase);
+        var tagFilter = tags is { Count: > 0 } ? new HashSet<string>(tags, StringComparer.Ordinal) : null;
         query = query?.Trim() ?? string.Empty;
         if (query.Length > MaxQueryLength)
         {
@@ -81,10 +89,13 @@ public sealed class HybridSearchService : ISearchService
             degraded = true;
         }
 
-        var merged = MergeScores(vecHits, ftsHits, degraded);
+        var merged = MergeScores(vecHits, ftsHits, degraded).ToList();
 
         // Pull the full notes for the top K (after de-dupe + ordering).
-        var topIds = merged.Select(m => m.Id).Take(limit * 2).ToList();
+        // Larger window when tag-filtering — many candidates may be dropped
+        // by the filter, and we want a fair shot at backfilling to `limit`.
+        var fetchMultiplier = tagFilter is null ? 2 : 6;
+        var topIds = merged.Select(m => m.Id).Take(limit * fetchMultiplier).ToList();
         var notesById = await LoadNotesAsync(db, topIds, ct);
 
         var results = new List<MemorySearchResult>(limit);
@@ -94,11 +105,27 @@ public sealed class HybridSearchService : ISearchService
             if (!notesById.TryGetValue(candidate.Id, out var note)) continue;
             if (note.Archived) continue;
             if (!includePending && (note.Tags?.Contains("review:pending") ?? false)) continue;
+            if (tagFilter is not null && !MatchesTagFilter(note.Tags, tagFilter, requireAll)) continue;
 
             results.Add(new MemorySearchResult(SecretStripper.StripNote(note), candidate.Score));
         }
 
         return new HybridSearchResult(results, degraded);
+    }
+
+    private static bool MatchesTagFilter(
+        IReadOnlyList<string>? noteTags, HashSet<string> required, bool requireAll)
+    {
+        if (noteTags is null || noteTags.Count == 0) return false;
+        if (requireAll)
+        {
+            foreach (var t in required)
+                if (!noteTags.Contains(t)) return false;
+            return true;
+        }
+        foreach (var t in noteTags)
+            if (required.Contains(t)) return true;
+        return false;
     }
 
     private static async Task<List<(string Id, double Bm25)>> RunFtsAsync(

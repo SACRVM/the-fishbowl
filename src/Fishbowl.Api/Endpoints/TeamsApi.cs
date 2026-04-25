@@ -482,14 +482,18 @@ public static class TeamsApi
             string slug, string q,
             ClaimsPrincipal user, ITeamRepository teams,
             Fishbowl.Core.Search.ISearchService search,
+            string[]? tag = null, string? match = null,
             int limit = 20, bool includePending = true, CancellationToken ct = default) =>
         {
             var resolved = await ResolveTeamAsync(slug, user, teams, ct);
             if (resolved.Error is not null) return resolved.Error;
 
             limit = Math.Clamp(limit, 1, 100);
+            var tags = tag is { Length: > 0 } ? tag : null;
+            var matchMode = match == "all" ? "all" : "any";
             var result = await search.HybridSearchAsync(
-                ContextRef.Team(resolved.Team!.Id), q ?? "", limit, includePending, ct);
+                ContextRef.Team(resolved.Team!.Id), q ?? "", limit, includePending,
+                tags, matchMode, ct);
             return Results.Ok(new
             {
                 notes = result.Hits.Select(h => new

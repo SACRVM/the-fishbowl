@@ -29,6 +29,19 @@ public class SearchMemoryTool : IMcpTool
             query = new { type = "string", description = "Search term" },
             limit = new { type = "integer", @default = 10, description = "Max hits to return" },
             include_pending = new { type = "boolean", @default = true, description = "Include review:pending notes" },
+            tags = new
+            {
+                type = "array",
+                items = new { type = "string" },
+                description = "Restrict hits to notes carrying these tags",
+            },
+            match = new
+            {
+                type = "string",
+                @enum = new[] { "any", "all" },
+                @default = "any",
+                description = "With multiple tags: 'any' (default) keeps notes with at least one; 'all' requires every tag",
+            },
         },
         required = new[] { "query" },
     };
@@ -43,7 +56,19 @@ public class SearchMemoryTool : IMcpTool
             || p.ValueKind == JsonValueKind.Null
             || p.GetBoolean();
 
-        var result = await _search.HybridSearchAsync(ctx, query, limit, includePending, ct);
+        IReadOnlyCollection<string>? tags = null;
+        if (arguments.TryGetProperty("tags", out var tagsEl) && tagsEl.ValueKind == JsonValueKind.Array)
+        {
+            tags = tagsEl.EnumerateArray()
+                .Select(e => e.GetString() ?? string.Empty)
+                .Where(s => s.Length > 0)
+                .ToList();
+            if (tags.Count == 0) tags = null;
+        }
+        var match = arguments.TryGetProperty("match", out var m) && m.ValueKind == JsonValueKind.String
+            ? m.GetString() ?? "any" : "any";
+
+        var result = await _search.HybridSearchAsync(ctx, query, limit, includePending, tags, match, ct);
 
         // Surface the degraded flag so MCP clients can reason about partial
         // ranking (e.g. when the embedding model is still downloading on

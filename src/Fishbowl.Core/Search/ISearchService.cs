@@ -3,9 +3,14 @@ using Fishbowl.Core.Models;
 namespace Fishbowl.Core.Search;
 
 // Hybrid (semantic + FTS) note search. Implementations live in
-// Fishbowl.Search; callers (MCP SearchMemoryTool, future UI search) only
-// need this contract. Secrets are stripped by the implementation before
-// the result reaches the caller.
+// Fishbowl.Data.Search; callers (MCP SearchMemoryTool, future UI search)
+// only need this contract. Secrets are stripped by the implementation
+// before the result reaches the caller.
+//
+// Tag filtering: post-rank, not pre-candidate — pre-filtering would
+// drop semantic recall before it had a chance to compete. With
+// `match="any"` a hit needs at least one of the requested tags;
+// `match="all"` needs every one. Empty/null tags = no filter.
 public interface ISearchService
 {
     Task<HybridSearchResult> HybridSearchAsync(
@@ -13,6 +18,8 @@ public interface ISearchService
         string query,
         int limit,
         bool includePending,
+        IReadOnlyCollection<string>? tags = null,
+        string match = "any",
         CancellationToken ct = default);
 }
 

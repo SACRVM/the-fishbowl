@@ -33,7 +33,7 @@ public class HybridSearchServiceTests : IDisposable
     public async Task HybridSearch_Empty_Query_ReturnsNoHits()
     {
         var svc = BuildService(new ScriptedEmbeddingService());
-        var result = await svc.HybridSearchAsync(_ctx, "", 10, true,
+        var result = await svc.HybridSearchAsync(_ctx, "", 10, true, ct:
             TestContext.Current.CancellationToken);
         Assert.Empty(result.Hits);
         Assert.False(result.Degraded);
@@ -52,7 +52,7 @@ public class HybridSearchServiceTests : IDisposable
             TestContext.Current.CancellationToken);
 
         var svc = BuildService(fake);
-        var result = await svc.HybridSearchAsync(_ctx, "DatabaseFactory", 5, true,
+        var result = await svc.HybridSearchAsync(_ctx, "DatabaseFactory", 5, true, ct:
             TestContext.Current.CancellationToken);
 
         Assert.NotEmpty(result.Hits);
@@ -93,7 +93,7 @@ public class HybridSearchServiceTests : IDisposable
         }
 
         var svc = BuildService(fake);
-        var result = await svc.HybridSearchAsync(_ctx, "how do migrations work", 5, true,
+        var result = await svc.HybridSearchAsync(_ctx, "how do migrations work", 5, true, ct:
             TestContext.Current.CancellationToken);
 
         var topIds = result.Hits.Select(h => h.Note.Title).ToList();
@@ -110,7 +110,7 @@ public class HybridSearchServiceTests : IDisposable
             TestContext.Current.CancellationToken);
 
         var svc = BuildService(throwing);
-        var result = await svc.HybridSearchAsync(_ctx, "unique-term-alpha", 5, true,
+        var result = await svc.HybridSearchAsync(_ctx, "unique-term-alpha", 5, true, ct:
             TestContext.Current.CancellationToken);
 
         Assert.True(result.Degraded, "should flag degraded when embedding unavailable");
@@ -132,7 +132,7 @@ public class HybridSearchServiceTests : IDisposable
         var bigQuery = "needle " + new string('x', HybridSearchService.MaxQueryLength * 4);
 
         var svc = BuildService(fake);
-        var result = await svc.HybridSearchAsync(_ctx, bigQuery, 5, true,
+        var result = await svc.HybridSearchAsync(_ctx, bigQuery, 5, true, ct:
             TestContext.Current.CancellationToken);
 
         Assert.NotEmpty(result.Hits);
@@ -157,7 +157,7 @@ public class HybridSearchServiceTests : IDisposable
         }
 
         var svc = BuildService(fake);
-        var result = await svc.HybridSearchAsync(_ctx, "archived-needle", 5, true,
+        var result = await svc.HybridSearchAsync(_ctx, "archived-needle", 5, true, ct:
             TestContext.Current.CancellationToken);
 
         Assert.DoesNotContain(result.Hits, h => h.Note.Id == archivedId);
@@ -179,14 +179,115 @@ public class HybridSearchServiceTests : IDisposable
             NoteSource.Human, TestContext.Current.CancellationToken);
 
         var svc = BuildService(fake);
-        var includePending = await svc.HybridSearchAsync(_ctx, "alpha", 10, true,
+        var includePending = await svc.HybridSearchAsync(_ctx, "alpha", 10, true, ct:
             TestContext.Current.CancellationToken);
-        var excludePending = await svc.HybridSearchAsync(_ctx, "alpha", 10, false,
+        var excludePending = await svc.HybridSearchAsync(_ctx, "alpha", 10, false, ct:
             TestContext.Current.CancellationToken);
 
         Assert.Contains(includePending.Hits, h => h.Note.Title == "pending-note");
         Assert.DoesNotContain(excludePending.Hits, h => h.Note.Title == "pending-note");
         Assert.Contains(excludePending.Hits, h => h.Note.Title == "approved-note");
+    }
+
+    [Fact]
+    public async Task HybridSearch_FiltersByTags_AnyMatch()
+    {
+        var fake = new ScriptedEmbeddingService();
+        var repo = BuildRepo(fake);
+        await repo.CreateAsync(_ctx, UserId,
+            new Note { Title = "first", Content = "alpha", Tags = new() { "project-a" } },
+            TestContext.Current.CancellationToken);
+        await repo.CreateAsync(_ctx, UserId,
+            new Note { Title = "second", Content = "alpha", Tags = new() { "project-b" } },
+            TestContext.Current.CancellationToken);
+        await repo.CreateAsync(_ctx, UserId,
+            new Note { Title = "third", Content = "alpha", Tags = new() { "project-c" } },
+            TestContext.Current.CancellationToken);
+
+        var svc = BuildService(fake);
+        var result = await svc.HybridSearchAsync(_ctx, "alpha", 10, true,
+            tags: new[] { "project-a", "project-b" }, match: "any",
+            ct: TestContext.Current.CancellationToken);
+
+        var titles = result.Hits.Select(h => h.Note.Title).ToList();
+        Assert.Contains("first", titles);
+        Assert.Contains("second", titles);
+        Assert.DoesNotContain("third", titles);
+    }
+
+    [Fact]
+    public async Task HybridSearch_FiltersByTags_AllMatch_RequiresEvery()
+    {
+        var fake = new ScriptedEmbeddingService();
+        var repo = BuildRepo(fake);
+        await repo.CreateAsync(_ctx, UserId,
+            new Note
+            {
+                Title = "both-tags",
+                Content = "alpha",
+                Tags = new() { "project-a", "urgent" },
+            },
+            TestContext.Current.CancellationToken);
+        await repo.CreateAsync(_ctx, UserId,
+            new Note
+            {
+                Title = "one-tag-only",
+                Content = "alpha",
+                Tags = new() { "project-a" },
+            },
+            TestContext.Current.CancellationToken);
+
+        var svc = BuildService(fake);
+        var result = await svc.HybridSearchAsync(_ctx, "alpha", 10, true,
+            tags: new[] { "project-a", "urgent" }, match: "all",
+            ct: TestContext.Current.CancellationToken);
+
+        var titles = result.Hits.Select(h => h.Note.Title).ToList();
+        Assert.Contains("both-tags", titles);
+        Assert.DoesNotContain("one-tag-only", titles);
+    }
+
+    [Fact]
+    public async Task HybridSearch_TagFilter_EmptyOrNull_DoesNothing()
+    {
+        var fake = new ScriptedEmbeddingService();
+        var repo = BuildRepo(fake);
+        await repo.CreateAsync(_ctx, UserId,
+            new Note { Title = "hit", Content = "alpha", Tags = new() { "x" } },
+            TestContext.Current.CancellationToken);
+
+        var svc = BuildService(fake);
+        var withNull = await svc.HybridSearchAsync(_ctx, "alpha", 10, true,
+            tags: null, ct: TestContext.Current.CancellationToken);
+        var withEmpty = await svc.HybridSearchAsync(_ctx, "alpha", 10, true,
+            tags: Array.Empty<string>(), ct: TestContext.Current.CancellationToken);
+
+        Assert.NotEmpty(withNull.Hits);
+        Assert.NotEmpty(withEmpty.Hits);
+    }
+
+    [Fact]
+    public async Task HybridSearch_TagFilter_PairsWithIncludePending()
+    {
+        var fake = new ScriptedEmbeddingService();
+        var repo = BuildRepo(fake);
+
+        // Mcp-source auto-adds review:pending; combined with a project tag
+        // gives a typical agent-write that the user later wants to filter.
+        await repo.CreateAsync(_ctx, UserId,
+            new Note { Title = "mcp-tagged", Content = "alpha", Tags = new() { "project-a" } },
+            NoteSource.Mcp, TestContext.Current.CancellationToken);
+        await repo.CreateAsync(_ctx, UserId,
+            new Note { Title = "human-tagged", Content = "alpha", Tags = new() { "project-a" } },
+            NoteSource.Human, TestContext.Current.CancellationToken);
+
+        var svc = BuildService(fake);
+        var excludingPending = await svc.HybridSearchAsync(_ctx, "alpha", 10, includePending: false,
+            tags: new[] { "project-a" }, ct: TestContext.Current.CancellationToken);
+
+        var titles = excludingPending.Hits.Select(h => h.Note.Title).ToList();
+        Assert.DoesNotContain("mcp-tagged", titles);
+        Assert.Contains("human-tagged", titles);
     }
 
     private HybridSearchService BuildService(IEmbeddingService embeddings)

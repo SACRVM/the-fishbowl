@@ -179,6 +179,72 @@ public class SearchApiTests : IClassFixture<WebApplicationFactory<Program>>, IDi
     }
 
     [Fact]
+    public async Task Search_TagFilter_AnyMode_FiltersResults()
+    {
+        var notes = new NoteRepository(_dbFactory, new TagRepository(_dbFactory));
+        await notes.CreateAsync(UserId,
+            new Note { Title = "alpha-a", Content = "shared body", Tags = new() { "project-a" } },
+            TestContext.Current.CancellationToken);
+        await notes.CreateAsync(UserId,
+            new Note { Title = "alpha-b", Content = "shared body", Tags = new() { "project-b" } },
+            TestContext.Current.CancellationToken);
+        await notes.CreateAsync(UserId,
+            new Note { Title = "alpha-c", Content = "shared body", Tags = new() { "other" } },
+            TestContext.Current.CancellationToken);
+
+        var client = _factory.CreateClient();
+        client.DefaultRequestHeaders.Add("X-Test-User-Id", UserId);
+
+        var resp = await client.GetAsync(
+            "/api/v1/search/?q=shared&tag=project-a&tag=project-b",
+            TestContext.Current.CancellationToken);
+        resp.EnsureSuccessStatusCode();
+
+        var body = await resp.Content.ReadFromJsonAsync<SearchResponse>(
+            TestContext.Current.CancellationToken);
+        var titles = body!.Notes!.Select(n => n.Title).ToHashSet();
+        Assert.Contains("alpha-a", titles);
+        Assert.Contains("alpha-b", titles);
+        Assert.DoesNotContain("alpha-c", titles);
+    }
+
+    [Fact]
+    public async Task Search_TagFilter_AllMode_RequiresEvery()
+    {
+        var notes = new NoteRepository(_dbFactory, new TagRepository(_dbFactory));
+        await notes.CreateAsync(UserId,
+            new Note
+            {
+                Title = "both",
+                Content = "shared body",
+                Tags = new() { "project-a", "urgent" },
+            },
+            TestContext.Current.CancellationToken);
+        await notes.CreateAsync(UserId,
+            new Note
+            {
+                Title = "only-one",
+                Content = "shared body",
+                Tags = new() { "project-a" },
+            },
+            TestContext.Current.CancellationToken);
+
+        var client = _factory.CreateClient();
+        client.DefaultRequestHeaders.Add("X-Test-User-Id", UserId);
+
+        var resp = await client.GetAsync(
+            "/api/v1/search/?q=shared&tag=project-a&tag=urgent&match=all",
+            TestContext.Current.CancellationToken);
+        resp.EnsureSuccessStatusCode();
+
+        var body = await resp.Content.ReadFromJsonAsync<SearchResponse>(
+            TestContext.Current.CancellationToken);
+        var titles = body!.Notes!.Select(n => n.Title).ToHashSet();
+        Assert.Contains("both", titles);
+        Assert.DoesNotContain("only-one", titles);
+    }
+
+    [Fact]
     public async Task Search_BearerWithoutReadNotesScope_Returns403()
     {
         var issued = await _keys.IssueAsync(UserId, ContextRef.User(UserId), "search-ro",

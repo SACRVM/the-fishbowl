@@ -28,7 +28,8 @@ public static class SearchApi
         group.MapGet("/", async (
             ClaimsPrincipal user,
             ISearchService search,
-            string q, int limit = 20, bool includePending = true,
+            string q, string[]? tag = null, string? match = null,
+            int limit = 20, bool includePending = true,
             CancellationToken ct = default) =>
         {
             ContextRef ctx;
@@ -39,7 +40,11 @@ public static class SearchApi
             // tip over the candidate pool inside the ranker.
             limit = Math.Clamp(limit, 1, 100);
 
-            var result = await search.HybridSearchAsync(ctx, q ?? "", limit, includePending, ct);
+            var tags = tag is { Length: > 0 } ? tag : null;
+            var matchMode = match == "all" ? "all" : "any";
+
+            var result = await search.HybridSearchAsync(
+                ctx, q ?? "", limit, includePending, tags, matchMode, ct);
             return Results.Ok(new
             {
                 notes = result.Hits.Select(h => new

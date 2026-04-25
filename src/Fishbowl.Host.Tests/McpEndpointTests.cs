@@ -251,6 +251,38 @@ public class McpEndpointTests : IClassFixture<WebApplicationFactory<Program>>, I
     }
 
     [Fact]
+    public async Task Mcp_SearchMemory_TagFilter_ScopesResults()
+    {
+        var client = await BearerClientAsync("read:notes", "write:notes");
+
+        await CallToolAsync(client, "remember", new
+        {
+            title = "alpha-keep",
+            content = "shared body",
+            tags = new[] { "project-a" },
+        });
+        await CallToolAsync(client, "remember", new
+        {
+            title = "alpha-drop",
+            content = "shared body",
+            tags = new[] { "project-b" },
+        });
+
+        var search = await CallToolAsync(client, "search_memory", new
+        {
+            query = "shared body",
+            tags = new[] { "project-a" },
+        });
+        var text = search.GetProperty("result").GetProperty("content")[0].GetProperty("text").GetString();
+        using var doc = JsonDocument.Parse(text!);
+        var titles = doc.RootElement.GetProperty("notes")
+            .EnumerateArray().Select(n => n.GetProperty("title").GetString()).ToList();
+
+        Assert.Contains("alpha-keep", titles);
+        Assert.DoesNotContain("alpha-drop", titles);
+    }
+
+    [Fact]
     public async Task Mcp_SearchMemory_SecretsStrippedFromResponse()
     {
         var client = await BearerClientAsync("read:notes", "write:notes");
