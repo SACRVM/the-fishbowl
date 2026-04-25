@@ -520,6 +520,35 @@ public class McpEndpointTests : IClassFixture<WebApplicationFactory<Program>>, I
     }
 
     [Fact]
+    public async Task HumanUpdate_PreservesSourceMcp_EvenIfOmittedFromPut()
+    {
+        // Audit invariant flip-side: a human update that doesn't include
+        // source:mcp in its tags array must not be able to wipe the
+        // provenance marker. SystemTags marks source:mcp as
+        // UserRemovable=false; preservation re-adds it inside the update tx.
+        var repo = new Fishbowl.Data.Repositories.NoteRepository(_dbFactory,
+            new Fishbowl.Data.Repositories.TagRepository(_dbFactory));
+
+        var id = await repo.CreateAsync(
+            new ContextRef(ContextType.User, AliceId), AliceId,
+            new Fishbowl.Core.Models.Note { Title = "mcp-origin", Tags = new() },
+            Fishbowl.Core.Models.NoteSource.Mcp,
+            TestContext.Current.CancellationToken);
+
+        // Sanity: the row carries source:mcp from the MCP create.
+        var afterCreate = await repo.GetByIdAsync(AliceId, id, TestContext.Current.CancellationToken);
+        Assert.Contains("source:mcp", afterCreate!.Tags);
+
+        // Human edit that omits source:mcp from its tags array.
+        afterCreate.Tags = new List<string> { "approved" };
+        await repo.UpdateAsync(AliceId, afterCreate, TestContext.Current.CancellationToken);
+
+        var afterEdit = await repo.GetByIdAsync(AliceId, id, TestContext.Current.CancellationToken);
+        Assert.Contains("source:mcp", afterEdit!.Tags);
+        Assert.Contains("approved", afterEdit.Tags);
+    }
+
+    [Fact]
     public async Task CookieWrite_DoesNotAddSourceMcp()
     {
         // Direct repository call with the default (Human) overload — proves

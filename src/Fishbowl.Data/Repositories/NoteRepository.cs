@@ -158,6 +158,12 @@ public class NoteRepository : INoteRepository
 
         return await _dbFactory.WithContextTransactionAsync<bool>(ctx, async (db, tx, token) =>
         {
+            // Re-add any UserRemovable=false system tag that the existing
+            // row carries — a human PUT that omits source:mcp should not
+            // be able to wipe the provenance marker. SystemTags.Seeds is
+            // the source of truth for which tags are sticky.
+            await PreserveLockedTagsAsync(db, tx, note, token);
+
             note.Tags = (await _tagRepository.EnsureExistsAsync(db, tx, note.Tags, token)).ToList();
 
             var affected = await db.ExecuteAsync(new CommandDefinition(@"
@@ -369,6 +375,46 @@ public class NoteRepository : INoteRepository
         var stripped = SecretStripper.StripNote(note).Content ?? string.Empty;
         var tags = note.Tags is null ? string.Empty : string.Join(' ', note.Tags);
         return $"{note.Title} {stripped} {tags}".Trim();
+    }
+
+    // ────────── Locked-tag preservation ──────────
+    // Reads the existing notes.tags JSON for the row, then merges any tag
+    // marked UserRemovable=false in SystemTags.Seeds into `note.Tags`.
+    // Cheap (one SELECT inside the existing tx, no extra connection); the
+    // alternative is letting the caller silently strip provenance markers.
+    // No-op when the row doesn't exist yet — the UPDATE below will simply
+    // affect 0 rows.
+    private static async Task PreserveLockedTagsAsync(
+        IDbConnection db, IDbTransaction tx, Note note, CancellationToken ct)
+    {
+        var lockedNames = SystemTags.Seeds
+            .Where(s => !s.UserRemovable)
+            .Select(s => s.Name)
+            .ToList();
+        if (lockedNames.Count == 0) return;
+
+        var rawTags = await db.QuerySingleOrDefaultAsync<string?>(new CommandDefinition(
+            "SELECT tags FROM notes WHERE id = @Id",
+            new { note.Id }, transaction: tx, cancellationToken: ct));
+        if (string.IsNullOrEmpty(rawTags)) return;
+
+        // notes.tags is JSON via JsonTagsHandler in production; the raw
+        // SELECT skips that handler so we re-parse here. Tolerate older
+        // rows or test seeds that wrote a non-JSON value by bailing on
+        // parse failure — preservation is best-effort, not a correctness
+        // boundary.
+        List<string>? existing;
+        try { existing = System.Text.Json.JsonSerializer.Deserialize<List<string>>(rawTags); }
+        catch (System.Text.Json.JsonException) { return; }
+        if (existing is null) return;
+
+        note.Tags ??= new List<string>();
+        var live = new HashSet<string>(note.Tags, StringComparer.Ordinal);
+        foreach (var name in lockedNames)
+        {
+            if (existing.Contains(name)) live.Add(name);
+        }
+        note.Tags = live.ToList();
     }
 
     // ────────── Size-limit gate ──────────
