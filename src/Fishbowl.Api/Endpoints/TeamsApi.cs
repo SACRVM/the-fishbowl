@@ -3,6 +3,7 @@ using Fishbowl.Core;
 using Fishbowl.Core.Mcp;
 using Fishbowl.Core.Models;
 using Fishbowl.Core.Repositories;
+using Fishbowl.Core.Util;
 using Fishbowl.Data;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
@@ -150,8 +151,20 @@ public static class TeamsApi
             if (!role.CanWrite()) return Results.Forbid();
 
             var userId = user.FindFirst("fishbowl_user_id")!.Value;
-            var created = await notes.CreateAsync(ContextRef.Team(team.Id), userId, note, ct);
-            return Results.Created($"/api/v1/teams/{slug}/notes/{created}", note);
+            try
+            {
+                var created = await notes.CreateAsync(ContextRef.Team(team.Id), userId, note, ct);
+                return Results.Created($"/api/v1/teams/{slug}/notes/{created}", note);
+            }
+            catch (NoteValidationException ex)
+            {
+                return Results.Json(new
+                {
+                    error = "note exceeds size limits",
+                    field = ex.Error.Field,
+                    reason = ex.Error.Reason,
+                }, statusCode: StatusCodes.Status413PayloadTooLarge);
+            }
         })
         .WithName("CreateTeamNote")
         .RequireScope("write:notes");
@@ -166,8 +179,20 @@ public static class TeamsApi
             if (!role.CanWrite()) return Results.Forbid();
 
             note.Id = id;
-            var updated = await notes.UpdateAsync(ContextRef.Team(team.Id), note, ct);
-            return updated ? Results.NoContent() : Results.NotFound();
+            try
+            {
+                var updated = await notes.UpdateAsync(ContextRef.Team(team.Id), note, ct);
+                return updated ? Results.NoContent() : Results.NotFound();
+            }
+            catch (NoteValidationException ex)
+            {
+                return Results.Json(new
+                {
+                    error = "note exceeds size limits",
+                    field = ex.Error.Field,
+                    reason = ex.Error.Reason,
+                }, statusCode: StatusCodes.Status413PayloadTooLarge);
+            }
         })
         .WithName("UpdateTeamNote")
         .RequireScope("write:notes");

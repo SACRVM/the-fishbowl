@@ -6,6 +6,7 @@ using Fishbowl.Core;
 using Fishbowl.Core.Mcp;
 using Fishbowl.Core.Models;
 using Fishbowl.Core.Repositories;
+using Fishbowl.Core.Util;
 
 namespace Fishbowl.Api.Endpoints;
 
@@ -78,8 +79,20 @@ public static class NotesApi
             var actor = ActorUserId(user);
             if (ctx is null || string.IsNullOrEmpty(actor)) return Results.Unauthorized();
 
-            var id = await repo.CreateAsync(ctx.Value, actor, note, SourceForPrincipal(user), ct);
-            return Results.Created($"/api/v1/notes/{id}", note);
+            try
+            {
+                var id = await repo.CreateAsync(ctx.Value, actor, note, SourceForPrincipal(user), ct);
+                return Results.Created($"/api/v1/notes/{id}", note);
+            }
+            catch (NoteValidationException ex)
+            {
+                return Results.Json(new
+                {
+                    error = "note exceeds size limits",
+                    field = ex.Error.Field,
+                    reason = ex.Error.Reason,
+                }, statusCode: StatusCodes.Status413PayloadTooLarge);
+            }
         })
         .WithName("CreateNote")
         .WithSummary("Creates a new note in the resolved context.")
@@ -93,8 +106,20 @@ public static class NotesApi
             if (ctx is null) return Results.Unauthorized();
 
             note.Id = id;
-            var updated = await repo.UpdateAsync(ctx.Value, note, SourceForPrincipal(user), ct);
-            return updated ? Results.NoContent() : Results.NotFound();
+            try
+            {
+                var updated = await repo.UpdateAsync(ctx.Value, note, SourceForPrincipal(user), ct);
+                return updated ? Results.NoContent() : Results.NotFound();
+            }
+            catch (NoteValidationException ex)
+            {
+                return Results.Json(new
+                {
+                    error = "note exceeds size limits",
+                    field = ex.Error.Field,
+                    reason = ex.Error.Reason,
+                }, statusCode: StatusCodes.Status413PayloadTooLarge);
+            }
         })
         .WithName("UpdateNote")
         .WithSummary("Updates an existing note.")

@@ -176,6 +176,34 @@ public class NoteRepositoryTests : IDisposable
         Assert.True(retrieved.CreatedAt > DateTime.UtcNow.AddSeconds(-10));
     }
 
+    [Fact]
+    public async Task Create_RejectsNoteAboveContentLimit()
+    {
+        var note = new Note
+        {
+            Title = "ok",
+            Content = new string('x', Fishbowl.Core.Util.NoteLimits.MaxContentLength + 1),
+        };
+
+        var ex = await Assert.ThrowsAsync<Fishbowl.Core.Util.NoteValidationException>(() =>
+            _repo.CreateAsync(TestUserId, note, TestContext.Current.CancellationToken));
+        Assert.Equal("content", ex.Error.Field);
+    }
+
+    [Fact]
+    public async Task Update_RejectsOversizedContentSecret()
+    {
+        var note = new Note { Title = "ok", Content = "small" };
+        var id = await _repo.CreateAsync(TestUserId, note, TestContext.Current.CancellationToken);
+
+        var loaded = await _repo.GetByIdAsync(TestUserId, id, TestContext.Current.CancellationToken);
+        Assert.NotNull(loaded);
+        loaded!.ContentSecret = new byte[Fishbowl.Core.Util.NoteLimits.MaxContentSecretBytes + 1];
+
+        await Assert.ThrowsAsync<Fishbowl.Core.Util.NoteValidationException>(() =>
+            _repo.UpdateAsync(TestUserId, loaded, TestContext.Current.CancellationToken));
+    }
+
     public void Dispose()
     {
         SqliteConnection.ClearAllPools();

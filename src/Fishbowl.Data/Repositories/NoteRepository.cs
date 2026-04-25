@@ -79,6 +79,7 @@ public class NoteRepository : INoteRepository
     public async Task<string> CreateAsync(ContextRef ctx, string actorUserId, Note note, NoteSource source, CancellationToken ct = default)
     {
         ApplySourceTags(note, source);
+        EnforceLimits(note);
 
         if (string.IsNullOrEmpty(note.Id))
             note.Id = Ulid.NewUlid().ToString();
@@ -133,6 +134,7 @@ public class NoteRepository : INoteRepository
     public async Task<bool> UpdateAsync(ContextRef ctx, Note note, NoteSource source, CancellationToken ct = default)
     {
         ApplySourceTags(note, source);
+        EnforceLimits(note);
         note.UpdatedAt = DateTime.UtcNow;
 
         return await _dbFactory.WithContextTransactionAsync<bool>(ctx, async (db, tx, token) =>
@@ -348,6 +350,16 @@ public class NoteRepository : INoteRepository
         var stripped = SecretStripper.StripNote(note).Content ?? string.Empty;
         var tags = note.Tags is null ? string.Empty : string.Join(' ', note.Tags);
         return $"{note.Title} {stripped} {tags}".Trim();
+    }
+
+    // ────────── Size-limit gate ──────────
+    // Throws NoteValidationException when a field is past the hard cap.
+    // The API edge catches this and converts to 413; MCP tools see the
+    // same exception type and surface it as a tool error to the caller.
+    private static void EnforceLimits(Note note)
+    {
+        var error = NoteLimits.Validate(note);
+        if (error is not null) throw new NoteValidationException(error);
     }
 
     // ────────── Source-tag massage ──────────
