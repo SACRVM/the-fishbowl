@@ -57,6 +57,8 @@ if (-not (Test-Path $exe)) {
 
 The user-data folder (`fishbowl-data/`, holds `system.db` + per-user/team SQLite files + the embeddings model) lives next to the binary inside `app/` and is preserved across updates because Husky overlays new files without deleting. Linux/macOS deployments use the matching RID asset and override `executable` in a local `husky.config.json` (the repo-root config is Windows-pathed by default).
 
+See [`docs/deploy.md`](docs/deploy.md) for the long-form runbook: the recommended ACME-staged sequence, post-lockout config edits via `/api/v1/admin/config`, scheduled backups with `tools/snapshot-data`, and a troubleshooting section for the failure modes the launcher can land in.
+
 ## Licence
 
 AGPL-3.0
