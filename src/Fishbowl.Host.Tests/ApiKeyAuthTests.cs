@@ -240,7 +240,7 @@ public class ApiKeyAuthTests : IClassFixture<WebApplicationFactory<Program>>, ID
         Assert.Contains(list!, n => n.Title == "written-via-bearer");
 
         // Note must land in Alice's user DB, not a team DB.
-        var aliceDbPath = Path.Combine(_dataDir, "users", $"{AliceId}.db");
+        var aliceDbPath = Path.Combine(_dataDir, "users", AliceId, "personal.db");
         Assert.True(File.Exists(aliceDbPath), $"expected {aliceDbPath} to exist");
     }
 

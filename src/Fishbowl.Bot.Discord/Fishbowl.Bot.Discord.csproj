@@ -1,14 +1,23 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
-  <ItemGroup>
-    <ProjectReference Include="..\Fishbowl.Data\Fishbowl.Data.csproj" />
-    <ProjectReference Include="..\Fishbowl.Search\Fishbowl.Search.csproj" />
-  </ItemGroup>
-
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
+    <RootNamespace>Fishbowl.Bot.Discord</RootNamespace>
   </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Discord.Net" Version="3.19.1" />
+    <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" Version="10.0.6" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.6" />
+    <PackageReference Include="Microsoft.Extensions.Options" Version="10.0.6" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Fishbowl.Core\Fishbowl.Core.csproj" />
+    <ProjectReference Include="..\Fishbowl.Data\Fishbowl.Data.csproj" />
+    <ProjectReference Include="..\Fishbowl.Search\Fishbowl.Search.csproj" />
+  </ItemGroup>
 
 </Project>

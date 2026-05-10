@@ -70,6 +70,43 @@
             <div class="providers" id="providers">
                 <!-- Populated by JS -->
             </div>
+            <form id="local-form" class="local-login" style="display:none; margin-top: 1rem;">
+                <div class="form-group">
+                    <label for="local-username">Username</label>
+                    <input type="text" id="local-username" name="username"
+                           autocomplete="username" required>
+                </div>
+                <div class="form-group">
+                    <label for="local-password">Password</label>
+                    <input type="password" id="local-password" name="password"
+                           autocomplete="current-password" required>
+                </div>
+                <button type="submit" class="btn primary" style="width:100%;">
+                    Sign in
+                </button>
+            </form>
+
+            <form id="change-form" class="local-login" style="display:none; margin-top: 1rem;">
+                <p class="tagline">An administrator reset your password. Pick a new one to continue.</p>
+                <div class="form-group">
+                    <label for="change-username">Username</label>
+                    <input type="text" id="change-username" name="username"
+                           autocomplete="username" readonly>
+                </div>
+                <div class="form-group">
+                    <label for="change-current">Temporary password</label>
+                    <input type="password" id="change-current" name="currentPassword"
+                           autocomplete="current-password" required>
+                </div>
+                <div class="form-group">
+                    <label for="change-new">New password</label>
+                    <input type="password" id="change-new" name="newPassword"
+                           autocomplete="new-password" placeholder="at least 12 characters" required>
+                </div>
+                <button type="submit" class="btn primary" style="width:100%;">
+                    Save and sign in
+                </button>
+            </form>
             <p id="error" class="error" style="display:none;"></p>
         </div>
     </div>
@@ -77,7 +114,28 @@
     <script>
     (async function () {
         const providersEl = document.getElementById("providers");
+        const localForm = document.getElementById("local-form");
+        const changeForm = document.getElementById("change-form");
         const errorEl = document.getElementById("error");
+
+        function showError(msg) {
+            errorEl.textContent = msg;
+            errorEl.style.display = "block";
+        }
+
+        function clearError() { errorEl.style.display = "none"; }
+
+        // Swap the visible form. Carries the username forward and pre-fills the
+        // "temporary password" field with whatever the user just typed (saves
+        // them re-entering on the next screen).
+        function showChangeForm(username, currentPassword) {
+            localForm.style.display = "none";
+            providersEl.style.display = "none";
+            changeForm.style.display = "block";
+            document.getElementById("change-username").value = username;
+            document.getElementById("change-current").value = currentPassword || "";
+            document.getElementById("change-new").focus();
+        }
 
         try {
             const res = await fetch("/api/auth/providers");
@@ -90,15 +148,99 @@
                 return;
             }
 
-            providersEl.innerHTML = providers.map(p => `
+            // OAuth providers (everything except local) get a button each.
+            const oauthProviders = providers.filter(p => p.id !== "local");
+            providersEl.innerHTML = oauthProviders.map(p => `
                 <a class="provider-btn" href="/login/challenge/${p.id}">
                     <span>Continue with ${p.name}</span>
                 </a>
             `).join("");
+
+            // Local form is its own block — username + password don't fit the
+            // "click a provider button" shape.
+            const hasLocal = providers.some(p => p.id === "local");
+            if (hasLocal) {
+                localForm.style.display = "block";
+            }
         } catch (err) {
-            errorEl.textContent = "Unable to load providers: " + err.message;
-            errorEl.style.display = "block";
+            showError("Unable to load providers: " + err.message);
         }
+
+        localForm.addEventListener("submit", async (e) => {
+            e.preventDefault();
+            clearError();
+
+            const username = document.getElementById("local-username").value.trim();
+            const password = document.getElementById("local-password").value;
+
+            try {
+                const res = await fetch("/api/auth/login", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ username, password })
+                });
+                if (res.status === 204) {
+                    window.location.href = "/";
+                    return;
+                }
+                if (res.status === 200) {
+                    // Must-change branch — the temp password was correct but
+                    // the server refused to issue a cookie. Move them to the
+                    // change-password form.
+                    const body = await res.json().catch(() => ({}));
+                    if (body?.mustChangePassword) {
+                        showChangeForm(body.username || username, password);
+                        return;
+                    }
+                }
+                if (res.status === 401) {
+                    showError("Wrong username or password.");
+                    return;
+                }
+                const text = await res.text().catch(() => "");
+                showError("Sign-in failed: " + (text || res.status));
+            } catch (err) {
+                showError("Request failed: " + err.message);
+            }
+        });
+
+        changeForm.addEventListener("submit", async (e) => {
+            e.preventDefault();
+            clearError();
+
+            const username = document.getElementById("change-username").value.trim();
+            const currentPassword = document.getElementById("change-current").value;
+            const newPassword = document.getElementById("change-new").value;
+
+            if (newPassword.length < 12) {
+                showError("New password must be at least 12 characters.");
+                return;
+            }
+            if (newPassword === currentPassword) {
+                showError("New password must differ from the temporary one.");
+                return;
+            }
+
+            try {
+                const res = await fetch("/api/auth/change-password", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ username, currentPassword, newPassword })
+                });
+                if (res.status === 204) {
+                    window.location.href = "/";
+                    return;
+                }
+                if (res.status === 401) {
+                    showError("Temporary password didn't match. Ask the admin for a fresh reset.");
+                    return;
+                }
+                const text = await res.text().catch(() => "");
+                showError("Couldn't change password: " + (text || res.status));
+            } catch (err) {
+                showError("Request failed: " + err.message);
+            }
+        });
     })();
     </script>
 </body>

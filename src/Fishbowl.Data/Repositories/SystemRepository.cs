@@ -55,8 +55,78 @@ public class SystemRepository : ISystemRepository
         using var db = _dbFactory.CreateSystemConnection();
         return await db.QuerySingleOrDefaultAsync<User>(
             new CommandDefinition(
-                "SELECT id AS Id, name AS Name, email AS Email, avatar_url AS AvatarUrl, created_at AS CreatedAt FROM users WHERE id = @userId",
+                @"SELECT id AS Id, name AS Name, email AS Email, avatar_url AS AvatarUrl,
+                         created_at AS CreatedAt, password_hash AS PasswordHash,
+                         password_salt AS PasswordSalt, is_admin AS IsAdmin,
+                         must_change_password AS MustChangePassword
+                  FROM users WHERE id = @userId",
                 new { userId }, cancellationToken: ct));
+    }
+
+    // Local username lookup. Username is stored lowercased in user_mappings
+    // (provider="local") so case doesn't fork "Alice" vs "alice".
+    public async Task<User?> GetUserByLocalUsernameAsync(string username, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(username)) return null;
+        using var db = _dbFactory.CreateSystemConnection();
+        var normalised = username.Trim().ToLowerInvariant();
+        return await db.QuerySingleOrDefaultAsync<User>(
+            new CommandDefinition(
+                @"SELECT u.id AS Id, u.name AS Name, u.email AS Email, u.avatar_url AS AvatarUrl,
+                         u.created_at AS CreatedAt, u.password_hash AS PasswordHash,
+                         u.password_salt AS PasswordSalt, u.is_admin AS IsAdmin,
+                         u.must_change_password AS MustChangePassword
+                  FROM users u
+                  INNER JOIN user_mappings m
+                      ON m.user_id = u.id AND m.provider = 'local' AND m.provider_id = @username",
+                new { username = normalised }, cancellationToken: ct));
+    }
+
+    // Stores the new hash/salt and (by default) clears the must-change flag —
+    // a fresh password is implicitly the user's own choice. Admin-reset
+    // explicitly sets `mustChange = true` to flip the flag back on.
+    public async Task<bool> SetPasswordAsync(
+        string userId, string passwordHash, string passwordSalt,
+        bool mustChange = false, CancellationToken ct = default)
+    {
+        using var db = _dbFactory.CreateSystemConnection();
+        var affected = await db.ExecuteAsync(
+            new CommandDefinition(
+                @"UPDATE users
+                  SET password_hash = @hash, password_salt = @salt, must_change_password = @flag
+                  WHERE id = @userId",
+                new { userId, hash = passwordHash, salt = passwordSalt, flag = mustChange ? 1 : 0 },
+                cancellationToken: ct));
+        return affected > 0;
+    }
+
+    public async Task<bool> SetAdminAsync(string userId, bool isAdmin, CancellationToken ct = default)
+    {
+        using var db = _dbFactory.CreateSystemConnection();
+        var affected = await db.ExecuteAsync(
+            new CommandDefinition(
+                "UPDATE users SET is_admin = @flag WHERE id = @userId",
+                new { userId, flag = isAdmin ? 1 : 0 },
+                cancellationToken: ct));
+        return affected > 0;
+    }
+
+    public async Task<bool> HasLocalUserAsync(CancellationToken ct = default)
+    {
+        using var db = _dbFactory.CreateSystemConnection();
+        var count = await db.ExecuteScalarAsync<long>(
+            new CommandDefinition(
+                "SELECT COUNT(*) FROM user_mappings WHERE provider = 'local'",
+                cancellationToken: ct));
+        return count > 0;
+    }
+
+    public async Task<IReadOnlyList<string>> ListUserIdsAsync(CancellationToken ct = default)
+    {
+        using var db = _dbFactory.CreateSystemConnection();
+        var ids = await db.QueryAsync<string>(
+            new CommandDefinition("SELECT id FROM users", cancellationToken: ct));
+        return ids.ToList();
     }
 
     public async Task<bool> UpsertUserAsync(string userId, string? name, string? email, string? avatarUrl, CancellationToken ct = default)

@@ -22,6 +22,7 @@ public class ConfigurationInitializer : IHostedService
     {
         "Google:ClientId",
         "Google:ClientSecret",
+        "Discord:BotToken",
     };
 
     private readonly IServiceScopeFactory _scopeFactory;

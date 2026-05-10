@@ -16,25 +16,59 @@
                 <div class="bottom"></div>
             </div>
             <h1>WELCOME</h1>
-            <p class="tagline">Let's configure Google sign-in to get started.</p>
+            <p class="tagline">Pick at least one sign-in method to get started.</p>
 
             <form id="setup-form">
-                <div class="form-group">
-                    <label for="clientId">Google Client ID</label>
-                    <input type="text"
-                           id="clientId"
-                           name="clientId"
-                           placeholder="xxxxx.apps.googleusercontent.com"
-                           required>
-                </div>
-                <div class="form-group">
-                    <label for="clientSecret">Google Client Secret</label>
-                    <input type="password"
-                           id="clientSecret"
-                           name="clientSecret"
-                           placeholder="at least 20 characters"
-                           required>
-                </div>
+                <details open>
+                    <summary style="cursor: pointer; color: var(--text-muted); font-size: 0.9rem;">
+                        Google sign-in — optional (needs internet)
+                    </summary>
+                    <p style="color: var(--text-muted); font-size: 0.85rem; margin: 0.75rem 0;">
+                        Use Google OAuth for sign-in. Skip this section if you're running
+                        on a LAN without internet — set up a local account below instead.
+                    </p>
+                    <div class="form-group">
+                        <label for="clientId">Google Client ID</label>
+                        <input type="text"
+                               id="clientId"
+                               name="clientId"
+                               placeholder="xxxxx.apps.googleusercontent.com">
+                    </div>
+                    <div class="form-group">
+                        <label for="clientSecret">Google Client Secret</label>
+                        <input type="password"
+                               id="clientSecret"
+                               name="clientSecret"
+                               placeholder="at least 20 characters">
+                    </div>
+                </details>
+
+                <details open style="margin-top: 1rem;">
+                    <summary style="cursor: pointer; color: var(--text-muted); font-size: 0.9rem;">
+                        Local admin account — optional (works offline)
+                    </summary>
+                    <p style="color: var(--text-muted); font-size: 0.85rem; margin: 0.75rem 0;">
+                        Create a username + password admin. Works with no internet,
+                        and can register new local users later. Pick a strong
+                        password — there's no email reset flow.
+                    </p>
+                    <div class="form-group">
+                        <label for="localUsername">Username</label>
+                        <input type="text"
+                               id="localUsername"
+                               name="localUsername"
+                               placeholder="admin"
+                               autocomplete="username">
+                    </div>
+                    <div class="form-group">
+                        <label for="localPassword">Password</label>
+                        <input type="password"
+                               id="localPassword"
+                               name="localPassword"
+                               placeholder="at least 12 characters"
+                               autocomplete="new-password">
+                    </div>
+                </details>
 
                 <details style="margin-top: 1rem;">
                     <summary style="cursor: pointer; color: var(--text-muted); font-size: 0.9rem;">
@@ -70,6 +104,28 @@
                     </label>
                 </details>
 
+                <details style="margin-top: 1rem;">
+                    <summary style="cursor: pointer; color: var(--text-muted); font-size: 0.9rem;">
+                        Discord bot — optional
+                    </summary>
+                    <p style="color: var(--text-muted); font-size: 0.85rem; margin: 0.75rem 0;">
+                        Connect a Discord bot so you can capture notes, search, and receive
+                        reminders from a DM. Create a bot at the
+                        <a href="https://discord.com/developers/applications"
+                           target="_blank" rel="noopener">Discord Developer Portal</a>,
+                        enable <em>User Install</em> on the Installation tab, and paste the
+                        token below. Takes effect after a restart.
+                    </p>
+                    <div class="form-group">
+                        <label for="discordBotToken">Bot token</label>
+                        <input type="password"
+                               id="discordBotToken"
+                               name="discordBotToken"
+                               placeholder="MTIz...xyz (~70 characters)"
+                               autocomplete="off">
+                    </div>
+                </details>
+
                 <button type="submit" class="btn primary" style="width:100%; margin-top:1rem;">
                     Save &amp; Continue
                 </button>
@@ -94,15 +150,43 @@
 
             const clientId = document.getElementById("clientId").value.trim();
             const clientSecret = document.getElementById("clientSecret").value;
+            const localUsername = document.getElementById("localUsername").value.trim();
+            const localPassword = document.getElementById("localPassword").value;
 
-            // Client-side mirrors server-side rules from Task 4.2 of A+ hardening.
-            if (!clientId.endsWith(".apps.googleusercontent.com")) {
-                showError("Client ID must end with .apps.googleusercontent.com");
+            const hasGoogle = clientId.length > 0 || clientSecret.length > 0;
+            const hasLocal = localUsername.length > 0 || localPassword.length > 0;
+
+            if (!hasGoogle && !hasLocal) {
+                showError("Pick at least one sign-in method: Google or local admin.");
                 return;
             }
-            if (clientSecret.length < 20) {
-                showError("Client Secret must be at least 20 characters.");
-                return;
+
+            // Google-side checks mirror server-side rules.
+            if (hasGoogle) {
+                if (!clientId.endsWith(".apps.googleusercontent.com")) {
+                    showError("Client ID must end with .apps.googleusercontent.com");
+                    return;
+                }
+                if (clientSecret.length < 20) {
+                    showError("Client Secret must be at least 20 characters.");
+                    return;
+                }
+            }
+
+            // Local-side checks mirror server-side rules.
+            if (hasLocal) {
+                if (localUsername.length < 3 || localUsername.length > 64) {
+                    showError("Local username must be 3–64 characters.");
+                    return;
+                }
+                if (!/^[a-zA-Z0-9_.\-]+$/.test(localUsername)) {
+                    showError("Local username may only contain letters, digits, _, . or -.");
+                    return;
+                }
+                if (localPassword.length < 12) {
+                    showError("Local password must be at least 12 characters.");
+                    return;
+                }
             }
 
             // ACME fields — all optional, but all-or-nothing if the operator starts filling them in.
@@ -120,12 +204,35 @@
                 }
             }
 
+            // Discord bot token — optional. Mirror the server's loose check so
+            // the operator gets feedback before a network round-trip.
+            const discordBotToken = document.getElementById("discordBotToken").value.trim();
+            if (discordBotToken) {
+                if (discordBotToken.length < 50) {
+                    showError("Discord bot token looks too short — they're ~70 characters."); return;
+                }
+                if ((discordBotToken.match(/\./g) || []).length < 2) {
+                    showError("Discord bot token should contain two '.' separators."); return;
+                }
+            }
+
             try {
-                const body = { clientId, clientSecret };
+                const body = {};
+                if (hasGoogle) {
+                    body.clientId = clientId;
+                    body.clientSecret = clientSecret;
+                }
+                if (hasLocal) {
+                    body.localUsername = localUsername;
+                    body.localPassword = localPassword;
+                }
                 if (anyAcme) {
                     body.acmeDomains = acmeDomains;
                     body.acmeEmail = acmeEmail;
                     body.acmeAcceptTos = true;
+                }
+                if (discordBotToken) {
+                    body.discordBotToken = discordBotToken;
                 }
                 const res = await fetch("/api/setup", {
                     method: "POST",
@@ -139,11 +246,22 @@
                 }
                 const result = await res.json().catch(() => ({}));
                 if (result?.acmeConfigured) {
+                    const restartFor = result?.discordConfigured
+                        ? "TLS and the Discord bot are configured"
+                        : "TLS is configured";
                     document.querySelector(".auth-card").innerHTML = `
                         <h1>ALMOST THERE</h1>
-                        <p class="tagline">TLS is configured. Restart Fishbowl, then
+                        <p class="tagline">${restartFor}. Restart Fishbowl, then
                         visit <strong>https://${acmeDomains.split(",")[0].trim()}</strong>
                         to finish signing in.</p>`;
+                } else if (result?.discordConfigured) {
+                    document.querySelector(".auth-card").innerHTML = `
+                        <h1>ALMOST THERE</h1>
+                        <p class="tagline">The Discord bot is configured. Restart Fishbowl,
+                        then continue to sign in.</p>
+                        <a href="/" class="btn primary" style="display:inline-block; margin-top:1rem;">
+                            Continue
+                        </a>`;
                 } else {
                     window.location.href = "/";
                 }

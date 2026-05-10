@@ -88,4 +88,98 @@ public class SetupFlowTests : IClassFixture<WebApplicationFactory<Program>>, IDi
 
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
     }
+
+    [Fact]
+    public async Task PostSetup_Rejects_DiscordTokenTooShort_Test()
+    {
+        var client = _factory.CreateClient();
+
+        var response = await client.PostAsJsonAsync("/api/setup",
+            new
+            {
+                ClientId = "valid.apps.googleusercontent.com",
+                ClientSecret = "some-valid-length-secret-here",
+                DiscordBotToken = "short.dot.value",
+            },
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task PostSetup_Rejects_DiscordTokenWithoutDotSeparators_Test()
+    {
+        var client = _factory.CreateClient();
+
+        // 70 chars but no dots — fails the structural check.
+        var bogus = new string('a', 70);
+        var response = await client.PostAsJsonAsync("/api/setup",
+            new
+            {
+                ClientId = "valid.apps.googleusercontent.com",
+                ClientSecret = "some-valid-length-secret-here",
+                DiscordBotToken = bogus,
+            },
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task PostSetup_PersistsDiscordToken_AndSignalsRestart_Test()
+    {
+        var client = _factory.CreateClient();
+
+        // 70-char synthetic token with two dots — passes the structural sniff
+        // tests. We don't actually log into Discord during the unit run; the
+        // hosted service no-ops on bad tokens at runtime.
+        var fakeToken = new string('a', 23) + "." + new string('b', 6) + "." + new string('c', 39);
+
+        var response = await client.PostAsJsonAsync("/api/setup",
+            new
+            {
+                ClientId = "valid.apps.googleusercontent.com",
+                ClientSecret = "some-valid-length-secret-here",
+                DiscordBotToken = fakeToken,
+            },
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        var body = await response.Content.ReadFromJsonAsync<SetupResult>(TestContext.Current.CancellationToken);
+        Assert.NotNull(body);
+        Assert.True(body!.DiscordConfigured);
+        Assert.True(body.RestartRequired);
+
+        using var scope = _factory.Services.CreateScope();
+        var repo = scope.ServiceProvider.GetRequiredService<ISystemRepository>();
+        Assert.Equal(fakeToken,
+            await repo.GetConfigAsync("Discord:BotToken", TestContext.Current.CancellationToken));
+    }
+
+    [Fact]
+    public async Task PostSetup_WithoutDiscordToken_DoesNotMarkConfigured_Test()
+    {
+        var client = _factory.CreateClient();
+
+        var response = await client.PostAsJsonAsync("/api/setup",
+            new
+            {
+                ClientId = "valid.apps.googleusercontent.com",
+                ClientSecret = "some-valid-length-secret-here",
+            },
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        var body = await response.Content.ReadFromJsonAsync<SetupResult>(TestContext.Current.CancellationToken);
+        Assert.NotNull(body);
+        Assert.False(body!.DiscordConfigured);
+
+        using var scope = _factory.Services.CreateScope();
+        var repo = scope.ServiceProvider.GetRequiredService<ISystemRepository>();
+        Assert.Null(await repo.GetConfigAsync("Discord:BotToken", TestContext.Current.CancellationToken));
+    }
+
+    private sealed record SetupResult(bool AcmeConfigured, bool DiscordConfigured, bool RestartRequired);
 }

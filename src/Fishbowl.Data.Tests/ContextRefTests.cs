@@ -25,7 +25,7 @@ public class ContextRefTests : IDisposable
         var version = db.ExecuteScalar<long>("PRAGMA user_version");
         Assert.Equal(5, version);
 
-        var file = Path.Combine(_dataDir, "users", "alice.db");
+        var file = Path.Combine(_dataDir, "users", "alice", "personal.db");
         Assert.True(File.Exists(file));
     }
 
@@ -36,7 +36,7 @@ public class ContextRefTests : IDisposable
         var version = db.ExecuteScalar<long>("PRAGMA user_version");
         Assert.Equal(5, version);
 
-        var file = Path.Combine(_dataDir, "teams", "fishbowl-dev.db");
+        var file = Path.Combine(_dataDir, "teams", "fishbowl-dev", "team.db");
         Assert.True(File.Exists(file));
     }
 

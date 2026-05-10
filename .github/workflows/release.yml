@@ -32,25 +32,50 @@ jobs:
         with:
           dotnet-version: '10.0.x'
 
+      - name: Resolve version
+        id: ver
+        shell: bash
+        run: |
+          tag="${GITHUB_REF_NAME:-}"
+          if [ -z "$tag" ]; then tag="v0.0.0-dev"; fi
+          version="${tag#v}"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
       - name: Publish
         shell: bash
+        # Husky's installer expects an `app/` directory at the ZIP root —
+        # so we publish straight into `staging/app/` and zip the parent.
+        # PublishReadyToRun=false keeps single-file artefacts a touch smaller;
+        # boot is ~3-5% slower which is invisible for a long-running server.
         run: |
           dotnet publish src/Fishbowl.Host \
             -c Release \
             -r ${{ matrix.rid }} \
+            --self-contained \
             -p:PublishSingleFile=true \
-            -p:SelfContained=true \
+            -p:PublishReadyToRun=false \
             -p:IncludeNativeLibrariesForSelfExtract=true \
-            -o publish
+            -p:Version=${{ steps.ver.outputs.version }} \
+            -o staging/app
 
-      - name: Rename artifact
-        shell: bash
-        run: mv "publish/Fishbowl.Host${{ matrix.ext }}" "publish/fishbowl-${{ matrix.rid }}${{ matrix.ext }}"
+      - name: Pack ZIP
+        shell: pwsh
+        run: |
+          $version = "${{ steps.ver.outputs.version }}"
+          $rid = "${{ matrix.rid }}"
+          $zipName = "Fishbowl-$version-$rid.zip"
+          # Husky §6: ZIP root contains a single `app/` directory with the
+          # published binaries. The user-data folder (`fishbowl-data/`) is
+          # created next to the binary at first run and is preserved across
+          # updates because Husky overlays new files without deleting.
+          Compress-Archive -Path staging/app -DestinationPath $zipName
+          "ZIP_NAME=$zipName" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
 
       - uses: actions/upload-artifact@v4
         with:
           name: fishbowl-${{ matrix.rid }}
-          path: publish/fishbowl-${{ matrix.rid }}${{ matrix.ext }}
+          path: ${{ env.ZIP_NAME }}
 
   release:
     needs: build
@@ -65,5 +90,5 @@ jobs:
 
       - uses: softprops/action-gh-release@v2
         with:
-          files: artifacts/**/*
+          files: artifacts/**/*.zip
           generate_release_notes: true

@@ -21,6 +21,20 @@ public class DatabaseFactory
         Fishbowl.Data.Dapper.DapperConventions.Install();
     }
 
+    // File names within a context folder. The folder *is* the unit of "this
+    // user's data" — drop the folder onto another Fishbowl instance and the
+    // import flow can pick up notes + future siblings (attachments, exports,
+    // local indexes) atomically. Naming the file deterministically inside
+    // the folder keeps the path predictable for backup tools.
+    public const string PersonalDbFileName = "personal.db";
+    public const string TeamDbFileName = "team.db";
+
+    // Public roots so admin tooling (cold import) can enumerate folders
+    // without depending on internal state. Read-only — never overwrite from
+    // outside the factory.
+    public string UsersRoot => _usersPath;
+    public string TeamsRoot => _teamsPath;
+
     public DatabaseFactory(string dataRoot = "fishbowl-data", ILogger<DatabaseFactory>? logger = null)
     {
         _logger = logger ?? NullLogger<DatabaseFactory>.Instance;
@@ -35,6 +49,18 @@ public class DatabaseFactory
         if (!Directory.Exists(_teamsPath)) Directory.CreateDirectory(_teamsPath);
     }
 
+    // Resolves the on-disk path for a given context. Folder-per-context layout:
+    //   users/{userId}/personal.db
+    //   teams/{teamId}/team.db
+    // Public so admin tooling (cold import) can list/validate folders without
+    // having to duplicate the convention.
+    public string ResolveContextPath(ContextRef ctx) => ctx.Type switch
+    {
+        ContextType.User => Path.Combine(_usersPath, ctx.Id, PersonalDbFileName),
+        ContextType.Team => Path.Combine(_teamsPath, ctx.Id, TeamDbFileName),
+        _ => throw new ArgumentException($"Unknown context type: {ctx.Type}", nameof(ctx)),
+    };
+
     // Preferred primary entrypoint: one context resolves to one file. Personal
     // and team spaces share an identical schema and identical migrations —
     // CONCEPT.md § Teams is explicit that team DBs are structurally identical
@@ -45,13 +71,59 @@ public class DatabaseFactory
     // during EnsureUserInitialized, not just at query time.
     public IDbConnection CreateContextConnection(ContextRef ctx)
     {
-        var dbPath = ctx.Type switch
+        var dbPath = ResolveContextPath(ctx);
+        MigrateLegacyLayoutIfPresent(ctx, dbPath);
+
+        // Ensure the parent folder exists before SQLite tries to create the
+        // file — SqliteOpenMode.ReadWriteCreate creates the file but not the
+        // directory tree above it.
+        var parent = Path.GetDirectoryName(dbPath);
+        if (!string.IsNullOrEmpty(parent) && !Directory.Exists(parent))
+            Directory.CreateDirectory(parent);
+
+        return OpenAndInitialize(dbPath, EnsureUserInitialized, loadVec: true);
+    }
+
+    // Idempotent one-shot move for installs that pre-date folder-per-context.
+    // Looks for the legacy flat path (users/{id}.db, teams/{id}.db); if found
+    // and the new path doesn't exist, slides the file into place. Logs at
+    // info so the operator can see it happened. Pre-existing new path wins —
+    // never overwrite real data.
+    private void MigrateLegacyLayoutIfPresent(ContextRef ctx, string newPath)
+    {
+        if (File.Exists(newPath)) return;
+
+        var legacy = ctx.Type switch
         {
             ContextType.User => Path.Combine(_usersPath, $"{ctx.Id}.db"),
             ContextType.Team => Path.Combine(_teamsPath, $"{ctx.Id}.db"),
-            _ => throw new ArgumentException($"Unknown context type: {ctx.Type}", nameof(ctx)),
+            _ => null,
         };
-        return OpenAndInitialize(dbPath, EnsureUserInitialized, loadVec: true);
+        if (legacy is null || !File.Exists(legacy)) return;
+
+        try
+        {
+            var parent = Path.GetDirectoryName(newPath);
+            if (!string.IsNullOrEmpty(parent) && !Directory.Exists(parent))
+                Directory.CreateDirectory(parent);
+
+            // Close any pooled handles to the legacy file before moving —
+            // Microsoft.Data.Sqlite holds connections open in a pool and a
+            // pending handle would block File.Move on Windows.
+            Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
+            File.Move(legacy, newPath);
+            _logger.LogInformation("Migrated legacy DB layout: {Legacy} → {New}", legacy, newPath);
+        }
+        catch (Exception ex)
+        {
+            // Don't crash the open path — fall through and let SQLite create a
+            // fresh empty file at the new path. The legacy file stays put for
+            // manual recovery if anyone needs it. Loud log so the operator
+            // notices.
+            _logger.LogError(ex,
+                "Failed to migrate legacy DB layout {Legacy} → {New}; opening fresh DB at new path",
+                legacy, newPath);
+        }
     }
 
     // Legacy entrypoint — kept so cookie-auth call sites (which only know a
@@ -210,6 +282,30 @@ public class DatabaseFactory
             ApplySystemV3(connection);
             connection.Execute("PRAGMA user_version = 3");
             _logger.LogInformation("Applied system schema v3");
+            version = 3;
+        }
+
+        if (version < 4)
+        {
+            ApplySystemV4(connection);
+            connection.Execute("PRAGMA user_version = 4");
+            _logger.LogInformation("Applied system schema v4");
+            version = 4;
+        }
+
+        if (version < 5)
+        {
+            ApplySystemV5(connection);
+            connection.Execute("PRAGMA user_version = 5");
+            _logger.LogInformation("Applied system schema v5");
+            version = 5;
+        }
+
+        if (version < 6)
+        {
+            ApplySystemV6(connection);
+            connection.Execute("PRAGMA user_version = 6");
+            _logger.LogInformation("Applied system schema v6");
         }
     }
 
@@ -520,9 +616,9 @@ public class DatabaseFactory
         try
         {
             // Teams: shared workspaces with their own fixed-schema .db file
-            // under `fishbowl-data/teams/{id}.db`. Slug is URL-safe, unique
-            // per-deployment (a single Fishbowl instance can't have two teams
-            // named 'fishbowl-dev').
+            // under `fishbowl-data/teams/{id}/team.db`. Slug is URL-safe,
+            // unique per-deployment (a single Fishbowl instance can't have
+            // two teams named 'fishbowl-dev').
             connection.Execute(@"
                 CREATE TABLE IF NOT EXISTS teams (
                     id          TEXT PRIMARY KEY,
@@ -593,6 +689,100 @@ public class DatabaseFactory
                 "CREATE INDEX IF NOT EXISTS idx_api_keys_prefix ON api_keys(key_prefix) WHERE revoked_at IS NULL",
                 transaction: transaction);
 
+            transaction.Commit();
+        }
+        catch
+        {
+            transaction.Rollback();
+            throw;
+        }
+    }
+
+    // Notification fan-out (CONCEPT.md § Notification Channels): one row per
+    // (user, channel_type, channel_id). The bot stores DM channel IDs here on
+    // first link; the future reminder engine reads this table to dispatch.
+    // discord_link_codes is a one-shot redemption table — the web UI mints a
+    // code, the user DMs `/link <code>` to the bot, the bot redeems it and
+    // creates the user_mappings row. Codes expire after 10 minutes so a
+    // forgotten code can't be re-used by whoever finds it on a screen.
+    private void ApplySystemV4(IDbConnection connection)
+    {
+        using var transaction = connection.BeginTransaction();
+        try
+        {
+            connection.Execute(@"
+                CREATE TABLE IF NOT EXISTS notification_channels (
+                    id            TEXT PRIMARY KEY,
+                    user_id       TEXT NOT NULL REFERENCES users(id),
+                    channel_type  TEXT NOT NULL,
+                    channel_id    TEXT NOT NULL,
+                    enabled       INTEGER NOT NULL DEFAULT 1,
+                    created_at    TEXT NOT NULL,
+                    UNIQUE (user_id, channel_type)
+                );", transaction: transaction);
+
+            connection.Execute(
+                "CREATE INDEX IF NOT EXISTS idx_notif_channels_user ON notification_channels(user_id)",
+                transaction: transaction);
+
+            connection.Execute(@"
+                CREATE TABLE IF NOT EXISTS discord_link_codes (
+                    code         TEXT PRIMARY KEY,
+                    user_id      TEXT NOT NULL REFERENCES users(id),
+                    created_at   TEXT NOT NULL,
+                    expires_at   TEXT NOT NULL,
+                    redeemed_at  TEXT
+                );", transaction: transaction);
+
+            connection.Execute(
+                "CREATE INDEX IF NOT EXISTS idx_discord_link_codes_user ON discord_link_codes(user_id)",
+                transaction: transaction);
+
+            transaction.Commit();
+        }
+        catch
+        {
+            transaction.Rollback();
+            throw;
+        }
+    }
+
+    // Local username/password auth — alternative to Google OAuth so a LAN
+    // install with no internet still has a working login. Hash + salt are
+    // nullable: existing Google-mapped users have no password and that's
+    // fine. `is_admin` flips the bit on the first user created (during setup
+    // wizard) and on anyone explicitly promoted later — admin is required
+    // to use the cold-DB-import endpoint.
+    private void ApplySystemV5(IDbConnection connection)
+    {
+        using var transaction = connection.BeginTransaction();
+        try
+        {
+            AddColumnIfMissing(connection, transaction, "users", "password_hash", "TEXT");
+            AddColumnIfMissing(connection, transaction, "users", "password_salt", "TEXT");
+            AddColumnIfMissing(connection, transaction, "users", "is_admin", "INTEGER NOT NULL DEFAULT 0");
+
+            transaction.Commit();
+        }
+        catch
+        {
+            transaction.Rollback();
+            throw;
+        }
+    }
+
+    // Forces a password change on next login. Admin-reset flow flips this on
+    // when minting a temporary password the operator hands the user out-of-band
+    // (chat / paper / yelling across the office). The successful change-password
+    // call flips it off again. Avoids needing an SMTP server for password
+    // reset on a self-hosted LAN install.
+    private void ApplySystemV6(IDbConnection connection)
+    {
+        using var transaction = connection.BeginTransaction();
+        try
+        {
+            AddColumnIfMissing(connection, transaction, "users", "must_change_password",
+                "INTEGER NOT NULL DEFAULT 0");
             transaction.Commit();
         }
         catch

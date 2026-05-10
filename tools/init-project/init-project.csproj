@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <!-- Dev-only tool; not part of the main product build. -->
+    <IsPackable>false</IsPackable>
+    <AssemblyName>init-project</AssemblyName>
+    <RootNamespace>Fishbowl.Tools.InitProject</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Fishbowl.Data\Fishbowl.Data.csproj" />
+  </ItemGroup>
+
+</Project>

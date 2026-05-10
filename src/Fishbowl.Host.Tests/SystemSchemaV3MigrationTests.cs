@@ -22,7 +22,7 @@ public class SystemSchemaV3MigrationTests : IDisposable
         using var db = factory.CreateSystemConnection();
 
         var version = await db.ExecuteScalarAsync<long>("PRAGMA user_version");
-        Assert.Equal(3, version);
+        Assert.True(version >= 3, $"Expected schema >= v3, got v{version}");
 
         var tables = (await db.QueryAsync<string>(
             "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")).ToList();
@@ -82,7 +82,7 @@ public class SystemSchemaV3MigrationTests : IDisposable
         using var db = factory.CreateSystemConnection();
 
         var version = await db.ExecuteScalarAsync<long>("PRAGMA user_version");
-        Assert.Equal(3, version);
+        Assert.True(version >= 3, $"Expected schema >= v3, got v{version}");
 
         var userCount = await db.ExecuteScalarAsync<long>("SELECT COUNT(*) FROM users WHERE id = 'u1'");
         Assert.Equal(1, userCount);

@@ -3,8 +3,8 @@
  *
  * Minimal management surface for team workspaces — list, create, delete.
  * Each team is a shared data context backed by its own SQLite file under
- * fishbowl-data/teams/{teamId}.db (keyed by ULID, not slug — so renames don't
- * move the file). Notes live inside via /api/v1/teams/{slug}/notes; the API
+ * fishbowl-data/teams/{teamId}/team.db (keyed by ULID, not slug — so renames
+ * don't move the file). Notes live inside via /api/v1/teams/{slug}/notes; the API
  * translates slug→id before opening the DB. Renders the id next to each
  * team (and the user's own id for the personal workspace) so operators can
  * match rows to files on disk.
@@ -225,7 +225,7 @@ class FbTeamsSettingsView extends HTMLElement {
                     <p class="team-name">${escapeHtml(this.me.displayName || this.me.email || "You")}</p>
                     <div class="team-meta">
                         <span class="id-chip"
-                              title="users/${escapeAttr(this.me.id)}.db">${escapeHtml(this.me.id)}</span>
+                              title="users/${escapeAttr(this.me.id)}/personal.db">${escapeHtml(this.me.id)}</span>
                     </div>
                 </div>
             </div>
@@ -250,7 +250,7 @@ class FbTeamsSettingsView extends HTMLElement {
                         <span>/${escapeHtml(t.slug)}</span>
                         <span class="role">${escapeHtml(t.role)}</span>
                         <span class="id-chip"
-                              title="teams/${escapeAttr(t.id)}.db">${escapeHtml(t.id)}</span>
+                              title="teams/${escapeAttr(t.id)}/team.db">${escapeHtml(t.id)}</span>
                     </div>
                 </div>
                 ${t.role === "owner"

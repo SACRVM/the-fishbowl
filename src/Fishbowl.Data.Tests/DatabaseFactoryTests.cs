@@ -28,8 +28,8 @@ public class DatabaseFactoryTests : IDisposable
         using var connection = factory.CreateConnection(userId);
 
         // Assert
-        // Databases are now stored in a /users subfolder
-        var dbPath = Path.Combine(_tempDbDir, "users", $"{userId}.db");
+        // Folder-per-context layout: users/{id}/personal.db
+        var dbPath = Path.Combine(_tempDbDir, "users", userId, "personal.db");
         Assert.True(File.Exists(dbPath));
     }
 
@@ -54,9 +54,19 @@ public class DatabaseFactoryTests : IDisposable
         Assert.Contains("team_members", tables);
 
         Assert.Contains("api_keys", tables);
+        Assert.Contains("notification_channels", tables);
+        Assert.Contains("discord_link_codes", tables);
+
+        // V5 + V6 added local-auth columns + the must-change flag to users.
+        var userColumns = connection.Query<string>(
+            "SELECT name FROM pragma_table_info('users')").ToList();
+        Assert.Contains("password_hash", userColumns);
+        Assert.Contains("password_salt", userColumns);
+        Assert.Contains("is_admin", userColumns);
+        Assert.Contains("must_change_password", userColumns);
 
         var version = connection.ExecuteScalar<long>("PRAGMA user_version");
-        Assert.Equal(3, version);
+        Assert.Equal(6, version);
     }
 
     [Fact]
