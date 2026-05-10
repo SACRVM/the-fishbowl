@@ -59,7 +59,7 @@ public class ListEventsTool : IMcpTool
             ? Math.Clamp(l.GetInt32(), 1, 500) : 50;
 
         DateTime? from = TryDate(arguments, "from");
-        DateTime? to   = TryDate(arguments, "to");
+        DateTime? to = TryDate(arguments, "to");
 
         IEnumerable<Fishbowl.Core.Models.Event> found;
         if (from is not null && to is not null)

@@ -31,7 +31,7 @@ public class EventRepositoryTests : IDisposable
             Title = "Team offsite",
             Description = "two days in the mountains",
             StartAt = new DateTime(2026, 6, 1, 9, 0, 0, DateTimeKind.Utc),
-            EndAt   = new DateTime(2026, 6, 2, 17, 0, 0, DateTimeKind.Utc),
+            EndAt = new DateTime(2026, 6, 2, 17, 0, 0, DateTimeKind.Utc),
             AllDay = false,
             Location = "Alpine lodge",
             ReminderMinutes = 60,
@@ -177,16 +177,16 @@ public class EventRepositoryTests : IDisposable
     {
         var baseTime = new DateTime(2026, 5, 1, 0, 0, 0, DateTimeKind.Utc);
         await _repo.CreateAsync(TestUserId,
-            new Event { Title = "morning",    StartAt = baseTime.AddHours(9) },
+            new Event { Title = "morning", StartAt = baseTime.AddHours(9) },
             TestContext.Current.CancellationToken);
         await _repo.CreateAsync(TestUserId,
-            new Event { Title = "afternoon",  StartAt = baseTime.AddHours(14) },
+            new Event { Title = "afternoon", StartAt = baseTime.AddHours(14) },
             TestContext.Current.CancellationToken);
         await _repo.CreateAsync(TestUserId,
             new Event { Title = "later-week", StartAt = baseTime.AddDays(5) },
             TestContext.Current.CancellationToken);
         await _repo.CreateAsync(TestUserId,
-            new Event { Title = "evening",    StartAt = baseTime.AddHours(19) },
+            new Event { Title = "evening", StartAt = baseTime.AddHours(19) },
             TestContext.Current.CancellationToken);
 
         var dayRange = (await _repo.GetRangeAsync(
@@ -212,15 +212,18 @@ public class EventRepositoryTests : IDisposable
     {
         await _repo.CreateAsync(TestUserId, new Event
         {
-            Title = "third", StartAt = new DateTime(2026, 9, 1, 0, 0, 0, DateTimeKind.Utc),
+            Title = "third",
+            StartAt = new DateTime(2026, 9, 1, 0, 0, 0, DateTimeKind.Utc),
         }, TestContext.Current.CancellationToken);
         await _repo.CreateAsync(TestUserId, new Event
         {
-            Title = "first", StartAt = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc),
+            Title = "first",
+            StartAt = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc),
         }, TestContext.Current.CancellationToken);
         await _repo.CreateAsync(TestUserId, new Event
         {
-            Title = "second", StartAt = new DateTime(2026, 5, 1, 0, 0, 0, DateTimeKind.Utc),
+            Title = "second",
+            StartAt = new DateTime(2026, 5, 1, 0, 0, 0, DateTimeKind.Utc),
         }, TestContext.Current.CancellationToken);
 
         var list = (await _repo.GetAllAsync(TestUserId,
@@ -237,7 +240,7 @@ public class EventRepositoryTests : IDisposable
             new Event { Title = "personal", StartAt = DateTime.UtcNow },
             TestContext.Current.CancellationToken);
         await _repo.CreateAsync(ContextRef.Team(teamSlug), TestUserId,
-            new Event { Title = "team",     StartAt = DateTime.UtcNow },
+            new Event { Title = "team", StartAt = DateTime.UtcNow },
             TestContext.Current.CancellationToken);
 
         var personal = (await _repo.GetAllAsync(ContextRef.User(TestUserId),

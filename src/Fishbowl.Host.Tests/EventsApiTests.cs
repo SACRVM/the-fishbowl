@@ -131,11 +131,11 @@ public class EventsApiTests : IClassFixture<WebApplicationFactory<Program>>, IDi
         var client = _factory.CreateClient();
         var day = new DateTime(2026, 6, 1, 0, 0, 0, DateTimeKind.Utc);
         await CreateAsync(client, UserA, "before", day.AddHours(-2));
-        await CreateAsync(client, UserA, "inside",  day.AddHours(9));
-        await CreateAsync(client, UserA, "after",  day.AddDays(3));
+        await CreateAsync(client, UserA, "inside", day.AddHours(9));
+        await CreateAsync(client, UserA, "after", day.AddDays(3));
 
         var from = Uri.EscapeDataString(day.ToString("o"));
-        var to   = Uri.EscapeDataString(day.AddDays(1).ToString("o"));
+        var to = Uri.EscapeDataString(day.AddDays(1).ToString("o"));
         var resp = await client.SendAsync(Req(HttpMethod.Get,
             $"/api/v1/events?from={from}&to={to}", UserA),
             TestContext.Current.CancellationToken);

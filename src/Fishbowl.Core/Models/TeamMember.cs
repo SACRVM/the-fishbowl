@@ -23,18 +23,18 @@ public static class TeamRoleExtensions
     public static string ToDbValue(this TeamRole role) => role switch
     {
         TeamRole.Readonly => "readonly",
-        TeamRole.Member   => "member",
-        TeamRole.Admin    => "admin",
-        TeamRole.Owner    => "owner",
+        TeamRole.Member => "member",
+        TeamRole.Admin => "admin",
+        TeamRole.Owner => "owner",
         _ => throw new ArgumentOutOfRangeException(nameof(role), role, null),
     };
 
     public static TeamRole FromDbValue(string value) => value switch
     {
         "readonly" => TeamRole.Readonly,
-        "member"   => TeamRole.Member,
-        "admin"    => TeamRole.Admin,
-        "owner"    => TeamRole.Owner,
+        "member" => TeamRole.Member,
+        "admin" => TeamRole.Admin,
+        "owner" => TeamRole.Owner,
         _ => throw new ArgumentException($"Unknown team role: {value}", nameof(value)),
     };
 

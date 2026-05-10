@@ -454,9 +454,9 @@ public class DatabaseFactory
             //                    only system/MCP writes can attach it to a note.
             //  user_removable  — fb-tag-chip renders a × for this tag. When 0,
             //                    the tag is locked onto whatever note holds it.
-            AddColumnIfMissing(connection, transaction, "tags", "is_system",       "INTEGER NOT NULL DEFAULT 0");
+            AddColumnIfMissing(connection, transaction, "tags", "is_system", "INTEGER NOT NULL DEFAULT 0");
             AddColumnIfMissing(connection, transaction, "tags", "user_assignable", "INTEGER NOT NULL DEFAULT 1");
-            AddColumnIfMissing(connection, transaction, "tags", "user_removable",  "INTEGER NOT NULL DEFAULT 1");
+            AddColumnIfMissing(connection, transaction, "tags", "user_removable", "INTEGER NOT NULL DEFAULT 1");
 
             ReconcileSystemTagRows(connection, transaction);
             transaction.Commit();
@@ -548,7 +548,7 @@ public class DatabaseFactory
         {
             // If a pre-reshape v3 only added `is_system`, fill in the other two.
             AddColumnIfMissing(connection, transaction, "tags", "user_assignable", "INTEGER NOT NULL DEFAULT 1");
-            AddColumnIfMissing(connection, transaction, "tags", "user_removable",  "INTEGER NOT NULL DEFAULT 1");
+            AddColumnIfMissing(connection, transaction, "tags", "user_removable", "INTEGER NOT NULL DEFAULT 1");
 
             ReconcileSystemTagRows(connection, transaction);
             transaction.Commit();

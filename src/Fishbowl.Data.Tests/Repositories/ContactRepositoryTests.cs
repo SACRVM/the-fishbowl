@@ -146,8 +146,8 @@ public class ContactRepositoryTests : IDisposable
 
         var list = (await _repo.GetAllAsync(TestUserId,
             ct: TestContext.Current.CancellationToken)).ToList();
-        Assert.Equal("Alice",   list[0].Name);
-        Assert.Equal("bernd",   list[1].Name);
+        Assert.Equal("Alice", list[0].Name);
+        Assert.Equal("bernd", list[1].Name);
         Assert.Equal("Charlie", list[2].Name);
     }
 

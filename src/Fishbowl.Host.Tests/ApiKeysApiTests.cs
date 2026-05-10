@@ -238,7 +238,7 @@ public class ApiKeysApiTests : IClassFixture<WebApplicationFactory<Program>>, ID
         // in a generated key prefix (e.g. "fb_live_9b1u" would match "b1").
         // Use hyphenated strings that can't appear inside a hex-ish prefix.
         const string aliceName = "alice-owned-key";
-        const string bobName   = "bob-owned-key";
+        const string bobName = "bob-owned-key";
         await _keyRepo.IssueAsync(Alice, ContextRef.User(Alice), aliceName,
             new[] { "read:notes" }, TestContext.Current.CancellationToken);
         await _keyRepo.IssueAsync(Bob, ContextRef.User(Bob), bobName,
