@@ -67,13 +67,18 @@ if (acme is { IsValid: true })
     });
 }
 else if (!builder.Environment.IsDevelopment()
-         && string.IsNullOrEmpty(Environment.GetEnvironmentVariable("ASPNETCORE_URLS")))
+         && string.IsNullOrEmpty(builder.Configuration["urls"]))
 {
     // First-boot fallback: no ACME config in system.db (yet) and the operator
-    // hasn't overridden ASPNETCORE_URLS — bind HTTP on all interfaces so
+    // hasn't overridden the URL bindings — bind HTTP on all interfaces so
     // /setup is reachable from outside the box. Without this Kestrel falls
     // back to its loopback-only defaults (localhost:5000) and a fresh server
     // install is effectively unreachable.
+    //
+    // The `urls` config key is the union of ASPNETCORE_URLS env var, --urls
+    // CLI arg, and IConfiguration["Urls"]. Checking the env var alone would
+    // break PlaywrightFixture (which passes --urls but no env var) and any
+    // operator who relies on the same CLI path.
     //
     // After the operator finishes /setup with ACME fields filled in, the next
     // restart takes the branch above (80 + 443 with auto-issued cert). The
