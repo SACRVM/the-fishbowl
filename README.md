@@ -54,8 +54,13 @@ if (-not (Test-Path $exe)) {
     Remove-Item $zip
 }
 
-& $exe --repo 'chloe-dream/the-fishbowl' --asset 'Fishbowl-{version}-win-x64.zip' --dir $dir
+# Detached so this PowerShell session can close without killing the launcher.
+$proc = Start-Process -FilePath $exe -PassThru `
+    -ArgumentList @('--repo','chloe-dream/the-fishbowl','--asset','Fishbowl-{version}-win-x64.zip','--dir',$dir)
+Write-Host "Husky started (PID $($proc.Id)). You can close this window." -ForegroundColor Green
 ```
+
+For a permanent install that survives user logoff and restarts at boot, register Husky as a Windows service via NSSM — see [`docs/deploy.md`](docs/deploy.md) §5.
 
 The user-data folder (`fishbowl-data/`, holds `system.db` + per-user/team SQLite files + the embeddings model) lives next to the binary inside `app/` and is preserved across updates because Husky overlays new files without deleting. Linux/macOS deployments use the matching RID asset and override `executable` in a local `husky.config.json` (the repo-root config is Windows-pathed by default).
 

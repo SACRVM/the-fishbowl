@@ -46,16 +46,22 @@ over time.
        Remove-Item $zip
    }
 
-   & $exe --repo 'chloe-dream/the-fishbowl' --asset 'Fishbowl-{version}-win-x64.zip' --dir $dir
+   # Detached so this PowerShell session can close without killing Husky.
+   $proc = Start-Process -FilePath $exe -PassThru `
+       -ArgumentList @('--repo','chloe-dream/the-fishbowl','--asset','Fishbowl-{version}-win-x64.zip','--dir',$dir)
+   Write-Host "Husky started (PID $($proc.Id)). You can close this window." -ForegroundColor Green
    ```
 
 3. Run it: `pwsh C:\fishbowl\run.ps1`.
 
    - First run pulls Husky's binary into the install dir, then pulls the
      latest Fishbowl release and extracts its `app/` folder.
-   - Husky launches `app/Fishbowl.Host.exe`.
+   - Husky launches `app/Fishbowl.Host.exe` in its own console window;
+     `run.ps1` exits immediately and the PowerShell window can close.
    - On a fresh install, Fishbowl binds **HTTP on port 80** (no HTTPS yet —
      that lights up after ACME setup, see step 3).
+   - This is the **smoke-test setup**. For permanent operation (survives
+     user logoff, restarts at boot), see §5.
 
 4. From any client, visit `http://<server-ip>/`. You should see `/setup`.
 
@@ -103,7 +109,7 @@ least one of:
 2. Verify DNS: from outside, `nslookup yourdomain.example.com` returns
    the server's public IP. `Test-NetConnection yourdomain.example.com 80`
    succeeds from anywhere.
-3. **Add ACME** via the admin config endpoint (see §5). Restart the host
+3. **Add ACME** via the admin config endpoint (see §6). Restart the host
    (kill the process; Husky restarts it). It binds `:80` + `:443`, fetches
    a cert, and from now on `https://yourdomain.example.com/` is your URL.
 
@@ -116,7 +122,7 @@ verify the install is healthy *before* you put TLS on top of it.
 
 Once any provider is configured, `GET /setup` returns 404 and
 `POST /api/setup` is also locked. Use `/api/v1/admin/config` instead
-(see §5).
+(see §6).
 
 ---
 
@@ -143,7 +149,101 @@ the next check happens on launch.
 
 ---
 
-## 5. Operational endpoints
+## 5. Run as a Windows service
+
+The `run.ps1` snippet detaches Husky so the launching PowerShell can
+close — but the process still lives in the user session that started it.
+Log off the server (not just disconnect RDP) and the launcher dies.
+For real permanence — auto-start at boot, survive user logoff, NSSM-level
+restart on crash — register Husky as a Windows service.
+
+Husky is a plain executable (no service-host plumbing), so `sc.exe
+create` direct against `Husky.exe` produces a service that fails to
+start. The pragmatic wrapper is **[NSSM](https://nssm.cc/)** ("the
+Non-Sucking Service Manager"), a tiny shim that wraps any exe as a
+proper Windows service.
+
+### Get NSSM
+
+NSSM is a single self-contained `nssm.exe`. Pick whichever fits your
+server:
+
+```powershell
+# Option A: official release (latest stable: nssm-2.24, works on Win10/11/Server)
+Invoke-WebRequest 'https://nssm.cc/release/nssm-2.24.zip' -OutFile "$env:TEMP\nssm.zip" -UseBasicParsing
+Expand-Archive "$env:TEMP\nssm.zip" "$env:TEMP\nssm" -Force
+Copy-Item "$env:TEMP\nssm\nssm-2.24\win64\nssm.exe" 'C:\Windows\System32\'
+Remove-Item -Recurse "$env:TEMP\nssm","$env:TEMP\nssm.zip"
+
+# Option B: Chocolatey
+choco install nssm
+
+# Option C: Scoop (per-user, no admin)
+scoop install nssm
+```
+
+### Register the service
+
+```powershell
+nssm install husky-fishbowl `
+    'C:\fishbowl\Husky.exe' `
+    --repo chloe-dream/the-fishbowl `
+    --asset 'Fishbowl-{version}-win-x64.zip' `
+    --dir 'C:\fishbowl'
+
+nssm set husky-fishbowl AppDirectory      C:\fishbowl
+nssm set husky-fishbowl Start             SERVICE_AUTO_START
+nssm set husky-fishbowl AppStdout         C:\fishbowl\husky.log
+nssm set husky-fishbowl AppStderr         C:\fishbowl\husky.log
+nssm set husky-fishbowl AppRotateFiles    1
+nssm set husky-fishbowl AppRotateBytes    10485760     # rotate at 10 MB
+
+nssm start husky-fishbowl
+```
+
+What this does:
+
+- Runs as **LocalSystem** by default — survives user logoff, autostarts
+  at boot.
+- NSSM watches Husky and restarts it if it dies (a second supervision
+  layer on top of Husky's own app-level supervision — both useful, NSSM
+  catches Husky-process crashes, Husky catches app crashes).
+- Logs Husky's stdout/stderr to `husky.log`, rotating at 10 MB.
+
+### Stop, restart, remove
+
+```powershell
+nssm stop    husky-fishbowl
+nssm restart husky-fishbowl
+nssm status  husky-fishbowl
+
+# Permanent removal (uninstalls service definition):
+nssm remove  husky-fishbowl confirm
+```
+
+### Multiple Fishbowl instances on one server
+
+Husky is rudelfähig — multiple instances coexist as long as each gets:
+
+- **Its own install dir** (`--dir`), so configs, downloads, and child
+  PIDs don't collide.
+- **A unique service name** (`husky-fishbowl-prod`,
+  `husky-fishbowl-staging`, …) — Windows requires it.
+- **Non-overlapping ports for the hosted apps.** Fishbowl's default
+  fallback grabs `:80` (HTTP-only when ACME isn't set) or `:80`+`:443`
+  (with ACME). A second instance has to be told to bind elsewhere via
+  `ASPNETCORE_URLS`:
+
+  ```powershell
+  nssm set husky-fishbowl-staging AppEnvironmentExtra ASPNETCORE_URLS=http://0.0.0.0:8080
+  ```
+
+Husky itself has no global state. Every config, log, downloaded zip,
+and supervised child PID is per-`--dir`.
+
+---
+
+## 6. Operational endpoints
 
 Once you're signed in as an admin via cookie, these work without unlocking
 `/setup` again. Use `curl --cookie-jar`/Bearer-token isn't usable here —
@@ -200,7 +300,7 @@ monitoring — it doesn't require any auth and doesn't touch the DB.
 
 ---
 
-## 6. Backups
+## 7. Backups
 
 Schedule `tools/snapshot-data` to run daily. See
 [`tools/snapshot-data/README.md`](../tools/snapshot-data/README.md) for
@@ -235,7 +335,7 @@ by copying just `users/{id}/`.
 
 ---
 
-## 7. Troubleshooting
+## 8. Troubleshooting
 
 ### "Can't reach the server" right after install
 
@@ -301,7 +401,7 @@ flow once you've re-run setup.
 
 ---
 
-## 8. Operating multiple teams
+## 9. Operating multiple teams
 
 A team is Fishbowl's isolation primitive — separate SQLite file,
 separate membership, separate MCP scope. Any agent CLI that needs its
@@ -324,7 +424,7 @@ You can also issue keys interactively from the admin SPA at
 
 ---
 
-## 9. Going to production checklist
+## 10. Going to production checklist
 
 Before pointing real users at a Fishbowl install:
 
