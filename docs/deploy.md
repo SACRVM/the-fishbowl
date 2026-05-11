@@ -301,22 +301,23 @@ flow once you've re-run setup.
 
 ---
 
-## 8. Operating multiple Firepit projects
+## 8. Operating multiple teams
 
-Each Firepit project that uses Fishbowl as its memory backend maps to a
-Fishbowl team. The host you just deployed accepts MCP traffic from
-Firepit's bearer token without further configuration.
+A team is Fishbowl's isolation primitive — separate SQLite file,
+separate membership, separate MCP scope. Any agent CLI that needs its
+own memory namespace gets its own team and a team-scoped API key.
 
-To wire up a project:
+To carve one out:
 
 ```bash
 # On a workstation that has the Fishbowl source checked out:
-dotnet run --project tools/init-project -- my-project-slug --data \\fishbowl-server\fishbowl-data
+dotnet run --project tools/init-team -- lighthouse --data \\fishbowl-server\fishbowl-data
 ```
 
-`init-project` creates the team, mints an API key, and prints a
-`cmdkey` line plus a Firepit `mcpOverrides` snippet ready to paste. The
-project's URL is `https://your.fishbowl/p/my-project-slug`.
+`init-team` creates the team (or reuses it if the slug already exists),
+mints a team-scoped API key, and prints the bearer token on stdout
+with a status banner on stderr. How the bearer is then stored and
+handed to a downstream agent CLI lives in that agent's docs.
 
 You can also issue keys interactively from the admin SPA at
 `https://your.fishbowl/#/api-keys` (cookie auth).

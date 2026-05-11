@@ -26,15 +26,17 @@ dotnet test --filter "FullyQualifiedName~TestName"   # one test
 
 Early development. The foundation is hardened (CI, OpenAPI, plugin contracts, structured logging, typed Dapper mapping). Feature work on search, Discord bot, calendar sync, reminders, teams, and apps follows — see `docs/superpowers/specs/` for active design work.
 
-## Wire up a Firepit project
+## Team-scoped memory via MCP
 
-[Firepit](https://github.com/chloe-dream/firepit-ai) hosts Claude Code (and other agent CLIs) in tabs, one per project. To use Fishbowl as the per-project memory backend, run:
+Fishbowl exposes its memory API as an MCP server at `/mcp` (JSON-RPC 2.0 over Streamable HTTP, Bearer auth). Any agent CLI that speaks MCP can attach. The isolation primitive is a **team** — each team is a separate SQLite file with its own membership and scopes.
+
+To carve out a team for an agent:
 
 ```bash
-dotnet run --project tools/init-project -- <project-slug>
+dotnet run --project tools/init-team -- <slug>
 ```
 
-This creates a Fishbowl team with that slug (the underlying file-boundary mechanism; "team" is the internal name, "project" is what the user sees), mints a team-scoped API key, and prints a ready-to-paste `cmdkey` line plus a Firepit `mcpOverrides` snippet. The project then has its own URL at `https://localhost:7180/p/<slug>`. See [`tools/init-project/README.md`](tools/init-project/README.md) for flags and idempotency notes.
+This creates the team (if absent), mints a team-scoped API key, and prints the bearer on stdout. The integration handle is *(MCP endpoint, Bearer token)*; how an agent CLI stores and presents that token is the agent's concern and lives in its docs, not here. See [`tools/init-team/README.md`](tools/init-team/README.md) for flags and idempotency notes.
 
 ## Deploy on a server
 

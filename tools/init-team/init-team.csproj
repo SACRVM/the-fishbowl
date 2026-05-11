@@ -7,8 +7,8 @@
     <Nullable>enable</Nullable>
     <!-- Dev-only tool; not part of the main product build. -->
     <IsPackable>false</IsPackable>
-    <AssemblyName>init-project</AssemblyName>
-    <RootNamespace>Fishbowl.Tools.InitProject</RootNamespace>
+    <AssemblyName>init-team</AssemblyName>
+    <RootNamespace>Fishbowl.Tools.InitTeam</RootNamespace>
   </PropertyGroup>
 
   <ItemGroup>

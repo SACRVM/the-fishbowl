@@ -625,11 +625,9 @@ app.MapGet("/logout", async (HttpContext context) =>
     return Results.Redirect("/");
 });
 
-// Project shortcut. Each Claude-Code-style project that wires Fishbowl as
-// its memory backend gets a Fishbowl team with a matching slug; this short
-// alias keeps Firepit's `https://localhost:7180/p/<slug>` quicklink template
-// (firepit-ai SPEC §"Quick-Links per Project") working without leaking the
-// team-as-project naming choice into the user-facing URL. The slug is not
+// Short URL alias to a team workspace. Lets downstream link templates
+// (browser bookmarks, agent-CLI quicklinks) point at `/p/<slug>` without
+// needing to know Fishbowl's internal team-URL shape. The slug is not
 // validated server-side — invalid slugs surface as a 401/404 in the SPA's
 // team workspace, which is the same path a stale bookmark would hit.
 app.MapGet("/p/{slug}", (string slug) =>

@@ -1,22 +1,24 @@
-# init-project
+# init-team
 
-Dev utility. Bootstraps a Fishbowl team that backs a [Firepit](https://github.com/chloe-dream/firepit-ai) (or Claude-Code) project: creates the team if absent, mints a team-scoped API key with full read/write scopes, and prints a ready-to-paste `cmdkey` command + Firepit `settings.json` snippet.
+Dev utility. Creates a Fishbowl team (if absent) and mints a team-scoped API key with full read/write scopes (or a narrower set via `--scopes`). The bearer goes to stdout; a status banner goes to stderr. Idempotent on the slug.
 
 ## What it solves
 
-Every project that wants Fishbowl as its memory backend needs four things wired up: a Fishbowl team, an API key bound to that team, the bearer stored in a credential vault, and a Firepit MCP entry referencing it. This tool makes it one command.
+A team in Fishbowl is the file-boundary isolation primitive — each team has its own SQLite file under `teams/{teamId}/`, its own roles, and its own MCP scope. To carve out a memory namespace for an agent CLI, you need a team, a key bound to that team, and the bearer in the hands of the agent. This tool produces the first two and prints the third on stdout for the caller to route.
+
+How the bearer is stored and consumed (credential vault, environment variable, agent-CLI config) is the consumer's concern and lives in the consumer's docs — Fishbowl just hands out tokens.
 
 ## Usage
 
 ```bash
-# create-or-reuse team 'firepit' for the first user in system.db
-dotnet run --project tools/init-project -- firepit \
+# create-or-reuse team 'lighthouse' for the first user in system.db
+dotnet run --project tools/init-team -- lighthouse \
   --data src/Fishbowl.Host/fishbowl-data
 ```
 
 ```bash
 # pretty display name + scoped-down key (search-only agent)
-dotnet run --project tools/init-project -- lighthouse \
+dotnet run --project tools/init-team -- lighthouse \
   --data src/Fishbowl.Host/fishbowl-data \
   --name "Lighthouse" \
   --scopes read:notes,read:tags,read:contacts,read:events
@@ -26,20 +28,20 @@ dotnet run --project tools/init-project -- lighthouse \
 
 | Flag | Default | Notes |
 |---|---|---|
-| `<slug>` | — | Positional, required. Lowercase letters/digits/hyphens, 1-60 chars. Same string is used as the team slug, the credential-manager target (`firepit/fishbowl-<slug>`), and the project URL alias (`/p/<slug>`). |
+| `<slug>` | — | Positional, required. Lowercase letters/digits/hyphens, 1-60 chars. The team slug is used as the URL fragment (`/#/team/<slug>/notes`) and as the default key/display name. |
 | `--data` | `fishbowl-data` | Path to the Fishbowl data directory. |
 | `--user` | first user in `system.db` | Owns the team if it gets created. Re-running for an existing team requires this user to already be a member. |
 | `--name` | same as `<slug>` | Display name stored on the team row. |
 | `--scopes` | every `read:*` + `write:*` scope | Comma-separated. See `ScopeCatalog.All` for the canonical set. |
-| `--key-name` | `firepit-<slug>` | Human-readable label stored on the API key row. |
+| `--key-name` | `team-<slug>` | Human-readable label stored on the API key row. |
 
 ## Output
 
 stdout: the raw bearer token on its own line (pipe-friendly).
-stderr: status banner + the `cmdkey` line + the Firepit `settings.json` snippet + the project URL.
+stderr: status banner — team id, key id, scopes, team URL, MCP endpoint.
 
 ```bash
-TOKEN=$(dotnet run --project tools/init-project -- firepit 2>/dev/null)
+TOKEN=$(dotnet run --project tools/init-team -- lighthouse 2>/dev/null)
 ```
 
 ## Idempotency

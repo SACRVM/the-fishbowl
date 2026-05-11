@@ -7,14 +7,14 @@ using Fishbowl.Core.Repositories;
 using Fishbowl.Data;
 using Fishbowl.Data.Repositories;
 
-// Dev utility: bootstraps a Fishbowl team that backs a Firepit (or
-// Claude-Code) project. Idempotent — re-running for an existing slug
-// reuses the team and just mints a fresh API key. The output is a
-// ready-to-paste Firepit settings.json snippet plus a `cmdkey` line
-// for stashing the bearer in Windows Credential Manager.
+// Dev utility: bootstraps a Fishbowl team and mints a team-scoped API
+// key. Idempotent — re-running for an existing slug reuses the team
+// and just mints a fresh key. The bearer goes to stdout (pipe-friendly);
+// a short status banner goes to stderr. How the bearer is stored and
+// passed to a downstream agent CLI is the consumer's concern.
 //
 // Usage:
-//   dotnet run --project tools/init-project -- <slug> \
+//   dotnet run --project tools/init-team -- <slug> \
 //       [--data <path>] \
 //       [--user <id>] \
 //       [--name <display>] \
@@ -26,14 +26,14 @@ using Fishbowl.Data.Repositories;
 //   --data        fishbowl-data
 //   --user        first user in system.db
 //   --name        same as <slug>
-//   --scopes      every read:* and write:* scope (full project access)
-//   --key-name    firepit-<slug>
+//   --scopes      every read:* and write:* scope (full read/write)
+//   --key-name    team-<slug>
 
 var args_ = args;
 
 if (args_.Length == 0 || args_[0].StartsWith("--"))
 {
-    Console.Error.WriteLine("usage: init-project <slug> [--data <path>] [--user <id>] [--name <display>] [--scopes <csv>] [--key-name <label>]");
+    Console.Error.WriteLine("usage: init-team <slug> [--data <path>] [--user <id>] [--name <display>] [--scopes <csv>] [--key-name <label>]");
     return 2;
 }
 
@@ -42,12 +42,11 @@ var dataPath = GetArg("--data") ?? "fishbowl-data";
 var userIdArg = GetArg("--user");
 var displayName = GetArg("--name") ?? slug;
 var scopesArg = GetArg("--scopes");
-var keyName = GetArg("--key-name") ?? $"firepit-{slug}";
+var keyName = GetArg("--key-name") ?? $"team-{slug}";
 
-// Slugs are URL fragments and folder-path components (teams live in
-// `teams/{teamId}/`, but Firepit's quicklink template uses the slug as
-// `/p/<slug>`). Restricting to lowercase+digits+hyphen keeps this
-// trivially safe across both axes.
+// Slugs are URL fragments and folder-path components. Restricting to
+// lowercase letters, digits, and hyphens keeps them safe across both
+// axes regardless of who routes them downstream.
 if (!Regex.IsMatch(slug, "^[a-z0-9]([a-z0-9-]{0,58}[a-z0-9])?$"))
 {
     Console.Error.WriteLine($"error: slug '{slug}' must be lowercase letters/digits/hyphens, 1-60 chars, no leading/trailing hyphen.");
@@ -149,28 +148,18 @@ else
 var keys = new ApiKeyRepository(factory);
 var issued = await keys.IssueAsync(userId, ContextRef.Team(team.Id), keyName, scopes);
 
-// User-facing output goes to stdout so it can be piped/captured; status
-// + paste-ables go to stderr. Keep the snippet trimmed — Firepit's
-// settings.json schema lives in firepit-ai SPEC §Configuration.
+// Bearer goes to stdout so it can be piped/captured; the status banner
+// goes to stderr so it won't poison a captured token. Downstream wiring
+// (credential storage, agent-CLI config) belongs in the consumer's docs,
+// not here — Fishbowl just hands out the bearer.
 Console.WriteLine(issued.RawToken);
 
 Console.Error.WriteLine();
 Console.Error.WriteLine($"# {(created ? "Created" : "Reused")} team '{team.Slug}' (id={team.Id}) with display name '{team.Name}'.");
 Console.Error.WriteLine($"# Minted API key id={issued.Record.Id} name='{keyName}'");
 Console.Error.WriteLine($"# Scopes: {string.Join(", ", scopes)}");
-Console.Error.WriteLine();
-Console.Error.WriteLine("# Step 1 — store the bearer token in Windows Credential Manager:");
-Console.Error.WriteLine($"cmdkey /generic:firepit/fishbowl-{slug} /user:fishbowl /pass:{issued.RawToken}");
-Console.Error.WriteLine();
-Console.Error.WriteLine("# Step 2 — add a per-project override to your Firepit settings.json");
-Console.Error.WriteLine("#          (%APPDATA%\\Firepit\\settings.json), inside your `projects` entry:");
-Console.Error.WriteLine("\"mcpOverrides\": {");
-Console.Error.WriteLine("  \"fishbowl\": {");
-Console.Error.WriteLine($"    \"headers\": {{ \"Authorization\": \"Bearer ${{cred:firepit/fishbowl-{slug}}}\" }}");
-Console.Error.WriteLine("  }");
-Console.Error.WriteLine("}");
-Console.Error.WriteLine();
-Console.Error.WriteLine($"# Project URL: https://localhost:7180/p/{slug}");
+Console.Error.WriteLine($"# Team URL (browser): /#/team/{slug}/notes");
+Console.Error.WriteLine($"# MCP endpoint (agent): /mcp  (Authorization: Bearer <token from stdout>)");
 return 0;
 
 string? GetArg(string flag)

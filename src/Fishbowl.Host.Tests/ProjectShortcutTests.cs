@@ -7,10 +7,10 @@ using Xunit;
 
 namespace Fishbowl.Host.Tests;
 
-// Firepit's quicklink template (firepit-ai SPEC §"Quick-Links per Project")
-// links to `/p/<slug>`. The route is anonymous and unauthenticated — it
-// only emits a 302 to the SPA hash route. The team-existence check is
-// deliberately left to the SPA so the redirect stays cheap and stateless.
+// `/p/<slug>` is a short URL alias that 302s to the SPA team workspace
+// (`/#/team/<slug>/notes`). The route is anonymous and unauthenticated;
+// team-existence is deliberately checked downstream by the SPA so the
+// redirect stays cheap and stateless.
 public class ProjectShortcutTests : IClassFixture<WebApplicationFactory<Program>>, IDisposable
 {
     private readonly WebApplicationFactory<Program> _factory;
