@@ -24,6 +24,11 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <UserSecretsId>1c355ec5-18cc-48f6-a980-8180ba39bfb9</UserSecretsId>
+    <!-- Runtime data folders. fishbowl-mods/ contains junctions/symlinks to
+         Fishbowl.Data/Resources for the dev mod-overlay workflow; without
+         this exclusion, Windows' reparse-point trust policy causes the
+         SDK's default-item globber to fail with MSB3552 on any build. -->
+    <DefaultItemExcludesInProjectFolder>$(DefaultItemExcludesInProjectFolder);fishbowl-data/**;fishbowl-mods/**;fishbowl-backups/**</DefaultItemExcludesInProjectFolder>
   </PropertyGroup>
 
 </Project>
