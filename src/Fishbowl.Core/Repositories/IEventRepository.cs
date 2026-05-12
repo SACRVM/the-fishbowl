@@ -26,6 +26,14 @@ public interface IEventRepository
     Task<bool> UpdateAsync(ContextRef ctx, Event evt, CancellationToken ct = default);
     Task<bool> DeleteAsync(ContextRef ctx, string id, CancellationToken ct = default);
 
+    // Events whose reminder *trigger time* (start_at − reminder_minutes)
+    // falls in the half-open window [from, to). Used by the scheduler to
+    // find reminders that are now due. Skips events whose `start_at` is
+    // older than `notAncient` so a Saturday-down dispatcher doesn't drown
+    // in long-past triggers on Monday morning.
+    Task<IReadOnlyList<Event>> ListDueRemindersAsync(
+        ContextRef ctx, DateTime from, DateTime to, DateTime notAncient, CancellationToken ct = default);
+
     // Legacy personal-context aliases for cookie-auth call sites.
     Task<Event?> GetByIdAsync(string userId, string id, CancellationToken ct = default);
     Task<IEnumerable<Event>> GetAllAsync(string userId, CancellationToken ct = default);

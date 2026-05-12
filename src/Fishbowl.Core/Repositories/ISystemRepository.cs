@@ -8,6 +8,19 @@ public interface ISystemRepository
     Task<string?> GetUserIdByMappingAsync(string provider, string providerId, CancellationToken ct = default);
     Task<bool> CreateUserMappingAsync(string userId, string provider, string providerId, CancellationToken ct = default);
 
+    // Removes (provider, provider_id) → user_id binding. Returns true when a
+    // row was deleted, false when nothing matched. Used by `/unlink`-style
+    // flows and by future settings UI; does NOT delete the underlying user
+    // (that's a separate, terminal operation).
+    Task<bool> DeleteUserMappingAsync(string provider, string providerId, CancellationToken ct = default);
+
+    // Reverse lookup: which provider_id is bound to this user under this
+    // provider, or null if not mapped. The forward direction is what auth
+    // hits on every request (hot); this is for the few paths that have a
+    // userId and need to address the external account — e.g. opening a
+    // fresh Discord DM after a gateway cache evicts the channel.
+    Task<string?> GetProviderIdForUserAsync(string userId, string provider, CancellationToken ct = default);
+
     // User Profile
     Task<bool> CreateUserAsync(string userId, string? name, string? email, string? avatarUrl, CancellationToken ct = default);
 

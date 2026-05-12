@@ -153,6 +153,34 @@ public class EventRepository : IEventRepository
         return affected > 0;
     }
 
+    public async Task<IReadOnlyList<Event>> ListDueRemindersAsync(
+        ContextRef ctx, DateTime from, DateTime to, DateTime notAncient, CancellationToken ct = default)
+    {
+        using var db = _dbFactory.CreateContextConnection(ctx);
+
+        // trigger_at = start_at - reminder_minutes; SQLite computes that on
+        // the fly via `datetime(start_at, '-N minutes')`. Comparisons go
+        // through `datetime()` on both sides so the formats line up — raw
+        // ISO-8601 strings compare lexicographically *only* when both sides
+        // have identical precision, which the SQLite datetime function
+        // strips. Skipping the `datetime()` cast on @from/@to would silently
+        // miss matches.
+        return (await db.QueryAsync<Event>(new CommandDefinition(@"
+            SELECT * FROM events
+            WHERE reminder_minutes IS NOT NULL
+              AND reminder_minutes >= 0
+              AND datetime(start_at, '-' || reminder_minutes || ' minutes') >= datetime(@from)
+              AND datetime(start_at, '-' || reminder_minutes || ' minutes') <  datetime(@to)
+              AND datetime(start_at) >= datetime(@notAncient)
+            ORDER BY start_at ASC",
+            new
+            {
+                from = from.ToString("o"),
+                to = to.ToString("o"),
+                notAncient = notAncient.ToString("o"),
+            }, cancellationToken: ct))).ToList();
+    }
+
     public async Task<bool> DeleteAsync(ContextRef ctx, string id, CancellationToken ct = default)
     {
         using var db = _dbFactory.CreateContextConnection(ctx);

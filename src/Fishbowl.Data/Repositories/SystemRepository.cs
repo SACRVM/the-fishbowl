@@ -35,6 +35,24 @@ public class SystemRepository : ISystemRepository
         return affected > 0;
     }
 
+    public async Task<bool> DeleteUserMappingAsync(string provider, string providerId, CancellationToken ct = default)
+    {
+        using var db = _dbFactory.CreateSystemConnection();
+        var affected = await db.ExecuteAsync(
+            new CommandDefinition("DELETE FROM user_mappings WHERE provider = @provider AND provider_id = @providerId",
+            new { provider, providerId }, cancellationToken: ct));
+        return affected > 0;
+    }
+
+    public async Task<string?> GetProviderIdForUserAsync(string userId, string provider, CancellationToken ct = default)
+    {
+        using var db = _dbFactory.CreateSystemConnection();
+        return await db.QuerySingleOrDefaultAsync<string>(
+            new CommandDefinition(
+                "SELECT provider_id FROM user_mappings WHERE user_id = @userId AND provider = @provider",
+                new { userId, provider }, cancellationToken: ct));
+    }
+
     public async Task<bool> CreateUserAsync(string userId, string? name, string? email, string? avatarUrl, CancellationToken ct = default)
     {
         using var db = _dbFactory.CreateSystemConnection();
