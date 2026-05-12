@@ -21,6 +21,17 @@ public static class BootConfig
         public bool IsValid => AcceptTos && Domains.Count > 0 && !string.IsNullOrWhiteSpace(Email);
     }
 
+    public record LoggingSettings(int RetentionDays, string Format)
+    {
+        // Plain-text rendering is the default — easier to grep, smaller files,
+        // doesn't require a log-aggregator front-end. "json" switches to a
+        // compact one-line-per-event format that Loki/Splunk/Datadog can ingest
+        // without a parser config.
+        public bool UseJson => string.Equals(Format, "json", StringComparison.OrdinalIgnoreCase);
+
+        public static LoggingSettings Default => new(RetentionDays: 7, Format: "text");
+    }
+
     /// <summary>
     /// Returns ACME config if system.db exists and all three keys are set.
     /// Returns null on fresh install or when any field is missing — caller
@@ -58,6 +69,39 @@ public static class BootConfig
             // system_config table missing (pre-v1 schema), file locked, or any
             // other read failure — treat as "no ACME config" and boot HTTP-only.
             return null;
+        }
+    }
+
+    /// <summary>
+    /// Reads Logging:RetentionDays and Logging:Format from system.db. Falls
+    /// back to defaults (7 days, plain text) on a fresh install or any
+    /// read error — logging must boot before the rest of the host, so this
+    /// is never allowed to throw.
+    /// </summary>
+    public static LoggingSettings LoadLogging(string dataRoot)
+    {
+        var dbPath = Path.Combine(dataRoot, "system.db");
+        if (!File.Exists(dbPath)) return LoggingSettings.Default;
+
+        try
+        {
+            using var conn = new SqliteConnection($"Data Source={dbPath};Mode=ReadOnly");
+            conn.Open();
+
+            var retentionStr = conn.QuerySingleOrDefault<string?>(
+                "SELECT value FROM system_config WHERE key = 'Logging:RetentionDays'");
+            var format = conn.QuerySingleOrDefault<string?>(
+                "SELECT value FROM system_config WHERE key = 'Logging:Format'");
+
+            var retention = int.TryParse(retentionStr, out var n) && n > 0 && n <= 365
+                ? n : LoggingSettings.Default.RetentionDays;
+            var fmt = string.IsNullOrWhiteSpace(format) ? LoggingSettings.Default.Format : format!;
+
+            return new LoggingSettings(retention, fmt);
+        }
+        catch
+        {
+            return LoggingSettings.Default;
         }
     }
 }

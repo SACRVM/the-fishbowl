@@ -20,8 +20,10 @@ using Fishbowl.Core.Search;
 using Fishbowl.Mcp;
 using Fishbowl.Mcp.Endpoints;
 using Fishbowl.Mcp.Tools;
+using Fishbowl.Scheduler;
 using Fishbowl.Search;
 using Husky.Client;
+using Serilog;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -38,6 +40,48 @@ builder.Services.AddSingleton<IResourceProvider, ResourceProvider>(sp =>
 var dataPath = builder.Configuration["data"] ?? "fishbowl-data";
 builder.Services.AddSingleton<DatabaseFactory>(sp =>
     new DatabaseFactory(dataPath, sp.GetRequiredService<ILogger<DatabaseFactory>>()));
+
+// Logging: console (always) + rolling daily file under fishbowl-data/logs/.
+// File sink is suppressed in Testing so the smoke fixture's temp data dirs
+// don't accumulate disk artefacts and Windows doesn't trip on open handles
+// when the fixture deletes the dir. Retention + format read from system.db
+// via BootConfig — changes need a host restart (acceptable; ops don't
+// retune logging hot).
+var logSettings = Fishbowl.Host.Configuration.BootConfig.LoadLogging(dataPath);
+var logConfig = new Serilog.LoggerConfiguration()
+    .MinimumLevel.Information()
+    .MinimumLevel.Override("Microsoft.AspNetCore", Serilog.Events.LogEventLevel.Warning)
+    .Enrich.FromLogContext()
+    .WriteTo.Console();
+
+if (!builder.Environment.IsEnvironment("Testing"))
+{
+    var logsDir = Path.Combine(dataPath, "logs");
+    Directory.CreateDirectory(logsDir);
+    var logPath = Path.Combine(logsDir, "host-.log");
+
+    if (logSettings.UseJson)
+    {
+        logConfig.WriteTo.File(
+            new Serilog.Formatting.Json.JsonFormatter(renderMessage: true),
+            logPath,
+            rollingInterval: Serilog.RollingInterval.Day,
+            retainedFileCountLimit: logSettings.RetentionDays,
+            shared: true);
+    }
+    else
+    {
+        logConfig.WriteTo.File(
+            logPath,
+            rollingInterval: Serilog.RollingInterval.Day,
+            retainedFileCountLimit: logSettings.RetentionDays,
+            outputTemplate: "[{Timestamp:yyyy-MM-dd HH:mm:ss.fff zzz}] [{Level:u3}] {SourceContext}: {Message:lj}{NewLine}{Exception}",
+            shared: true);
+    }
+}
+
+Serilog.Log.Logger = logConfig.CreateLogger();
+builder.Host.UseSerilog();
 
 // LettuceEncrypt — self-hosted ACME. Reads domains/email/ToS from system.db
 // synchronously (too early for the normal ConfigurationCache flow, which is
@@ -99,6 +143,7 @@ builder.Services.AddScoped<ITeamRepository, TeamRepository>();
 builder.Services.AddScoped<IApiKeyRepository, ApiKeyRepository>();
 builder.Services.AddScoped<INotificationChannelRepository, NotificationChannelRepository>();
 builder.Services.AddScoped<IDiscordLinkRepository, DiscordLinkRepository>();
+builder.Services.AddScoped<IReminderRepository, ReminderRepository>();
 
 // Embedding service — singleton because the ONNX session is heavy and ORT's
 // Run() is thread-safe. ModelDownloader points at `{dataRoot}/models/` which
@@ -279,6 +324,11 @@ builder.Services.AddOptions<DiscordBotOptions>()
     });
 builder.Services.AddFishbowlDiscordBot();
 
+// Reminder dispatcher — polls events with reminder_minutes set across all
+// personal contexts and routes notifications through any registered
+// IBotClient (currently Discord). No-op if no bot plugins are wired.
+builder.Services.AddFishbowlScheduler();
+
 // Local username/password auth — sibling to Google. Argon2id hashing lives
 // in Host (the only crypto-aware project edge); the interface lives in Core
 // so AuthApi can call it without picking up a transitive Konscious ref.
@@ -288,6 +338,11 @@ builder.Services.AddAuthorization();
 builder.Services.AddOpenApi();
 
 var app = builder.Build();
+
+// Flush any in-flight log writes on graceful shutdown. The file sink is
+// already shared+buffered, so this just ensures the last lines hit disk
+// before the process exits — important when Husky tells us to stop.
+app.Lifetime.ApplicationStopped.Register(Serilog.Log.CloseAndFlush);
 
 // Enforce SSL in production *only when an HTTPS endpoint exists*. We have
 // HTTPS via LettuceEncrypt → enabled only when ACME is configured. In the
@@ -367,10 +422,13 @@ app.UseAuthorization();
 
 app.MapOpenApi("/api/openapi.json");
 
-// Branding Output
+// Branding Output — render once Kestrel has actually bound, so the banner
+// reflects the real listening URLs (ACME's :80/:443, dev's :7180/:7181, or
+// whatever ASPNETCORE_URLS overrode). ApplicationStarted fires synchronously
+// during app.Run() startup; banner runs there and the app keeps booting.
 if (!app.Environment.IsEnvironment("Testing"))
 {
-    StartupBranding.PrintBanner();
+    app.Lifetime.ApplicationStarted.Register(() => StartupBranding.PrintBanner(app, dataPath));
 }
 
 // Register Auth Endpoints

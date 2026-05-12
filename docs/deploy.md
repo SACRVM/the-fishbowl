@@ -193,10 +193,6 @@ nssm install husky-fishbowl `
 
 nssm set husky-fishbowl AppDirectory      C:\fishbowl
 nssm set husky-fishbowl Start             SERVICE_AUTO_START
-nssm set husky-fishbowl AppStdout         C:\fishbowl\husky.log
-nssm set husky-fishbowl AppStderr         C:\fishbowl\husky.log
-nssm set husky-fishbowl AppRotateFiles    1
-nssm set husky-fishbowl AppRotateBytes    10485760     # rotate at 10 MB
 
 nssm start husky-fishbowl
 ```
@@ -208,7 +204,13 @@ What this does:
 - NSSM watches Husky and restarts it if it dies (a second supervision
   layer on top of Husky's own app-level supervision — both useful, NSSM
   catches Husky-process crashes, Husky catches app crashes).
-- Logs Husky's stdout/stderr to `husky.log`, rotating at 10 MB.
+- **Logs:** Fishbowl writes its own rolling log files to
+  `C:\fishbowl\app\fishbowl-data\logs\host-{yyyy-MM-dd}.log` (7-day
+  retention by default; configurable via `Logging:RetentionDays` and
+  `Logging:Format=json` in `system.db`). No NSSM stdout/stderr
+  redirection needed — the in-app file sink is the canonical log,
+  survives across binary swaps, and gets backed up by
+  `tools/snapshot-data` automatically.
 
 ### Stop, restart, remove
 
