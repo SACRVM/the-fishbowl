@@ -22,6 +22,7 @@ public static class ServiceCollectionExtensions
         // One registration per handler so GetServices<ISlashCommandHandler>()
         // returns the full set. Handlers are scoped — they hold scoped repos.
         services.AddScoped<ISlashCommandHandler, LinkCommandHandler>();
+        services.AddScoped<ISlashCommandHandler, UnlinkCommandHandler>();
         services.AddScoped<ISlashCommandHandler, RememberCommandHandler>();
         services.AddScoped<ISlashCommandHandler, SearchCommandHandler>();
         services.AddScoped<ISlashCommandHandler, RecentCommandHandler>();

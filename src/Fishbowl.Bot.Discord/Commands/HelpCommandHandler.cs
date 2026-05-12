@@ -23,6 +23,7 @@ public class HelpCommandHandler : ISlashCommandHandler
         {
             "**Fishbowl bot — commands**",
             "`/link <code>` — connect this Discord account to your Fishbowl",
+            "`/unlink` — disconnect this Discord account",
             "`/remember text:<...> [title:<...>]` — save a note",
             "`/search query:<...>` — hybrid search across your notes (titles only)",
             "`/recent` — list your newest notes",
