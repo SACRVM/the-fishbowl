@@ -345,7 +345,9 @@ public class McpEndpointTests : IClassFixture<WebApplicationFactory<Program>>, I
         using var doc = JsonDocument.Parse(
             await resp.Content.ReadAsStringAsync(TestContext.Current.CancellationToken));
         var err = doc.RootElement.GetProperty("error");
-        Assert.Equal(-32603, err.GetProperty("code").GetInt32());
+        // Apps platform tightened this from InternalError (-32603) to InvalidParams
+        // (-32602): scope mismatch is caller-fixable, not a server fault.
+        Assert.Equal(-32602, err.GetProperty("code").GetInt32());
         Assert.Contains("Scope denied", err.GetProperty("message").GetString() ?? "");
     }
 

@@ -10,10 +10,17 @@ public readonly record struct ContextRef(ContextType Type, string Id)
 {
     public static ContextRef User(string id) => new(ContextType.User, id);
     public static ContextRef Team(string id) => new(ContextType.Team, id);
+
+    // Carries only the app id. The owner pair (ownerType, ownerId) needed to
+    // open the actual app.db lives on `AppRef`, resolved separately from the
+    // principal's claims. Keeping App single-id here means existing dispatcher
+    // / repository plumbing that pattern-matches on ContextType stays uniform.
+    public static ContextRef App(string id) => new(ContextType.App, id);
 }
 
 public enum ContextType
 {
     User,
     Team,
+    App,
 }

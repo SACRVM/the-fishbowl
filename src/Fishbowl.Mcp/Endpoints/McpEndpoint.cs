@@ -1,6 +1,7 @@
 using System.Security.Claims;
 using System.Text.Json;
 using Fishbowl.Core;
+using Fishbowl.Core.Apps;
 using Fishbowl.Core.Mcp;
 using Fishbowl.Core.Util;
 using Microsoft.AspNetCore.Builder;
@@ -70,6 +71,26 @@ public static class McpEndpoint
             // (e.g. RememberTool's "title is required"). Same logic — the
             // caller can fix the input.
             logger.LogDebug("MCP {Method} rejected on argument validation: {Message}", request.Method, ex.Message);
+            error = new McpError(McpErrorCodes.InvalidParams, ex.Message);
+        }
+        catch (QueryDslException ex)
+        {
+            // Apps platform: DSL compile rejected the caller's payload (unknown
+            // column, additional_data filter, depth/leaf/in cap, type mismatch).
+            // InvalidParams tells the agent the input is fixable.
+            logger.LogDebug("MCP {Method} DSL rejected: {Code} on {Field}",
+                request.Method, ex.Code, ex.Field ?? "(none)");
+            error = new McpError(McpErrorCodes.InvalidParams, ex.Message);
+        }
+        catch (InvalidOperationException ex)
+        {
+            // Caller-fixable errors raised by repository pre-flight checks
+            // (forbidden base column write, unknown column on insert, schema
+            // not yet created, etc). InvalidParams keeps the agent in fix-and-
+            // retry mode; anything we genuinely don't expect still falls
+            // through to the InternalError branch below.
+            logger.LogDebug("MCP {Method} rejected on repository pre-flight: {Message}",
+                request.Method, ex.Message);
             error = new McpError(McpErrorCodes.InvalidParams, ex.Message);
         }
         catch (Exception ex)
@@ -142,8 +163,11 @@ public static class McpEndpoint
         if (user.Identity?.AuthenticationType == McpContextClaims.BearerScheme &&
             !user.HasClaim(McpContextClaims.Scope, tool.RequiredScope))
         {
+            // Caller-fixable: re-mint a key with the right scope. InvalidParams
+            // matches the ResourceValidationException handling at the top of
+            // HandleAsync rather than misclassifying as a server-side failure.
             return (null, new McpError(
-                McpErrorCodes.InternalError,
+                McpErrorCodes.InvalidParams,
                 $"Scope denied: tool '{toolName}' requires '{tool.RequiredScope}'"));
         }
 
@@ -151,7 +175,8 @@ public static class McpEndpoint
         try { ctxRef = McpContextClaims.Resolve(user); }
         catch (InvalidOperationException ex)
         {
-            return (null, new McpError(McpErrorCodes.InternalError, ex.Message));
+            // Token's context claims are missing/malformed — fix the token, not the server.
+            return (null, new McpError(McpErrorCodes.InvalidParams, ex.Message));
         }
 
         var actor = user.FindFirst(McpContextClaims.UserId)?.Value ?? "";

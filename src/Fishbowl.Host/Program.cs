@@ -20,6 +20,7 @@ using Fishbowl.Core.Search;
 using Fishbowl.Mcp;
 using Fishbowl.Mcp.Endpoints;
 using Fishbowl.Mcp.Tools;
+using Fishbowl.Mcp.Tools.Apps;
 using Fishbowl.Scheduler;
 using Fishbowl.Search;
 using Husky.Client;
@@ -145,6 +146,12 @@ builder.Services.AddScoped<INotificationChannelRepository, NotificationChannelRe
 builder.Services.AddScoped<IDiscordLinkRepository, DiscordLinkRepository>();
 builder.Services.AddScoped<IReminderRepository, ReminderRepository>();
 
+// Apps platform — the per-app .db registry + DDL generator + row CRUD.
+// All three repos sit at the same scope as the rest of the data-plane.
+builder.Services.AddScoped<IAppRepository, AppRepository>();
+builder.Services.AddScoped<IAppSchemaRepository, AppSchemaRepository>();
+builder.Services.AddScoped<IAppRowRepository, AppRowRepository>();
+
 // Embedding service — singleton because the ONNX session is heavy and ORT's
 // Run() is thread-safe. ModelDownloader points at `{dataRoot}/models/` which
 // follows the same convention as user/system DBs.
@@ -176,6 +183,24 @@ builder.Services.AddScoped<IMcpTool, ListPendingTool>();
 builder.Services.AddScoped<IMcpTool, ListContactsTool>();
 builder.Services.AddScoped<IMcpTool, FindContactTool>();
 builder.Services.AddScoped<IMcpTool, ListEventsTool>();
+
+// Apps platform — 13 tools join the existing registry. The dispatcher
+// surfaces all of them in tools/list; per-tool scope claims keep CRUD and
+// DDL distinct.
+builder.Services.AddScoped<IMcpTool, AppListTablesTool>();
+builder.Services.AddScoped<IMcpTool, AppDescribeTableTool>();
+builder.Services.AddScoped<IMcpTool, AppCreateTableTool>();
+builder.Services.AddScoped<IMcpTool, AppAlterTableTool>();
+builder.Services.AddScoped<IMcpTool, AppDropTableTool>();
+builder.Services.AddScoped<IMcpTool, AppCreateIndexTool>();
+builder.Services.AddScoped<IMcpTool, AppInsertTool>();
+builder.Services.AddScoped<IMcpTool, AppGetTool>();
+builder.Services.AddScoped<IMcpTool, AppUpdateTool>();
+builder.Services.AddScoped<IMcpTool, AppDeleteTool>();
+builder.Services.AddScoped<IMcpTool, AppRestoreTool>();
+builder.Services.AddScoped<IMcpTool, AppQueryTool>();
+builder.Services.AddScoped<IMcpTool, AppCountTool>();
+
 builder.Services.AddScoped<ToolRegistry>();
 
 // Load plugins from configured path (defaults to fishbowl-mods/plugins)
@@ -701,6 +726,7 @@ app.MapContactsApi();
 app.MapEventsApi();
 app.MapTeamsApi();
 app.MapApiKeysApi();
+app.MapAppsApi();
 app.MapAccountApi();
 app.MapAdminApi();
 app.MapAdminConfigEndpoints();

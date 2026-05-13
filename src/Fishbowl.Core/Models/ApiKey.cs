@@ -7,8 +7,16 @@ public class ApiKey
 {
     public string Id { get; set; } = "";
     public string UserId { get; set; } = "";
-    public string ContextType { get; set; } = "";   // "user" | "team"
+    public string ContextType { get; set; } = "";   // "user" | "team" | "app"
     public string ContextId { get; set; } = "";
+    // App-keys only: the owner pair backing path resolution
+    // (<owner-folder>/apps/<context_id>/app.db). NULL for user/team keys; the
+    // system.db CHECK constraint enforces the (context_type='app') ↔ NOT NULL
+    // invariant. Stored separately from ContextId so a single api_keys row
+    // carries everything the auth handler needs to mint a full AppRef without
+    // a second DB hit.
+    public string? OwnerType { get; set; }
+    public string? OwnerId { get; set; }
     public string Name { get; set; } = "";
     public string KeyHash { get; set; } = "";       // SHA-256 hex, lowercase
     public string KeyPrefix { get; set; } = "";     // first 12 chars of the raw token

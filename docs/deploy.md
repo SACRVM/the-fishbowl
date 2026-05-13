@@ -25,7 +25,11 @@ over time.
 - A scratch dir for the install — Husky doesn't care where; pick somewhere
   with enough space (`fishbowl-data/` starts at a few MB and grows with
   your notes; the ONNX embedding model is ~90 MB and lives at
-  `fishbowl-data/models/`).
+  `fishbowl-data/models/`). Each App also gets its own SQLite file under
+  `fishbowl-data/users/<userId>/apps/<appId>/app.db` (personal apps) or
+  `fishbowl-data/teams/<teamId>/apps/<appId>/app.db` (team apps), so an
+  agent's typed-row store doesn't bleed into the global notes DB. Backup
+  strategy: anything under `fishbowl-data/` survives Husky upgrades.
 
 ---
 

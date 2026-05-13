@@ -6,12 +6,14 @@ namespace Fishbowl.Core.Tests;
 public class ScopeCatalogTests
 {
     [Fact]
-    public void All_ContainsTenCanonicalScopes()
+    public void All_ContainsThirteenCanonicalScopes()
     {
         // Lock the count so adding a scope is a deliberate act — anyone
         // bumping this number must also remember to wire the matching MCP
-        // tool and API endpoint, per the comment on ScopeCatalog.
-        Assert.Equal(10, ScopeCatalog.All.Count);
+        // tool and API endpoint, per the comment on ScopeCatalog. Apps
+        // platform added app:read/app:write/app:admin on top of the original
+        // ten resource scopes.
+        Assert.Equal(13, ScopeCatalog.All.Count);
     }
 
     [Theory]
@@ -25,6 +27,9 @@ public class ScopeCatalogTests
     [InlineData("write:contacts")]
     [InlineData("read:events")]
     [InlineData("write:events")]
+    [InlineData("app:read")]
+    [InlineData("app:write")]
+    [InlineData("app:admin")]
     public void IsValid_True_ForKnownScopes(string scope)
     {
         Assert.True(ScopeCatalog.IsValid(scope));

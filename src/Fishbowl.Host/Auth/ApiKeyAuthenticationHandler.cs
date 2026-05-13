@@ -57,6 +57,15 @@ public class ApiKeyAuthenticationHandler : AuthenticationHandler<ApiKeyAuthentic
             new(McpContextClaims.ContextType, key.ContextType),
             new(McpContextClaims.ContextId, key.ContextId),
         };
+        // App-keys carry the owner pair so downstream code can build a full
+        // AppRef from claims alone (no second DB lookup on the hot path).
+        if (string.Equals(key.ContextType, "app", StringComparison.Ordinal))
+        {
+            if (!string.IsNullOrEmpty(key.OwnerType))
+                claims.Add(new Claim(McpContextClaims.OwnerType, key.OwnerType));
+            if (!string.IsNullOrEmpty(key.OwnerId))
+                claims.Add(new Claim(McpContextClaims.OwnerId, key.OwnerId));
+        }
         foreach (var scope in key.Scopes)
             claims.Add(new Claim(McpContextClaims.Scope, scope));
 

@@ -27,12 +27,46 @@ public class ApiKeyRepository : IApiKeyRepository
         _logger = logger ?? NullLogger<ApiKeyRepository>.Instance;
     }
 
-    public async Task<IssuedApiKey> IssueAsync(
+    public Task<IssuedApiKey> IssueAsync(
         string userId,
         ContextRef context,
         string name,
         IReadOnlyList<string> scopes,
         CancellationToken ct = default)
+    {
+        if (context.Type == ContextType.App)
+            throw new ArgumentException(
+                "Use the AppRef overload to mint app-scoped keys.", nameof(context));
+
+        var contextType = context.Type == ContextType.Team ? "team" : "user";
+        return IssueInternalAsync(userId, contextType, context.Id, ownerType: null, ownerId: null,
+            name, scopes, ct);
+    }
+
+    public Task<IssuedApiKey> IssueAsync(
+        string userId,
+        AppRef appRef,
+        string name,
+        IReadOnlyList<string> scopes,
+        CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(appRef.AppId))
+            throw new ArgumentException("AppRef.AppId is required", nameof(appRef));
+        if (string.IsNullOrWhiteSpace(appRef.OwnerId))
+            throw new ArgumentException("AppRef.OwnerId is required", nameof(appRef));
+        if (appRef.OwnerType is not (AppRef.OwnerTypeUser or AppRef.OwnerTypeTeam))
+            throw new ArgumentException(
+                $"AppRef.OwnerType must be '{AppRef.OwnerTypeUser}' or '{AppRef.OwnerTypeTeam}'",
+                nameof(appRef));
+
+        return IssueInternalAsync(userId, "app", appRef.AppId, appRef.OwnerType, appRef.OwnerId,
+            name, scopes, ct);
+    }
+
+    private async Task<IssuedApiKey> IssueInternalAsync(
+        string userId, string contextType, string contextId,
+        string? ownerType, string? ownerId,
+        string name, IReadOnlyList<string> scopes, CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(userId))
             throw new ArgumentException("userId is required", nameof(userId));
@@ -59,20 +93,22 @@ public class ApiKeyRepository : IApiKeyRepository
         {
             Id = Ulid.NewUlid().ToString(),
             UserId = userId,
-            ContextType = context.Type == ContextType.Team ? "team" : "user",
-            ContextId = context.Id,
+            ContextType = contextType,
+            ContextId = contextId,
+            OwnerType = ownerType,
+            OwnerId = ownerId,
             Name = name.Trim(),
             KeyHash = hash,
             KeyPrefix = prefix,
-            Scopes = scopes?.ToList() ?? new List<string>(),
+            Scopes = scopes.ToList(),
             CreatedAt = DateTime.UtcNow,
         };
 
         using var db = _dbFactory.CreateSystemConnection();
         await db.ExecuteAsync(new CommandDefinition(@"
-            INSERT INTO api_keys(id, user_id, context_type, context_id, name,
+            INSERT INTO api_keys(id, user_id, context_type, context_id, owner_type, owner_id, name,
                                  key_hash, key_prefix, scopes, created_at)
-            VALUES (@Id, @UserId, @ContextType, @ContextId, @Name,
+            VALUES (@Id, @UserId, @ContextType, @ContextId, @OwnerType, @OwnerId, @Name,
                     @KeyHash, @KeyPrefix, @Scopes, @CreatedAt)",
             new
             {
@@ -80,6 +116,8 @@ public class ApiKeyRepository : IApiKeyRepository
                 record.UserId,
                 record.ContextType,
                 record.ContextId,
+                record.OwnerType,
+                record.OwnerId,
                 record.Name,
                 record.KeyHash,
                 record.KeyPrefix,

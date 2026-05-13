@@ -19,6 +19,16 @@ public interface IApiKeyRepository
         IReadOnlyList<string> scopes,
         CancellationToken ct = default);
 
+    // App-scope overload. The key's `context_type='app'` and `context_id=AppId`;
+    // additionally persists the owner pair (owner_type/owner_id) so the auth
+    // handler can mint a full AppRef on every request without a second DB hit.
+    Task<IssuedApiKey> IssueAsync(
+        string userId,
+        AppRef appRef,
+        string name,
+        IReadOnlyList<string> scopes,
+        CancellationToken ct = default);
+
     // Resolves a raw Bearer token to a live (non-revoked) key or null. Uses
     // the prefix index to narrow candidates, then constant-time compares the
     // SHA-256 hash. Returns null for malformed tokens, unknown prefixes, and

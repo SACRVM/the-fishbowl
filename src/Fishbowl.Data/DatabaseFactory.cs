@@ -58,8 +58,51 @@ public class DatabaseFactory
     {
         ContextType.User => Path.Combine(_usersPath, ctx.Id, PersonalDbFileName),
         ContextType.Team => Path.Combine(_teamsPath, ctx.Id, TeamDbFileName),
+        // App refs are only one third of the routing tuple — opening the
+        // file needs the owner pair too. Surface accidental misuse instead
+        // of silently routing to nowhere.
+        ContextType.App => throw new ArgumentException(
+            "ContextRef.App carries only the app id; use DatabaseFactory.ResolveAppPath(AppRef) / CreateAppConnection(AppRef) instead.",
+            nameof(ctx)),
         _ => throw new ArgumentException($"Unknown context type: {ctx.Type}", nameof(ctx)),
     };
+
+    // App DBs live nested under their owner:
+    //   users/<userId>/apps/<appId>/app.db
+    //   teams/<teamId>/apps/<appId>/app.db
+    // Dropping a team/user folder onto another Fishbowl instance moves the
+    // owner *plus its apps* atomically, which is what folder-per-context is
+    // for. Folder name is the App's ULID (26 chars; well under MAX_PATH).
+    public string ResolveAppPath(AppRef appRef)
+    {
+        if (string.IsNullOrEmpty(appRef.AppId) || string.IsNullOrEmpty(appRef.OwnerId))
+            throw new ArgumentException("AppRef requires non-empty OwnerId and AppId.", nameof(appRef));
+
+        var ownerRoot = appRef.OwnerType switch
+        {
+            AppRef.OwnerTypeUser => _usersPath,
+            AppRef.OwnerTypeTeam => _teamsPath,
+            _ => throw new ArgumentException(
+                $"Unknown AppRef owner type: {appRef.OwnerType}", nameof(appRef)),
+        };
+        return Path.Combine(ownerRoot, appRef.OwnerId, "apps", appRef.AppId, AppDbFileName);
+    }
+
+    // Opens (and on first use creates) an app's SQLite file. App DBs have no
+    // built-in schema — owner-defined tables come in via app_create_table.
+    // sqlite-vec is NOT loaded: per-table vector indexes are post-MVP, so
+    // every app open today is leaner than a context open.
+    public IDbConnection CreateAppConnection(AppRef appRef)
+    {
+        var dbPath = ResolveAppPath(appRef);
+        var parent = Path.GetDirectoryName(dbPath);
+        if (!string.IsNullOrEmpty(parent) && !Directory.Exists(parent))
+            Directory.CreateDirectory(parent);
+
+        return OpenAndInitialize(dbPath, EnsureAppInitialized, loadVec: false);
+    }
+
+    public const string AppDbFileName = "app.db";
 
     // Preferred primary entrypoint: one context resolves to one file. Personal
     // and team spaces share an identical schema and identical migrations —
@@ -254,6 +297,14 @@ public class DatabaseFactory
             ApplyUserV5(connection);
             connection.Execute("PRAGMA user_version = 5");
             _logger.LogInformation("Applied user schema v5 to {DbPath}", ((SqliteConnection)connection).DataSource);
+            version = 5;
+        }
+
+        if (version < 6)
+        {
+            ApplyUserV6(connection);
+            connection.Execute("PRAGMA user_version = 6");
+            _logger.LogInformation("Applied user schema v6 to {DbPath}", ((SqliteConnection)connection).DataSource);
         }
     }
 
@@ -306,7 +357,25 @@ public class DatabaseFactory
             ApplySystemV6(connection);
             connection.Execute("PRAGMA user_version = 6");
             _logger.LogInformation("Applied system schema v6");
+            version = 6;
         }
+
+        if (version < 7)
+        {
+            ApplySystemV7(connection);
+            connection.Execute("PRAGMA user_version = 7");
+            _logger.LogInformation("Applied system schema v7");
+        }
+    }
+
+    // App DBs have no built-in schema. Owner brings in real SQL tables via
+    // `app_create_table` / `app_alter_table` (Fishbowl.Data.Repositories.
+    // AppSchemaRepository). user_version stays at 0 until/unless we ship
+    // app-engine migrations; the absence of any built-in schema is the
+    // whole point of the platform.
+    private void EnsureAppInitialized(IDbConnection connection)
+    {
+        // Intentionally empty.
     }
 
     private void ApplyUserInitialSchema(IDbConnection connection)
@@ -525,6 +594,34 @@ public class DatabaseFactory
             connection.Execute(@"
                 CREATE VIRTUAL TABLE IF NOT EXISTS contacts_fts USING fts5(
                     name, email, phone, notes
+                );", transaction: transaction);
+
+            transaction.Commit();
+        }
+        catch
+        {
+            transaction.Rollback();
+            throw;
+        }
+    }
+
+    // Apps registry: per-owner index of Apps owned by this user/team. The
+    // App's own data lives in `<owner-folder>/apps/<id>/app.db` whose schema
+    // is owner-defined (Fishbowl.Data.Repositories.AppSchemaRepository).
+    // Slug is unique within the owner — two owners may both have an app
+    // called `todos`. Name is human-readable display only.
+    private void ApplyUserV6(IDbConnection connection)
+    {
+        using var transaction = connection.BeginTransaction();
+        try
+        {
+            connection.Execute(@"
+                CREATE TABLE IF NOT EXISTS apps (
+                    id          TEXT PRIMARY KEY,
+                    slug        TEXT NOT NULL UNIQUE,
+                    name        TEXT NOT NULL,
+                    created_by  TEXT NOT NULL,
+                    created_at  TEXT NOT NULL
                 );", transaction: transaction);
 
             transaction.Commit();
@@ -783,6 +880,60 @@ public class DatabaseFactory
         {
             AddColumnIfMissing(connection, transaction, "users", "must_change_password",
                 "INTEGER NOT NULL DEFAULT 0");
+            transaction.Commit();
+        }
+        catch
+        {
+            transaction.Rollback();
+            throw;
+        }
+    }
+
+    // Apps platform — expands api_keys to support a third context type.
+    // SQLite can't ALTER a CHECK constraint in-place, so the canonical
+    // rename-via-shadow-table dance: build api_keys_new with the broader
+    // CHECK, copy every existing row (owner pair NULL for legacy user/team
+    // keys), drop the old table, rename. A compound CHECK pins the
+    // (context_type='app') ↔ (owner_type IS NOT NULL AND owner_id IS NOT NULL)
+    // invariant so a misfilled row can't sneak in.
+    private void ApplySystemV7(IDbConnection connection)
+    {
+        using var transaction = connection.BeginTransaction();
+        try
+        {
+            connection.Execute(@"
+                CREATE TABLE api_keys_new (
+                    id            TEXT PRIMARY KEY,
+                    user_id       TEXT NOT NULL REFERENCES users(id),
+                    context_type  TEXT NOT NULL CHECK(context_type IN ('user','team','app')),
+                    context_id    TEXT NOT NULL,
+                    owner_type    TEXT     CHECK(owner_type IS NULL OR owner_type IN ('user','team')),
+                    owner_id      TEXT,
+                    name          TEXT NOT NULL,
+                    key_hash      TEXT NOT NULL,
+                    key_prefix    TEXT NOT NULL,
+                    scopes        TEXT NOT NULL,
+                    created_at    TEXT NOT NULL,
+                    last_used_at  TEXT,
+                    revoked_at    TEXT,
+                    CHECK ((context_type = 'app') = (owner_type IS NOT NULL AND owner_id IS NOT NULL))
+                );", transaction: transaction);
+
+            connection.Execute(@"
+                INSERT INTO api_keys_new
+                  (id, user_id, context_type, context_id, owner_type, owner_id, name,
+                   key_hash, key_prefix, scopes, created_at, last_used_at, revoked_at)
+                SELECT id, user_id, context_type, context_id, NULL, NULL, name,
+                       key_hash, key_prefix, scopes, created_at, last_used_at, revoked_at
+                FROM api_keys;", transaction: transaction);
+
+            connection.Execute("DROP TABLE api_keys;", transaction: transaction);
+            connection.Execute("ALTER TABLE api_keys_new RENAME TO api_keys;", transaction: transaction);
+
+            connection.Execute(
+                "CREATE INDEX IF NOT EXISTS idx_api_keys_prefix ON api_keys(key_prefix) WHERE revoked_at IS NULL",
+                transaction: transaction);
+
             transaction.Commit();
         }
         catch

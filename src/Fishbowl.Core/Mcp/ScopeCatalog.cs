@@ -22,6 +22,14 @@ public static class ScopeCatalog
     public const string ReadEvents = "read:events";
     public const string WriteEvents = "write:events";
 
+    // Apps platform — single-app-wide trio. `app:admin` gates DDL
+    // (create/alter/drop table, create index); read/write gate row CRUD.
+    // No per-table or per-row scopes in MVP — the bearer token *is* the
+    // app boundary.
+    public const string AppRead = "app:read";
+    public const string AppWrite = "app:write";
+    public const string AppAdmin = "app:admin";
+
     private static readonly HashSet<string> _all = new(StringComparer.Ordinal)
     {
         ReadNotes, WriteNotes,
@@ -29,6 +37,7 @@ public static class ScopeCatalog
         ReadTasks, WriteTasks,
         ReadContacts, WriteContacts,
         ReadEvents, WriteEvents,
+        AppRead, AppWrite, AppAdmin,
     };
 
     public static IReadOnlyCollection<string> All => _all;
