@@ -4,7 +4,7 @@ using Fishbowl.Host.Configuration;
 using Microsoft.AspNetCore.Hosting.Server;
 using Microsoft.AspNetCore.Hosting.Server.Features;
 using Microsoft.Extensions.DependencyInjection;
-using Spectre.Console;
+using Retro.Crt;
 
 namespace Fishbowl.Host;
 
@@ -21,65 +21,66 @@ public static class StartupBranding
         {
             if (!Console.IsOutputRedirected)
             {
-                AnsiConsole.Clear();
+                Crt.ClrScr();
             }
 
             var version = ResolveVersion();
             var endpoints = ResolveEndpoints(app);
             var auth = ResolveAuth(app);
 
-            AnsiConsole.Write(new Rule("[gold1]THE FISHBOWL[/]").RuleStyle("grey"));
-            AnsiConsole.WriteLine();
-
-            AnsiConsole.MarkupLine("[bold gold1]  > [/] [bold white]THE FISHBOWL[/]");
-            AnsiConsole.MarkupLine($"[bold grey]    {Markup.Escape(version)}[/] - [italic]Your memory lives here. You don't.[/]");
-            AnsiConsole.WriteLine();
-
-            var table = new Table().Border(TableBorder.Rounded).BorderColor(Color.Grey);
-            table.AddColumn(new TableColumn("[u]Service[/]").Centered());
-            table.AddColumn(new TableColumn("[u]Status[/]").Centered());
-            table.AddColumn(new TableColumn("[u]Endpoint[/]").LeftAligned());
-
-            var primary = endpoints.Primary;
-            if (primary is null)
+            // Dos palette: white accent, dark-grey muted frame, classic
+            // green/yellow/red status slots. UseTheme also drives Table.Print's
+            // default header (Accent) and border (Muted) colours.
+            using (Crt.UseTheme(Themes.Dos))
             {
-                table.AddRow("Web UI",
-                    "[red]No listener[/]",
-                    "[grey](Kestrel did not report any addresses — check bind config)[/]");
+                Banner.Box("THE FISHBOWL", fg: Color.LightCyan);
+                Crt.WriteLine();
+
+                Crt.Write("  > ");
+                using (Crt.WithStyle(fg: Color.White, bold: true)) Crt.WriteLine("THE FISHBOWL");
+                using (Crt.WithStyle(fg: Color.DarkGray)) Crt.Write($"    {version}");
+                Crt.Write(" - ");
+                using (Crt.WithStyle(fg: Color.LightGray)) Crt.WriteLine("Your memory lives here. You don't.");
+                Crt.WriteLine();
+
+                var headers = new[] { "Service", "Status", "Endpoint" };
+                var rows = new List<string[]>();
+
+                var primary = endpoints.Primary;
+                if (primary is null)
+                {
+                    rows.Add(["Web UI", "No listener",
+                        "(Kestrel did not report any addresses — check bind config)"]);
+                }
+                else
+                {
+                    rows.Add(["Web UI", "Running", primary]);
+                    rows.Add(["REST API", "Ready", $"{primary}/api/v1/"]);
+                    rows.Add(["MCP", auth.AnyBearerCapable ? "Ready" : "Awaiting setup", $"{primary}/mcp"]);
+                }
+
+                rows.Add(["Security", auth.Configured ? "Configured" : "Setup wizard", auth.Summary]);
+                rows.Add(["Data", "Local", dataPath]);
+
+                // Per-cell status colours aren't expressible via Table.Print yet
+                // (uniform header/border only) — tracked in retro-crt#26. Status
+                // reads as plain text until that lands.
+                Table.Print(headers, [.. rows], border: TableBorder.Box);
+                Crt.WriteLine();
+
+                if (!auth.Configured)
+                {
+                    using (Crt.WithStyle(fg: Color.Yellow, bold: true)) Crt.Write("> ");
+                    Crt.WriteLine(
+                        $"First run: open the Web UI and complete the setup wizard at {primary ?? "/setup"}/setup.");
+                }
+
+                using (Crt.WithStyle(fg: Color.LightCyan, bold: true)) Crt.Write("> ");
+                Crt.Write("Press ");
+                using (Crt.WithStyle(fg: Color.White, bold: true)) Crt.Write("Ctrl+C");
+                Crt.WriteLine(" to stop the bowl.");
+                Crt.WriteLine();
             }
-            else
-            {
-                table.AddRow("Web UI",
-                    "[green]Running[/]",
-                    $"[link={primary}]{Markup.Escape(primary)}[/]");
-                table.AddRow("REST API",
-                    "[green]Ready[/]",
-                    Markup.Escape($"{primary}/api/v1/"));
-                table.AddRow("MCP",
-                    auth.AnyBearerCapable ? "[green]Ready[/]" : "[grey]Awaiting setup[/]",
-                    Markup.Escape($"{primary}/mcp"));
-            }
-
-            table.AddRow("Security",
-                auth.Configured ? "[gold1]Configured[/]" : "[grey]Setup wizard[/]",
-                Markup.Escape(auth.Summary));
-
-            table.AddRow("Data",
-                "[green]Local[/]",
-                Markup.Escape(dataPath));
-
-            AnsiConsole.Write(table);
-            AnsiConsole.WriteLine();
-
-            if (!auth.Configured)
-            {
-                AnsiConsole.MarkupLine(
-                    "[bold yellow]>[/] First run: open the Web UI and complete the setup wizard at " +
-                    $"[bold]{Markup.Escape(primary ?? "/setup")}/setup[/].");
-            }
-
-            AnsiConsole.MarkupLine("[bold cyan]>[/] Press [bold white]Ctrl+C[/] to stop the bowl.");
-            AnsiConsole.WriteLine();
         }
         catch
         {

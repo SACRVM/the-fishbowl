@@ -26,6 +26,12 @@ using Fishbowl.Search;
 using Husky.Client;
 using Serilog;
 
+// Windows consoles default to the OEM code page (CP850/CP1252), so the
+// Unicode box-drawing glyphs in the startup banner render as mojibake.
+// Force UTF-8 before any console output so Retro.Crt's box borders display
+// correctly. Wrapped because a redirected/closed stdout can throw here.
+try { Console.OutputEncoding = System.Text.Encoding.UTF8; } catch { /* non-console host */ }
+
 var builder = WebApplication.CreateBuilder(args);
 
 // Register Core Services
