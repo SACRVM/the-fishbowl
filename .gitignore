@@ -513,3 +513,8 @@ coverage.cobertura.xml
 
 # Playwright browser cache (only if anyone overrides the default cache dir)
 .playwright/
+
+# Local agent scratch + uncommitted dev artefacts
+.firepit/
+assets/
+tools/set-config/
