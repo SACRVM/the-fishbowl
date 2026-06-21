@@ -45,6 +45,20 @@ builder.Services.AddSingleton<IResourceProvider, ResourceProvider>(sp =>
 
 // Consistent data root from CLI or default
 var dataPath = builder.Configuration["data"] ?? "fishbowl-data";
+
+// Operator infra config (URL/port binding, etc.) lives in a JSON file under
+// the data dir — NOT system.db (that's for data Fishbowl owns at runtime) and
+// NOT app/appsettings.json (shipped in the release package, so a Husky update
+// would clobber an operator's edit). fishbowl-data/ is Husky-preserved across
+// upgrades, so the binding sticks. Optional + absent by default: a fresh
+// install still falls through to the :80 first-boot binding below so /setup
+// stays reachable. To bind a non-standard loopback port behind a reverse
+// proxy (Caddy/nginx terminating TLS), drop in:
+//   { "Urls": "http://127.0.0.1:8087" }
+// The host's "urls" key (and the ACME-skip check below) pick it up.
+builder.Configuration.AddJsonFile(
+    Path.Combine(dataPath, "host.config.json"), optional: true, reloadOnChange: false);
+
 builder.Services.AddSingleton<DatabaseFactory>(sp =>
     new DatabaseFactory(dataPath, sp.GetRequiredService<ILogger<DatabaseFactory>>()));
 
@@ -368,12 +382,37 @@ builder.Services.AddSingleton<Fishbowl.Core.Auth.IPasswordHasher, Fishbowl.Host.
 builder.Services.AddAuthorization();
 builder.Services.AddOpenApi();
 
+// Reverse-proxy awareness. When TLS is terminated by a fronting proxy (Caddy/
+// nginx) and Fishbowl is bound to a loopback port, the request ASP.NET sees is
+// plain http — so request.Scheme would be "http" and the Google OAuth
+// redirect_uri (and the /setup redirect-URI check) would be built with the
+// wrong scheme, breaking login. UseForwardedHeaders rewrites Scheme/RemoteIp
+// from X-Forwarded-Proto / X-Forwarded-For. We clear KnownProxies/KnownNetworks
+// because the only thing that can reach a 127.0.0.1 bind is a process on the
+// box (the proxy) — so the immediate peer is trusted by construction. Host is
+// left alone: Caddy/nginx pass the original Host header through by default.
+builder.Services.Configure<Microsoft.AspNetCore.Builder.ForwardedHeadersOptions>(options =>
+{
+    options.ForwardedHeaders = Microsoft.AspNetCore.HttpOverrides.ForwardedHeaders.XForwardedProto
+                             | Microsoft.AspNetCore.HttpOverrides.ForwardedHeaders.XForwardedFor;
+    options.KnownIPNetworks.Clear();
+    options.KnownProxies.Clear();
+});
+
 var app = builder.Build();
 
 // Flush any in-flight log writes on graceful shutdown. The file sink is
 // already shared+buffered, so this just ensures the last lines hit disk
 // before the process exits — important when Husky tells us to stop.
 app.Lifetime.ApplicationStopped.Register(Serilog.Log.CloseAndFlush);
+
+// Apply X-Forwarded-* before anything reads scheme/host (auth challenges, the
+// HTTPS-redirect below, OAuth redirect_uri). No-op in dev (no fronting proxy,
+// no forwarded headers); only meaningful when bound behind Caddy/nginx.
+if (!app.Environment.IsDevelopment())
+{
+    app.UseForwardedHeaders();
+}
 
 // Enforce SSL in production *only when an HTTPS endpoint exists*. We have
 // HTTPS via LettuceEncrypt → enabled only when ACME is configured. In the
