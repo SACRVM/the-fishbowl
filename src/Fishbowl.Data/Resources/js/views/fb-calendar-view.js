@@ -373,8 +373,7 @@ class FbCalendarView extends HTMLElement {
                     flex-wrap: wrap;
                 }
                 fb-calendar-view .cv-date-input,
-                fb-calendar-view .cv-text-input,
-                fb-calendar-view .cv-select {
+                fb-calendar-view .cv-text-input {
                     background: rgba(0, 0, 0, 0.3);
                     border: 1px solid var(--border);
                     border-radius: 8px;
@@ -388,8 +387,10 @@ class FbCalendarView extends HTMLElement {
                     transition: border-color 0.15s;
                 }
                 fb-calendar-view .cv-date-input:focus,
-                fb-calendar-view .cv-text-input:focus,
-                fb-calendar-view .cv-select:focus { border-color: var(--accent); }
+                fb-calendar-view .cv-text-input:focus { border-color: var(--accent); }
+                /* Field look + chevron come from the global select baseline
+                   in app.css — only sizing lives here. */
+                fb-calendar-view .cv-select { max-width: 260px; }
                 fb-calendar-view .cv-text-input { max-width: 420px; width: 100%; }
                 fb-calendar-view .cv-allday-label {
                     display: inline-flex;
@@ -411,20 +412,23 @@ class FbCalendarView extends HTMLElement {
                     display: block;
                     width: 100%;
                     min-height: 160px;
-                    background: none;
-                    border: none;
+                    background: rgba(0, 0, 0, 0.18);
+                    border: 1px solid var(--border);
+                    border-radius: 10px;
                     color: var(--text);
                     font-family: inherit;
                     font-size: 14px;
                     line-height: 1.6;
                     outline: none;
                     resize: none;
-                    padding: 0;
+                    padding: 12px 14px;
                     overflow: hidden;
+                    transition: border-color 0.15s;
                 }
+                fb-calendar-view .cv-desc-input:focus { border-color: var(--accent); }
                 fb-calendar-view .cv-desc-input::placeholder {
                     color: var(--text-muted);
-                    opacity: 0.4;
+                    opacity: 0.55;
                 }
                 fb-calendar-view .cv-repeat-mark {
                     color: var(--text-muted);

@@ -1550,16 +1550,32 @@ const TEMPLATE = `
     :host {
         display: block;
         position: relative;
+        /* Editor reads as a bordered writing surface with a toolbar strip
+           on top — a bare transparent area gives no "you can type here"
+           affordance at all. Focus pulls the border toward the accent. */
+        background: rgba(0, 0, 0, 0.18);
+        border: 1px solid var(--border, rgba(255,255,255,0.08));
+        border-radius: 12px;
+        transition: border-color 0.15s, box-shadow 0.15s;
+    }
+    :host(:focus-within) {
+        border-color: rgba(59, 130, 246, 0.5);
+        box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
     }
     :host(.is-readonly) .toolbar { display: none; }
+    :host(.is-readonly) {
+        background: transparent;
+        border-color: transparent;
+    }
 
     .toolbar {
         display: flex;
         gap: 2px;
         flex-wrap: wrap;
-        margin-bottom: 12px;
-        padding-bottom: 8px;
+        padding: 8px 12px;
+        background: rgba(255, 255, 255, 0.02);
         border-bottom: 1px solid var(--border, rgba(255,255,255,0.08));
+        border-radius: 12px 12px 0 0;
     }
     .toolbar button {
         padding: 5px 9px;
@@ -1596,20 +1612,24 @@ const TEMPLATE = `
         outline: none;
         position: relative;
         min-height: 60vh;
+        padding: 14px 20px;
+        cursor: text;
         color: var(--text, #fff);
         font-family: inherit;
         font-size: 15px;
         line-height: 1.6;
         caret-color: var(--accent, #3b82f6);
     }
-    /* Placeholder: show when the only line is empty. Uses :has() - evergreen. */
+    /* Placeholder: show when the only line is empty. Uses :has() - evergreen.
+       Offsets = .editor padding + .line's own 2px/net-0 horizontal inset so
+       it sits exactly where typed text will land. */
     .editor[data-placeholder]:has(> .line:only-child:empty)::before {
         content: attr(data-placeholder);
         position: absolute;
-        top: 1px;
-        left: 0;
+        top: 16px;
+        left: 20px;
         color: var(--text-muted, #888);
-        opacity: 0.4;
+        opacity: 0.55;
         pointer-events: none;
     }
 

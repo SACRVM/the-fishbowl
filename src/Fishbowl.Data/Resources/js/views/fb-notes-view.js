@@ -532,7 +532,7 @@ class FbNotesView extends HTMLElement {
                 }
                 fb-notes-view .nv-title-input::placeholder {
                     color: var(--text-muted);
-                    opacity: 0.4;
+                    opacity: 0.55;
                 }
                 fb-notes-view .nv-content-input {
                     /* fb-md-editor handles its own autosize and renders the

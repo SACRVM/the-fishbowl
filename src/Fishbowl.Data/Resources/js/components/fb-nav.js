@@ -118,20 +118,36 @@ class FbNav extends HTMLElement {
                     -webkit-backdrop-filter: blur(12px);
                     border-bottom: 1px solid rgba(255, 255, 255, 0.1);
                 }
+                /* Burger that morphs into an X while the panel is open —
+                   same 3-span construction as the panel's slide, so open
+                   state is readable from the ribbon alone. */
                 .menu-btn {
                     background: none;
                     border: none;
-                    color: #f8fafc;
                     cursor: pointer;
-                    padding: 0.25rem 0.5rem;
+                    width: 32px;
+                    height: 32px;
                     margin-right: 0.5rem;
-                    font-size: 1.2rem;
                     border-radius: 6px;
                     display: flex;
+                    flex-direction: column;
+                    justify-content: center;
                     align-items: center;
+                    gap: 4px;
+                    padding: 0;
                 }
                 .menu-btn:hover { background: rgba(255,255,255,0.08); }
-                .menu-btn fb-icon { --icon-size: 20px; }
+                .menu-btn span {
+                    display: block;
+                    width: 18px;
+                    height: 2px;
+                    background: #f8fafc;
+                    border-radius: 2px;
+                    transition: all 0.3s ease;
+                }
+                .menu-btn.active span:nth-child(1) { transform: translateY(6px) rotate(45deg); }
+                .menu-btn.active span:nth-child(2) { opacity: 0; }
+                .menu-btn.active span:nth-child(3) { transform: translateY(-6px) rotate(-45deg); }
                 .brand-mark {
                     color: var(--accent);
                     margin-right: 0.6rem;
@@ -384,8 +400,8 @@ class FbNav extends HTMLElement {
                 }
             </style>
             <nav class="ribbon">
-                <button class="menu-btn" aria-label="Menu">
-                    <fb-icon name="menu"></fb-icon>
+                <button class="menu-btn" aria-label="Menu" aria-expanded="false">
+                    <span></span><span></span><span></span>
                 </button>
                 <a class="brand" href="${hrefFor("#/")}">
                     <span class="brand-mark"><fb-icon name="fish"></fb-icon></span>
@@ -446,6 +462,8 @@ class FbNav extends HTMLElement {
             this.isOpen = open;
             backdrop.classList.toggle("open", open);
             panel.classList.toggle("open", open);
+            menuBtn.classList.toggle("active", open);
+            menuBtn.setAttribute("aria-expanded", String(open));
         };
         const toggle = () => setOpen(!this.isOpen);
 

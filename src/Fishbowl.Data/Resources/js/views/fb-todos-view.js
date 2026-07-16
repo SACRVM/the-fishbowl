@@ -340,20 +340,23 @@ class FbTodosView extends HTMLElement {
                     display: block;
                     width: 100%;
                     min-height: 200px;
-                    background: none;
-                    border: none;
+                    background: rgba(0, 0, 0, 0.18);
+                    border: 1px solid var(--border);
+                    border-radius: 10px;
                     color: var(--text);
                     font-family: inherit;
                     font-size: 14px;
                     line-height: 1.6;
                     outline: none;
                     resize: none;
-                    padding: 0;
+                    padding: 12px 14px;
                     overflow: hidden;
+                    transition: border-color 0.15s;
                 }
+                fb-todos-view .tv-desc-input:focus { border-color: var(--accent); }
                 fb-todos-view .tv-desc-input::placeholder {
                     color: var(--text-muted);
-                    opacity: 0.4;
+                    opacity: 0.55;
                 }
 
                 fb-todos-view .tv-editor-footer {
