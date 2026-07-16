@@ -19,12 +19,14 @@ public class UiSmokeTests : IClassFixture<PlaywrightFixture>
 
         await page.GotoAsync(_fixture.BaseUrl);
 
-        // Hub view renders with the two tiles.
+        // Hub view renders with its tiles.
         var notesTile = page.Locator("a.tile[href='#/notes']");
         var todosTile = page.Locator("a.tile[href='#/todos']");
+        var calendarTile = page.Locator("a.tile[href='#/calendar']");
         await notesTile.WaitForAsync(new LocatorWaitForOptions { Timeout = 3000 });
         Assert.True(await notesTile.IsVisibleAsync());
         Assert.True(await todosTile.IsVisibleAsync());
+        Assert.True(await calendarTile.IsVisibleAsync());
 
         // Click Notes tile -> hash changes, notes view mounts.
         await notesTile.ClickAsync();

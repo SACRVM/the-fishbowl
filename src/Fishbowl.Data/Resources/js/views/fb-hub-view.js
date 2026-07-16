@@ -46,6 +46,13 @@ class FbHubView extends HTMLElement {
                             <p>Fast to-dos, always at hand.</p>
                         </div>
                     </a>
+                    <a class="tile" href="${hrefFor("#/calendar")}">
+                        <fb-icon name="calendar"></fb-icon>
+                        <div>
+                            <h2>Calendar</h2>
+                            <p>Events and reminders, yours.</p>
+                        </div>
+                    </a>
                 </main>
             </div>
             <fb-footer></fb-footer>

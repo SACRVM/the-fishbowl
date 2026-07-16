@@ -199,6 +199,94 @@ public class EventRepositoryTests : IDisposable
     }
 
     [Fact]
+    public async Task GetRange_ExpandsRecurringSeriesIntoInstances()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        // Weekly series starting well before the window — the master's
+        // start_at is outside [from, to) but its occurrences are not.
+        var seriesStart = new DateTime(2026, 6, 3, 9, 0, 0, DateTimeKind.Utc); // Wednesday
+        var id = await _repo.CreateAsync(TestUserId, new Event
+        {
+            Title = "weekly sync",
+            StartAt = seriesStart,
+            EndAt = seriesStart.AddHours(1),
+            RRule = "FREQ=WEEKLY",
+        }, ct);
+
+        var from = new DateTime(2026, 7, 1, 0, 0, 0, DateTimeKind.Utc);
+        var to = new DateTime(2026, 7, 15, 0, 0, 0, DateTimeKind.Utc);
+        var range = (await _repo.GetRangeAsync(TestUserId, from, to, ct)).ToList();
+
+        // Wednesdays Jul 1 + Jul 8 fall inside the two-week window.
+        Assert.Equal(2, range.Count);
+        Assert.All(range, e =>
+        {
+            Assert.Equal(id, e.Id);
+            Assert.True(e.IsRecurringInstance);
+            Assert.Equal("weekly sync", e.Title);
+            Assert.Equal(TimeSpan.FromHours(1), e.EndAt - e.StartAt); // duration preserved
+        });
+        Assert.Equal(
+            new[]
+            {
+                new DateTime(2026, 7, 1, 9, 0, 0, DateTimeKind.Utc),
+                new DateTime(2026, 7, 8, 9, 0, 0, DateTimeKind.Utc),
+            },
+            range.Select(e => e.StartAt).ToArray());
+    }
+
+    [Fact]
+    public async Task GetRange_UnsupportedRule_DegradesToMasterOnly()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var start = new DateTime(2026, 7, 5, 9, 0, 0, DateTimeKind.Utc);
+        await _repo.CreateAsync(TestUserId, new Event
+        {
+            Title = "exotic import",
+            StartAt = start,
+            RRule = "FREQ=MONTHLY;BYSETPOS=-1;BYDAY=FR", // out of subset
+        }, ct);
+
+        var inWindow = (await _repo.GetRangeAsync(TestUserId,
+            start.AddDays(-1), start.AddDays(1), ct)).ToList();
+        var laterWindow = (await _repo.GetRangeAsync(TestUserId,
+            start.AddDays(10), start.AddDays(40), ct)).ToList();
+
+        // Master shows once at DTSTART (pre-expansion behavior), and no
+        // phantom occurrences are invented for a rule we can't walk.
+        Assert.Single(inWindow);
+        Assert.False(inWindow[0].IsRecurringInstance);
+        Assert.Empty(laterWindow);
+    }
+
+    [Fact]
+    public async Task ListDueReminders_ExpandsRecurringOccurrences()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        // Daily 09:00 series started days ago, 30-minute reminder → the
+        // trigger for "today's" occurrence is 08:30.
+        var seriesStart = new DateTime(2026, 7, 10, 9, 0, 0, DateTimeKind.Utc);
+        var id = await _repo.CreateAsync(TestUserId, new Event
+        {
+            Title = "daily meds",
+            StartAt = seriesStart,
+            ReminderMinutes = 30,
+            RRule = "FREQ=DAILY",
+        }, ct);
+
+        var windowFrom = new DateTime(2026, 7, 14, 8, 29, 0, DateTimeKind.Utc);
+        var windowTo = new DateTime(2026, 7, 14, 8, 31, 0, DateTimeKind.Utc);
+        var due = await _repo.ListDueRemindersAsync(
+            ContextRef.User(TestUserId), windowFrom, windowTo,
+            windowTo.AddDays(-1), ct);
+
+        var hit = Assert.Single(due);
+        Assert.Equal(id, hit.Id);
+        Assert.True(hit.IsRecurringInstance);
+        Assert.Equal(new DateTime(2026, 7, 14, 9, 0, 0, DateTimeKind.Utc), hit.StartAt);
+    }
+
+    [Fact]
     public async Task GetRange_RejectsInvertedWindow()
     {
         var start = new DateTime(2026, 6, 1, 0, 0, 0, DateTimeKind.Utc);

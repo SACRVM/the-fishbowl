@@ -98,9 +98,9 @@ public class ReminderDispatcherTests : IDisposable
         // Reminder row was persisted with sent_at.
         using var scope = _services.CreateScope();
         var reminders = scope.ServiceProvider.GetRequiredService<IReminderRepository>();
-        var sent = await reminders.GetSentEventIdsAsync(
+        var sent = await reminders.GetSentTriggersAsync(
             ContextRef.User(Alice), new[] { eventId }, ct);
-        Assert.Contains(eventId, sent);
+        Assert.Contains(sent, t => t.EventId == eventId);
     }
 
     [Fact]
@@ -144,7 +144,7 @@ public class ReminderDispatcherTests : IDisposable
         // No sent row → next tick after Alice links would still fire.
         using var scope = _services.CreateScope();
         var reminders = scope.ServiceProvider.GetRequiredService<IReminderRepository>();
-        var sent = await reminders.GetSentEventIdsAsync(
+        var sent = await reminders.GetSentTriggersAsync(
             ContextRef.User(Alice), new[] { eventId }, ct);
         Assert.Empty(sent);
     }
@@ -166,6 +166,47 @@ public class ReminderDispatcherTests : IDisposable
 
         Assert.Equal(0, fired);
         Assert.Empty(_bot.Calls);
+    }
+
+    [Fact]
+    public async Task RecurringEvent_FiresPerOccurrence_AndDedupesWithinOccurrence()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        await SeedUserAsync(Alice, ct);
+        await SeedDiscordChannelAsync(Alice, ct);
+
+        // Daily series anchored yesterday so today's occurrence is not the
+        // DTSTART row itself — proves expansion, not the master fallback.
+        var now = DateTime.UtcNow;
+        using (var scope = _services.CreateScope())
+        {
+            var events = scope.ServiceProvider.GetRequiredService<IEventRepository>();
+            await events.CreateAsync(Alice, new Event
+            {
+                Title = "Daily standup",
+                StartAt = now.AddDays(-1).AddMinutes(30),
+                ReminderMinutes = 30,
+                RRule = "FREQ=DAILY",
+            }, ct);
+        }
+
+        var dispatcher = _services.GetRequiredService<ReminderDispatcher>();
+
+        // Today's occurrence triggers inside this window.
+        var fired = await dispatcher.RunTickAsync(now.AddMinutes(-1), now.AddMinutes(1), ct);
+        Assert.Equal(1, fired);
+        Assert.Single(_bot.Calls);
+
+        // Same window again → same occurrence, latched, no double-fire.
+        var again = await dispatcher.RunTickAsync(now.AddMinutes(-1), now.AddMinutes(1), ct);
+        Assert.Equal(0, again);
+        Assert.Single(_bot.Calls);
+
+        // Tomorrow's window → next occurrence fires despite the same event_id.
+        var tomorrow = now.AddDays(1);
+        var nextDay = await dispatcher.RunTickAsync(tomorrow.AddMinutes(-1), tomorrow.AddMinutes(1), ct);
+        Assert.Equal(1, nextDay);
+        Assert.Equal(2, _bot.Calls.Count);
     }
 
     [Fact]

@@ -50,10 +50,10 @@ public class ReminderRepositoryTests : IDisposable
     }
 
     [Fact]
-    public async Task GetSentEventIdsAsync_ReturnsEmptyForUnknownEvents()
+    public async Task GetSentTriggersAsync_ReturnsEmptyForUnknownEvents()
     {
         var ct = TestContext.Current.CancellationToken;
-        var result = await _reminders.GetSentEventIdsAsync(
+        var result = await _reminders.GetSentTriggersAsync(
             ContextRef.User(TestUser),
             new[] { "non-existent-1", "non-existent-2" }, ct);
         Assert.Empty(result);
@@ -84,15 +84,47 @@ public class ReminderRepositoryTests : IDisposable
 
         Assert.True(inserted);
 
-        var sent = await _reminders.GetSentEventIdsAsync(
+        var sent = await _reminders.GetSentTriggersAsync(
             ContextRef.User(TestUser),
             new[] { eventId, "some-other-event" }, ct);
-        Assert.Contains(eventId, sent);
-        Assert.DoesNotContain("some-other-event", sent);
+        Assert.Contains((eventId, trigger), sent);
+        Assert.DoesNotContain(sent, t => t.EventId == "some-other-event");
     }
 
     [Fact]
-    public async Task GetSentEventIdsAsync_IgnoresPendingRowsWhereSentAtIsNull()
+    public async Task GetSentTriggersAsync_DistinguishesOccurrencesOfSameEvent()
+    {
+        // Recurring events fire once per occurrence under the same
+        // event_id — the latch must be trigger-granular or the second
+        // occurrence would be silently swallowed.
+        var ct = TestContext.Current.CancellationToken;
+        var eventId = await CreateEventAsync(
+            new DateTime(2026, 6, 1, 10, 0, 0, DateTimeKind.Utc),
+            reminderMinutes: 15);
+
+        var firstTrigger = new DateTime(2026, 6, 1, 9, 45, 0, DateTimeKind.Utc);
+        await _reminders.RecordSentAsync(
+            ContextRef.User(TestUser),
+            new Reminder
+            {
+                Id = "r_occ_1",
+                EventId = eventId,
+                ScheduledAt = firstTrigger,
+                SentAt = firstTrigger.AddSeconds(30),
+                ChannelType = "discord",
+                ChannelId = "dm-channel-id",
+            }, ct);
+
+        var sent = await _reminders.GetSentTriggersAsync(
+            ContextRef.User(TestUser), new[] { eventId }, ct);
+
+        var secondTrigger = new DateTime(2026, 6, 2, 9, 45, 0, DateTimeKind.Utc);
+        Assert.Contains((eventId, firstTrigger), sent);
+        Assert.DoesNotContain((eventId, secondTrigger), sent);
+    }
+
+    [Fact]
+    public async Task GetSentTriggersAsync_IgnoresPendingRowsWhereSentAtIsNull()
     {
         // The schema allows sent_at to be null (a future scheduler model
         // might insert "scheduled" rows ahead of time). The dedupe query
@@ -113,7 +145,7 @@ public class ReminderRepositoryTests : IDisposable
                 new { eventId });
         }
 
-        var sent = await _reminders.GetSentEventIdsAsync(
+        var sent = await _reminders.GetSentTriggersAsync(
             ContextRef.User(TestUser),
             new[] { eventId }, ct);
 

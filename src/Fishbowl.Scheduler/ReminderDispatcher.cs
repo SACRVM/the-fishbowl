@@ -15,10 +15,11 @@ namespace Fishbowl.Scheduler;
 // "who's on the to-line" design call that we don't have yet.
 //
 // Idempotency: each fire writes a `reminders` row with sent_at set. The
-// next tick filters those out via `IReminderRepository.GetSentEventIdsAsync`.
-// That means restart-during-window or accidental double-tick can't
-// double-notify, even though the dispatcher itself holds no in-memory
-// "already fired" set.
+// next tick filters those out via `IReminderRepository.GetSentTriggersAsync`
+// — keyed on (event_id, trigger time) so each occurrence of a recurring
+// event fires exactly once. Restart-during-window or accidental
+// double-tick can't double-notify, even though the dispatcher itself
+// holds no in-memory "already fired" set.
 //
 // Catch-up: at startup the dispatcher looks at the past 6h of triggers so
 // a downtime shorter than that backfills automatically. Older triggers are
@@ -133,8 +134,11 @@ public class ReminderDispatcher : BackgroundService
         var due = await events.ListDueRemindersAsync(ctx, fromUtc, toUtc, notAncient, ct);
         if (due.Count == 0) return 0;
 
-        var alreadySent = await reminders.GetSentEventIdsAsync(ctx, due.Select(e => e.Id), ct);
-        var toFire = due.Where(e => !alreadySent.Contains(e.Id)).ToList();
+        // Latch is (event_id, trigger) — recurring events come back as one
+        // entry per due occurrence under the same event_id, and each
+        // occurrence deserves its own notification.
+        var alreadySent = await reminders.GetSentTriggersAsync(ctx, due.Select(e => e.Id), ct);
+        var toFire = due.Where(e => !alreadySent.Contains((e.Id, TriggerOf(e)))).ToList();
         if (toFire.Count == 0) return 0;
 
         var fired = 0;
@@ -164,12 +168,11 @@ public class ReminderDispatcher : BackgroundService
                     continue; // try next platform
                 }
 
-                var trigger = ev.StartAt.AddMinutes(-(ev.ReminderMinutes ?? 0));
                 await reminders.RecordSentAsync(ctx, new Reminder
                 {
                     Id = Ulid.NewUlid().ToString(),
                     EventId = ev.Id,
-                    ScheduledAt = trigger,
+                    ScheduledAt = TriggerOf(ev),
                     SentAt = toUtc,
                     ChannelType = bot.Name,
                     ChannelId = channel.ChannelId,
@@ -185,6 +188,12 @@ public class ReminderDispatcher : BackgroundService
 
         return fired;
     }
+
+    // The latch identity for one occurrence. ListDueRemindersAsync returns
+    // UTC-normalized StartAt values (per-occurrence for recurring events),
+    // so this is deterministic across ticks and restarts.
+    internal static DateTime TriggerOf(Event ev)
+        => ev.StartAt.AddMinutes(-(ev.ReminderMinutes ?? 0));
 
     // Plain-text, deliberately short. Discord renders **bold**; other
     // platforms either render or pass through the asterisks. No PII risk —

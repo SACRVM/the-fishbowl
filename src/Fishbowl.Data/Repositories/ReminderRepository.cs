@@ -1,3 +1,4 @@
+using System.Globalization;
 using Dapper;
 using Fishbowl.Core;
 using Fishbowl.Core.Models;
@@ -20,17 +21,25 @@ public class ReminderRepository : IReminderRepository
         _logger = logger ?? NullLogger<ReminderRepository>.Instance;
     }
 
-    public async Task<IReadOnlySet<string>> GetSentEventIdsAsync(
+    public async Task<IReadOnlySet<(string EventId, DateTime TriggerAt)>> GetSentTriggersAsync(
         ContextRef ctx, IEnumerable<string> eventIds, CancellationToken ct = default)
     {
         var ids = eventIds as IReadOnlyCollection<string> ?? eventIds.ToList();
-        if (ids.Count == 0) return new HashSet<string>();
+        if (ids.Count == 0) return new HashSet<(string, DateTime)>();
 
         using var db = _dbFactory.CreateContextConnection(ctx);
-        var rows = await db.QueryAsync<string>(new CommandDefinition(
-            "SELECT event_id FROM reminders WHERE sent_at IS NOT NULL AND event_id IN @ids",
+        var rows = await db.QueryAsync<(string EventId, string ScheduledAt)>(new CommandDefinition(
+            "SELECT event_id, scheduled_at FROM reminders WHERE sent_at IS NOT NULL AND event_id IN @ids",
             new { ids }, cancellationToken: ct));
-        return new HashSet<string>(rows);
+
+        // scheduled_at strings can carry "Z", a local offset (pre-expansion
+        // rows written from Local-kind DateTimes), or no zone at all —
+        // AdjustToUniversal + AssumeUniversal collapses all three to the
+        // same UTC instant the dispatcher recomputes from start_at.
+        return rows
+            .Select(r => (r.EventId, DateTime.Parse(r.ScheduledAt, CultureInfo.InvariantCulture,
+                DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal)))
+            .ToHashSet();
     }
 
     public async Task<bool> RecordSentAsync(
@@ -42,8 +51,8 @@ public class ReminderRepository : IReminderRepository
         // concurrent tick collides on the unique implicit (id) — the caller
         // generates a fresh ULID per attempt, so true collisions come from
         // a different code path. We don't enforce a unique (event_id) here
-        // because the model could expand to multiple reminders per event;
-        // dedupe is the scheduler's job via GetSentEventIdsAsync.
+        // because recurring events legitimately produce one row per
+        // occurrence; dedupe is the scheduler's job via GetSentTriggersAsync.
         var affected = await db.ExecuteAsync(new CommandDefinition(@"
             INSERT INTO reminders (id, event_id, scheduled_at, sent_at, channel_type, channel_id)
             VALUES (@Id, @EventId, @ScheduledAt, @SentAt, @ChannelType, @ChannelId)",

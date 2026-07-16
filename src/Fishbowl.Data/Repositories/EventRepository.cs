@@ -49,15 +49,81 @@ public class EventRepository : IEventRepository
         // start_at is stored as ISO-8601, which sorts lexicographically in
         // the same order as DateTime — string comparison gives the right
         // answer without needing SQLite's date() functions.
-        return await db.QueryAsync<Event>(new CommandDefinition(@"
+        var plain = (await db.QueryAsync<Event>(new CommandDefinition(@"
             SELECT * FROM events
             WHERE start_at >= @from AND start_at < @to
+              AND (rrule IS NULL OR rrule = '')
             ORDER BY start_at ASC",
             new
             {
                 from = from.ToString("o"),
                 to = to.ToString("o"),
-            }, cancellationToken: ct));
+            }, cancellationToken: ct))).ToList();
+
+        // Recurring series can begin long before the window and still occur
+        // inside it — fetch every series that starts before the window end
+        // and expand in C# (SQL can't walk an RRULE). Series count per
+        // context is human-scale, so this stays cheap.
+        var recurring = await db.QueryAsync<Event>(new CommandDefinition(@"
+            SELECT * FROM events
+            WHERE rrule IS NOT NULL AND rrule != ''
+              AND start_at < @to
+            ORDER BY start_at ASC",
+            new { to = to.ToString("o") }, cancellationToken: ct));
+
+        var fromUtc = TimeUtil.AsUtc(from);
+        var toUtc = TimeUtil.AsUtc(to);
+        var results = plain;
+        foreach (var ev in results)
+            NormalizeTimes(ev);
+
+        foreach (var ev in recurring)
+        {
+            NormalizeTimes(ev);
+            if (!RRule.TryParse(ev.RRule, out var spec))
+            {
+                // Out-of-subset rule — degrade to the master occurrence
+                // only, exactly what the pre-expansion read path returned.
+                if (ev.StartAt >= fromUtc && ev.StartAt < toUtc)
+                    results.Add(ev);
+                continue;
+            }
+
+            var duration = ev.EndAt is DateTime end ? end - ev.StartAt : (TimeSpan?)null;
+            foreach (var occ in RRule.Expand(ev.StartAt, spec, fromUtc, toUtc))
+                results.Add(CloneAt(ev, occ, duration));
+        }
+
+        return results.OrderBy(e => e.StartAt).ToList();
+    }
+
+    // Expanded occurrence of a recurring master — same Id, shifted times.
+    private static Event CloneAt(Event ev, DateTime occStart, TimeSpan? duration) => new()
+    {
+        Id = ev.Id,
+        Title = ev.Title,
+        Description = ev.Description,
+        StartAt = occStart,
+        EndAt = duration is TimeSpan d ? occStart + d : null,
+        AllDay = ev.AllDay,
+        RRule = ev.RRule,
+        Location = ev.Location,
+        ReminderMinutes = ev.ReminderMinutes,
+        ExternalId = ev.ExternalId,
+        ExternalSource = ev.ExternalSource,
+        CreatedBy = ev.CreatedBy,
+        CreatedAt = ev.CreatedAt,
+        UpdatedAt = ev.UpdatedAt,
+        IsRecurringInstance = true,
+    };
+
+    // Stored instants are UTC but the TEXT→DateTime parse can surface them
+    // as Local/Unspecified kinds; expansion windows and the scheduler's
+    // trigger latch compare instants in C#, so pin everything to UTC here.
+    private static void NormalizeTimes(Event ev)
+    {
+        ev.StartAt = TimeUtil.AsUtc(ev.StartAt);
+        if (ev.EndAt is DateTime end) ev.EndAt = TimeUtil.AsUtc(end);
     }
 
     public async Task<string> CreateAsync(
@@ -165,10 +231,11 @@ public class EventRepository : IEventRepository
         // have identical precision, which the SQLite datetime function
         // strips. Skipping the `datetime()` cast on @from/@to would silently
         // miss matches.
-        return (await db.QueryAsync<Event>(new CommandDefinition(@"
+        var single = (await db.QueryAsync<Event>(new CommandDefinition(@"
             SELECT * FROM events
             WHERE reminder_minutes IS NOT NULL
               AND reminder_minutes >= 0
+              AND (rrule IS NULL OR rrule = '')
               AND datetime(start_at, '-' || reminder_minutes || ' minutes') >= datetime(@from)
               AND datetime(start_at, '-' || reminder_minutes || ' minutes') <  datetime(@to)
               AND datetime(start_at) >= datetime(@notAncient)
@@ -179,6 +246,50 @@ public class EventRepository : IEventRepository
                 to = to.ToString("o"),
                 notAncient = notAncient.ToString("o"),
             }, cancellationToken: ct))).ToList();
+
+        // Recurring series: any rule whose DTSTART trigger precedes the
+        // window end could have an occurrence due — SQL can't walk an
+        // RRULE, so expansion happens here. No notAncient guard needed:
+        // a trigger inside [from, to) implies the occurrence is recent.
+        var recurring = await db.QueryAsync<Event>(new CommandDefinition(@"
+            SELECT * FROM events
+            WHERE reminder_minutes IS NOT NULL
+              AND reminder_minutes >= 0
+              AND rrule IS NOT NULL AND rrule != ''
+              AND datetime(start_at, '-' || reminder_minutes || ' minutes') < datetime(@to)
+            ORDER BY start_at ASC",
+            new { to = to.ToString("o") }, cancellationToken: ct));
+
+        var results = single;
+        foreach (var ev in results)
+            NormalizeTimes(ev);
+
+        var fromUtc = TimeUtil.AsUtc(from);
+        var toUtc = TimeUtil.AsUtc(to);
+        foreach (var ev in recurring)
+        {
+            NormalizeTimes(ev);
+            var minutes = ev.ReminderMinutes!.Value;
+
+            if (!RRule.TryParse(ev.RRule, out var spec))
+            {
+                // Out-of-subset rule — same treatment as before expansion
+                // existed: a single occurrence at DTSTART.
+                var trigger = ev.StartAt.AddMinutes(-minutes);
+                if (trigger >= fromUtc && trigger < toUtc
+                    && ev.StartAt >= TimeUtil.AsUtc(notAncient))
+                    results.Add(ev);
+                continue;
+            }
+
+            // occurrence ∈ [from + minutes, to + minutes) ⇔ trigger ∈ [from, to)
+            var duration = ev.EndAt is DateTime end ? end - ev.StartAt : (TimeSpan?)null;
+            foreach (var occ in RRule.Expand(
+                ev.StartAt, spec, fromUtc.AddMinutes(minutes), toUtc.AddMinutes(minutes)))
+                results.Add(CloneAt(ev, occ, duration));
+        }
+
+        return results.OrderBy(e => e.StartAt).ToList();
     }
 
     public async Task<bool> DeleteAsync(ContextRef ctx, string id, CancellationToken ct = default)

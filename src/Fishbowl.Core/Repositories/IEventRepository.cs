@@ -15,10 +15,12 @@ public interface IEventRepository
     // for calendar-view queries so we don't over-fetch.
     Task<IEnumerable<Event>> GetAllAsync(ContextRef ctx, CancellationToken ct = default);
 
-    // Half-open range [from, to) ordered by start_at. `from`/`to` are
-    // compared against `start_at`. Recurrence (RRULE) is NOT expanded —
-    // callers see the master event; the scheduler does expansion when it
-    // fires reminders. That keeps the read path free of time-math surprises.
+    // Half-open range [from, to) ordered by start_at. Recurring events
+    // (RRULE within the supported subset — see Fishbowl.Core.Util.RRule)
+    // are expanded into per-occurrence instances flagged with
+    // IsRecurringInstance; instances share the master's Id, so writes
+    // against an instance's id edit the whole series. Out-of-subset rules
+    // degrade to the master event only.
     Task<IEnumerable<Event>> GetRangeAsync(
         ContextRef ctx, DateTime from, DateTime to, CancellationToken ct = default);
 
@@ -28,9 +30,13 @@ public interface IEventRepository
 
     // Events whose reminder *trigger time* (start_at − reminder_minutes)
     // falls in the half-open window [from, to). Used by the scheduler to
-    // find reminders that are now due. Skips events whose `start_at` is
-    // older than `notAncient` so a Saturday-down dispatcher doesn't drown
-    // in long-past triggers on Monday morning.
+    // find reminders that are now due. Recurring events are expanded: each
+    // due occurrence comes back as an IsRecurringInstance clone with
+    // StartAt set to the occurrence start, so trigger math and messages
+    // are per-occurrence. StartAt/EndAt are normalized to UTC kinds.
+    // Skips non-recurring events whose `start_at` is older than
+    // `notAncient` so a Saturday-down dispatcher doesn't drown in
+    // long-past triggers on Monday morning.
     Task<IReadOnlyList<Event>> ListDueRemindersAsync(
         ContextRef ctx, DateTime from, DateTime to, DateTime notAncient, CancellationToken ct = default);
 

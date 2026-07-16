@@ -18,4 +18,9 @@ public class Event
     public string CreatedBy { get; set; } = string.Empty;
     public DateTime CreatedAt { get; set; }
     public DateTime UpdatedAt { get; set; }
+
+    // True only on expanded RRULE occurrences returned by range reads and
+    // reminder queries — never persisted. Instances share the master's Id;
+    // clients editing an instance are editing the whole series.
+    public bool IsRecurringInstance { get; set; }
 }
