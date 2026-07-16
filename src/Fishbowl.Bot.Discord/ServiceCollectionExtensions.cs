@@ -26,6 +26,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<ISlashCommandHandler, RememberCommandHandler>();
         services.AddScoped<ISlashCommandHandler, SearchCommandHandler>();
         services.AddScoped<ISlashCommandHandler, RecentCommandHandler>();
+        services.AddScoped<ISlashCommandHandler, UpcomingCommandHandler>();
         services.AddScoped<ISlashCommandHandler, HelpCommandHandler>();
 
         services.AddHostedService<DiscordBotHostedService>();

@@ -19,6 +19,7 @@ internal sealed class BotTestFixture : IDisposable
     public IDiscordLinkRepository Links { get; }
     public ITagRepository Tags { get; }
     public INoteRepository Notes { get; }
+    public IEventRepository Events { get; }
 
     public BotTestFixture(string nameHint = "fishbowl_bot_disc_")
     {
@@ -35,6 +36,7 @@ internal sealed class BotTestFixture : IDisposable
         // directly, and the underlying NoteRepository degrades gracefully when
         // the service isn't present (see EmbeddingUnavailableException swallow).
         Notes = new NoteRepository(Factory, Tags, embeddings: null);
+        Events = new EventRepository(Factory);
     }
 
     public async Task<string> SeedUserAsync(string id = "u_alice", CancellationToken ct = default)

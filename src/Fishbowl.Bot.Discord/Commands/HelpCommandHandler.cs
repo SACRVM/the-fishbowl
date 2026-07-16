@@ -27,6 +27,7 @@ public class HelpCommandHandler : ISlashCommandHandler
             "`/remember text:<...> [title:<...>]` — save a note",
             "`/search query:<...>` — hybrid search across your notes (titles only)",
             "`/recent` — list your newest notes",
+            "`/upcoming [days:<n>]` — list your upcoming calendar events",
             "`/help` — show this message",
             string.Empty,
             "I never reveal secret content (`::secret` blocks) in chat — open them in the web UI.",
