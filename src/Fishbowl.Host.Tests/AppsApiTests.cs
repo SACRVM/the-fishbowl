@@ -336,25 +336,25 @@ public class AppsApiTests : IClassFixture<WebApplicationFactory<Program>>, IDisp
             $"App folder should be deleted, still exists at {appFolder}");
     }
 
-    // ── Task 2: Team-owner end-to-end MCP round-trip ────────────────────────
+    // ── Task 2: Space-owner end-to-end MCP round-trip ───────────────────────
 
     [Fact]
-    public async Task FullMcpRoundTrip_TeamOwner()
+    public async Task FullMcpRoundTrip_SpaceOwner()
     {
         var ct = TestContext.Current.CancellationToken;
 
-        // 1. Seed a team via TeamRepository (Alice added as owner by CreateAsync).
-        var teams = new TeamRepository(_dbFactory);
-        var team = await teams.CreateAsync(Alice, "ledger-team", ct);
+        // 1. Seed a space via SpaceRepository (Alice added as owner by CreateAsync).
+        var spaces = new SpaceRepository(_dbFactory);
+        var space = await spaces.CreateAsync(Alice, "ledger-space", ct);
 
-        // 2. Create an app under that team via REST (cookie-authed as Alice).
+        // 2. Create an app under that space via REST (cookie-authed as Alice).
         var (app, bearer) = await CreateAppAndMintKeyAsync(
-            "team", team.Slug, "ledger",
+            "space", space.Slug, "ledger",
             new[] { ScopeCatalog.AppRead, ScopeCatalog.AppWrite, ScopeCatalog.AppAdmin });
 
         Assert.Equal("ledger", app.Slug);
-        Assert.Equal("team", app.OwnerType);
-        Assert.Equal(team.Slug, app.OwnerId);
+        Assert.Equal("space", app.OwnerType);
+        Assert.Equal(space.Slug, app.OwnerId);
 
         // 3. App key was minted by CreateAppAndMintKeyAsync — use that bearer.
         var client = BearerClient(bearer);
@@ -443,7 +443,8 @@ public class AppsApiTests : IClassFixture<WebApplicationFactory<Program>>, IDisp
         SqliteConnection.ClearAllPools();
         if (Directory.Exists(_dataDir))
         {
-            try { Directory.Delete(_dataDir, true); } catch { /* swallow */ }
+            try { Directory.Delete(_dataDir, true); /* swallow */ }
+            catch { }
         }
     }
 }

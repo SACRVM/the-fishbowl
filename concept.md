@@ -54,7 +54,7 @@ Bring your friends. Bring your team. Bring your family. The Fishbowl is not just
 
 The grocery list your partner can update from their phone. The project board your team works from every morning. The family calendar that finally has everyone on the same page. The shared document folder your band, your club, your community actually uses.
 
-Each team gets its own space — separate from your personal data, but part of the same system. You can belong to multiple teams, switch between contexts naturally, and always know what is yours and what is shared. The same simplicity, the same search, the same chat interface — just more people in the bowl.
+Each group gets its own **Space** — separate from your personal data, but part of the same system. You can belong to multiple Spaces, switch between contexts naturally, and always know what is yours and what is shared. The same simplicity, the same search, the same chat interface — just more people in the bowl.
 
 ---
 
@@ -142,27 +142,27 @@ One search bar for everything. Notes, events, contacts, tasks, documents — all
 
 ---
 
-## Teams
+## Spaces
 
 The Fishbowl is personal by default — but you are not alone.
 
-Invite your team, your friends, your family. Each group gets its own shared space, completely separate from your private data but working with exactly the same system. The grocery list your partner updates from their phone. The project board your team works from every morning. The shared calendar that finally has everyone on the same page.
+A **Space** is a self-contained workspace with its own data, completely separate from your private notes but working with exactly the same system. A Space can be shared — invite your team, your friends, your family — or it can stand alone, a clean namespace of its own (even an AI agent gets its own Space to remember in). "Shared" is just a property of a Space, not a different kind of thing.
 
-Every team member uses The Fishbowl the way they already do — through their chat client, through the web UI, through whatever feels natural. The shared space just means everyone is working from the same truth.
+Invite people into a Space and you get the grocery list your partner updates from their phone, the project board your team works from every morning, the shared calendar that finally has everyone on the same page. Everyone uses The Fishbowl the way they already do — through their chat client, through the web UI, through whatever feels natural. The Space just means everyone is working from the same truth.
 
-You can belong to multiple teams. Switch between them with a single word in chat. Your personal notes stay personal. The team's notes stay shared. Nothing leaks across.
+You can belong to multiple Spaces. Switch between them with a single word in chat. Your personal notes stay personal. A Space's notes stay in that Space. Nothing leaks across.
 
 ---
 
 ## Apps
 
-Personal and team spaces have a fixed structure — notes, calendar, contacts, tasks, documents. That structure is intentional and stable. It does not change.
+Personal and shared Spaces have a fixed structure — notes, calendar, contacts, tasks, documents. That structure is intentional and stable. It does not change.
 
 But sometimes you need something different. A staff roster. A booking tracker. An inventory. A content calendar. Something with its own fields, its own rules, its own shape.
 
 That is what Apps are for.
 
-An App lives in its own database — completely separate from your personal data and your team data. It has its own schema, defined by you. Its own access rules. Its own workflows. It can belong to a single user or be shared with a team. It can be exported as a template — schema and configuration, no data — and shared with anyone else running The Fishbowl.
+An App lives in its own database — completely separate from your personal data and your Spaces' data. It has its own schema, defined by you. Its own access rules. Its own workflows. It can belong to a single user or to a Space. It can be exported as a template — schema and configuration, no data — and shared with anyone else running The Fishbowl.
 
 Create an App without code using the simple form builder. Define the fields you need, choose who can read and write, add a basic workflow. The Fishbowl generates the interface automatically. For the 1% who want more — drop down to a script, write a custom rule, build a custom renderer.
 
@@ -172,10 +172,10 @@ Apps are searchable alongside everything else. A task created by an App workflow
 fishbowl-data/
   users/
     abc123.db              ← fixed schema: notes, events, contacts, tasks
-  teams/
+  spaces/
     acme-team.db           ← fixed schema: same, shared
   apps/
-    staff-roster.db        ← dynamic schema, owned by a user or team
+    staff-roster.db        ← dynamic schema, owned by a user or space
     grocery-list.db        ← dynamic schema
     booking-tracker.db     ← dynamic schema
 ```
@@ -226,14 +226,14 @@ Every trigger receives the entry and a context object. The context provides the 
 ```javascript
 trigger('after:insert', (entry, ctx) => {
     ctx.owner              // the App owner
-    ctx.team               // the team the App belongs to (if any)
+    ctx.space              // the space the App belongs to (if any)
     ctx.actor              // who triggered the action
     ctx.user('abc123')     // any specific user by ID
 
     // all of the above have .notify()
     ctx.owner.notify(`New entry added: ${entry.Name}`);
     ctx.actor.notify('Your entry was saved');
-    ctx.team.notify('Roster updated');
+    ctx.space.notify('Roster updated');
 });
 ```
 
@@ -1083,45 +1083,45 @@ The binary itself is not backed up — it can always be re-downloaded. Only the 
 
 ---
 
-## Teams — Technical Details
+## Spaces — Technical Details
 
-Users can belong to multiple teams. A team has its own SQLite database — structurally identical to a user database. The same schema, the same services, the same search. Just shared.
+Users can belong to multiple Spaces. A Space has its own SQLite database — structurally identical to a user database. The same schema, the same services, the same search. Just shared (or solo).
 
 ```
 fishbowl-data/
   users/
     abc123.db        ← fixed schema, private data only
     def456.db        ← fixed schema, another user
-  teams/
+  spaces/
     acme-team.db     ← fixed schema, shared by members
     project-x.db     ← fixed schema, selected members only
   apps/
-    staff-roster.db  ← dynamic schema, owned by user or team
+    staff-roster.db  ← dynamic schema, owned by user or space
     grocery-list.db  ← dynamic schema
 ```
 
-### Team Membership
+### Space Membership
 
-Stored in `global.db`. Four roles — nothing more complex is needed:
+Stored in `system.db`. Four roles — nothing more complex is needed:
 
 ```sql
-CREATE TABLE teams (
+CREATE TABLE spaces (
     id           TEXT PRIMARY KEY,
     name         TEXT NOT NULL,
     slug         TEXT NOT NULL UNIQUE,  -- 'acme-team', 'project-x'
     created_at   TEXT NOT NULL
 );
 
-CREATE TABLE team_members (
-    team_id    TEXT NOT NULL REFERENCES teams(id),
+CREATE TABLE space_members (
+    space_id   TEXT NOT NULL REFERENCES spaces(id),
     user_id    TEXT NOT NULL REFERENCES users(id),
     role       TEXT NOT NULL CHECK(role IN ('owner','admin','member','readonly')),
     joined_at  TEXT NOT NULL,
-    PRIMARY KEY (team_id, user_id)
+    PRIMARY KEY (space_id, user_id)
 );
 ```
 
-| Role | Can read | Can write | Can invite | Can delete team |
+| Role | Can read | Can write | Can invite | Can delete space |
 |---|---|---|---|---|
 | readonly | ✓ | ✗ | ✗ | ✗ |
 | member | ✓ | ✓ | ✗ | ✗ |
@@ -1130,11 +1130,11 @@ CREATE TABLE team_members (
 
 ### Context Switching
 
-The `UserDatabaseFactory` becomes a `ContextDatabaseFactory`. One extra parameter — personal or team context. Same code, same migrations, same search engine.
+The `UserDatabaseFactory` becomes a `ContextDatabaseFactory`. One extra parameter — personal or space context. Same code, same migrations, same search engine.
 
 ```csharp
 public Task<IDbConnection> GetConnectionAsync(string contextId, ContextType type)
-// type = ContextType.User | ContextType.Team
+// type = ContextType.User | ContextType.Space
 ```
 
 ### Collection Security Rules
@@ -1156,9 +1156,9 @@ Users who want nothing more than this never touch rules. Users who want granular
 
 ```javascript
 // Identity
-member()           // is a team member
-admin()            // is team admin or owner
-owner()            // is team owner
+member()           // is a space member
+admin()            // is space admin or owner
+owner()            // is space owner
 creator()          // created this specific entry
 owner_of(entry)    // entry.created_by === current_user
 authenticated()    // is logged in at all
@@ -1236,7 +1236,7 @@ Bot: "Save to which context?"
      🎸 Project X
 ```
 
-Teams are a v0.1 architecture decision — retrofitting this later would be painful. The schema and factory pattern must exist from day one even if the UI for managing teams comes in v0.2.
+Spaces are a v0.1 architecture decision — retrofitting this later would be painful. The schema and factory pattern must exist from day one even if the UI for managing Spaces comes in v0.2.
 
 ---
 
@@ -1460,10 +1460,10 @@ v0.5  — Agent Ready
         Telegram bot (second chat client)
 
 v0.6  — Apps
-        App database (dynamic schema, separate from user/team DB)
+        App database (dynamic schema, separate from user/space DB)
         Custom field definitions, Views (Table / Kanban / List)
         Simple If→Then Workflows
-        User + Team ownership per App
+        User + Space ownership per App
         App Security Rules (Firebase-style .rules file)
         Creator-owns-delete enforced everywhere
         App Permissions (iOS-style prompts, secrets structurally excluded)

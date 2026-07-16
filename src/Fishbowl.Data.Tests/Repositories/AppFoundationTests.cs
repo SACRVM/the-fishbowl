@@ -10,8 +10,7 @@ using Xunit;
 namespace Fishbowl.Data.Tests.Repositories;
 
 // Apps platform — Phase B.1 foundation smoke tests. Pins:
-//  * system.db rebuilds api_keys cleanly into v7 (CHECK widened, owner_* added,
-//    legacy rows preserved with NULL owners)
+//  * system.db rebuilds api_keys cleanly into v8 (V7 owner_* cols + V8 rename)
 //  * AppRef → CreateAppConnection opens <ownerFolder>/apps/<id>/app.db
 //  * AppRepository CRUD against an owner DB
 //  * ApiKeyRepository.IssueAsync(AppRef) → lookup → AppRef claim roundtrip
@@ -38,8 +37,9 @@ public class AppFoundationTests : IDisposable
     {
         using var sys = _factory.CreateSystemConnection();
 
+        // V7 added owner columns; V8 ran on top — current head is 8.
         var version = sys.ExecuteScalar<long>("PRAGMA user_version");
-        Assert.Equal(7, version);
+        Assert.Equal(8, version);
 
         var cols = sys.Query<string>("SELECT name FROM pragma_table_info('api_keys')").ToList();
         Assert.Contains("owner_type", cols);
@@ -59,11 +59,11 @@ public class AppFoundationTests : IDisposable
     }
 
     [Fact]
-    public void ResolveAppPath_TeamOwner_PointsUnderTeamsFolder()
+    public void ResolveAppPath_SpaceOwner_PointsUnderSpacesFolder()
     {
-        var path = _factory.ResolveAppPath(AppRef.OfTeam("tX", "aY"));
+        var path = _factory.ResolveAppPath(AppRef.OfSpace("sX", "aY"));
         Assert.Equal(
-            Path.Combine(_factory.TeamsRoot, "tX", "apps", "aY", DatabaseFactory.AppDbFileName),
+            Path.Combine(_factory.SpacesRoot, "sX", "apps", "aY", DatabaseFactory.AppDbFileName),
             path);
     }
 
@@ -77,13 +77,13 @@ public class AppFoundationTests : IDisposable
     [Fact]
     public void CreateAppConnection_CreatesFolderTreeAndFile()
     {
-        var appRef = AppRef.OfTeam("teamZ", "appZ");
+        var appRef = AppRef.OfSpace("spaceZ", "appZ");
 
         using (var conn = _factory.CreateAppConnection(appRef)) { /* open + close */ }
 
         Assert.True(File.Exists(_factory.ResolveAppPath(appRef)));
         Assert.True(Directory.Exists(
-            Path.Combine(_factory.TeamsRoot, "teamZ", "apps", "appZ")));
+            Path.Combine(_factory.SpacesRoot, "spaceZ", "apps", "appZ")));
     }
 
     [Fact]
@@ -146,13 +146,13 @@ public class AppFoundationTests : IDisposable
     public async Task ApiKeyRepository_IssueAppKey_PersistsOwnerColumns()
     {
         var apps = new AppRepository(_factory);
-        var owner = ContextRef.Team("teamA");
+        var owner = ContextRef.Space("spaceA");
         // owner DB needs the apps registry — ensure it exists by creating an app
         var app = await apps.CreateAsync(owner, "ledger", "Ledger", Alice,
             TestContext.Current.CancellationToken);
 
         var keys = new ApiKeyRepository(_factory);
-        var appRef = AppRef.OfTeam("teamA", app.Id);
+        var appRef = AppRef.OfSpace("spaceA", app.Id);
 
         var issued = await keys.IssueAsync(Alice, appRef, "ledger-key",
             new[] { ScopeCatalog.AppRead, ScopeCatalog.AppWrite, ScopeCatalog.AppAdmin },
@@ -160,13 +160,13 @@ public class AppFoundationTests : IDisposable
 
         Assert.Equal("app", issued.Record.ContextType);
         Assert.Equal(app.Id, issued.Record.ContextId);
-        Assert.Equal("team", issued.Record.OwnerType);
-        Assert.Equal("teamA", issued.Record.OwnerId);
+        Assert.Equal("space", issued.Record.OwnerType);
+        Assert.Equal("spaceA", issued.Record.OwnerId);
 
         var looked = await keys.LookupAsync(issued.RawToken, TestContext.Current.CancellationToken);
         Assert.NotNull(looked);
-        Assert.Equal("team", looked!.OwnerType);
-        Assert.Equal("teamA", looked.OwnerId);
+        Assert.Equal("space", looked!.OwnerType);
+        Assert.Equal("spaceA", looked.OwnerId);
         Assert.Equal(app.Id, looked.ContextId);
     }
 
@@ -187,14 +187,14 @@ public class AppFoundationTests : IDisposable
             new Claim(McpContextClaims.UserId, Alice),
             new Claim(McpContextClaims.ContextType, "app"),
             new Claim(McpContextClaims.ContextId, "aZ"),
-            new Claim(McpContextClaims.OwnerType, "team"),
-            new Claim(McpContextClaims.OwnerId, "teamA"),
+            new Claim(McpContextClaims.OwnerType, "space"),
+            new Claim(McpContextClaims.OwnerId, "spaceA"),
         }, "Test");
         var principal = new ClaimsPrincipal(identity);
 
         var appRef = McpContextClaims.ResolveApp(principal);
-        Assert.Equal("team", appRef.OwnerType);
-        Assert.Equal("teamA", appRef.OwnerId);
+        Assert.Equal("space", appRef.OwnerType);
+        Assert.Equal("spaceA", appRef.OwnerId);
         Assert.Equal("aZ", appRef.AppId);
 
         // Resolve() collapses the same principal to ContextRef.App(appId).
@@ -216,10 +216,10 @@ public class AppFoundationTests : IDisposable
         Assert.Throws<InvalidOperationException>(() => McpContextClaims.ResolveApp(principal));
     }
 
-    // ── Task 1: CHECK-constraint enforcement for system v7 ──────────────────
+    // ── Task 1: CHECK-constraint enforcement for system v8 ──────────────────
 
     [Fact]
-    public void SystemV7_CheckRejectsAppKey_WithNullOwners()
+    public void SystemV8_CheckRejectsAppKey_WithNullOwners()
     {
         // context_type='app' but owner_type/owner_id both NULL — the compound
         // CHECK ((context_type = 'app') = (owner_type IS NOT NULL AND owner_id IS NOT NULL))
@@ -241,7 +241,7 @@ public class AppFoundationTests : IDisposable
     }
 
     [Fact]
-    public void SystemV7_CheckRejectsUserKey_WithOwners()
+    public void SystemV8_CheckRejectsUserKey_WithOwners()
     {
         // context_type='user' plus a non-null owner pair — the same CHECK
         // enforces equivalence both ways, so this must also be rejected.

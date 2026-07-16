@@ -61,7 +61,7 @@ public static class ApiKeysApi
             CreateKeyRequest body,
             ClaimsPrincipal user,
             IApiKeyRepository keys,
-            ITeamRepository teams,
+            ISpaceRepository spaces,
             CancellationToken ct) =>
         {
             if (RejectIfBearer(user) is { } reject) return reject;
@@ -89,22 +89,22 @@ public static class ApiKeysApi
                 // must not mint a key scoped to someone else's personal space.
                 context = ContextRef.User(userId);
             }
-            else if (body.ContextType == "team")
+            else if (body.ContextType == "space")
             {
                 if (string.IsNullOrWhiteSpace(body.ContextId))
-                    return Results.BadRequest(new { error = "contextId is required for team keys" });
-                var team = await teams.GetBySlugAsync(body.ContextId, ct);
-                if (team is null) return Results.NotFound(new { error = "unknown team" });
-                var role = await teams.GetMembershipAsync(team.Id, userId, ct);
+                    return Results.BadRequest(new { error = "contextId is required for space keys" });
+                var space = await spaces.GetBySlugAsync(body.ContextId, ct);
+                if (space is null) return Results.NotFound(new { error = "unknown space" });
+                var role = await spaces.GetMembershipAsync(space.Id, userId, ct);
                 if (role is null) return Results.Forbid();
                 // Bind to slug (URL-identifier) not id — tokens are issued
-                // against the name the user asked for, and team slugs never
+                // against the name the user asked for, and space slugs never
                 // change (unique across the deployment).
-                context = ContextRef.Team(team.Slug);
+                context = ContextRef.Space(space.Slug);
             }
             else
             {
-                return Results.BadRequest(new { error = "contextType must be 'user' or 'team'" });
+                return Results.BadRequest(new { error = "contextType must be 'user' or 'space'" });
             }
 
             var issued = await keys.IssueAsync(userId, context, body.Name, body.Scopes, ct);

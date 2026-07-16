@@ -16,25 +16,26 @@ public class SystemSchemaV2MigrationTests : IDisposable
     }
 
     [Fact]
-    public async Task ApplyV2_OnFreshSystemDb_CreatesTeamsAndMembers()
+    public async Task ApplyV2_OnFreshSystemDb_CreatesSpacesAndMembers()
     {
         var factory = new DatabaseFactory(_dataDir);
         using var db = factory.CreateSystemConnection();
 
-        // Migrations chain: fresh DB rolls all the way up to the current head.
+        // Migrations chain: fresh DB rolls all the way up to the current head
+        // (V8). V2 created teams/team_members; V8 renamed them to spaces/space_members.
         var version = await db.ExecuteScalarAsync<long>("PRAGMA user_version");
         Assert.True(version >= 2, $"expected version >= 2, got {version}");
 
         var tables = (await db.QueryAsync<string>(
             "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")).ToList();
-        Assert.Contains("teams", tables);
-        Assert.Contains("team_members", tables);
+        Assert.Contains("spaces", tables);
+        Assert.Contains("space_members", tables);
     }
 
     [Fact]
     public async Task ApplyV2_FromV1_PreservesExistingUsers()
     {
-        // Seed a v1 system.db with a user, then run factory to trigger V2.
+        // Seed a v1 system.db with a user, then run factory to trigger V2+.
         var systemPath = Path.Combine(_dataDir, "system.db");
         using (var seed = new SqliteConnection($"Data Source={systemPath}"))
         {
@@ -71,7 +72,7 @@ public class SystemSchemaV2MigrationTests : IDisposable
     }
 
     [Fact]
-    public async Task TeamsTable_EnforcesUniqueSlugs()
+    public async Task SpacesTable_EnforcesUniqueSlugs()
     {
         var factory = new DatabaseFactory(_dataDir);
         using var db = factory.CreateSystemConnection();
@@ -83,17 +84,17 @@ public class SystemSchemaV2MigrationTests : IDisposable
 
         var now = DateTime.UtcNow.ToString("o");
         await db.ExecuteAsync(
-            "INSERT INTO teams(id, slug, name, created_by, created_at) VALUES ('t1', 'fishbowl', 'First', 'owner', @now)",
+            "INSERT INTO spaces(id, slug, name, created_by, created_at) VALUES ('t1', 'fishbowl', 'First', 'owner', @now)",
             new { now });
 
         await Assert.ThrowsAsync<SqliteException>(() =>
             db.ExecuteAsync(
-                "INSERT INTO teams(id, slug, name, created_by, created_at) VALUES ('t2', 'fishbowl', 'Second', 'owner', @now)",
+                "INSERT INTO spaces(id, slug, name, created_by, created_at) VALUES ('t2', 'fishbowl', 'Second', 'owner', @now)",
                 new { now }));
     }
 
     [Fact]
-    public async Task TeamMembers_RejectsInvalidRole()
+    public async Task SpaceMembers_RejectsInvalidRole()
     {
         var factory = new DatabaseFactory(_dataDir);
         using var db = factory.CreateSystemConnection();
@@ -103,12 +104,12 @@ public class SystemSchemaV2MigrationTests : IDisposable
             "INSERT INTO users(id, name, email, created_at) VALUES ('u1', 'U', 'u@u', @now)",
             new { now });
         await db.ExecuteAsync(
-            "INSERT INTO teams(id, slug, name, created_by, created_at) VALUES ('t1', 'slug', 'T', 'u1', @now)",
+            "INSERT INTO spaces(id, slug, name, created_by, created_at) VALUES ('t1', 'slug', 'T', 'u1', @now)",
             new { now });
 
         await Assert.ThrowsAsync<SqliteException>(() =>
             db.ExecuteAsync(
-                "INSERT INTO team_members(team_id, user_id, role, joined_at) VALUES ('t1', 'u1', 'god', @now)",
+                "INSERT INTO space_members(space_id, user_id, role, joined_at) VALUES ('t1', 'u1', 'god', @now)",
                 new { now }));
     }
 

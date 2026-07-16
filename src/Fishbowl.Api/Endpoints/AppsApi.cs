@@ -18,10 +18,10 @@ namespace Fishbowl.Api.Endpoints;
 //   3) /api/v1/apps/{ownerType}/{ownerId}/{slug}/{...} — bearer-or-cookie
 //      data plane gated by `app:*` scopes
 //
-// `{ownerType}` ∈ {user, team}. `{ownerId}` is the user-id for user owners
-// and the team-slug for team owners — operator-friendly URLs. The resolver
-// translates slug → team-ULID before any repository call, matching the
-// pattern in TeamsApi.cs / ResolveTeamAsync.
+// `{ownerType}` ∈ {user, space}. `{ownerId}` is the user-id for user owners
+// and the space-slug for space owners — operator-friendly URLs. The resolver
+// translates slug → space-ULID before any repository call, matching the
+// pattern in SpacesApi.cs / ResolveSpaceAsync.
 public static class AppsApi
 {
     private const string ApiKeyScheme = "ApiKey";
@@ -60,7 +60,7 @@ public static class AppsApi
             CreateAppRequest body,
             ClaimsPrincipal user,
             IAppRepository apps,
-            ITeamRepository teams,
+            ISpaceRepository spaces,
             CancellationToken ct) =>
         {
             if (RejectIfBearer(user) is { } reject) return reject;
@@ -70,7 +70,7 @@ public static class AppsApi
                 || string.IsNullOrWhiteSpace(body.Name) || body.Owner is null)
                 return Results.BadRequest(new { error = "slug, name, owner.{type,id} are required" });
 
-            var (owner, error) = await ResolveOwnerForCreateAsync(body.Owner, userId, teams, ct);
+            var (owner, error) = await ResolveOwnerForCreateAsync(body.Owner, userId, spaces, ct);
             if (error is not null) return error;
 
             try
@@ -88,25 +88,25 @@ public static class AppsApi
         group.MapGet("/", async (
             ClaimsPrincipal user,
             IAppRepository apps,
-            ITeamRepository teams,
+            ISpaceRepository spaces,
             CancellationToken ct) =>
         {
             if (RejectIfBearer(user) is { } reject) return reject;
             var userId = user.FindFirst(McpContextClaims.UserId)?.Value;
             if (string.IsNullOrEmpty(userId)) return Results.Unauthorized();
 
-            // Personal apps + apps from every team the user belongs to.
+            // Personal apps + apps from every space the user belongs to.
             var personal = await apps.ListByOwnerAsync(ContextRef.User(userId), ct);
             var rows = new List<AppSummary>(personal.Count);
             foreach (var a in personal)
                 rows.Add(new AppSummary(a.Id, a.Slug, a.Name, "user", userId, a.CreatedAt));
 
-            var memberships = await teams.ListByMemberAsync(userId, ct);
+            var memberships = await spaces.ListByMemberAsync(userId, ct);
             foreach (var m in memberships)
             {
-                var teamApps = await apps.ListByOwnerAsync(ContextRef.Team(m.Team.Id), ct);
-                foreach (var a in teamApps)
-                    rows.Add(new AppSummary(a.Id, a.Slug, a.Name, "team", m.Team.Slug, a.CreatedAt));
+                var spaceApps = await apps.ListByOwnerAsync(ContextRef.Space(m.Space.Id), ct);
+                foreach (var a in spaceApps)
+                    rows.Add(new AppSummary(a.Id, a.Slug, a.Name, "space", m.Space.Slug, a.CreatedAt));
             }
             return Results.Ok(rows);
         }).WithName("ListApps");
@@ -114,9 +114,9 @@ public static class AppsApi
         group.MapGet("/{ownerType}/{ownerId}/{slug}", async (
             string ownerType, string ownerId, string slug,
             ClaimsPrincipal user, IAppRepository apps,
-            ITeamRepository teams, CancellationToken ct) =>
+            ISpaceRepository spaces, CancellationToken ct) =>
         {
-            var resolved = await ResolveAppAsync(ownerType, ownerId, slug, user, apps, teams, ct);
+            var resolved = await ResolveAppAsync(ownerType, ownerId, slug, user, apps, spaces, ct);
             if (resolved.Error is not null) return resolved.Error;
             var (app, owner) = (resolved.App!, resolved.Owner!.Value);
             return Results.Ok(new AppSummary(app.Id, app.Slug, app.Name,
@@ -127,14 +127,14 @@ public static class AppsApi
             string ownerType, string ownerId, string slug,
             RenameAppRequest body,
             ClaimsPrincipal user, IAppRepository apps,
-            ITeamRepository teams, CancellationToken ct) =>
+            ISpaceRepository spaces, CancellationToken ct) =>
         {
             if (RejectIfBearer(user) is { } reject) return reject;
             if (body is null || string.IsNullOrWhiteSpace(body.Name))
                 return Results.BadRequest(new { error = "name is required" });
-            var resolved = await ResolveAppAsync(ownerType, ownerId, slug, user, apps, teams, ct);
+            var resolved = await ResolveAppAsync(ownerType, ownerId, slug, user, apps, spaces, ct);
             if (resolved.Error is not null) return resolved.Error;
-            if (resolved.TeamRole is { } role && !role.CanWrite())
+            if (resolved.SpaceRole is { } role && !role.CanWrite())
                 return Results.Forbid();
             var ok = await apps.RenameAsync(resolved.Owner!.Value, resolved.App!.Id, body.Name.Trim(), ct);
             return ok ? Results.NoContent() : Results.NotFound();
@@ -144,7 +144,7 @@ public static class AppsApi
             string ownerType, string ownerId, string slug,
             string? confirm,
             ClaimsPrincipal user, IAppRepository apps,
-            ITeamRepository teams, DatabaseFactory dbFactory,
+            ISpaceRepository spaces, DatabaseFactory dbFactory,
             CancellationToken ct) =>
         {
             if (RejectIfBearer(user) is { } reject) return reject;
@@ -152,11 +152,11 @@ public static class AppsApi
             // confirmation as ?confirm=<slug> instead. Same safety knob.
             if (!string.Equals(confirm, slug, StringComparison.Ordinal))
                 return Results.BadRequest(new { error = "?confirm=<slug> must match the app slug" });
-            var resolved = await ResolveAppAsync(ownerType, ownerId, slug, user, apps, teams, ct);
+            var resolved = await ResolveAppAsync(ownerType, ownerId, slug, user, apps, spaces, ct);
             if (resolved.Error is not null) return resolved.Error;
-            // Team apps: only owner-level roles can delete. Personal apps:
+            // Space apps: only owner-level roles can delete. Personal apps:
             // owner check already done by ResolveAppAsync.
-            if (resolved.TeamRole is { } role && !role.CanDeleteTeam())
+            if (resolved.SpaceRole is { } role && !role.CanDeleteSpace())
                 return Results.Forbid();
 
             var appRef = new AppRef(ownerType, resolved.Owner!.Value.Id, resolved.App!.Id);
@@ -186,7 +186,7 @@ public static class AppsApi
             CreateAppKeyRequest body,
             ClaimsPrincipal user,
             IAppRepository apps,
-            ITeamRepository teams,
+            ISpaceRepository spaces,
             IApiKeyRepository keys,
             CancellationToken ct) =>
         {
@@ -201,7 +201,7 @@ public static class AppsApi
             if (unknown.Count > 0)
                 return Results.BadRequest(new { error = "unknown scope(s)", unknown });
 
-            var resolved = await ResolveAppAsync(ownerType, ownerId, slug, user, apps, teams, ct);
+            var resolved = await ResolveAppAsync(ownerType, ownerId, slug, user, apps, spaces, ct);
             if (resolved.Error is not null) return resolved.Error;
 
             var appRef = new AppRef(ownerType, resolved.Owner!.Value.Id, resolved.App!.Id);
@@ -214,14 +214,14 @@ public static class AppsApi
         group.MapGet("/", async (
             string ownerType, string ownerId, string slug,
             ClaimsPrincipal user, IAppRepository apps,
-            ITeamRepository teams, IApiKeyRepository keys,
+            ISpaceRepository spaces, IApiKeyRepository keys,
             DatabaseFactory dbFactory,
             CancellationToken ct) =>
         {
             if (RejectIfBearer(user) is { } reject) return reject;
             var userId = user.FindFirst(McpContextClaims.UserId)?.Value;
             if (string.IsNullOrEmpty(userId)) return Results.Unauthorized();
-            var resolved = await ResolveAppAsync(ownerType, ownerId, slug, user, apps, teams, ct);
+            var resolved = await ResolveAppAsync(ownerType, ownerId, slug, user, apps, spaces, ct);
             if (resolved.Error is not null) return resolved.Error;
 
             // List from the user's own minted keys filtered by AppId. The api_keys
@@ -258,10 +258,10 @@ public static class AppsApi
 
         group.MapGet("/tables", async (
             string ownerType, string ownerId, string slug,
-            ClaimsPrincipal user, IAppRepository apps, ITeamRepository teams,
+            ClaimsPrincipal user, IAppRepository apps, ISpaceRepository spaces,
             IAppSchemaRepository schema, CancellationToken ct) =>
         {
-            var resolved = await ResolveAppAsync(ownerType, ownerId, slug, user, apps, teams, ct);
+            var resolved = await ResolveAppAsync(ownerType, ownerId, slug, user, apps, spaces, ct);
             if (resolved.Error is not null) return resolved.Error;
             var appRef = new AppRef(ownerType, resolved.Owner!.Value.Id, resolved.App!.Id);
             return Results.Ok(new { tables = await schema.ListTablesAsync(appRef, ct) });
@@ -270,10 +270,10 @@ public static class AppsApi
         group.MapPost("/tables", async (
             string ownerType, string ownerId, string slug,
             JsonElement body,
-            ClaimsPrincipal user, IAppRepository apps, ITeamRepository teams,
+            ClaimsPrincipal user, IAppRepository apps, ISpaceRepository spaces,
             IAppSchemaRepository schema, CancellationToken ct) =>
         {
-            var resolved = await ResolveAppAsync(ownerType, ownerId, slug, user, apps, teams, ct);
+            var resolved = await ResolveAppAsync(ownerType, ownerId, slug, user, apps, spaces, ct);
             if (resolved.Error is not null) return resolved.Error;
             var name = AppJsonParsers.RequireString(body, "table");
             var cols = AppJsonParsers.ParseColumns(body, "columns");
@@ -284,10 +284,10 @@ public static class AppsApi
 
         group.MapGet("/tables/{table}", async (
             string ownerType, string ownerId, string slug, string table,
-            ClaimsPrincipal user, IAppRepository apps, ITeamRepository teams,
+            ClaimsPrincipal user, IAppRepository apps, ISpaceRepository spaces,
             IAppSchemaRepository schema, CancellationToken ct) =>
         {
-            var resolved = await ResolveAppAsync(ownerType, ownerId, slug, user, apps, teams, ct);
+            var resolved = await ResolveAppAsync(ownerType, ownerId, slug, user, apps, spaces, ct);
             if (resolved.Error is not null) return resolved.Error;
             var appRef = new AppRef(ownerType, resolved.Owner!.Value.Id, resolved.App!.Id);
             var desc = await schema.DescribeTableAsync(appRef, table, ct);
@@ -297,10 +297,10 @@ public static class AppsApi
         group.MapPatch("/tables/{table}", async (
             string ownerType, string ownerId, string slug, string table,
             AlterTableRequest body,
-            ClaimsPrincipal user, IAppRepository apps, ITeamRepository teams,
+            ClaimsPrincipal user, IAppRepository apps, ISpaceRepository spaces,
             IAppSchemaRepository schema, CancellationToken ct) =>
         {
-            var resolved = await ResolveAppAsync(ownerType, ownerId, slug, user, apps, teams, ct);
+            var resolved = await ResolveAppAsync(ownerType, ownerId, slug, user, apps, spaces, ct);
             if (resolved.Error is not null) return resolved.Error;
             var appRef = new AppRef(ownerType, resolved.Owner!.Value.Id, resolved.App!.Id);
             switch (body.Operation?.ToLowerInvariant())
@@ -328,10 +328,10 @@ public static class AppsApi
 
         group.MapDelete("/tables/{table}", async (
             string ownerType, string ownerId, string slug, string table,
-            ClaimsPrincipal user, IAppRepository apps, ITeamRepository teams,
+            ClaimsPrincipal user, IAppRepository apps, ISpaceRepository spaces,
             IAppSchemaRepository schema, CancellationToken ct) =>
         {
-            var resolved = await ResolveAppAsync(ownerType, ownerId, slug, user, apps, teams, ct);
+            var resolved = await ResolveAppAsync(ownerType, ownerId, slug, user, apps, spaces, ct);
             if (resolved.Error is not null) return resolved.Error;
             var appRef = new AppRef(ownerType, resolved.Owner!.Value.Id, resolved.App!.Id);
             await schema.DropTableAsync(appRef, table, ct);
@@ -341,10 +341,10 @@ public static class AppsApi
         group.MapPost("/tables/{table}/indexes", async (
             string ownerType, string ownerId, string slug, string table,
             JsonElement body,
-            ClaimsPrincipal user, IAppRepository apps, ITeamRepository teams,
+            ClaimsPrincipal user, IAppRepository apps, ISpaceRepository spaces,
             IAppSchemaRepository schema, CancellationToken ct) =>
         {
-            var resolved = await ResolveAppAsync(ownerType, ownerId, slug, user, apps, teams, ct);
+            var resolved = await ResolveAppAsync(ownerType, ownerId, slug, user, apps, spaces, ct);
             if (resolved.Error is not null) return resolved.Error;
             var appRef = new AppRef(ownerType, resolved.Owner!.Value.Id, resolved.App!.Id);
             var column = AppJsonParsers.RequireString(body, "column");
@@ -357,10 +357,10 @@ public static class AppsApi
         group.MapPost("/rows/{table}", async (
             string ownerType, string ownerId, string slug, string table,
             JsonElement body,
-            ClaimsPrincipal user, IAppRepository apps, ITeamRepository teams,
+            ClaimsPrincipal user, IAppRepository apps, ISpaceRepository spaces,
             IAppRowRepository rows, CancellationToken ct) =>
         {
-            var resolved = await ResolveAppAsync(ownerType, ownerId, slug, user, apps, teams, ct);
+            var resolved = await ResolveAppAsync(ownerType, ownerId, slug, user, apps, spaces, ct);
             if (resolved.Error is not null) return resolved.Error;
             var appRef = new AppRef(ownerType, resolved.Owner!.Value.Id, resolved.App!.Id);
             var fields = AppJsonParsers.ToDict(body);
@@ -372,10 +372,10 @@ public static class AppsApi
         group.MapGet("/rows/{table}/{id}", async (
             string ownerType, string ownerId, string slug, string table, string id,
             bool? includeDeleted,
-            ClaimsPrincipal user, IAppRepository apps, ITeamRepository teams,
+            ClaimsPrincipal user, IAppRepository apps, ISpaceRepository spaces,
             IAppRowRepository rows, CancellationToken ct) =>
         {
-            var resolved = await ResolveAppAsync(ownerType, ownerId, slug, user, apps, teams, ct);
+            var resolved = await ResolveAppAsync(ownerType, ownerId, slug, user, apps, spaces, ct);
             if (resolved.Error is not null) return resolved.Error;
             var appRef = new AppRef(ownerType, resolved.Owner!.Value.Id, resolved.App!.Id);
             var row = await rows.GetAsync(appRef, table, id, includeDeleted ?? false, ct);
@@ -385,10 +385,10 @@ public static class AppsApi
         group.MapPatch("/rows/{table}/{id}", async (
             string ownerType, string ownerId, string slug, string table, string id,
             JsonElement body,
-            ClaimsPrincipal user, IAppRepository apps, ITeamRepository teams,
+            ClaimsPrincipal user, IAppRepository apps, ISpaceRepository spaces,
             IAppRowRepository rows, CancellationToken ct) =>
         {
-            var resolved = await ResolveAppAsync(ownerType, ownerId, slug, user, apps, teams, ct);
+            var resolved = await ResolveAppAsync(ownerType, ownerId, slug, user, apps, spaces, ct);
             if (resolved.Error is not null) return resolved.Error;
             var appRef = new AppRef(ownerType, resolved.Owner!.Value.Id, resolved.App!.Id);
             var patch = AppJsonParsers.ToDict(body);
@@ -400,10 +400,10 @@ public static class AppsApi
         group.MapDelete("/rows/{table}/{id}", async (
             string ownerType, string ownerId, string slug, string table, string id,
             bool? hard,
-            ClaimsPrincipal user, IAppRepository apps, ITeamRepository teams,
+            ClaimsPrincipal user, IAppRepository apps, ISpaceRepository spaces,
             IAppRowRepository rows, CancellationToken ct) =>
         {
-            var resolved = await ResolveAppAsync(ownerType, ownerId, slug, user, apps, teams, ct);
+            var resolved = await ResolveAppAsync(ownerType, ownerId, slug, user, apps, spaces, ct);
             if (resolved.Error is not null) return resolved.Error;
             var appRef = new AppRef(ownerType, resolved.Owner!.Value.Id, resolved.App!.Id);
             var actor = user.FindFirst(McpContextClaims.UserId)?.Value;
@@ -413,10 +413,10 @@ public static class AppsApi
 
         group.MapPost("/rows/{table}/{id}/restore", async (
             string ownerType, string ownerId, string slug, string table, string id,
-            ClaimsPrincipal user, IAppRepository apps, ITeamRepository teams,
+            ClaimsPrincipal user, IAppRepository apps, ISpaceRepository spaces,
             IAppRowRepository rows, CancellationToken ct) =>
         {
-            var resolved = await ResolveAppAsync(ownerType, ownerId, slug, user, apps, teams, ct);
+            var resolved = await ResolveAppAsync(ownerType, ownerId, slug, user, apps, spaces, ct);
             if (resolved.Error is not null) return resolved.Error;
             var appRef = new AppRef(ownerType, resolved.Owner!.Value.Id, resolved.App!.Id);
             var actor = user.FindFirst(McpContextClaims.UserId)?.Value;
@@ -429,10 +429,10 @@ public static class AppsApi
         group.MapPost("/query/{table}", async (
             string ownerType, string ownerId, string slug, string table,
             JsonElement body,
-            ClaimsPrincipal user, IAppRepository apps, ITeamRepository teams,
+            ClaimsPrincipal user, IAppRepository apps, ISpaceRepository spaces,
             IAppRowRepository rows, CancellationToken ct) =>
         {
-            var resolved = await ResolveAppAsync(ownerType, ownerId, slug, user, apps, teams, ct);
+            var resolved = await ResolveAppAsync(ownerType, ownerId, slug, user, apps, spaces, ct);
             if (resolved.Error is not null) return resolved.Error;
             var appRef = new AppRef(ownerType, resolved.Owner!.Value.Id, resolved.App!.Id);
             var spec = AppJsonParsers.ParseQuerySpec(body);
@@ -443,10 +443,10 @@ public static class AppsApi
         group.MapPost("/count/{table}", async (
             string ownerType, string ownerId, string slug, string table,
             JsonElement body,
-            ClaimsPrincipal user, IAppRepository apps, ITeamRepository teams,
+            ClaimsPrincipal user, IAppRepository apps, ISpaceRepository spaces,
             IAppRowRepository rows, CancellationToken ct) =>
         {
-            var resolved = await ResolveAppAsync(ownerType, ownerId, slug, user, apps, teams, ct);
+            var resolved = await ResolveAppAsync(ownerType, ownerId, slug, user, apps, spaces, ct);
             if (resolved.Error is not null) return resolved.Error;
             var appRef = new AppRef(ownerType, resolved.Owner!.Value.Id, resolved.App!.Id);
             var spec = AppJsonParsers.ParseQuerySpec(body);
@@ -471,20 +471,20 @@ public static class AppsApi
     private record AppResolution(
         Fishbowl.Core.Models.App? App,
         ContextRef? Owner,
-        TeamRole? TeamRole,
+        SpaceRole? SpaceRole,
         IResult? Error);
 
     // Resolves {ownerType,ownerId,slug} → (App, owner-ContextRef) and runs
     // the same trust checks every data/lifecycle handler needs:
-    //   * cookie principals: owner-user or team-member-of
+    //   * cookie principals: owner-user or space-member-of
     //   * Bearer principals: token's AppRef must agree with the URL triple
     //
-    // The translation team-slug → team-ULID lives here so the rest of the API
-    // can treat ContextRef.Team(id) uniformly.
+    // The translation space-slug → space-ULID lives here so the rest of the API
+    // can treat ContextRef.Space(id) uniformly.
     private static async Task<AppResolution> ResolveAppAsync(
         string ownerType, string ownerId, string slug,
         ClaimsPrincipal user,
-        IAppRepository apps, ITeamRepository teams,
+        IAppRepository apps, ISpaceRepository spaces,
         CancellationToken ct)
     {
         var userId = user.FindFirst(McpContextClaims.UserId)?.Value;
@@ -492,7 +492,7 @@ public static class AppsApi
             return new AppResolution(null, null, null, Results.Unauthorized());
 
         ContextRef owner;
-        TeamRole? teamRole = null;
+        SpaceRole? spaceRole = null;
 
         if (string.Equals(ownerType, AppRef.OwnerTypeUser, StringComparison.Ordinal))
         {
@@ -502,49 +502,49 @@ public static class AppsApi
                 return new AppResolution(null, null, null, Results.Forbid());
             owner = ContextRef.User(ownerId);
         }
-        else if (string.Equals(ownerType, AppRef.OwnerTypeTeam, StringComparison.Ordinal))
+        else if (string.Equals(ownerType, AppRef.OwnerTypeSpace, StringComparison.Ordinal))
         {
-            var team = await teams.GetBySlugAsync(ownerId, ct);
-            if (team is null)
+            var space = await spaces.GetBySlugAsync(ownerId, ct);
+            if (space is null)
                 return new AppResolution(null, null, null, Results.NotFound());
 
             if (user.Identity?.AuthenticationType == ApiKeyScheme)
             {
-                // Bearer: owner_id claim must be this team's ULID (apps use ULID consistently).
+                // Bearer: owner_id claim must be this space's ULID (apps use ULID consistently).
                 var claimedOwnerId = user.FindFirst(McpContextClaims.OwnerId)?.Value;
-                if (!string.Equals(claimedOwnerId, team.Id, StringComparison.Ordinal))
+                if (!string.Equals(claimedOwnerId, space.Id, StringComparison.Ordinal))
                     return new AppResolution(null, null, null, Results.Forbid());
             }
             else
             {
-                var role = await teams.GetMembershipAsync(team.Id, userId, ct);
+                var role = await spaces.GetMembershipAsync(space.Id, userId, ct);
                 if (role is null) return new AppResolution(null, null, null, Results.Forbid());
-                teamRole = role;
+                spaceRole = role;
             }
-            owner = ContextRef.Team(team.Id);
+            owner = ContextRef.Space(space.Id);
         }
         else
         {
             return new AppResolution(null, null, null,
-                Results.BadRequest(new { error = "ownerType must be 'user' or 'team'" }));
+                Results.BadRequest(new { error = "ownerType must be 'user' or 'space'" }));
         }
 
         var app = await apps.GetBySlugAsync(owner, slug, ct);
-        if (app is null) return new AppResolution(null, owner, teamRole, Results.NotFound());
+        if (app is null) return new AppResolution(null, owner, spaceRole, Results.NotFound());
 
         // Bearer: app-id claim must agree with the URL's resolved app.
         if (user.Identity?.AuthenticationType == ApiKeyScheme)
         {
             var claimedAppId = user.FindFirst(McpContextClaims.ContextId)?.Value;
             if (!string.Equals(claimedAppId, app.Id, StringComparison.Ordinal))
-                return new AppResolution(app, owner, teamRole, Results.Forbid());
+                return new AppResolution(app, owner, spaceRole, Results.Forbid());
         }
 
-        return new AppResolution(app, owner, teamRole, null);
+        return new AppResolution(app, owner, spaceRole, null);
     }
 
     private static async Task<(ContextRef? Owner, IResult? Error)> ResolveOwnerForCreateAsync(
-        OwnerRef owner, string userId, ITeamRepository teams, CancellationToken ct)
+        OwnerRef owner, string userId, ISpaceRepository spaces, CancellationToken ct)
     {
         if (string.Equals(owner.Type, AppRef.OwnerTypeUser, StringComparison.Ordinal))
         {
@@ -554,18 +554,18 @@ public static class AppsApi
                 return (null, Results.Forbid());
             return (ContextRef.User(userId), null);
         }
-        if (string.Equals(owner.Type, AppRef.OwnerTypeTeam, StringComparison.Ordinal))
+        if (string.Equals(owner.Type, AppRef.OwnerTypeSpace, StringComparison.Ordinal))
         {
-            var team = await teams.GetBySlugAsync(owner.Id, ct);
-            if (team is null) return (null, Results.NotFound());
-            var role = await teams.GetMembershipAsync(team.Id, userId, ct);
+            var space = await spaces.GetBySlugAsync(owner.Id, ct);
+            if (space is null) return (null, Results.NotFound());
+            var role = await spaces.GetMembershipAsync(space.Id, userId, ct);
             if (role is null) return (null, Results.Forbid());
             // App creation = workspace-shaping. Members may create on behalf
-            // of their team; readonly viewers may not.
+            // of their space; readonly viewers may not.
             if (!role.Value.CanWrite()) return (null, Results.Forbid());
-            return (ContextRef.Team(team.Id), null);
+            return (ContextRef.Space(space.Id), null);
         }
-        return (null, Results.BadRequest(new { error = "owner.type must be 'user' or 'team'" }));
+        return (null, Results.BadRequest(new { error = "owner.type must be 'user' or 'space'" }));
     }
 
     private static IResult? RejectIfBearer(ClaimsPrincipal user)

@@ -62,9 +62,9 @@
     };
 
     // Context switch flips the underlying DB. Tag names + colours come from
-    // that DB, so a team tag won't exist in the personal registry (and vice
+    // that DB, so a space tag won't exist in the personal registry (and vice
     // versa) — drop the cache so the next all()/colorFor() call re-hydrates
-    // from the new context. Without this, a tag added in a team workspace
+    // from the new context. Without this, a tag added in a space workspace
     // never shows up until a manual reload.
     window.addEventListener("fb:context-changed", () => {
         if (fb.tags) fb.tags.invalidate();

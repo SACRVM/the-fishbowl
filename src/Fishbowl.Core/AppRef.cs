@@ -1,8 +1,8 @@
 namespace Fishbowl.Core;
 
 // Three-coordinate routing for an App's `app.db` file:
-//   ownerType: "user" | "team"
-//   ownerId:   ULID of the owning user or team
+//   ownerType: "user" | "space"
+//   ownerId:   ULID of the owning user or space
 //   appId:     ULID of the app itself (also the folder name under apps/)
 //
 // Separate from `ContextRef` on purpose. `ContextRef` is two coordinates
@@ -13,13 +13,13 @@ namespace Fishbowl.Core;
 public readonly record struct AppRef(string OwnerType, string OwnerId, string AppId)
 {
     public const string OwnerTypeUser = "user";
-    public const string OwnerTypeTeam = "team";
+    public const string OwnerTypeSpace = "space";
 
     public static AppRef OfUser(string userId, string appId) =>
         new(OwnerTypeUser, userId, appId);
 
-    public static AppRef OfTeam(string teamId, string appId) =>
-        new(OwnerTypeTeam, teamId, appId);
+    public static AppRef OfSpace(string spaceId, string appId) =>
+        new(OwnerTypeSpace, spaceId, appId);
 
     // The ContextRef of the *owner* DB (where the `apps` registry row lives).
     // App-row repos use this to read/write the registry; the AppRef itself
@@ -27,7 +27,7 @@ public readonly record struct AppRef(string OwnerType, string OwnerId, string Ap
     public ContextRef OwnerContext() => OwnerType switch
     {
         OwnerTypeUser => ContextRef.User(OwnerId),
-        OwnerTypeTeam => ContextRef.Team(OwnerId),
+        OwnerTypeSpace => ContextRef.Space(OwnerId),
         _ => throw new InvalidOperationException($"Unknown AppRef owner type: {OwnerType}"),
     };
 }

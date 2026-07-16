@@ -18,8 +18,8 @@ public static class NotesApi
 
         // Resolves the request to a ContextRef. Cookie users get ContextRef.User
         // (their fishbowl_user_id). Bearer users get whatever their key was
-        // issued against — personal → User, team → Team. So a team-scoped
-        // Bearer hitting /api/v1/notes reads TEAM notes, not the user's
+        // issued against — personal → User, space → Space. So a space-scoped
+        // Bearer hitting /api/v1/notes reads SPACE notes, not the user's
         // personal notes. Acceptance criterion from the MCP memory plan.
         static ContextRef? TryResolveContext(ClaimsPrincipal user)
         {

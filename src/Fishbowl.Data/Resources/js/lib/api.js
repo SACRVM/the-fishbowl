@@ -4,8 +4,8 @@
  *
  * Context-aware: every CRUD wrapper routes through `fb.context.endpoint(path)`
  * so a request for "/notes" becomes "/api/v1/notes" when personal is active
- * or "/api/v1/teams/SLUG/notes" when a team is active. Context-agnostic
- * endpoints (teams CRUD, API keys, auth, /me) stay on the personal path.
+ * or "/api/v1/spaces/SLUG/notes" when a space is active. Context-agnostic
+ * endpoints (spaces CRUD, API keys, auth, /me) stay on the personal path.
  */
 (function () {
     const base = "/api/v1";
@@ -38,7 +38,7 @@
         return res.text();
     }
 
-    // `ctx(path)` prefixes `path` with the current team slug when a team
+    // `ctx(path)` prefixes `path` with the current space slug when a space
     // context is active. Called lazily (per request) so switching context
     // doesn't require rebuilding the fb.api object.
     function ctx(path) {
@@ -252,11 +252,11 @@
             if (!res.ok) throw new ApiError(res.status, await res.text().catch(() => ""));
             return res.blob();
         }),
-        teams: {
-            list:   ()       => request("/teams"),
-            get:    (slug)   => request(`/teams/${encodeURIComponent(slug)}`),
-            create: ({ name }) => request("/teams", { method: "POST", body: JSON.stringify({ name }) }),
-            delete: (slug)   => request(`/teams/${encodeURIComponent(slug)}`, { method: "DELETE" }),
+        spaces: {
+            list:   ()       => request("/spaces"),
+            get:    (slug)   => request(`/spaces/${encodeURIComponent(slug)}`),
+            create: ({ name }) => request("/spaces", { method: "POST", body: JSON.stringify({ name }) }),
+            delete: (slug)   => request(`/spaces/${encodeURIComponent(slug)}`, { method: "DELETE" }),
         },
         // API keys — the create() response is the ONLY moment the raw token
         // exists on the client. Store nothing; surface it to the user with a

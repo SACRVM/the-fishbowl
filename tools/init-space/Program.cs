@@ -7,14 +7,14 @@ using Fishbowl.Core.Repositories;
 using Fishbowl.Data;
 using Fishbowl.Data.Repositories;
 
-// Dev utility: bootstraps a Fishbowl team and mints a team-scoped API
-// key. Idempotent — re-running for an existing slug reuses the team
+// Dev utility: bootstraps a Fishbowl space and mints a space-scoped API
+// key. Idempotent — re-running for an existing slug reuses the space
 // and just mints a fresh key. The bearer goes to stdout (pipe-friendly);
 // a short status banner goes to stderr. How the bearer is stored and
 // passed to a downstream agent CLI is the consumer's concern.
 //
 // Usage:
-//   dotnet run --project tools/init-team -- <slug> \
+//   dotnet run --project tools/init-space -- <slug> \
 //       [--data <path>] \
 //       [--user <id>] \
 //       [--name <display>] \
@@ -27,13 +27,13 @@ using Fishbowl.Data.Repositories;
 //   --user        first user in system.db
 //   --name        same as <slug>
 //   --scopes      every read:* and write:* scope (full read/write)
-//   --key-name    team-<slug>
+//   --key-name    space-<slug>
 
 var args_ = args;
 
 if (args_.Length == 0 || args_[0].StartsWith("--"))
 {
-    Console.Error.WriteLine("usage: init-team <slug> [--data <path>] [--user <id>] [--name <display>] [--scopes <csv>] [--key-name <label>]");
+    Console.Error.WriteLine("usage: init-space <slug> [--data <path>] [--user <id>] [--name <display>] [--scopes <csv>] [--key-name <label>]");
     return 2;
 }
 
@@ -42,7 +42,7 @@ var dataPath = GetArg("--data") ?? "fishbowl-data";
 var userIdArg = GetArg("--user");
 var displayName = GetArg("--name") ?? slug;
 var scopesArg = GetArg("--scopes");
-var keyName = GetArg("--key-name") ?? $"team-{slug}";
+var keyName = GetArg("--key-name") ?? $"space-{slug}";
 
 // Slugs are URL fragments and folder-path components. Restricting to
 // lowercase letters, digits, and hyphens keeps them safe across both
@@ -99,24 +99,24 @@ else
     userId = first;
 }
 
-// Resolve or create the team. Idempotency: an existing team with the same
+// Resolve or create the space. Idempotency: an existing space with the same
 // slug is reused only if the requested user is already a member; otherwise
-// the user is asking us to graft a key onto someone else's team, which is
+// the user is asking us to graft a key onto someone else's space, which is
 // a permission decision we don't want to make from a CLI.
-var teams = new TeamRepository(factory);
-var existing = await teams.GetBySlugAsync(slug);
-Team team;
+var spaces = new SpaceRepository(factory);
+var existing = await spaces.GetBySlugAsync(slug);
+Space space;
 bool created;
 if (existing is not null)
 {
-    var role = await teams.GetMembershipAsync(existing.Id, userId);
+    var role = await spaces.GetMembershipAsync(existing.Id, userId);
     if (role is null)
     {
-        Console.Error.WriteLine($"error: team '{slug}' already exists but user {userId} is not a member.");
+        Console.Error.WriteLine($"error: space '{slug}' already exists but user {userId} is not a member.");
         Console.Error.WriteLine("       use --user <id> to target an owning member, or pick a different slug.");
         return 7;
     }
-    team = existing;
+    space = existing;
     created = false;
 }
 else
@@ -126,10 +126,10 @@ else
     // verbatim. If the slug somehow drifted (e.g. someone else races a
     // create with the same slug between GetBySlug and Create), surface it
     // loudly rather than silently using a -2 variant.
-    team = await teams.CreateAsync(userId, slug);
-    if (!string.Equals(team.Slug, slug, StringComparison.Ordinal))
+    space = await spaces.CreateAsync(userId, slug);
+    if (!string.Equals(space.Slug, slug, StringComparison.Ordinal))
     {
-        Console.Error.WriteLine($"error: created team got slug '{team.Slug}' instead of requested '{slug}' (race?). Aborting.");
+        Console.Error.WriteLine($"error: created space got slug '{space.Slug}' instead of requested '{slug}' (race?). Aborting.");
         return 8;
     }
     // CreateAsync sets `name` to the trimmed input; honour --name if the
@@ -138,15 +138,15 @@ else
     {
         using var sys = factory.CreateSystemConnection();
         await sys.ExecuteAsync(
-            "UPDATE teams SET name = @Name WHERE id = @Id",
-            new { Name = displayName, team.Id });
-        team.Name = displayName;
+            "UPDATE spaces SET name = @Name WHERE id = @Id",
+            new { Name = displayName, space.Id });
+        space.Name = displayName;
     }
     created = true;
 }
 
 var keys = new ApiKeyRepository(factory);
-var issued = await keys.IssueAsync(userId, ContextRef.Team(team.Id), keyName, scopes);
+var issued = await keys.IssueAsync(userId, ContextRef.Space(space.Id), keyName, scopes);
 
 // Bearer goes to stdout so it can be piped/captured; the status banner
 // goes to stderr so it won't poison a captured token. Downstream wiring
@@ -155,10 +155,10 @@ var issued = await keys.IssueAsync(userId, ContextRef.Team(team.Id), keyName, sc
 Console.WriteLine(issued.RawToken);
 
 Console.Error.WriteLine();
-Console.Error.WriteLine($"# {(created ? "Created" : "Reused")} team '{team.Slug}' (id={team.Id}) with display name '{team.Name}'.");
+Console.Error.WriteLine($"# {(created ? "Created" : "Reused")} space '{space.Slug}' (id={space.Id}) with display name '{space.Name}'.");
 Console.Error.WriteLine($"# Minted API key id={issued.Record.Id} name='{keyName}'");
 Console.Error.WriteLine($"# Scopes: {string.Join(", ", scopes)}");
-Console.Error.WriteLine($"# Team URL (browser): /#/team/{slug}/notes");
+Console.Error.WriteLine($"# Space URL (browser): /#/space/{slug}/notes");
 Console.Error.WriteLine($"# MCP endpoint (agent): /mcp  (Authorization: Bearer <token from stdout>)");
 return 0;
 

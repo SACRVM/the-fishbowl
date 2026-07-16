@@ -16,8 +16,8 @@ namespace Fishbowl.Api.Endpoints;
 //
 // The download uses SQLite's online backup API — safe even while the
 // source DB is being written to. Cookie-only: Bearer tokens are scoped
-// to agent/MCP workflows, not wholesale data exfil. Team variant in
-// TeamsApi.cs restricts further to owner (see CanDeleteTeam — a full
+// to agent/MCP workflows, not wholesale data exfil. Space variant in
+// SpacesApi.cs restricts further to owner (see CanDeleteSpace — a full
 // DB copy is a terminal action, not a member-level read).
 public static class ExportApi
 {
@@ -37,7 +37,7 @@ public static class ExportApi
             try { ctx = McpContextClaims.Resolve(user); }
             catch (InvalidOperationException) { return Results.Unauthorized(); }
 
-            // Team exports live on the team-nested path and are role-gated
+            // Space exports live on the space-nested path and are role-gated
             // there. A cookie caller landing here is always a personal export.
             if (ctx.Type != ContextType.User) return Results.Forbid();
 

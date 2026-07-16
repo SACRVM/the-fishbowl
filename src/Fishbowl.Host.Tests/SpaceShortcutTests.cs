@@ -7,18 +7,18 @@ using Xunit;
 
 namespace Fishbowl.Host.Tests;
 
-// `/t/<slug>` is a short URL alias that 302s to the SPA team workspace
-// (`/#/team/<slug>/notes`). The route is anonymous and unauthenticated;
-// team-existence is deliberately checked downstream by the SPA so the
+// `/s/<slug>` is a short URL alias that 302s to the SPA space workspace
+// (`/#/space/<slug>/notes`). The route is anonymous and unauthenticated;
+// space-existence is deliberately checked downstream by the SPA so the
 // redirect stays cheap and stateless.
-public class TeamShortcutTests : IClassFixture<WebApplicationFactory<Program>>, IDisposable
+public class SpaceShortcutTests : IClassFixture<WebApplicationFactory<Program>>, IDisposable
 {
     private readonly WebApplicationFactory<Program> _factory;
     private readonly string _testDataDir;
 
-    public TeamShortcutTests(WebApplicationFactory<Program> factory)
+    public SpaceShortcutTests(WebApplicationFactory<Program> factory)
     {
-        _testDataDir = Path.Combine(Path.GetTempPath(), "fishbowl_team_shortcut_tests_" + Path.GetRandomFileName());
+        _testDataDir = Path.Combine(Path.GetTempPath(), "fishbowl_space_shortcut_tests_" + Path.GetRandomFileName());
         Directory.CreateDirectory(_testDataDir);
 
         _factory = factory.WithWebHostBuilder(builder =>
@@ -43,21 +43,21 @@ public class TeamShortcutTests : IClassFixture<WebApplicationFactory<Program>>, 
     }
 
     [Fact]
-    public async Task TeamShortcut_RedirectsToTeamHashRoute()
+    public async Task SpaceShortcut_RedirectsToSpaceHashRoute()
     {
         var client = _factory.CreateClient(new WebApplicationFactoryClientOptions
         {
             AllowAutoRedirect = false
         });
 
-        var response = await client.GetAsync("/t/lighthouse", TestContext.Current.CancellationToken);
+        var response = await client.GetAsync("/s/lighthouse", TestContext.Current.CancellationToken);
 
         Assert.Equal(HttpStatusCode.Redirect, response.StatusCode);
-        Assert.Equal("/#/team/lighthouse/notes", response.Headers.Location?.OriginalString);
+        Assert.Equal("/#/space/lighthouse/notes", response.Headers.Location?.OriginalString);
     }
 
     [Fact]
-    public async Task TeamShortcut_AnonymousAccess_NoLoginRedirect()
+    public async Task SpaceShortcut_AnonymousAccess_NoLoginRedirect()
     {
         // The shortcut must not 401 or bounce to /login — it's a public
         // alias that the SPA's auth gate handles after the hash route mounts.
@@ -66,14 +66,14 @@ public class TeamShortcutTests : IClassFixture<WebApplicationFactory<Program>>, 
             AllowAutoRedirect = false
         });
 
-        var response = await client.GetAsync("/t/anything", TestContext.Current.CancellationToken);
+        var response = await client.GetAsync("/s/anything", TestContext.Current.CancellationToken);
 
         Assert.Equal(HttpStatusCode.Redirect, response.StatusCode);
-        Assert.StartsWith("/#/team/", response.Headers.Location?.OriginalString);
+        Assert.StartsWith("/#/space/", response.Headers.Location?.OriginalString);
     }
 
     [Fact]
-    public async Task TeamShortcut_EscapesSlugForUrl()
+    public async Task SpaceShortcut_EscapesSlugForUrl()
     {
         // Defence-in-depth: even though the slug regex on creation rules out
         // funny chars, we don't trust the route segment server-side and
@@ -83,7 +83,7 @@ public class TeamShortcutTests : IClassFixture<WebApplicationFactory<Program>>, 
             AllowAutoRedirect = false
         });
 
-        var response = await client.GetAsync("/t/has%20space", TestContext.Current.CancellationToken);
+        var response = await client.GetAsync("/s/has%20space", TestContext.Current.CancellationToken);
 
         Assert.Equal(HttpStatusCode.Redirect, response.StatusCode);
         // %20 round-trips to "has%20space" through Uri.EscapeDataString.

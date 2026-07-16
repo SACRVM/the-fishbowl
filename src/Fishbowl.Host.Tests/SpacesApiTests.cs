@@ -11,21 +11,21 @@ using Xunit;
 
 namespace Fishbowl.Host.Tests;
 
-public class TeamsApiTests : IClassFixture<WebApplicationFactory<Program>>, IDisposable
+public class SpacesApiTests : IClassFixture<WebApplicationFactory<Program>>, IDisposable
 {
     private readonly WebApplicationFactory<Program> _factory;
     private readonly string _dataDir;
-    private const string UserA = "teams_user_a";
-    private const string UserB = "teams_user_b";
+    private const string UserA = "spaces_user_a";
+    private const string UserB = "spaces_user_b";
 
-    public TeamsApiTests(WebApplicationFactory<Program> factory)
+    public SpacesApiTests(WebApplicationFactory<Program> factory)
     {
-        _dataDir = Path.Combine(Path.GetTempPath(), "fishbowl_teams_api_" + Path.GetRandomFileName());
+        _dataDir = Path.Combine(Path.GetTempPath(), "fishbowl_spaces_api_" + Path.GetRandomFileName());
         Directory.CreateDirectory(_dataDir);
 
         var testFactory = new DatabaseFactory(_dataDir);
 
-        // teams.created_by / team_members.user_id both FK to users(id), but
+        // spaces.created_by / space_members.user_id both FK to users(id), but
         // TestAuthHandler only synthesises claims — it never writes the user
         // row. Pre-seed both test users so the FKs are satisfied.
         using (var db = testFactory.CreateSystemConnection())
@@ -70,32 +70,32 @@ public class TeamsApiTests : IClassFixture<WebApplicationFactory<Program>>, IDis
     }
 
     [Fact]
-    public async Task CreateTeam_Succeeds_AndSlugIsDerivedFromName()
+    public async Task CreateSpace_Succeeds_AndSlugIsDerivedFromName()
     {
         var client = _factory.CreateClient();
 
         var resp = await client.SendAsync(
-            Req(HttpMethod.Post, "/api/v1/teams", UserA, new { name = "Fishbowl Dev" }),
+            Req(HttpMethod.Post, "/api/v1/spaces", UserA, new { name = "Fishbowl Dev" }),
             TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.Created, resp.StatusCode);
 
-        var team = await resp.Content.ReadFromJsonAsync<Team>(TestContext.Current.CancellationToken);
-        Assert.NotNull(team);
-        Assert.Equal("fishbowl-dev", team!.Slug);
-        Assert.Equal("Fishbowl Dev", team.Name);
+        var space = await resp.Content.ReadFromJsonAsync<Space>(TestContext.Current.CancellationToken);
+        Assert.NotNull(space);
+        Assert.Equal("fishbowl-dev", space!.Slug);
+        Assert.Equal("Fishbowl Dev", space.Name);
     }
 
     [Fact]
-    public async Task ListTeams_ReturnsOnlyMyTeams()
+    public async Task ListSpaces_ReturnsOnlyMySpaces()
     {
         var client = _factory.CreateClient();
 
-        await client.SendAsync(Req(HttpMethod.Post, "/api/v1/teams", UserA, new { name = "Mine" }),
+        await client.SendAsync(Req(HttpMethod.Post, "/api/v1/spaces", UserA, new { name = "Mine" }),
             TestContext.Current.CancellationToken);
-        await client.SendAsync(Req(HttpMethod.Post, "/api/v1/teams", UserB, new { name = "Theirs" }),
+        await client.SendAsync(Req(HttpMethod.Post, "/api/v1/spaces", UserB, new { name = "Theirs" }),
             TestContext.Current.CancellationToken);
 
-        var resp = await client.SendAsync(Req(HttpMethod.Get, "/api/v1/teams", UserA),
+        var resp = await client.SendAsync(Req(HttpMethod.Get, "/api/v1/spaces", UserA),
             TestContext.Current.CancellationToken);
         resp.EnsureSuccessStatusCode();
         var list = await resp.Content.ReadFromJsonAsync<List<Dictionary<string, object>>>(
@@ -107,57 +107,57 @@ public class TeamsApiTests : IClassFixture<WebApplicationFactory<Program>>, IDis
     }
 
     [Fact]
-    public async Task GetTeam_NonMember_403()
+    public async Task GetSpace_NonMember_403()
     {
         var client = _factory.CreateClient();
 
-        await client.SendAsync(Req(HttpMethod.Post, "/api/v1/teams", UserA, new { name = "Private" }),
+        await client.SendAsync(Req(HttpMethod.Post, "/api/v1/spaces", UserA, new { name = "Private" }),
             TestContext.Current.CancellationToken);
 
         var resp = await client.SendAsync(
-            Req(HttpMethod.Get, "/api/v1/teams/private", UserB),
+            Req(HttpMethod.Get, "/api/v1/spaces/private", UserB),
             TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.Forbidden, resp.StatusCode);
     }
 
     [Fact]
-    public async Task GetTeam_UnknownSlug_404()
+    public async Task GetSpace_UnknownSlug_404()
     {
         var client = _factory.CreateClient();
         var resp = await client.SendAsync(
-            Req(HttpMethod.Get, "/api/v1/teams/nope", UserA),
+            Req(HttpMethod.Get, "/api/v1/spaces/nope", UserA),
             TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.NotFound, resp.StatusCode);
     }
 
     [Fact]
-    public async Task DeleteTeam_NonOwner_403()
+    public async Task DeleteSpace_NonOwner_403()
     {
         var client = _factory.CreateClient();
 
-        await client.SendAsync(Req(HttpMethod.Post, "/api/v1/teams", UserA, new { name = "Shared" }),
+        await client.SendAsync(Req(HttpMethod.Post, "/api/v1/spaces", UserA, new { name = "Shared" }),
             TestContext.Current.CancellationToken);
 
-        var del = await client.SendAsync(Req(HttpMethod.Delete, "/api/v1/teams/shared", UserB),
+        var del = await client.SendAsync(Req(HttpMethod.Delete, "/api/v1/spaces/shared", UserB),
             TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.Forbidden, del.StatusCode);
     }
 
     [Fact]
-    public async Task DeleteTeam_Owner_204()
+    public async Task DeleteSpace_Owner_204()
     {
         var client = _factory.CreateClient();
 
-        await client.SendAsync(Req(HttpMethod.Post, "/api/v1/teams", UserA, new { name = "Doomed" }),
+        await client.SendAsync(Req(HttpMethod.Post, "/api/v1/spaces", UserA, new { name = "Doomed" }),
             TestContext.Current.CancellationToken);
 
-        var del = await client.SendAsync(Req(HttpMethod.Delete, "/api/v1/teams/doomed", UserA),
+        var del = await client.SendAsync(Req(HttpMethod.Delete, "/api/v1/spaces/doomed", UserA),
             TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.NoContent, del.StatusCode);
     }
 
     [Fact]
-    public async Task TeamNotes_AreIsolatedFromPersonalNotes()
+    public async Task SpaceNotes_AreIsolatedFromPersonalNotes()
     {
         var client = _factory.CreateClient();
 
@@ -166,14 +166,14 @@ public class TeamsApiTests : IClassFixture<WebApplicationFactory<Program>>, IDis
             new Note { Title = "personal-only" }),
             TestContext.Current.CancellationToken);
 
-        // Create team + team note.
-        await client.SendAsync(Req(HttpMethod.Post, "/api/v1/teams", UserA, new { name = "Project X" }),
+        // Create space + space note.
+        await client.SendAsync(Req(HttpMethod.Post, "/api/v1/spaces", UserA, new { name = "Project X" }),
             TestContext.Current.CancellationToken);
-        await client.SendAsync(Req(HttpMethod.Post, "/api/v1/teams/project-x/notes", UserA,
-            new Note { Title = "team-only" }),
+        await client.SendAsync(Req(HttpMethod.Post, "/api/v1/spaces/project-x/notes", UserA,
+            new Note { Title = "space-only" }),
             TestContext.Current.CancellationToken);
 
-        // Personal list must not include the team note.
+        // Personal list must not include the space note.
         var personalResp = await client.SendAsync(Req(HttpMethod.Get, "/api/v1/notes", UserA),
             TestContext.Current.CancellationToken);
         var personal = await personalResp.Content.ReadFromJsonAsync<List<Note>>(
@@ -181,36 +181,36 @@ public class TeamsApiTests : IClassFixture<WebApplicationFactory<Program>>, IDis
         Assert.Single(personal!);
         Assert.Equal("personal-only", personal![0].Title);
 
-        // Team list must not include the personal note.
-        var teamResp = await client.SendAsync(Req(HttpMethod.Get, "/api/v1/teams/project-x/notes", UserA),
+        // Space list must not include the personal note.
+        var spaceResp = await client.SendAsync(Req(HttpMethod.Get, "/api/v1/spaces/project-x/notes", UserA),
             TestContext.Current.CancellationToken);
-        var teamNotes = await teamResp.Content.ReadFromJsonAsync<List<Note>>(
+        var spaceNotes = await spaceResp.Content.ReadFromJsonAsync<List<Note>>(
             TestContext.Current.CancellationToken);
-        Assert.Single(teamNotes!);
-        Assert.Equal("team-only", teamNotes![0].Title);
+        Assert.Single(spaceNotes!);
+        Assert.Equal("space-only", spaceNotes![0].Title);
     }
 
     [Fact]
-    public async Task TeamNotes_NonMemberCannotRead()
+    public async Task SpaceNotes_NonMemberCannotRead()
     {
         var client = _factory.CreateClient();
 
-        await client.SendAsync(Req(HttpMethod.Post, "/api/v1/teams", UserA, new { name = "Secret Club" }),
+        await client.SendAsync(Req(HttpMethod.Post, "/api/v1/spaces", UserA, new { name = "Secret Club" }),
             TestContext.Current.CancellationToken);
-        await client.SendAsync(Req(HttpMethod.Post, "/api/v1/teams/secret-club/notes", UserA,
+        await client.SendAsync(Req(HttpMethod.Post, "/api/v1/spaces/secret-club/notes", UserA,
             new Note { Title = "hidden" }),
             TestContext.Current.CancellationToken);
 
-        var resp = await client.SendAsync(Req(HttpMethod.Get, "/api/v1/teams/secret-club/notes", UserB),
+        var resp = await client.SendAsync(Req(HttpMethod.Get, "/api/v1/spaces/secret-club/notes", UserB),
             TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.Forbidden, resp.StatusCode);
     }
 
     [Fact]
-    public async Task TeamsApi_Unauthenticated_401()
+    public async Task SpacesApi_Unauthenticated_401()
     {
         var client = _factory.CreateClient();
-        var resp = await client.GetAsync("/api/v1/teams",
+        var resp = await client.GetAsync("/api/v1/spaces",
             TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.Unauthorized, resp.StatusCode);
     }

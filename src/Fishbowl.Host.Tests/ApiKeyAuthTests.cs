@@ -134,10 +134,10 @@ public class ApiKeyAuthTests : IClassFixture<WebApplicationFactory<Program>>, ID
     }
 
     [Fact]
-    public async Task ValidTokenTeamContext_PrincipalHasTeamClaims()
+    public async Task ValidTokenSpaceContext_PrincipalHasSpaceClaims()
     {
-        var issued = await _keys.IssueAsync(AliceId, ContextRef.Team("fishbowl-dev"),
-            "team-key", new[] { "read:notes" }, TestContext.Current.CancellationToken);
+        var issued = await _keys.IssueAsync(AliceId, ContextRef.Space("fishbowl-dev"),
+            "space-key", new[] { "read:notes" }, TestContext.Current.CancellationToken);
 
         var client = ClientWithToken(issued.RawToken);
         var resp = await client.GetAsync("/api/v1/auth/whoami",
@@ -146,7 +146,7 @@ public class ApiKeyAuthTests : IClassFixture<WebApplicationFactory<Program>>, ID
 
         var payload = await resp.Content.ReadFromJsonAsync<WhoAmIDto>(
             TestContext.Current.CancellationToken);
-        Assert.Equal("team", payload!.Context.Type);
+        Assert.Equal("space", payload!.Context.Type);
         Assert.Equal("fishbowl-dev", payload.Context.Id);
         Assert.Equal(AliceId, payload.UserId);
         Assert.Single(payload.Scopes, "read:notes");
@@ -239,7 +239,7 @@ public class ApiKeyAuthTests : IClassFixture<WebApplicationFactory<Program>>, ID
             TestContext.Current.CancellationToken);
         Assert.Contains(list!, n => n.Title == "written-via-bearer");
 
-        // Note must land in Alice's user DB, not a team DB.
+        // Note must land in Alice's user DB, not a space DB.
         var aliceDbPath = Path.Combine(_dataDir, "users", AliceId, "personal.db");
         Assert.True(File.Exists(aliceDbPath), $"expected {aliceDbPath} to exist");
     }
@@ -262,20 +262,20 @@ public class ApiKeyAuthTests : IClassFixture<WebApplicationFactory<Program>>, ID
     }
 
     [Fact]
-    public async Task BearerTeamScope_GetNotes_ReturnsTeamNotes_NotPersonal()
+    public async Task BearerSpaceScope_GetNotes_ReturnsSpaceNotes_NotPersonal()
     {
-        // Seed Alice's PERSONAL note and a TEAM note. Key is team-scoped, so
-        // /api/v1/notes must resolve to the team context, not personal.
+        // Seed Alice's PERSONAL note and a SPACE note. Key is space-scoped, so
+        // /api/v1/notes must resolve to the space context, not personal.
         await _notes.CreateAsync(ContextRef.User(AliceId), AliceId,
             new Note { Title = "alice-personal" }, TestContext.Current.CancellationToken);
 
-        var teamRepo = new TeamRepository(_dbFactory);
-        var team = await teamRepo.CreateAsync(AliceId, "Team Context Test",
+        var spaceRepo = new SpaceRepository(_dbFactory);
+        var space = await spaceRepo.CreateAsync(AliceId, "Space Context Test",
             TestContext.Current.CancellationToken);
-        await _notes.CreateAsync(ContextRef.Team(team.Slug), AliceId,
-            new Note { Title = "team-shared" }, TestContext.Current.CancellationToken);
+        await _notes.CreateAsync(ContextRef.Space(space.Slug), AliceId,
+            new Note { Title = "space-shared" }, TestContext.Current.CancellationToken);
 
-        var issued = await _keys.IssueAsync(AliceId, ContextRef.Team(team.Slug), "team-key",
+        var issued = await _keys.IssueAsync(AliceId, ContextRef.Space(space.Slug), "space-key",
             new[] { "read:notes" }, TestContext.Current.CancellationToken);
 
         var client = ClientWithToken(issued.RawToken);
@@ -283,49 +283,49 @@ public class ApiKeyAuthTests : IClassFixture<WebApplicationFactory<Program>>, ID
         resp.EnsureSuccessStatusCode();
         var raw = await resp.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
 
-        Assert.Contains("team-shared", raw);
+        Assert.Contains("space-shared", raw);
         Assert.DoesNotContain("alice-personal", raw);
     }
 
     [Fact]
-    public async Task PersonalBearer_CannotAccessTeamNotesUrl()
+    public async Task PersonalBearer_CannotAccessSpaceNotesUrl()
     {
-        var teamRepo = new TeamRepository(_dbFactory);
-        var team = await teamRepo.CreateAsync(AliceId, "Alice Only",
+        var spaceRepo = new SpaceRepository(_dbFactory);
+        var space = await spaceRepo.CreateAsync(AliceId, "Alice Only",
             TestContext.Current.CancellationToken);
 
-        // Alice owns the team but mints a PERSONAL-scoped key. The
+        // Alice owns the space but mints a PERSONAL-scoped key. The
         // authoritative scope is the token's, not the human behind it —
-        // hitting the team URL must 403 even though the user is the owner.
+        // hitting the space URL must 403 even though the user is the owner.
         var issued = await _keys.IssueAsync(AliceId, ContextRef.User(AliceId), "personal",
             new[] { "read:notes" }, TestContext.Current.CancellationToken);
 
         var client = ClientWithToken(issued.RawToken);
-        var resp = await client.GetAsync($"/api/v1/teams/{team.Slug}/notes",
+        var resp = await client.GetAsync($"/api/v1/spaces/{space.Slug}/notes",
             TestContext.Current.CancellationToken);
 
         Assert.Equal(HttpStatusCode.Forbidden, resp.StatusCode);
     }
 
     [Fact]
-    public async Task TeamBearerForTeamA_CannotAccessTeamBNotes()
+    public async Task SpaceBearerForSpaceA_CannotAccessSpaceBNotes()
     {
-        var teamRepo = new TeamRepository(_dbFactory);
-        var teamA = await teamRepo.CreateAsync(AliceId, "Team A",
+        var spaceRepo = new SpaceRepository(_dbFactory);
+        var spaceA = await spaceRepo.CreateAsync(AliceId, "Space A",
             TestContext.Current.CancellationToken);
-        var teamB = await teamRepo.CreateAsync(AliceId, "Team B",
+        var spaceB = await spaceRepo.CreateAsync(AliceId, "Space B",
             TestContext.Current.CancellationToken);
 
-        var keyA = await _keys.IssueAsync(AliceId, ContextRef.Team(teamA.Slug), "a-key",
+        var keyA = await _keys.IssueAsync(AliceId, ContextRef.Space(spaceA.Slug), "a-key",
             new[] { "read:notes" }, TestContext.Current.CancellationToken);
 
         var client = ClientWithToken(keyA.RawToken);
 
-        var okResp = await client.GetAsync($"/api/v1/teams/{teamA.Slug}/notes",
+        var okResp = await client.GetAsync($"/api/v1/spaces/{spaceA.Slug}/notes",
             TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.OK, okResp.StatusCode);
 
-        var forbidResp = await client.GetAsync($"/api/v1/teams/{teamB.Slug}/notes",
+        var forbidResp = await client.GetAsync($"/api/v1/spaces/{spaceB.Slug}/notes",
             TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.Forbidden, forbidResp.StatusCode);
     }

@@ -122,10 +122,10 @@ public class AppRepository : IAppRepository
 
     private static void EnsureOwnerContext(ContextRef owner)
     {
-        // The apps registry lives in user/team DBs only — App-scoped refs
+        // The apps registry lives in user/space DBs only — App-scoped refs
         // would route to the app's own .db, which has no apps table.
-        if (owner.Type is not (ContextType.User or ContextType.Team))
+        if (owner.Type is not (ContextType.User or ContextType.Space))
             throw new ArgumentException(
-                "App registry queries require a User or Team context.", nameof(owner));
+                "App registry queries require a User or Space context.", nameof(owner));
     }
 }

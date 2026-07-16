@@ -13,12 +13,12 @@ using Fishbowl.Search;
 //
 // Usage:
 //   dotnet run --project tools/reindex-dev -- [--data <path>] [--user <id>]
-//                                             [--context user|team] [--context-id <slug>]
+//                                             [--context user|space] [--context-id <slug>]
 //
 // Defaults:
 //   --data fishbowl-data         (matches Fishbowl.Host's default)
 //   --user <first user in system.db>
-//   --context user               (--context-id required when team)
+//   --context user               (--context-id required when space)
 
 var args_ = args;
 var dataPath = GetArg("--data") ?? "fishbowl-data";
@@ -59,28 +59,28 @@ if (contextArg == "user")
     ctx = ContextRef.User(userId);
     contextDisplay = $"user:{userId}";
 }
-else if (contextArg == "team")
+else if (contextArg == "space")
 {
     if (string.IsNullOrEmpty(contextIdArg))
     {
-        Console.Error.WriteLine("error: --context team requires --context-id <slug>");
+        Console.Error.WriteLine("error: --context space requires --context-id <slug>");
         return 5;
     }
     using var sys = factory.CreateSystemConnection();
-    var teamRow = sys.QueryFirstOrDefault<(string Id, string Slug)>(
-        "SELECT id AS Id, slug AS Slug FROM teams WHERE slug = @slug OR id = @slug",
+    var spaceRow = sys.QueryFirstOrDefault<(string Id, string Slug)>(
+        "SELECT id AS Id, slug AS Slug FROM spaces WHERE slug = @slug OR id = @slug",
         new { slug = contextIdArg });
-    if (string.IsNullOrEmpty(teamRow.Id))
+    if (string.IsNullOrEmpty(spaceRow.Id))
     {
-        Console.Error.WriteLine($"error: no team found with slug or id '{contextIdArg}'");
+        Console.Error.WriteLine($"error: no space found with slug or id '{contextIdArg}'");
         return 6;
     }
-    ctx = ContextRef.Team(teamRow.Id);
-    contextDisplay = $"team:{teamRow.Slug}";
+    ctx = ContextRef.Space(spaceRow.Id);
+    contextDisplay = $"space:{spaceRow.Slug}";
 }
 else
 {
-    Console.Error.WriteLine($"error: --context must be 'user' or 'team' (got '{contextArg}')");
+    Console.Error.WriteLine($"error: --context must be 'user' or 'space' (got '{contextArg}')");
     return 8;
 }
 

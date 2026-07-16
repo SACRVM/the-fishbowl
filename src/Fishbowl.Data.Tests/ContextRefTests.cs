@@ -30,21 +30,21 @@ public class ContextRefTests : IDisposable
     }
 
     [Fact]
-    public void CreateContextConnection_Team_OpensTeamsDbAndMigrates()
+    public void CreateContextConnection_Space_OpensSpacesDbAndMigrates()
     {
-        using var db = _factory.CreateContextConnection(ContextRef.Team("fishbowl-dev"));
+        using var db = _factory.CreateContextConnection(ContextRef.Space("fishbowl-dev"));
         var version = db.ExecuteScalar<long>("PRAGMA user_version");
         Assert.Equal(6, version);
 
-        var file = Path.Combine(_dataDir, "teams", "fishbowl-dev", "team.db");
+        var file = Path.Combine(_dataDir, "spaces", "fishbowl-dev", "space.db");
         Assert.True(File.Exists(file));
     }
 
     [Fact]
-    public void CreateContextConnection_Team_HasSameSchemaAsUser()
+    public void CreateContextConnection_Space_HasSameSchemaAsUser()
     {
-        using var teamDb = _factory.CreateContextConnection(ContextRef.Team("project-x"));
-        var tables = teamDb.Query<string>(
+        using var spaceDb = _factory.CreateContextConnection(ContextRef.Space("project-x"));
+        var tables = spaceDb.Query<string>(
             "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name").ToList();
 
         Assert.Contains("notes", tables);
@@ -56,9 +56,9 @@ public class ContextRefTests : IDisposable
     }
 
     [Fact]
-    public void CreateContextConnection_Team_SeedsSystemTags()
+    public void CreateContextConnection_Space_SeedsSystemTags()
     {
-        using var db = _factory.CreateContextConnection(ContextRef.Team("seed-team"));
+        using var db = _factory.CreateContextConnection(ContextRef.Space("seed-space"));
         var reserved = db.Query<string>(
             "SELECT name FROM tags WHERE is_system = 1 ORDER BY name").ToList();
 
@@ -78,9 +78,9 @@ public class ContextRefTests : IDisposable
     }
 
     [Fact]
-    public async Task WithContextTransactionAsync_Team_CommitsOnSuccess()
+    public async Task WithContextTransactionAsync_Space_CommitsOnSuccess()
     {
-        var ctx = ContextRef.Team("tx-team");
+        var ctx = ContextRef.Space("tx-space");
 
         await _factory.WithContextTransactionAsync(ctx, async (db, tx, ct) =>
         {
@@ -106,7 +106,7 @@ public class ContextRefTests : IDisposable
     [Fact]
     public async Task WithContextTransactionAsync_RollsBackOnException()
     {
-        var ctx = ContextRef.Team("rollback-team");
+        var ctx = ContextRef.Space("rollback-space");
 
         await Assert.ThrowsAsync<InvalidOperationException>(async () =>
         {

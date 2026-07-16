@@ -53,13 +53,13 @@ public class ApiKeyRepositoryTests : IDisposable
     }
 
     [Fact]
-    public async Task IssueAsync_TeamContext_StoresTeamType()
+    public async Task IssueAsync_SpaceContext_StoresSpaceType()
     {
         var issued = await _repo.IssueAsync(
-            Alice, ContextRef.Team("fishbowl-dev"), "team key", new[] { "read:notes", "write:notes" },
+            Alice, ContextRef.Space("fishbowl-dev"), "space key", new[] { "read:notes", "write:notes" },
             TestContext.Current.CancellationToken);
 
-        Assert.Equal("team", issued.Record.ContextType);
+        Assert.Equal("space", issued.Record.ContextType);
         Assert.Equal("fishbowl-dev", issued.Record.ContextId);
         Assert.Equal(2, issued.Record.Scopes.Count);
     }

@@ -14,11 +14,11 @@ dotnet run --project tools/mint-dev-key -- \
   --name read-only-probe \
   --scopes read:notes
 
-# team-scoped key (for context-isolation testing — section 8)
+# space-scoped key (for context-isolation testing — section 8)
 dotnet run --project tools/mint-dev-key -- \
   --data src/Fishbowl.Host/fishbowl-data \
-  --name team-probe \
-  --context team \
+  --name space-probe \
+  --context space \
   --context-id fishbowl-dev
 
 # pipe into an env var
@@ -33,8 +33,8 @@ TOKEN=$(dotnet run --project tools/mint-dev-key -- --data src/Fishbowl.Host/fish
 | `--user` | first user in `system.db` | Override to mint for a specific user id. |
 | `--name` | `claude-code-local` | Human-readable label stored on the key row. |
 | `--scopes` | `read:notes,write:notes` | Comma-separated. Valid scopes today: `read:notes`, `write:notes`. |
-| `--context` | `user` | `user` or `team`. |
-| `--context-id` | — | Required when `--context team`. Accepts the team slug or team id. |
+| `--context` | `user` | `user` or `space`. |
+| `--context-id` | — | Required when `--context space`. Accepts the space slug or space id. |
 
 ## Output
 
@@ -52,9 +52,9 @@ TOKEN=$(dotnet run --project tools/mint-dev-key -- --data src/Fishbowl.Host/fish
 | 2 | data dir or system.db missing — start the host once first |
 | 3 | no users in system.db — log in via the web UI first |
 | 4 | `--scopes` parsed to zero entries |
-| 5 | `--context team` without `--context-id` |
-| 6 | team slug/id not found |
-| 7 | user isn't a member of the specified team |
+| 5 | `--context space` without `--context-id` |
+| 6 | space slug/id not found |
+| 7 | user isn't a member of the specified space |
 | 8 | unknown `--context` value |
 
 ## Not a production path

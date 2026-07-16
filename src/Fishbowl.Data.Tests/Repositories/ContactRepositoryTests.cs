@@ -259,24 +259,24 @@ public class ContactRepositoryTests : IDisposable
     }
 
     [Fact]
-    public async Task TeamContext_IsolatedFromPersonal()
+    public async Task SpaceContext_IsolatedFromPersonal()
     {
         // Same in-memory factory, different ContextRef → different files.
-        const string teamSlug = "01J_TEAM_ID";
+        const string spaceSlug = "01J_SPACE_ID";
         await _repo.CreateAsync(ContextRef.User(TestUserId), TestUserId,
             new Contact { Name = "personal-only" }, TestContext.Current.CancellationToken);
-        await _repo.CreateAsync(ContextRef.Team(teamSlug), TestUserId,
-            new Contact { Name = "team-only" }, TestContext.Current.CancellationToken);
+        await _repo.CreateAsync(ContextRef.Space(spaceSlug), TestUserId,
+            new Contact { Name = "space-only" }, TestContext.Current.CancellationToken);
 
         var personal = (await _repo.GetAllAsync(ContextRef.User(TestUserId),
             ct: TestContext.Current.CancellationToken)).ToList();
-        var team = (await _repo.GetAllAsync(ContextRef.Team(teamSlug),
+        var spaceContacts = (await _repo.GetAllAsync(ContextRef.Space(spaceSlug),
             ct: TestContext.Current.CancellationToken)).ToList();
 
         Assert.Single(personal);
         Assert.Equal("personal-only", personal[0].Name);
-        Assert.Single(team);
-        Assert.Equal("team-only", team[0].Name);
+        Assert.Single(spaceContacts);
+        Assert.Equal("space-only", spaceContacts[0].Name);
     }
 
     [Fact]

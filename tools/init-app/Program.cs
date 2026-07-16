@@ -14,7 +14,7 @@ using Fishbowl.Data.Repositories;
 //
 // Usage:
 //   dotnet run --project tools/init-app -- <slug> \
-//       --owner team:<team-slug>   |   --owner user:<user-id> \
+//       --owner space:<space-slug>   |   --owner user:<user-id> \
 //       [--data <path>] \
 //       [--user <id>] \
 //       [--name <display>] \
@@ -26,7 +26,7 @@ var args_ = args;
 if (args_.Length == 0 || args_[0].StartsWith("--"))
 {
     Console.Error.WriteLine(
-        "usage: init-app <slug> --owner team:<slug>|user:<id> [--data <path>] [--user <id>] [--name <display>] [--scopes <csv>] [--key-name <label>]");
+        "usage: init-app <slug> --owner space:<slug>|user:<id> [--data <path>] [--user <id>] [--name <display>] [--scopes <csv>] [--key-name <label>]");
     return 2;
 }
 
@@ -47,7 +47,7 @@ if (!Regex.IsMatch(slug, "^[a-z0-9]([a-z0-9-]{0,58}[a-z0-9])?$"))
 
 if (string.IsNullOrWhiteSpace(ownerSpec) || !ownerSpec.Contains(':'))
 {
-    Console.Error.WriteLine("error: --owner is required and must be 'team:<slug>' or 'user:<id>'.");
+    Console.Error.WriteLine("error: --owner is required and must be 'space:<slug>' or 'user:<id>'.");
     return 4;
 }
 
@@ -122,29 +122,29 @@ if (ownerType == "user")
     ownerCtx = ContextRef.User(ownerSpecId);
     ownerIdForKey = ownerSpecId;
 }
-else if (ownerType == "team")
+else if (ownerType == "space")
 {
-    var teams = new TeamRepository(factory);
-    var team = await teams.GetBySlugAsync(ownerSpecId);
-    if (team is null)
+    var spaces = new SpaceRepository(factory);
+    var space = await spaces.GetBySlugAsync(ownerSpecId);
+    if (space is null)
     {
         Console.Error.WriteLine(
-            $"error: unknown team '{ownerSpecId}'. Bootstrap it with init-team first, or pick a different slug.");
+            $"error: unknown space '{ownerSpecId}'. Bootstrap it with init-space first, or pick a different slug.");
         return 9;
     }
-    var role = await teams.GetMembershipAsync(team.Id, userId);
+    var role = await spaces.GetMembershipAsync(space.Id, userId);
     if (role is null)
     {
         Console.Error.WriteLine(
-            $"error: user {userId} is not a member of team '{ownerSpecId}'.");
+            $"error: user {userId} is not a member of space '{ownerSpecId}'.");
         return 10;
     }
-    ownerCtx = ContextRef.Team(team.Id);
-    ownerIdForKey = team.Id;
+    ownerCtx = ContextRef.Space(space.Id);
+    ownerIdForKey = space.Id;
 }
 else
 {
-    Console.Error.WriteLine($"error: --owner type '{ownerType}' must be 'team' or 'user'.");
+    Console.Error.WriteLine($"error: --owner type '{ownerType}' must be 'space' or 'user'.");
     return 11;
 }
 
@@ -167,7 +167,7 @@ else
 
 var appRef = ownerType == "user"
     ? AppRef.OfUser(ownerIdForKey, appRow.Id)
-    : AppRef.OfTeam(ownerIdForKey, appRow.Id);
+    : AppRef.OfSpace(ownerIdForKey, appRow.Id);
 
 var keys = new ApiKeyRepository(factory);
 var issued = await keys.IssueAsync(userId, appRef, keyName, scopes);
@@ -182,7 +182,7 @@ Console.Error.WriteLine(
 Console.Error.WriteLine($"# Minted API key id={issued.Record.Id} name='{keyName}'");
 Console.Error.WriteLine($"# Scopes: {string.Join(", ", scopes)}");
 Console.Error.WriteLine(
-    $"# Folder: {Path.Combine(dataPath, ownerType == "user" ? "users" : "teams", ownerIdForKey, "apps", appRow.Id)}");
+    $"# Folder: {Path.Combine(dataPath, ownerType == "user" ? "users" : "spaces", ownerIdForKey, "apps", appRow.Id)}");
 Console.Error.WriteLine($"# MCP endpoint (agent): /mcp  (Authorization: Bearer <token from stdout>)");
 return 0;
 

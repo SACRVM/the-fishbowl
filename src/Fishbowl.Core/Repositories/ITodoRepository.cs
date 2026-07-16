@@ -6,7 +6,7 @@ namespace Fishbowl.Core.Repositories;
 public interface ITodoRepository
 {
     // ContextRef overloads — the canonical shape. Supports both personal
-    // (ContextRef.User) and team (ContextRef.Team) callers.
+    // (ContextRef.User) and space (ContextRef.Space) callers.
     Task<TodoItem?> GetByIdAsync(ContextRef ctx, string id, CancellationToken ct = default);
     Task<IEnumerable<TodoItem>> GetAllAsync(ContextRef ctx, bool includeCompleted = false, CancellationToken ct = default);
     Task<string> CreateAsync(ContextRef ctx, string actorUserId, TodoItem item, CancellationToken ct = default);

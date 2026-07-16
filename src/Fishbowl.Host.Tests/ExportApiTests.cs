@@ -27,7 +27,7 @@ public class ExportApiTests : IClassFixture<WebApplicationFactory<Program>>, IDi
 
         var testFactory = new DatabaseFactory(_dataDir);
 
-        // Pre-seed users so team-creation FKs are satisfied (TestAuthHandler
+        // Pre-seed users so space-creation FKs are satisfied (TestAuthHandler
         // only synthesises claims, not user rows).
         using (var db = testFactory.CreateSystemConnection())
         {
@@ -160,22 +160,22 @@ public class ExportApiTests : IClassFixture<WebApplicationFactory<Program>>, IDi
     }
 
     [Fact]
-    public async Task TeamExport_Owner_ReturnsValidSqliteDb()
+    public async Task SpaceExport_Owner_ReturnsValidSqliteDb()
     {
         var client = _factory.CreateClient();
 
-        // Create team and a note so there's content
-        var createTeam = await client.SendAsync(
-            Req(HttpMethod.Post, "/api/v1/teams", UserA, new { name = "Export Team" }),
+        // Create space and a note so there's content
+        var createSpace = await client.SendAsync(
+            Req(HttpMethod.Post, "/api/v1/spaces", UserA, new { name = "Export Team" }),
             TestContext.Current.CancellationToken);
-        createTeam.EnsureSuccessStatusCode();
+        createSpace.EnsureSuccessStatusCode();
         await client.SendAsync(
-            Req(HttpMethod.Post, "/api/v1/teams/export-team/notes", UserA,
-                new Note { Title = "team-note" }),
+            Req(HttpMethod.Post, "/api/v1/spaces/export-team/notes", UserA,
+                new Note { Title = "space-note" }),
             TestContext.Current.CancellationToken);
 
         var resp = await client.SendAsync(
-            Req(HttpMethod.Get, "/api/v1/teams/export-team/export/db", UserA),
+            Req(HttpMethod.Get, "/api/v1/spaces/export-team/export/db", UserA),
             TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
         var bytes = await resp.Content.ReadAsByteArrayAsync(TestContext.Current.CancellationToken);
@@ -184,58 +184,58 @@ public class ExportApiTests : IClassFixture<WebApplicationFactory<Program>>, IDi
 
         var filename = resp.Content.Headers.ContentDisposition?.FileName?.Trim('"');
         Assert.NotNull(filename);
-        Assert.Contains("team", filename!);
+        Assert.Contains("space", filename!);
         Assert.Contains("export-team", filename);
     }
 
     [Fact]
-    public async Task TeamExport_NonOwnerMember_403()
+    public async Task SpaceExport_NonOwnerMember_403()
     {
         var client = _factory.CreateClient();
 
-        var createTeam = await client.SendAsync(
-            Req(HttpMethod.Post, "/api/v1/teams", UserA, new { name = "Member Team" }),
+        var createSpace = await client.SendAsync(
+            Req(HttpMethod.Post, "/api/v1/spaces", UserA, new { name = "Member Team" }),
             TestContext.Current.CancellationToken);
-        createTeam.EnsureSuccessStatusCode();
+        createSpace.EnsureSuccessStatusCode();
 
         // Promote UserB to plain member (still not owner).
         using (var sys = new DatabaseFactory(_dataDir).CreateSystemConnection())
         {
-            var teamId = sys.ExecuteScalar<string>(
-                "SELECT id FROM teams WHERE slug = 'member-team'");
+            var spaceId = sys.ExecuteScalar<string>(
+                "SELECT id FROM spaces WHERE slug = 'member-team'");
             var now = DateTime.UtcNow.ToString("o");
             sys.Execute(
-                "INSERT INTO team_members(team_id, user_id, role, joined_at) VALUES (@t, @u, 'member', @j)",
-                new { t = teamId, u = UserB, j = now });
+                "INSERT INTO space_members(space_id, user_id, role, joined_at) VALUES (@t, @u, 'member', @j)",
+                new { t = spaceId, u = UserB, j = now });
         }
 
         var resp = await client.SendAsync(
-            Req(HttpMethod.Get, "/api/v1/teams/member-team/export/db", UserB),
+            Req(HttpMethod.Get, "/api/v1/spaces/member-team/export/db", UserB),
             TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.Forbidden, resp.StatusCode);
     }
 
     [Fact]
-    public async Task TeamExport_NonMember_403()
+    public async Task SpaceExport_NonMember_403()
     {
         var client = _factory.CreateClient();
 
         await client.SendAsync(
-            Req(HttpMethod.Post, "/api/v1/teams", UserA, new { name = "Private" }),
+            Req(HttpMethod.Post, "/api/v1/spaces", UserA, new { name = "Private" }),
             TestContext.Current.CancellationToken);
 
         var resp = await client.SendAsync(
-            Req(HttpMethod.Get, "/api/v1/teams/private/export/db", UserB),
+            Req(HttpMethod.Get, "/api/v1/spaces/private/export/db", UserB),
             TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.Forbidden, resp.StatusCode);
     }
 
     [Fact]
-    public async Task TeamExport_UnknownSlug_404()
+    public async Task SpaceExport_UnknownSlug_404()
     {
         var client = _factory.CreateClient();
         var resp = await client.SendAsync(
-            Req(HttpMethod.Get, "/api/v1/teams/ghost/export/db", UserA),
+            Req(HttpMethod.Get, "/api/v1/spaces/ghost/export/db", UserA),
             TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.NotFound, resp.StatusCode);
     }

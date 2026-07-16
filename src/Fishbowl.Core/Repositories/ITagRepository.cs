@@ -7,7 +7,7 @@ namespace Fishbowl.Core.Repositories;
 public interface ITagRepository
 {
     // ContextRef overloads — the canonical shape. Supports both personal
-    // (ContextRef.User) and team (ContextRef.Team) callers.
+    // (ContextRef.User) and space (ContextRef.Space) callers.
     Task<IEnumerable<Tag>> GetAllAsync(ContextRef ctx, CancellationToken ct = default);
     Task<Tag> UpsertColorAsync(ContextRef ctx, string name, string color, CancellationToken ct = default);
     Task<bool> RenameAsync(ContextRef ctx, string oldName, string newName, CancellationToken ct = default);

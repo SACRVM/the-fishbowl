@@ -8,7 +8,10 @@ namespace Fishbowl.Data.Tests;
 
 // Folder-per-context layout was introduced after the flat `users/{id}.db`
 // layout. Old installs auto-migrate on first open: legacy file is moved
-// to `users/{id}/personal.db`, no data loss. Same for teams.
+// to `users/{id}/personal.db`, no data loss.
+//
+// Space (formerly team) folder migration is handled separately by
+// MigrateTeamsFolderToSpaces — see SpacesFolderMigrationTests.
 public class LegacyLayoutMigrationTests : IDisposable
 {
     private readonly string _dataDir;
@@ -17,7 +20,6 @@ public class LegacyLayoutMigrationTests : IDisposable
     {
         _dataDir = Path.Combine(Path.GetTempPath(), "fishbowl_legacy_layout_" + Path.GetRandomFileName());
         Directory.CreateDirectory(Path.Combine(_dataDir, "users"));
-        Directory.CreateDirectory(Path.Combine(_dataDir, "teams"));
     }
 
     [Fact]
@@ -43,28 +45,6 @@ public class LegacyLayoutMigrationTests : IDisposable
 
         Assert.True(File.Exists(newPath), $"expected new path {newPath}");
         Assert.False(File.Exists(legacy), $"expected legacy path {legacy} to have moved");
-    }
-
-    [Fact]
-    public void OpenContext_LegacyTeamFile_MovedIntoFolder()
-    {
-        const string teamId = "01HSQTEAM";
-        var legacy = Path.Combine(_dataDir, "teams", $"{teamId}.db");
-        var newPath = Path.Combine(_dataDir, "teams", teamId, "team.db");
-
-        SeedNoteAtLegacyPath(legacy, teamId, noteId: "tn1", title: "team-carry");
-        SqliteConnection.ClearAllPools();
-
-        var factory = new DatabaseFactory(_dataDir);
-        using (var db = factory.CreateContextConnection(ContextRef.Team(teamId)))
-        {
-            Assert.Equal(1L, db.ExecuteScalar<long>("SELECT COUNT(*) FROM notes"));
-            Assert.Equal("team-carry",
-                db.ExecuteScalar<string>("SELECT title FROM notes WHERE id = 'tn1'"));
-        }
-
-        Assert.True(File.Exists(newPath));
-        Assert.False(File.Exists(legacy));
     }
 
     [Fact]

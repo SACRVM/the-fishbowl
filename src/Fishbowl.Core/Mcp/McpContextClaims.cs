@@ -13,9 +13,9 @@ public static class McpContextClaims
     public const string ContextId = "fishbowl_context_id";
     public const string Scope = "scope";
 
-    // App-bearer keys carry the owner pair (the user or team that owns the
+    // App-bearer keys carry the owner pair (the user or space that owns the
     // app) alongside the appId in ContextId. Together they let the auth
-    // handler build an AppRef without a second DB lookup. Empty on user/team
+    // handler build an AppRef without a second DB lookup. Empty on user/space
     // keys.
     public const string OwnerType = "fishbowl_owner_type";
     public const string OwnerId = "fishbowl_owner_id";
@@ -27,7 +27,7 @@ public static class McpContextClaims
     public const string BearerScheme = "ApiKey";
 
     // Collapses the principal to a single `ContextRef`. Bearer principals
-    // resolve to whichever ContextType claim they carry (team/app); cookie
+    // resolve to whichever ContextType claim they carry (space/app); cookie
     // users and Bearer keys bound to a user resolve to ContextRef.User.
     // Throws when the principal has no usable identity — callers should have
     // already gated with [Authorize].
@@ -37,8 +37,8 @@ public static class McpContextClaims
         var id = user.FindFirst(ContextId)?.Value;
         if (!string.IsNullOrEmpty(id))
         {
-            if (string.Equals(type, "team", StringComparison.Ordinal))
-                return ContextRef.Team(id);
+            if (string.Equals(type, "space", StringComparison.Ordinal))
+                return ContextRef.Space(id);
             if (string.Equals(type, "app", StringComparison.Ordinal))
                 return ContextRef.App(id);
         }
@@ -51,7 +51,7 @@ public static class McpContextClaims
 
     // App-routing variant: reads the three app claims and returns an AppRef.
     // Throws when the principal isn't an app-bearer (cookie users, user-keys,
-    // and team-keys all fall through to InvalidOperationException). App MCP
+    // and space-keys all fall through to InvalidOperationException). App MCP
     // tools call this inside InvokeAsync to fetch the owner-id needed to open
     // the app's .db file.
     public static AppRef ResolveApp(ClaimsPrincipal user)

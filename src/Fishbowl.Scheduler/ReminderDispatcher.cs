@@ -11,7 +11,7 @@ namespace Fishbowl.Scheduler;
 
 // Polls every minute for event reminders that have crossed their trigger
 // time and routes them through the registered IBotClient plugins. Personal
-// (user) contexts only for MVP — team-event reminders need a deliberate
+// (user) contexts only for MVP — space-event reminders need a deliberate
 // "who's on the to-line" design call that we don't have yet.
 //
 // Idempotency: each fire writes a `reminders` row with sent_at set. The

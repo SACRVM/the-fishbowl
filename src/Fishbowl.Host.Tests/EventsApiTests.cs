@@ -244,26 +244,26 @@ public class EventsApiTests : IClassFixture<WebApplicationFactory<Program>>, IDi
     }
 
     [Fact]
-    public async Task TeamEvents_Isolated_AndNonMember403()
+    public async Task SpaceEvents_Isolated_AndNonMember403()
     {
         var client = _factory.CreateClient();
         await CreateAsync(client, UserA, "personal-event", DateTime.UtcNow);
 
-        await client.SendAsync(Req(HttpMethod.Post, "/api/v1/teams", UserA,
-            new { name = "Events Team" }),
+        await client.SendAsync(Req(HttpMethod.Post, "/api/v1/spaces", UserA,
+            new { name = "Events Space" }),
             TestContext.Current.CancellationToken);
 
-        await client.SendAsync(Req(HttpMethod.Post, "/api/v1/teams/events-team/events", UserA,
-            new Event { Title = "team-event", StartAt = DateTime.UtcNow }),
+        await client.SendAsync(Req(HttpMethod.Post, "/api/v1/spaces/events-space/events", UserA,
+            new Event { Title = "space-event", StartAt = DateTime.UtcNow }),
             TestContext.Current.CancellationToken);
 
-        var teamResp = await client.SendAsync(Req(HttpMethod.Get,
-            "/api/v1/teams/events-team/events", UserA),
+        var spaceResp = await client.SendAsync(Req(HttpMethod.Get,
+            "/api/v1/spaces/events-space/events", UserA),
             TestContext.Current.CancellationToken);
-        var teamList = await teamResp.Content.ReadFromJsonAsync<List<Event>>(
+        var spaceList = await spaceResp.Content.ReadFromJsonAsync<List<Event>>(
             TestContext.Current.CancellationToken);
-        Assert.Single(teamList!);
-        Assert.Equal("team-event", teamList![0].Title);
+        Assert.Single(spaceList!);
+        Assert.Equal("space-event", spaceList![0].Title);
 
         var personalResp = await client.SendAsync(Req(HttpMethod.Get,
             "/api/v1/events", UserA),
@@ -274,38 +274,38 @@ public class EventsApiTests : IClassFixture<WebApplicationFactory<Program>>, IDi
         Assert.Equal("personal-event", personalList![0].Title);
 
         var forbid = await client.SendAsync(Req(HttpMethod.Get,
-            "/api/v1/teams/events-team/events", UserB),
+            "/api/v1/spaces/events-space/events", UserB),
             TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.Forbidden, forbid.StatusCode);
     }
 
     [Fact]
-    public async Task TeamEvents_Readonly_CannotWrite()
+    public async Task SpaceEvents_Readonly_CannotWrite()
     {
         var client = _factory.CreateClient();
 
-        await client.SendAsync(Req(HttpMethod.Post, "/api/v1/teams", UserA, new { name = "RO Events" }),
+        await client.SendAsync(Req(HttpMethod.Post, "/api/v1/spaces", UserA, new { name = "RO Events" }),
             TestContext.Current.CancellationToken);
 
         using (var sys = new DatabaseFactory(_dataDir).CreateSystemConnection())
         {
-            var teamId = sys.ExecuteScalar<string>(
-                "SELECT id FROM teams WHERE slug = 'ro-events'");
+            var spaceId = sys.ExecuteScalar<string>(
+                "SELECT id FROM spaces WHERE slug = 'ro-events'");
             var now = DateTime.UtcNow.ToString("o");
             sys.Execute(
-                "INSERT INTO team_members(team_id, user_id, role, joined_at) VALUES (@t, @u, 'readonly', @j)",
-                new { t = teamId, u = UserB, j = now });
+                "INSERT INTO space_members(space_id, user_id, role, joined_at) VALUES (@t, @u, 'readonly', @j)",
+                new { t = spaceId, u = UserB, j = now });
         }
 
         // readonly can read
         var readResp = await client.SendAsync(Req(HttpMethod.Get,
-            "/api/v1/teams/ro-events/events", UserB),
+            "/api/v1/spaces/ro-events/events", UserB),
             TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.OK, readResp.StatusCode);
 
         // readonly cannot write
         var writeResp = await client.SendAsync(Req(HttpMethod.Post,
-            "/api/v1/teams/ro-events/events", UserB,
+            "/api/v1/spaces/ro-events/events", UserB,
             new Event { Title = "sneaky", StartAt = DateTime.UtcNow }),
             TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.Forbidden, writeResp.StatusCode);

@@ -160,7 +160,7 @@ builder.Services.AddScoped<INoteRepository, NoteRepository>();
 builder.Services.AddScoped<ITodoRepository, TodoRepository>();
 builder.Services.AddScoped<IContactRepository, ContactRepository>();
 builder.Services.AddScoped<IEventRepository, EventRepository>();
-builder.Services.AddScoped<ITeamRepository, TeamRepository>();
+builder.Services.AddScoped<ISpaceRepository, SpaceRepository>();
 builder.Services.AddScoped<IApiKeyRepository, ApiKeyRepository>();
 builder.Services.AddScoped<INotificationChannelRepository, NotificationChannelRepository>();
 builder.Services.AddScoped<IDiscordLinkRepository, DiscordLinkRepository>();
@@ -753,13 +753,13 @@ app.MapGet("/logout", async (HttpContext context) =>
     return Results.Redirect("/");
 });
 
-// Short URL alias to a team workspace. Lets downstream link templates
-// (browser bookmarks, agent-CLI quicklinks) point at `/t/<slug>` without
+// Short URL alias to a space workspace. Lets downstream link templates
+// (browser bookmarks, agent-CLI quicklinks) point at `/s/<slug>` without
 // needing to know the SPA's hash-route shape. The slug is not validated
-// server-side — invalid slugs surface as a 401/404 in the SPA's team
+// server-side — invalid slugs surface as a 401/404 in the SPA's space
 // workspace, which is the same path a stale bookmark would hit.
-app.MapGet("/t/{slug}", (string slug) =>
-    Results.Redirect($"/#/team/{Uri.EscapeDataString(slug)}/notes"));
+app.MapGet("/s/{slug}", (string slug) =>
+    Results.Redirect($"/#/space/{Uri.EscapeDataString(slug)}/notes"));
 
 // Register API Endpoints
 app.MapVersionApi();
@@ -769,7 +769,7 @@ app.MapTagsApi();
 app.MapTodoApi();
 app.MapContactsApi();
 app.MapEventsApi();
-app.MapTeamsApi();
+app.MapSpacesApi();
 app.MapApiKeysApi();
 app.MapAppsApi();
 app.MapAccountApi();

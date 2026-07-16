@@ -24,19 +24,19 @@ dotnet test --filter "FullyQualifiedName~TestName"   # one test
 
 ## Status
 
-Early development. The foundation is hardened (CI, OpenAPI, plugin contracts, structured logging, typed Dapper mapping). Feature work on search, Discord bot, calendar sync, reminders, teams, and apps follows — see `docs/superpowers/specs/` for active design work.
+Early development. The foundation is hardened (CI, OpenAPI, plugin contracts, structured logging, typed Dapper mapping). Feature work on search, Discord bot, calendar sync, reminders, spaces, and apps follows — see `docs/superpowers/specs/` for active design work.
 
-## Team-scoped memory via MCP
+## Space-scoped memory via MCP
 
-Fishbowl exposes its memory API as an MCP server at `/mcp` (JSON-RPC 2.0 over Streamable HTTP, Bearer auth). Any agent CLI that speaks MCP can attach. The isolation primitive is a **team** — each team is a separate SQLite file with its own membership and scopes.
+Fishbowl exposes its memory API as an MCP server at `/mcp` (JSON-RPC 2.0 over Streamable HTTP, Bearer auth). Any agent CLI that speaks MCP can attach. The isolation primitive is a **space** — each space is a separate SQLite file with its own membership and scopes.
 
-To carve out a team for an agent:
+To carve out a space for an agent:
 
 ```bash
-dotnet run --project tools/init-team -- <slug>
+dotnet run --project tools/init-space -- <slug>
 ```
 
-This creates the team (if absent), mints a team-scoped API key, and prints the bearer on stdout. The integration handle is *(MCP endpoint, Bearer token)*; how an agent CLI stores and presents that token is the agent's concern and lives in its docs, not here. See [`tools/init-team/README.md`](tools/init-team/README.md) for flags and idempotency notes.
+This creates the space (if absent), mints a space-scoped API key, and prints the bearer on stdout. The integration handle is *(MCP endpoint, Bearer token)*; how an agent CLI stores and presents that token is the agent's concern and lives in its docs, not here. See [`tools/init-space/README.md`](tools/init-space/README.md) for flags and idempotency notes.
 
 ## Deploy on a server
 
@@ -62,7 +62,7 @@ Write-Host "Husky started (PID $($proc.Id)). You can close this window." -Foregr
 
 For a permanent install that survives user logoff and restarts at boot, register Husky as a Windows service via NSSM — see [`docs/deploy.md`](docs/deploy.md) §5.
 
-The user-data folder (`fishbowl-data/`, holds `system.db` + per-user/team SQLite files + the embeddings model) lives next to the binary inside `app/` and is preserved across updates because Husky overlays new files without deleting. Linux/macOS deployments use the matching RID asset and override `executable` in a local `husky.config.json` (the repo-root config is Windows-pathed by default).
+The user-data folder (`fishbowl-data/`, holds `system.db` + per-user/space SQLite files + the embeddings model) lives next to the binary inside `app/` and is preserved across updates because Husky overlays new files without deleting. Linux/macOS deployments use the matching RID asset and override `executable` in a local `husky.config.json` (the repo-root config is Windows-pathed by default).
 
 See [`docs/deploy.md`](docs/deploy.md) for the long-form runbook: the recommended ACME-staged sequence, post-lockout config edits via `/api/v1/admin/config`, scheduled backups with `tools/snapshot-data`, and a troubleshooting section for the failure modes the launcher can land in.
 

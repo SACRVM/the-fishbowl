@@ -10,9 +10,9 @@ namespace Fishbowl.Api.Endpoints;
 
 // CONCEPT.md § Contacts — "Not an address book. A living record of the
 // people who matter." Backend scaffolding only; UI wiring comes later.
-// Shape mirrors TodoApi: personal-only route here, team-nested variant
-// lives in TeamsApi.cs so the team-resolution/role-gating code stays
-// next to the team notes/todos handlers.
+// Shape mirrors TodoApi: personal-only route here, space-nested variant
+// lives in SpacesApi.cs so the space-resolution/role-gating code stays
+// next to the space notes/todos handlers.
 public static class ContactsApi
 {
     public static RouteGroupBuilder MapContactsApi(this IEndpointRouteBuilder routes)

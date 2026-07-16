@@ -11,8 +11,8 @@ using Xunit;
 
 namespace Fishbowl.Host.Tests;
 
-// Closes the coverage gap for /api/v1/todos. Team-nested todos are already
-// covered in TeamsApiTests; this file targets the personal route.
+// Closes the coverage gap for /api/v1/todos. Space-nested todos are already
+// covered in SpacesApiTests; this file targets the personal route.
 public class TodosApiTests : IClassFixture<WebApplicationFactory<Program>>, IDisposable
 {
     private readonly WebApplicationFactory<Program> _factory;

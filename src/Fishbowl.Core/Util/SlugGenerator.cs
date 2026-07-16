@@ -8,16 +8,16 @@ public static class SlugGenerator
     private static readonly Regex Collapse = new("[^a-z0-9]+", RegexOptions.Compiled);
 
     // Lowercase, ASCII-alphanumerics-and-hyphens, deduped hyphens, trimmed.
-    // Empty after normalisation → returns "team" so a caller can still append
+    // Empty after normalisation → returns "space" so a caller can still append
     // a disambiguation suffix rather than generating an invalid empty slug.
     public static string FromName(string name)
     {
-        if (string.IsNullOrWhiteSpace(name)) return "team";
+        if (string.IsNullOrWhiteSpace(name)) return "space";
         var normalized = name.Trim().ToLowerInvariant();
 
         // Best-effort diacritic fold (é → e, ß → ss-ish). We're not doing full
         // Unicode normalisation; for non-Latin input, the Collapse regex
-        // strips everything and the caller hits the "team" fallback.
+        // strips everything and the caller hits the "space" fallback.
         var decomposed = normalized.Normalize(NormalizationForm.FormD);
         var builder = new StringBuilder(decomposed.Length);
         foreach (var ch in decomposed)
@@ -28,7 +28,7 @@ public static class SlugGenerator
         var ascii = builder.ToString();
 
         var collapsed = Collapse.Replace(ascii, "-").Trim('-');
-        if (collapsed.Length == 0) return "team";
+        if (collapsed.Length == 0) return "space";
         if (collapsed.Length > 60) collapsed = collapsed[..60].TrimEnd('-');
         return collapsed;
     }

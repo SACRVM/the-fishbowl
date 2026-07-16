@@ -12,7 +12,7 @@ public class DatabaseFactory
 {
     private readonly string _dataRoot;
     private readonly string _usersPath;
-    private readonly string _teamsPath;
+    private readonly string _spacesPath;
     private readonly string _systemDbPath;
     private readonly ILogger<DatabaseFactory> _logger;
 
@@ -27,13 +27,13 @@ public class DatabaseFactory
     // local indexes) atomically. Naming the file deterministically inside
     // the folder keeps the path predictable for backup tools.
     public const string PersonalDbFileName = "personal.db";
-    public const string TeamDbFileName = "team.db";
+    public const string SpaceDbFileName = "space.db";
 
     // Public roots so admin tooling (cold import) can enumerate folders
     // without depending on internal state. Read-only — never overwrite from
     // outside the factory.
     public string UsersRoot => _usersPath;
-    public string TeamsRoot => _teamsPath;
+    public string SpacesRoot => _spacesPath;
 
     public DatabaseFactory(string dataRoot = "fishbowl-data", ILogger<DatabaseFactory>? logger = null)
     {
@@ -42,22 +42,29 @@ public class DatabaseFactory
         // Ensure absolute or relative path is handled correctly
         _dataRoot = Path.GetFullPath(dataRoot);
         _usersPath = Path.Combine(_dataRoot, "users");
-        _teamsPath = Path.Combine(_dataRoot, "teams");
+        _spacesPath = Path.Combine(_dataRoot, "spaces");
         _systemDbPath = Path.Combine(_dataRoot, "system.db");
 
         if (!Directory.Exists(_usersPath)) Directory.CreateDirectory(_usersPath);
-        if (!Directory.Exists(_teamsPath)) Directory.CreateDirectory(_teamsPath);
+        if (!Directory.Exists(_spacesPath)) Directory.CreateDirectory(_spacesPath);
+
+        // One-shot rename of the pre-Spaces on-disk layout: any leftover
+        // `teams/` folder (folder-per-context `teams/{id}/team.db` or the
+        // ancient flat `teams/{id}.db`) is slid into `spaces/{id}/space.db`.
+        // Idempotent; never overwrites an existing space folder. See
+        // MigrateTeamsFolderToSpaces.
+        MigrateTeamsFolderToSpaces();
     }
 
     // Resolves the on-disk path for a given context. Folder-per-context layout:
     //   users/{userId}/personal.db
-    //   teams/{teamId}/team.db
+    //   spaces/{spaceId}/space.db
     // Public so admin tooling (cold import) can list/validate folders without
     // having to duplicate the convention.
     public string ResolveContextPath(ContextRef ctx) => ctx.Type switch
     {
         ContextType.User => Path.Combine(_usersPath, ctx.Id, PersonalDbFileName),
-        ContextType.Team => Path.Combine(_teamsPath, ctx.Id, TeamDbFileName),
+        ContextType.Space => Path.Combine(_spacesPath, ctx.Id, SpaceDbFileName),
         // App refs are only one third of the routing tuple — opening the
         // file needs the owner pair too. Surface accidental misuse instead
         // of silently routing to nowhere.
@@ -69,8 +76,8 @@ public class DatabaseFactory
 
     // App DBs live nested under their owner:
     //   users/<userId>/apps/<appId>/app.db
-    //   teams/<teamId>/apps/<appId>/app.db
-    // Dropping a team/user folder onto another Fishbowl instance moves the
+    //   spaces/<spaceId>/apps/<appId>/app.db
+    // Dropping a space/user folder onto another Fishbowl instance moves the
     // owner *plus its apps* atomically, which is what folder-per-context is
     // for. Folder name is the App's ULID (26 chars; well under MAX_PATH).
     public string ResolveAppPath(AppRef appRef)
@@ -81,7 +88,7 @@ public class DatabaseFactory
         var ownerRoot = appRef.OwnerType switch
         {
             AppRef.OwnerTypeUser => _usersPath,
-            AppRef.OwnerTypeTeam => _teamsPath,
+            AppRef.OwnerTypeSpace => _spacesPath,
             _ => throw new ArgumentException(
                 $"Unknown AppRef owner type: {appRef.OwnerType}", nameof(appRef)),
         };
@@ -105,8 +112,8 @@ public class DatabaseFactory
     public const string AppDbFileName = "app.db";
 
     // Preferred primary entrypoint: one context resolves to one file. Personal
-    // and team spaces share an identical schema and identical migrations —
-    // CONCEPT.md § Teams is explicit that team DBs are structurally identical
+    // and shared spaces share an identical schema and identical migrations —
+    // CONCEPT.md § Spaces is explicit that space DBs are structurally identical
     // to user DBs, so EnsureUserInitialized applies to both.
     //
     // Context connections also load sqlite-vec (`vec0`) before migrations run;
@@ -136,10 +143,12 @@ public class DatabaseFactory
     {
         if (File.Exists(newPath)) return;
 
+        // Space data (any legacy `teams/` layout) is migrated wholesale at
+        // factory construction by MigrateTeamsFolderToSpaces; here we only
+        // handle the User flat→folder case (users/{id}.db → users/{id}/personal.db).
         var legacy = ctx.Type switch
         {
             ContextType.User => Path.Combine(_usersPath, $"{ctx.Id}.db"),
-            ContextType.Team => Path.Combine(_teamsPath, $"{ctx.Id}.db"),
             _ => null,
         };
         if (legacy is null || !File.Exists(legacy)) return;
@@ -166,6 +175,65 @@ public class DatabaseFactory
             _logger.LogError(ex,
                 "Failed to migrate legacy DB layout {Legacy} → {New}; opening fresh DB at new path",
                 legacy, newPath);
+        }
+    }
+
+    // One-shot rename of the pre-Spaces on-disk layout to `spaces/`. Two legacy
+    // shapes are folded in: the folder-per-context `teams/{id}/team.db` (with
+    // any nested `apps/` moving along atomically) and the ancient flat
+    // `teams/{id}.db`. Both land at `spaces/{id}/space.db`. Idempotent: an
+    // existing `spaces/{id}` target is never overwritten — real data wins.
+    // Runs once at construction (before any context open). Mirrors the
+    // close-pools-then-move discipline of MigrateLegacyLayoutIfPresent.
+    private void MigrateTeamsFolderToSpaces()
+    {
+        var legacyTeamsPath = Path.Combine(_dataRoot, "teams");
+        if (!Directory.Exists(legacyTeamsPath)) return;
+
+        try
+        {
+            // Drop pooled handles so Windows lets us move the files.
+            SqliteConnection.ClearAllPools();
+
+            // Folder-per-context: teams/{id}/...  → spaces/{id}/...
+            foreach (var teamDir in Directory.EnumerateDirectories(legacyTeamsPath))
+            {
+                var id = Path.GetFileName(teamDir);
+                var target = Path.Combine(_spacesPath, id);
+                if (Directory.Exists(target)) continue; // never overwrite real data
+
+                Directory.Move(teamDir, target);
+
+                var oldDb = Path.Combine(target, "team.db");
+                var newDb = Path.Combine(target, SpaceDbFileName);
+                if (File.Exists(oldDb) && !File.Exists(newDb))
+                    File.Move(oldDb, newDb);
+
+                _logger.LogInformation("Migrated team folder to space: {Old} → {New}", teamDir, target);
+            }
+
+            // Ancient flat layout: teams/{id}.db → spaces/{id}/space.db
+            foreach (var flat in Directory.EnumerateFiles(legacyTeamsPath, "*.db"))
+            {
+                var id = Path.GetFileNameWithoutExtension(flat);
+                var targetDir = Path.Combine(_spacesPath, id);
+                var newDb = Path.Combine(targetDir, SpaceDbFileName);
+                if (File.Exists(newDb)) continue; // never overwrite real data
+
+                Directory.CreateDirectory(targetDir);
+                File.Move(flat, newDb);
+                _logger.LogInformation("Migrated legacy flat team DB to space: {Old} → {New}", flat, newDb);
+            }
+
+            // Remove the now-empty legacy root so the migration doesn't re-run.
+            if (!Directory.EnumerateFileSystemEntries(legacyTeamsPath).Any())
+                Directory.Delete(legacyTeamsPath);
+        }
+        catch (Exception ex)
+        {
+            // Don't crash boot — leave the legacy files in place for manual
+            // recovery and log loudly so the operator notices.
+            _logger.LogError(ex, "Failed migrating teams/ folder to spaces/; legacy files left in place");
         }
     }
 
@@ -365,6 +433,14 @@ public class DatabaseFactory
             ApplySystemV7(connection);
             connection.Execute("PRAGMA user_version = 7");
             _logger.LogInformation("Applied system schema v7");
+            version = 7;
+        }
+
+        if (version < 8)
+        {
+            ApplySystemV8(connection);
+            connection.Execute("PRAGMA user_version = 8");
+            _logger.LogInformation("Applied system schema v8");
         }
     }
 
@@ -726,8 +802,9 @@ public class DatabaseFactory
                 );", transaction: transaction);
 
             // Membership + role. Composite PK = (team, user). CHECK constraint
-            // mirrors TeamRole enum in Fishbowl.Core.Models — keep the two in
-            // sync.
+            // mirrors the SpaceRole enum in Fishbowl.Core.Models — keep the two
+            // in sync. (Historical v2 DDL: created as team_members here, renamed
+            // to space_members in v8 — see ApplySystemV8.)
             connection.Execute(@"
                 CREATE TABLE IF NOT EXISTS team_members (
                     team_id    TEXT NOT NULL REFERENCES teams(id),
@@ -924,6 +1001,82 @@ public class DatabaseFactory
                   (id, user_id, context_type, context_id, owner_type, owner_id, name,
                    key_hash, key_prefix, scopes, created_at, last_used_at, revoked_at)
                 SELECT id, user_id, context_type, context_id, NULL, NULL, name,
+                       key_hash, key_prefix, scopes, created_at, last_used_at, revoked_at
+                FROM api_keys;", transaction: transaction);
+
+            connection.Execute("DROP TABLE api_keys;", transaction: transaction);
+            connection.Execute("ALTER TABLE api_keys_new RENAME TO api_keys;", transaction: transaction);
+
+            connection.Execute(
+                "CREATE INDEX IF NOT EXISTS idx_api_keys_prefix ON api_keys(key_prefix) WHERE revoked_at IS NULL",
+                transaction: transaction);
+
+            transaction.Commit();
+        }
+        catch
+        {
+            transaction.Rollback();
+            throw;
+        }
+    }
+
+    // Team → Space rename. The sub-database primitive formerly called a "team"
+    // is now a "space" (shared *or* solo). This renames the system.db tables
+    // and rewrites the api_keys context discriminator. The on-disk folder move
+    // (teams/ → spaces/) happens separately in MigrateTeamsFolderToSpaces.
+    // Append-only migration: ApplySystemV2/V3/V7 still create the old-named
+    // `teams`/`team_members` + old CHECK on fresh installs; this runs right
+    // after and renames them, so fresh and upgraded DBs converge on the same
+    // schema.
+    private void ApplySystemV8(IDbConnection connection)
+    {
+        using var transaction = connection.BeginTransaction();
+        try
+        {
+            // Rename the tables. SQLite (legacy_alter_table off) auto-updates
+            // the FK reference in team_members → spaces and the column's index.
+            connection.Execute("ALTER TABLE teams RENAME TO spaces;", transaction: transaction);
+            connection.Execute("ALTER TABLE team_members RENAME TO space_members;", transaction: transaction);
+            connection.Execute("ALTER TABLE space_members RENAME COLUMN team_id TO space_id;", transaction: transaction);
+
+            // The user-side membership index keeps its old name after a table
+            // rename; drop + recreate under the new name for clarity.
+            connection.Execute("DROP INDEX IF EXISTS idx_team_members_user;", transaction: transaction);
+            connection.Execute(
+                "CREATE INDEX IF NOT EXISTS idx_space_members_user ON space_members(user_id);",
+                transaction: transaction);
+
+            // api_keys can't have its CHECK constraints altered in place, so the
+            // same shadow-table dance as V7: build the new table with 'space' in
+            // both CHECK lists, copy every row rewriting the 'team' literal in
+            // context_type and owner_type, drop + rename, recreate the index.
+            connection.Execute(@"
+                CREATE TABLE api_keys_new (
+                    id            TEXT PRIMARY KEY,
+                    user_id       TEXT NOT NULL REFERENCES users(id),
+                    context_type  TEXT NOT NULL CHECK(context_type IN ('user','space','app')),
+                    context_id    TEXT NOT NULL,
+                    owner_type    TEXT     CHECK(owner_type IS NULL OR owner_type IN ('user','space')),
+                    owner_id      TEXT,
+                    name          TEXT NOT NULL,
+                    key_hash      TEXT NOT NULL,
+                    key_prefix    TEXT NOT NULL,
+                    scopes        TEXT NOT NULL,
+                    created_at    TEXT NOT NULL,
+                    last_used_at  TEXT,
+                    revoked_at    TEXT,
+                    CHECK ((context_type = 'app') = (owner_type IS NOT NULL AND owner_id IS NOT NULL))
+                );", transaction: transaction);
+
+            connection.Execute(@"
+                INSERT INTO api_keys_new
+                  (id, user_id, context_type, context_id, owner_type, owner_id, name,
+                   key_hash, key_prefix, scopes, created_at, last_used_at, revoked_at)
+                SELECT id, user_id,
+                       CASE context_type WHEN 'team' THEN 'space' ELSE context_type END,
+                       context_id,
+                       CASE owner_type   WHEN 'team' THEN 'space' ELSE owner_type   END,
+                       owner_id, name,
                        key_hash, key_prefix, scopes, created_at, last_used_at, revoked_at
                 FROM api_keys;", transaction: transaction);
 

@@ -34,7 +34,7 @@ No data-migration framework yet. When you need backfills, introduce it in the sa
 
 - Route under `/api/v1/{resource}` via a `MapXxxApi()` extension method on `IEndpointRouteBuilder` (see `NotesApi.cs`).
 - Inject `ClaimsPrincipal`; read the user via `user.FindFirst("fishbowl_user_id")?.Value`. Return `Results.Unauthorized()` if missing.
-- For endpoints served in both personal **and** team workspaces (notes, todos, tags, contacts, events, search), resolve the context with `McpContextClaims.Resolve(user)` → `ContextRef`; the team-nested variant lives in `TeamsApi.cs` and goes through `ResolveTeamAsync` (which validates membership + Bearer token scope). Readonly team members must be rejected on writes via `TeamRoleExtensions.CanWrite()`.
+- For endpoints served in both personal **and** space workspaces (notes, todos, tags, contacts, events, search), resolve the context with `McpContextClaims.Resolve(user)` → `ContextRef`; the space-nested variant lives in `SpacesApi.cs` and goes through `ResolveSpaceAsync` (which validates membership + Bearer token scope). Readonly space members must be rejected on writes via `SpaceRoleExtensions.CanWrite()`.
 - Gate Bearer scopes with `.RequireScope("read:notes")` / `"write:…"`. Cookie principals bypass the check by design. Adding a new scope? Just pick a colon-delimited name and use it — there's no central registry.
 - Annotate with `.WithName()`, `.WithSummary()`, `.Produces<T>()`, `.Produces(StatusCodes.Status401Unauthorized)` for OpenAPI. Add a case to `OpenApiTests` if the operation name matters (e.g. CLI generation relies on it).
 - Inject `ILogger<T>` into any new service; log writes at `Debug`, failed writes at `Warning`. **Never log PII, secrets, or `::secret` content.**
@@ -43,7 +43,7 @@ No data-migration framework yet. When you need backfills, introduce it in the sa
 
 - Interface in `Fishbowl.Core.Repositories`, implementation in `Fishbowl.Data.Repositories`.
 - Use typed Dapper queries (`QuerySingleOrDefaultAsync<T>`, `QueryAsync<T>`). The `DapperConventions` static ctor enables `MatchNamesWithUnderscores`, so `created_at` → `CreatedAt` works automatically.
-- Accept `ContextRef` on every public method — personal and team contexts share the same DB shape; `ContextRef.User(id)` vs `ContextRef.Team(id)` picks the file. Keep legacy `(string userId, …)` overloads that delegate to the ContextRef version so cookie-auth call sites stay one-liners.
+- Accept `ContextRef` on every public method — personal and space contexts share the same DB shape; `ContextRef.User(id)` vs `ContextRef.Space(id)` picks the file. Keep legacy `(string userId, …)` overloads that delegate to the ContextRef version so cookie-auth call sites stay one-liners.
 - For multi-step writes (primary table + FTS/join tables), use `_dbFactory.WithContextTransactionAsync(ctx, async (db, tx, ct) => { … })`. Never hand-roll `BeginTransaction`/`Commit`/`Rollback`.
 - For JSON columns (e.g. `notes.tags`), register a `SqlMapper.TypeHandler<T>` via `DapperConventions.Install()`.
 - Register in `Program.cs` as `AddScoped<IMyRepository, MyRepository>()`. DI auto-injects `ILogger<T>`.

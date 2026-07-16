@@ -11,7 +11,7 @@ namespace Fishbowl.Api.Endpoints;
 // CONCEPT.md § Calendar — "A calendar that belongs to you." Personal
 // CRUD over the events table (schema v1). No recurrence expansion on
 // read (callers get the master event; the future scheduler expands
-// RRULE when firing reminders). Team variant lives in TeamsApi.
+// RRULE when firing reminders). Space variant lives in SpacesApi.
 public static class EventsApi
 {
     public static RouteGroupBuilder MapEventsApi(this IEndpointRouteBuilder routes)

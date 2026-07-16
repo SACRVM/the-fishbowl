@@ -7,7 +7,7 @@ using Microsoft.Data.Sqlite;
 // What's included:
 //   system.db                              → SQLite backup
 //   users/{userId}/personal.db             → SQLite backup
-//   teams/{teamId}/team.db                 → SQLite backup
+//   spaces/{spaceId}/space.db              → SQLite backup
 //   acme/**                                → file copy (cert state; small, portable)
 //
 // What's deliberately excluded:
@@ -18,7 +18,7 @@ using Microsoft.Data.Sqlite;
 //
 // Restore: stop the host, replace the contents of `fishbowl-data/` with the
 // snapshot folder, start the host again. The folder-per-context layout is
-// preserved, so individual users/teams can also be restored by copying just
+// preserved, so individual users/spaces can also be restored by copying just
 // that subfolder.
 //
 // Usage:
@@ -93,23 +93,23 @@ if (Directory.Exists(usersRoot))
     }
 }
 
-// 3. teams/{id}/team.db
-var teamsRoot = Path.Combine(dataPath, "teams");
-if (Directory.Exists(teamsRoot))
+// 3. spaces/{id}/space.db
+var spacesRoot = Path.Combine(dataPath, "spaces");
+if (Directory.Exists(spacesRoot))
 {
-    foreach (var dir in Directory.EnumerateDirectories(teamsRoot))
+    foreach (var dir in Directory.EnumerateDirectories(spacesRoot))
     {
         var name = Path.GetFileName(dir);
         if (string.IsNullOrEmpty(name)) continue;
-        var src = Path.Combine(dir, "team.db");
+        var src = Path.Combine(dir, "space.db");
         if (!File.Exists(src))
         {
-            Log($"  - teams/{name}/ has no team.db, skipping");
+            Log($"  - spaces/{name}/ has no space.db, skipping");
             continue;
         }
-        var destDir = Path.Combine(snapshotDir, "teams", name);
+        var destDir = Path.Combine(snapshotDir, "spaces", name);
         Directory.CreateDirectory(destDir);
-        TryBackup(src, Path.Combine(destDir, "team.db"), $"teams/{name}/team.db");
+        TryBackup(src, Path.Combine(destDir, "space.db"), $"spaces/{name}/space.db");
     }
 }
 

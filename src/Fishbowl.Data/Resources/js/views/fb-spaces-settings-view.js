@@ -1,20 +1,20 @@
 /**
- * <fb-teams-settings-view>  (mounted at #/teams)
+ * <fb-spaces-settings-view>  (mounted at #/spaces)
  *
- * Minimal management surface for team workspaces — list, create, delete.
- * Each team is a shared data context backed by its own SQLite file under
- * fishbowl-data/teams/{teamId}/team.db (keyed by ULID, not slug — so renames
- * don't move the file). Notes live inside via /api/v1/teams/{slug}/notes; the API
+ * Minimal management surface for space workspaces — list, create, delete.
+ * Each space is a shared data context backed by its own SQLite file under
+ * fishbowl-data/spaces/{spaceId}/space.db (keyed by ULID, not slug — so renames
+ * don't move the file). Notes live inside via /api/v1/spaces/{slug}/notes; the API
  * translates slug→id before opening the DB. Renders the id next to each
- * team (and the user's own id for the personal workspace) so operators can
+ * space (and the user's own id for the personal workspace) so operators can
  * match rows to files on disk.
  *
  * Light-DOM so app.css tokens apply.
  */
-class FbTeamsSettingsView extends HTMLElement {
+class FbSpacesSettingsView extends HTMLElement {
     constructor() {
         super();
-        this.teams = [];
+        this.spaces = [];
         this.me = null;
         this.busy = false;
     }
@@ -26,15 +26,15 @@ class FbTeamsSettingsView extends HTMLElement {
 
     async refresh() {
         try {
-            const [teams, me] = await Promise.all([
-                fb.api.teams.list(),
+            const [spaces, me] = await Promise.all([
+                fb.api.spaces.list(),
                 fb.api.me.get().catch(() => null),
             ]);
-            this.teams = teams || [];
+            this.spaces = spaces || [];
             this.me = me;
         } catch (err) {
-            console.error("[fb-teams-settings-view] list failed:", err);
-            this.teams = [];
+            console.error("[fb-spaces-settings-view] list failed:", err);
+            this.spaces = [];
             this.me = null;
         }
         this.renderPersonal();
@@ -44,21 +44,21 @@ class FbTeamsSettingsView extends HTMLElement {
     render() {
         this.innerHTML = `
             <style>
-                fb-teams-settings-view { display: block; padding: 40px 48px; max-width: 780px; }
-                fb-teams-settings-view header { margin-bottom: 28px; }
-                fb-teams-settings-view h1 {
+                fb-spaces-settings-view { display: block; padding: 40px 48px; max-width: 780px; }
+                fb-spaces-settings-view header { margin-bottom: 28px; }
+                fb-spaces-settings-view h1 {
                     font-family: 'Outfit', 'Inter', sans-serif;
                     font-size: 28px;
                     font-weight: 700;
                     margin: 0 0 6px;
                     color: var(--text);
                 }
-                fb-teams-settings-view .subtitle {
+                fb-spaces-settings-view .subtitle {
                     color: var(--text-muted);
                     font-size: 14px;
                     margin: 0;
                 }
-                fb-teams-settings-view .create-row {
+                fb-spaces-settings-view .create-row {
                     display: flex;
                     gap: 8px;
                     margin-bottom: 32px;
@@ -67,7 +67,7 @@ class FbTeamsSettingsView extends HTMLElement {
                     border: 1px solid var(--border);
                     border-radius: 10px;
                 }
-                fb-teams-settings-view .create-row input {
+                fb-spaces-settings-view .create-row input {
                     flex: 1;
                     background: rgba(0, 0, 0, 0.3);
                     border: 1px solid var(--border);
@@ -78,8 +78,8 @@ class FbTeamsSettingsView extends HTMLElement {
                     font-size: 14px;
                     outline: none;
                 }
-                fb-teams-settings-view .create-row input:focus { border-color: var(--accent); }
-                fb-teams-settings-view .create-row button {
+                fb-spaces-settings-view .create-row input:focus { border-color: var(--accent); }
+                fb-spaces-settings-view .create-row button {
                     background: var(--accent);
                     border: none;
                     border-radius: 8px;
@@ -90,12 +90,12 @@ class FbTeamsSettingsView extends HTMLElement {
                     cursor: pointer;
                     transition: filter 120ms;
                 }
-                fb-teams-settings-view .create-row button:disabled {
+                fb-spaces-settings-view .create-row button:disabled {
                     opacity: 0.5; cursor: not-allowed;
                 }
-                fb-teams-settings-view .create-row button:not(:disabled):hover { filter: brightness(1.1); }
+                fb-spaces-settings-view .create-row button:not(:disabled):hover { filter: brightness(1.1); }
 
-                fb-teams-settings-view .list-title {
+                fb-spaces-settings-view .list-title {
                     font-size: 12px;
                     font-weight: 600;
                     text-transform: uppercase;
@@ -103,7 +103,7 @@ class FbTeamsSettingsView extends HTMLElement {
                     color: var(--text-muted);
                     margin: 0 0 10px;
                 }
-                fb-teams-settings-view .team-row {
+                fb-spaces-settings-view .space-row {
                     display: flex;
                     align-items: center;
                     gap: 14px;
@@ -113,21 +113,21 @@ class FbTeamsSettingsView extends HTMLElement {
                     border-radius: 10px;
                     margin-bottom: 8px;
                 }
-                fb-teams-settings-view .team-row fb-icon { --icon-size: 20px; color: var(--accent); flex-shrink: 0; }
-                fb-teams-settings-view .team-info { flex: 1; min-width: 0; }
-                fb-teams-settings-view .team-name {
+                fb-spaces-settings-view .space-row fb-icon { --icon-size: 20px; color: var(--accent); flex-shrink: 0; }
+                fb-spaces-settings-view .space-info { flex: 1; min-width: 0; }
+                fb-spaces-settings-view .space-name {
                     font-size: 14px;
                     font-weight: 600;
                     color: var(--text);
                     margin: 0 0 2px;
                 }
-                fb-teams-settings-view .team-meta {
+                fb-spaces-settings-view .space-meta {
                     display: flex;
                     gap: 12px;
                     font-size: 12px;
                     color: var(--text-muted);
                 }
-                fb-teams-settings-view .team-meta .role {
+                fb-spaces-settings-view .space-meta .role {
                     text-transform: uppercase;
                     letter-spacing: 0.05em;
                     font-size: 10px;
@@ -137,7 +137,7 @@ class FbTeamsSettingsView extends HTMLElement {
                     color: var(--accent);
                     font-weight: 700;
                 }
-                fb-teams-settings-view .id-chip {
+                fb-spaces-settings-view .id-chip {
                     font-family: 'SFMono-Regular', Consolas, monospace;
                     font-size: 11px;
                     padding: 1px 6px;
@@ -146,8 +146,8 @@ class FbTeamsSettingsView extends HTMLElement {
                     color: var(--text);
                     user-select: all;
                 }
-                fb-teams-settings-view .id-chip[title] { cursor: help; }
-                fb-teams-settings-view .delete-btn {
+                fb-spaces-settings-view .id-chip[title] { cursor: help; }
+                fb-spaces-settings-view .delete-btn {
                     background: transparent;
                     border: none;
                     color: var(--text-muted);
@@ -156,12 +156,12 @@ class FbTeamsSettingsView extends HTMLElement {
                     border-radius: 6px;
                     transition: color 100ms, background 100ms;
                 }
-                fb-teams-settings-view .delete-btn fb-icon { --icon-size: 16px; }
-                fb-teams-settings-view .delete-btn:hover {
+                fb-spaces-settings-view .delete-btn fb-icon { --icon-size: 16px; }
+                fb-spaces-settings-view .delete-btn:hover {
                     color: var(--danger, #ef4444);
                     background: rgba(239, 68, 68, 0.12);
                 }
-                fb-teams-settings-view .empty {
+                fb-spaces-settings-view .empty {
                     text-align: center;
                     color: var(--text-muted);
                     padding: 32px 0;
@@ -170,9 +170,9 @@ class FbTeamsSettingsView extends HTMLElement {
             </style>
 
             <header>
-                <h1>Teams</h1>
+                <h1>Spaces</h1>
                 <p class="subtitle">
-                    Shared workspaces — each team has its own notes, separate from your personal data.
+                    Shared workspaces — each space has its own notes, separate from your personal data.
                 </p>
             </header>
 
@@ -182,13 +182,13 @@ class FbTeamsSettingsView extends HTMLElement {
             <div style="margin-top: 32px;">
                 <fb-status-banner id="form-status"></fb-status-banner>
                 <div class="create-row">
-                    <input type="text" id="name-input" placeholder="New team name (e.g. 'Fishbowl Dev')" maxlength="60"/>
-                    <button type="button" id="create-btn">Create team</button>
+                    <input type="text" id="name-input" placeholder="New space name (e.g. 'Fishbowl Dev')" maxlength="60"/>
+                    <button type="button" id="create-btn">Create space</button>
                 </div>
             </div>
 
-            <h2 class="list-title">Your teams</h2>
-            <div id="team-list"></div>
+            <h2 class="list-title">Your spaces</h2>
+            <div id="space-list"></div>
         `;
 
         const input  = this.querySelector("#name-input");
@@ -219,11 +219,11 @@ class FbTeamsSettingsView extends HTMLElement {
         }
 
         mount.innerHTML = `
-            <div class="team-row">
+            <div class="space-row">
                 <fb-icon name="user"></fb-icon>
-                <div class="team-info">
-                    <p class="team-name">${escapeHtml(this.me.displayName || this.me.email || "You")}</p>
-                    <div class="team-meta">
+                <div class="space-info">
+                    <p class="space-name">${escapeHtml(this.me.displayName || this.me.email || "You")}</p>
+                    <div class="space-meta">
                         <span class="id-chip"
                               title="users/${escapeAttr(this.me.id)}/personal.db">${escapeHtml(this.me.id)}</span>
                     </div>
@@ -233,28 +233,28 @@ class FbTeamsSettingsView extends HTMLElement {
     }
 
     renderList() {
-        const list = this.querySelector("#team-list");
+        const list = this.querySelector("#space-list");
         if (!list) return;
 
-        if (this.teams.length === 0) {
-            list.innerHTML = `<div class="empty">no teams yet — create one above</div>`;
+        if (this.spaces.length === 0) {
+            list.innerHTML = `<div class="empty">no spaces yet — create one above</div>`;
             return;
         }
 
-        list.innerHTML = this.teams.map(t => `
-            <div class="team-row" data-slug="${escapeAttr(t.slug)}">
+        list.innerHTML = this.spaces.map(t => `
+            <div class="space-row" data-slug="${escapeAttr(t.slug)}">
                 <fb-icon name="users"></fb-icon>
-                <div class="team-info">
-                    <p class="team-name">${escapeHtml(t.name)}</p>
-                    <div class="team-meta">
+                <div class="space-info">
+                    <p class="space-name">${escapeHtml(t.name)}</p>
+                    <div class="space-meta">
                         <span>/${escapeHtml(t.slug)}</span>
                         <span class="role">${escapeHtml(t.role)}</span>
                         <span class="id-chip"
-                              title="teams/${escapeAttr(t.id)}/team.db">${escapeHtml(t.id)}</span>
+                              title="spaces/${escapeAttr(t.id)}/space.db">${escapeHtml(t.id)}</span>
                     </div>
                 </div>
                 ${t.role === "owner"
-                    ? `<button type="button" class="delete-btn" title="Delete team" aria-label="Delete">
+                    ? `<button type="button" class="delete-btn" title="Delete space" aria-label="Delete">
                            <fb-icon name="trash"></fb-icon>
                        </button>`
                     : ""}
@@ -263,7 +263,7 @@ class FbTeamsSettingsView extends HTMLElement {
 
         list.querySelectorAll(".delete-btn").forEach(btn => {
             btn.addEventListener("click", async (e) => {
-                const row  = e.currentTarget.closest(".team-row");
+                const row  = e.currentTarget.closest(".space-row");
                 const slug = row?.dataset.slug;
                 if (!slug) return;
                 await this._delete(slug);
@@ -278,7 +278,7 @@ class FbTeamsSettingsView extends HTMLElement {
         const input = this.querySelector("#name-input");
         const name  = input.value.trim();
         if (!name) {
-            this._showStatus("Team name is required.");
+            this._showStatus("Space name is required.");
             input.focus();
             return;
         }
@@ -286,14 +286,14 @@ class FbTeamsSettingsView extends HTMLElement {
         this.busy = true;
         this._setBusy(true);
         try {
-            await fb.api.teams.create({ name });
+            await fb.api.spaces.create({ name });
             input.value = "";
             await this.refresh();
         } catch (err) {
-            console.warn("[fb-teams-settings-view] create failed:", err);
+            console.warn("[fb-spaces-settings-view] create failed:", err);
             const status = err?.status;
-            if (status === 400) this._showStatus("Invalid team name.");
-            else                this._showStatus("Failed to create team.");
+            if (status === 400) this._showStatus("Invalid space name.");
+            else                this._showStatus("Failed to create space.");
         } finally {
             this.busy = false;
             this._setBusy(false);
@@ -301,12 +301,12 @@ class FbTeamsSettingsView extends HTMLElement {
     }
 
     async _delete(slug) {
-        const team = this.teams.find(t => t.slug === slug);
-        if (!team) return;
+        const space = this.spaces.find(t => t.slug === slug);
+        if (!space) return;
 
         const result = await fb.dialog.confirm({
-            title: `Delete team "${team.name}"?`,
-            message: `The team's notes stay on disk (recoverable) but the team is removed. Undo requires manual DB surgery.`,
+            title: `Delete space "${space.name}"?`,
+            message: `The space's notes stay on disk (recoverable) but the space is removed. Undo requires manual DB surgery.`,
             buttons: [
                 { action: "cancel", label: "Cancel", kind: "default" },
                 { action: "delete", label: "Delete",  kind: "destructive", armAfterMs: 1500 },
@@ -315,13 +315,13 @@ class FbTeamsSettingsView extends HTMLElement {
         if (result !== "delete") return;
 
         try {
-            await fb.api.teams.delete(slug);
+            await fb.api.spaces.delete(slug);
             await this.refresh();
         } catch (err) {
-            console.warn("[fb-teams-settings-view] delete failed:", err);
+            console.warn("[fb-spaces-settings-view] delete failed:", err);
             const status = err?.status;
-            if (status === 403) this._showStatus("Only the owner can delete this team.");
-            else                this._showStatus("Failed to delete team.");
+            if (status === 403) this._showStatus("Only the owner can delete this space.");
+            else                this._showStatus("Failed to delete space.");
         }
     }
 
@@ -336,5 +336,5 @@ function escapeHtml(s) {
 }
 function escapeAttr(s) { return escapeHtml(s); }
 
-customElements.define("fb-teams-settings-view", FbTeamsSettingsView);
-fb.router.register("#/teams", "fb-teams-settings-view", { label: "Teams", icon: "users" });
+customElements.define("fb-spaces-settings-view", FbSpacesSettingsView);
+fb.router.register("#/spaces", "fb-spaces-settings-view", { label: "Spaces", icon: "users" });

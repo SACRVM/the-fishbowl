@@ -44,7 +44,7 @@ PowerShell oneliner — `Get-ChildItem D:\fishbowl-backups -Directory | Sort-Obj
 Stop the host, replace the contents of `fishbowl-data/` with the snapshot
 folder, start the host again.
 
-The folder-per-context layout (`users/{id}/`, `teams/{id}/`) is preserved,
+The folder-per-context layout (`users/{id}/`, `spaces/{id}/`) is preserved,
 so partial restores work by copying just the affected subfolder.
 
 ## Exit codes

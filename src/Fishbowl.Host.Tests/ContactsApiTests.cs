@@ -27,7 +27,7 @@ public class ContactsApiTests : IClassFixture<WebApplicationFactory<Program>>, I
 
         var testFactory = new DatabaseFactory(_dataDir);
 
-        // Seed users so team-creation FKs are satisfied by the team tests.
+        // Seed users so space-creation FKs are satisfied by the space tests.
         using (var db = testFactory.CreateSystemConnection())
         {
             var now = DateTime.UtcNow.ToString("o");
@@ -233,15 +233,15 @@ public class ContactsApiTests : IClassFixture<WebApplicationFactory<Program>>, I
     }
 
     [Fact]
-    public async Task TeamContacts_AreIsolatedFromPersonal()
+    public async Task SpaceContacts_AreIsolatedFromPersonal()
     {
         var client = _factory.CreateClient();
 
         await CreateAsync(client, UserA, "personal-only");
-        await client.SendAsync(Req(HttpMethod.Post, "/api/v1/teams", UserA, new { name = "Contacts Team" }),
+        await client.SendAsync(Req(HttpMethod.Post, "/api/v1/spaces", UserA, new { name = "Contacts Space" }),
             TestContext.Current.CancellationToken);
-        await client.SendAsync(Req(HttpMethod.Post, "/api/v1/teams/contacts-team/contacts", UserA,
-            new Contact { Name = "team-only" }),
+        await client.SendAsync(Req(HttpMethod.Post, "/api/v1/spaces/contacts-space/contacts", UserA,
+            new Contact { Name = "space-only" }),
             TestContext.Current.CancellationToken);
 
         var personal = await client.SendAsync(
@@ -252,24 +252,24 @@ public class ContactsApiTests : IClassFixture<WebApplicationFactory<Program>>, I
         Assert.Single(personalList!);
         Assert.Equal("personal-only", personalList![0].Name);
 
-        var team = await client.SendAsync(
-            Req(HttpMethod.Get, "/api/v1/teams/contacts-team/contacts", UserA),
+        var space = await client.SendAsync(
+            Req(HttpMethod.Get, "/api/v1/spaces/contacts-space/contacts", UserA),
             TestContext.Current.CancellationToken);
-        var teamList = await team.Content.ReadFromJsonAsync<List<Contact>>(
+        var spaceList = await space.Content.ReadFromJsonAsync<List<Contact>>(
             TestContext.Current.CancellationToken);
-        Assert.Single(teamList!);
-        Assert.Equal("team-only", teamList![0].Name);
+        Assert.Single(spaceList!);
+        Assert.Equal("space-only", spaceList![0].Name);
     }
 
     [Fact]
-    public async Task TeamContacts_NonMember_Returns403()
+    public async Task SpaceContacts_NonMember_Returns403()
     {
         var client = _factory.CreateClient();
-        await client.SendAsync(Req(HttpMethod.Post, "/api/v1/teams", UserA, new { name = "Private C" }),
+        await client.SendAsync(Req(HttpMethod.Post, "/api/v1/spaces", UserA, new { name = "Private C" }),
             TestContext.Current.CancellationToken);
 
         var resp = await client.SendAsync(
-            Req(HttpMethod.Get, "/api/v1/teams/private-c/contacts", UserB),
+            Req(HttpMethod.Get, "/api/v1/spaces/private-c/contacts", UserB),
             TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.Forbidden, resp.StatusCode);
     }
@@ -311,44 +311,44 @@ public class ContactsApiTests : IClassFixture<WebApplicationFactory<Program>>, I
     }
 
     [Fact]
-    public async Task TeamSearch_NonMember_Returns403()
+    public async Task SpaceSearch_NonMember_Returns403()
     {
         var client = _factory.CreateClient();
-        await client.SendAsync(Req(HttpMethod.Post, "/api/v1/teams", UserA, new { name = "Search Private" }),
+        await client.SendAsync(Req(HttpMethod.Post, "/api/v1/spaces", UserA, new { name = "Search Private" }),
             TestContext.Current.CancellationToken);
 
         var resp = await client.SendAsync(
-            Req(HttpMethod.Get, "/api/v1/teams/search-private/contacts/search?q=anything", UserB),
+            Req(HttpMethod.Get, "/api/v1/spaces/search-private/contacts/search?q=anything", UserB),
             TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.Forbidden, resp.StatusCode);
     }
 
     [Fact]
-    public async Task TeamContacts_Readonly_CannotWrite()
+    public async Task SpaceContacts_Readonly_CannotWrite()
     {
         var client = _factory.CreateClient();
 
-        await client.SendAsync(Req(HttpMethod.Post, "/api/v1/teams", UserA, new { name = "Readonly Zone" }),
+        await client.SendAsync(Req(HttpMethod.Post, "/api/v1/spaces", UserA, new { name = "Readonly Zone" }),
             TestContext.Current.CancellationToken);
 
         // Promote UserB as readonly.
         using (var sys = new DatabaseFactory(_dataDir).CreateSystemConnection())
         {
-            var teamId = sys.ExecuteScalar<string>(
-                "SELECT id FROM teams WHERE slug = 'readonly-zone'");
+            var spaceId = sys.ExecuteScalar<string>(
+                "SELECT id FROM spaces WHERE slug = 'readonly-zone'");
             var now = DateTime.UtcNow.ToString("o");
             sys.Execute(
-                "INSERT INTO team_members(team_id, user_id, role, joined_at) VALUES (@t, @u, 'readonly', @j)",
-                new { t = teamId, u = UserB, j = now });
+                "INSERT INTO space_members(space_id, user_id, role, joined_at) VALUES (@t, @u, 'readonly', @j)",
+                new { t = spaceId, u = UserB, j = now });
         }
 
         var readResp = await client.SendAsync(
-            Req(HttpMethod.Get, "/api/v1/teams/readonly-zone/contacts", UserB),
+            Req(HttpMethod.Get, "/api/v1/spaces/readonly-zone/contacts", UserB),
             TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.OK, readResp.StatusCode);
 
         var writeResp = await client.SendAsync(
-            Req(HttpMethod.Post, "/api/v1/teams/readonly-zone/contacts", UserB,
+            Req(HttpMethod.Post, "/api/v1/spaces/readonly-zone/contacts", UserB,
                 new Contact { Name = "should-not-land" }),
             TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.Forbidden, writeResp.StatusCode);

@@ -15,7 +15,7 @@ using Fishbowl.Data.Repositories;
 //       [--user <id>] \
 //       [--name <label>] \
 //       [--scopes read:notes,write:notes] \
-//       [--context user|team] \
+//       [--context user|space] \
 //       [--context-id <slug>]
 //
 // Defaults:
@@ -23,7 +23,7 @@ using Fishbowl.Data.Repositories;
 //   --user <first user in system.db>
 //   --name claude-code-local
 //   --scopes read:notes,write:notes
-//   --context user                  (--context-id required when team)
+//   --context user                  (--context-id required when space)
 
 var args_ = args;
 var dataPath = GetArg("--data") ?? "fishbowl-data";
@@ -77,8 +77,8 @@ else
     userId = first;
 }
 
-// Resolve the context. Team context validates the slug is a real team and
-// the target user is a member — a key against a team you're not in would
+// Resolve the context. Space context validates the slug is a real space and
+// the target user is a member — a key against a space you're not in would
 // still get 403 at query time, but failing here is friendlier.
 ContextRef context;
 string contextDisplay;
@@ -87,38 +87,38 @@ if (contextArg == "user")
     context = ContextRef.User(userId);
     contextDisplay = $"user:{userId}";
 }
-else if (contextArg == "team")
+else if (contextArg == "space")
 {
     if (string.IsNullOrEmpty(contextIdArg))
     {
-        Console.Error.WriteLine("error: --context team requires --context-id <slug>");
+        Console.Error.WriteLine("error: --context space requires --context-id <slug>");
         return 5;
     }
 
     using var sys = factory.CreateSystemConnection();
-    var teamRow = sys.QueryFirstOrDefault<(string Id, string Slug)>(
-        "SELECT id AS Id, slug AS Slug FROM teams WHERE slug = @slug OR id = @slug",
+    var spaceRow = sys.QueryFirstOrDefault<(string Id, string Slug)>(
+        "SELECT id AS Id, slug AS Slug FROM spaces WHERE slug = @slug OR id = @slug",
         new { slug = contextIdArg });
-    if (string.IsNullOrEmpty(teamRow.Id))
+    if (string.IsNullOrEmpty(spaceRow.Id))
     {
-        Console.Error.WriteLine($"error: no team found with slug or id '{contextIdArg}'");
+        Console.Error.WriteLine($"error: no space found with slug or id '{contextIdArg}'");
         return 6;
     }
     var isMember = sys.ExecuteScalar<long>(
-        "SELECT COUNT(*) FROM team_members WHERE team_id = @teamId AND user_id = @userId",
-        new { teamId = teamRow.Id, userId }) > 0;
+        "SELECT COUNT(*) FROM space_members WHERE space_id = @spaceId AND user_id = @userId",
+        new { spaceId = spaceRow.Id, userId }) > 0;
     if (!isMember)
     {
-        Console.Error.WriteLine($"error: user {userId} is not a member of team '{teamRow.Slug}'");
+        Console.Error.WriteLine($"error: user {userId} is not a member of space '{spaceRow.Slug}'");
         return 7;
     }
 
-    context = ContextRef.Team(teamRow.Id);
-    contextDisplay = $"team:{teamRow.Slug}";
+    context = ContextRef.Space(spaceRow.Id);
+    contextDisplay = $"space:{spaceRow.Slug}";
 }
 else
 {
-    Console.Error.WriteLine($"error: --context must be 'user' or 'team' (got '{contextArg}')");
+    Console.Error.WriteLine($"error: --context must be 'user' or 'space' (got '{contextArg}')");
     return 8;
 }
 

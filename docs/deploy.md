@@ -27,7 +27,7 @@ over time.
   your notes; the ONNX embedding model is ~90 MB and lives at
   `fishbowl-data/models/`). Each App also gets its own SQLite file under
   `fishbowl-data/users/<userId>/apps/<appId>/app.db` (personal apps) or
-  `fishbowl-data/teams/<teamId>/apps/<appId>/app.db` (team apps), so an
+  `fishbowl-data/spaces/<spaceId>/apps/<appId>/app.db` (space apps), so an
   agent's typed-row store doesn't bleed into the global notes DB. Backup
   strategy: anything under `fishbowl-data/` survives Husky upgrades.
 
@@ -407,21 +407,21 @@ flow once you've re-run setup.
 
 ---
 
-## 9. Operating multiple teams
+## 9. Operating multiple spaces
 
-A team is Fishbowl's isolation primitive — separate SQLite file,
+A space is Fishbowl's isolation primitive — separate SQLite file,
 separate membership, separate MCP scope. Any agent CLI that needs its
-own memory namespace gets its own team and a team-scoped API key.
+own memory namespace gets its own space and a space-scoped API key.
 
 To carve one out:
 
 ```bash
 # On a workstation that has the Fishbowl source checked out:
-dotnet run --project tools/init-team -- lighthouse --data \\fishbowl-server\fishbowl-data
+dotnet run --project tools/init-space -- lighthouse --data \\fishbowl-server\fishbowl-data
 ```
 
-`init-team` creates the team (or reuses it if the slug already exists),
-mints a team-scoped API key, and prints the bearer token on stdout
+`init-space` creates the space (or reuses it if the slug already exists),
+mints a space-scoped API key, and prints the bearer token on stdout
 with a status banner on stderr. How the bearer is then stored and
 handed to a downstream agent CLI lives in that agent's docs.
 

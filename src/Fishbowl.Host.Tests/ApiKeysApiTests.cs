@@ -33,7 +33,7 @@ public class ApiKeysApiTests : IClassFixture<WebApplicationFactory<Program>>, ID
         _dbFactory = new DatabaseFactory(_dataDir);
         _keyRepo = new ApiKeyRepository(_dbFactory);
 
-        // Pre-seed both users so api_keys.user_id FK + team membership FK hold.
+        // Pre-seed both users so api_keys.user_id FK + space membership FK hold.
         using (var db = _dbFactory.CreateSystemConnection())
         {
             var now = DateTime.UtcNow.ToString("o");
@@ -148,14 +148,14 @@ public class ApiKeysApiTests : IClassFixture<WebApplicationFactory<Program>>, ID
     }
 
     [Fact]
-    public async Task CreateKey_TeamContext_NonMember_403()
+    public async Task CreateKey_SpaceContext_NonMember_403()
     {
-        // Alice owns a team; Bob is not a member. Bob cannot mint a team
+        // Alice owns a space; Bob is not a member. Bob cannot mint a space
         // key for it.
         using (var db = _dbFactory.CreateSystemConnection())
         {
-            var teamRepo = new TeamRepository(_dbFactory);
-            await teamRepo.CreateAsync(Alice, "Alice Team", TestContext.Current.CancellationToken);
+            var spaceRepo = new SpaceRepository(_dbFactory);
+            await spaceRepo.CreateAsync(Alice, "Alice Space", TestContext.Current.CancellationToken);
         }
 
         var client = _factory.CreateClient();
@@ -163,8 +163,8 @@ public class ApiKeysApiTests : IClassFixture<WebApplicationFactory<Program>>, ID
             Req(HttpMethod.Post, "/api/v1/keys", Bob, new
             {
                 name = "steal",
-                contextType = "team",
-                contextId = "alice-team",
+                contextType = "space",
+                contextId = "alice-space",
                 scopes = new[] { "read:notes" },
             }),
             TestContext.Current.CancellationToken);
@@ -173,14 +173,14 @@ public class ApiKeysApiTests : IClassFixture<WebApplicationFactory<Program>>, ID
     }
 
     [Fact]
-    public async Task CreateKey_TeamContext_UnknownTeam_404()
+    public async Task CreateKey_SpaceContext_UnknownSpace_404()
     {
         var client = _factory.CreateClient();
         var resp = await client.SendAsync(
             Req(HttpMethod.Post, "/api/v1/keys", Alice, new
             {
                 name = "ghost",
-                contextType = "team",
+                contextType = "space",
                 contextId = "does-not-exist",
                 scopes = new[] { "read:notes" },
             }),

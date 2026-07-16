@@ -233,25 +233,25 @@ public class EventRepositoryTests : IDisposable
     }
 
     [Fact]
-    public async Task TeamContext_IsolatedFromPersonal()
+    public async Task SpaceContext_IsolatedFromPersonal()
     {
-        const string teamSlug = "01J_EVENT_TEAM";
+        const string spaceSlug = "01J_EVENT_SPACE";
         await _repo.CreateAsync(ContextRef.User(TestUserId), TestUserId,
             new Event { Title = "personal", StartAt = DateTime.UtcNow },
             TestContext.Current.CancellationToken);
-        await _repo.CreateAsync(ContextRef.Team(teamSlug), TestUserId,
-            new Event { Title = "team", StartAt = DateTime.UtcNow },
+        await _repo.CreateAsync(ContextRef.Space(spaceSlug), TestUserId,
+            new Event { Title = "space-event", StartAt = DateTime.UtcNow },
             TestContext.Current.CancellationToken);
 
         var personal = (await _repo.GetAllAsync(ContextRef.User(TestUserId),
             TestContext.Current.CancellationToken)).ToList();
-        var team = (await _repo.GetAllAsync(ContextRef.Team(teamSlug),
+        var space = (await _repo.GetAllAsync(ContextRef.Space(spaceSlug),
             TestContext.Current.CancellationToken)).ToList();
 
         Assert.Single(personal);
         Assert.Equal("personal", personal[0].Title);
-        Assert.Single(team);
-        Assert.Equal("team", team[0].Title);
+        Assert.Single(space);
+        Assert.Equal("space-event", space[0].Title);
     }
 
     [Fact]

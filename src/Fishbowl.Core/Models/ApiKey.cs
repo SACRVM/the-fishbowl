@@ -7,10 +7,10 @@ public class ApiKey
 {
     public string Id { get; set; } = "";
     public string UserId { get; set; } = "";
-    public string ContextType { get; set; } = "";   // "user" | "team" | "app"
+    public string ContextType { get; set; } = "";   // "user" | "space" | "app"
     public string ContextId { get; set; } = "";
     // App-keys only: the owner pair backing path resolution
-    // (<owner-folder>/apps/<context_id>/app.db). NULL for user/team keys; the
+    // (<owner-folder>/apps/<context_id>/app.db). NULL for user/space keys; the
     // system.db CHECK constraint enforces the (context_type='app') ↔ NOT NULL
     // invariant. Stored separately from ContextId so a single api_keys row
     // carries everything the auth handler needs to mint a full AppRef without

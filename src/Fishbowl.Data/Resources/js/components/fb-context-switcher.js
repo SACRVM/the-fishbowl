@@ -1,9 +1,9 @@
 /**
  * <fb-context-switcher></fb-context-switcher>
  *
- * Compact pill that shows the current workspace (personal vs team) and lets
+ * Compact pill that shows the current workspace (personal vs space) and lets
  * the user switch between them. Reads the active context from fb.context,
- * lists the user's teams from fb.api.teams.list(), and navigates via
+ * lists the user's spaces from fb.api.spaces.list(), and navigates via
  * fb.context.set({ type, slug }) when picked.
  *
  * Rendered in the light DOM slot so the ribbon's Shadow DOM layout picks it
@@ -14,13 +14,13 @@ class FbContextSwitcher extends HTMLElement {
     constructor() {
         super();
         this.attachShadow({ mode: "open" });
-        this.teams = null;       // null until loaded
+        this.spaces = null;      // null until loaded
         this.open = false;
     }
 
     connectedCallback() {
         this.render();
-        this._loadTeams();
+        this._loadSpaces();
 
         // Every context switch (including the one we trigger ourselves)
         // re-renders so the pill label matches the URL.
@@ -42,25 +42,25 @@ class FbContextSwitcher extends HTMLElement {
         if (this._onDocClick) document.removeEventListener("click", this._onDocClick, true);
     }
 
-    async _loadTeams() {
+    async _loadSpaces() {
         try {
-            this.teams = await fb.api.teams.list();
+            this.spaces = await fb.api.spaces.list();
         } catch (err) {
             // 401 redirects happen in fb.api; everything else we degrade
             // silently — the switcher still works for personal-only.
-            console.warn("[fb-context-switcher] teams load failed:", err?.message || err);
-            this.teams = [];
+            console.warn("[fb-context-switcher] spaces load failed:", err?.message || err);
+            this.spaces = [];
         }
         this.render();
     }
 
     render() {
         const ctx = fb.context?.get() || { type: "user" };
-        const active = ctx.type === "team" ? ctx.slug : "personal";
-        const label = ctx.type === "team"
-            ? (this._teamName(ctx.slug) || ctx.slug)
+        const active = ctx.type === "space" ? ctx.slug : "personal";
+        const label = ctx.type === "space"
+            ? (this._spaceName(ctx.slug) || ctx.slug)
             : "Personal";
-        const inTeam = ctx.type === "team";
+        const inSpace = ctx.type === "space";
 
         this.shadowRoot.innerHTML = `
             <style>
@@ -87,14 +87,14 @@ class FbContextSwitcher extends HTMLElement {
                     background: rgba(255, 255, 255, 0.09);
                     border-color: rgba(255, 255, 255, 0.3);
                 }
-                /* Team context gets the warm accent so you can't miss that
+                /* Space context gets the warm accent so you can't miss that
                    you're looking at shared data. */
-                .pill.team {
+                .pill.space {
                     color: var(--accent-warm, #f97316);
                     border-color: color-mix(in srgb, var(--accent-warm, #f97316) 40%, transparent);
                 }
-                .pill.team:hover,
-                .pill.team.open {
+                .pill.space:hover,
+                .pill.space.open {
                     background: color-mix(in srgb, var(--accent-warm, #f97316) 14%, transparent);
                     border-color: color-mix(in srgb, var(--accent-warm, #f97316) 60%, transparent);
                 }
@@ -152,7 +152,7 @@ class FbContextSwitcher extends HTMLElement {
                     background: rgba(59, 130, 246, 0.14);
                     color: var(--accent, #3b82f6);
                 }
-                .item.team.active {
+                .item.space.active {
                     background: color-mix(in srgb, var(--accent-warm, #f97316) 18%, transparent);
                     color: var(--accent-warm, #f97316);
                 }
@@ -171,10 +171,10 @@ class FbContextSwitcher extends HTMLElement {
                     color: var(--accent, #3b82f6);
                 }
             </style>
-            <button class="pill ${inTeam ? "team" : ""} ${this.open ? "open" : ""}"
+            <button class="pill ${inSpace ? "space" : ""} ${this.open ? "open" : ""}"
                     aria-haspopup="menu"
                     aria-expanded="${this.open}">
-                <fb-icon name="${inTeam ? "users" : "user"}"></fb-icon>
+                <fb-icon name="${inSpace ? "users" : "user"}"></fb-icon>
                 <span class="label">${this._escape(label)}</span>
                 <fb-icon class="caret" name="chevron-down"></fb-icon>
             </button>
@@ -183,12 +183,12 @@ class FbContextSwitcher extends HTMLElement {
                     <fb-icon name="user"></fb-icon>
                     <span>Personal</span>
                 </button>
-                ${this.teams === null ? "" : (this.teams.length === 0
-                    ? `<div class="divider"></div><div class="empty">No teams yet</div>`
+                ${this.spaces === null ? "" : (this.spaces.length === 0
+                    ? `<div class="divider"></div><div class="empty">No spaces yet</div>`
                     : `<div class="divider"></div>
-                       ${this.teams.map(t => `
-                           <button class="item team ${active === t.slug ? "active" : ""}"
-                                   data-type="team" data-slug="${this._escape(t.slug)}">
+                       ${this.spaces.map(t => `
+                           <button class="item space ${active === t.slug ? "active" : ""}"
+                                   data-type="space" data-slug="${this._escape(t.slug)}">
                                <fb-icon name="users"></fb-icon>
                                <span>${this._escape(t.name || t.slug)}</span>
                            </button>
@@ -196,7 +196,7 @@ class FbContextSwitcher extends HTMLElement {
                 <div class="divider"></div>
                 <button class="item create" data-action="manage">
                     <fb-icon name="settings"></fb-icon>
-                    <span>Manage teams…</span>
+                    <span>Manage spaces…</span>
                 </button>
             </div>
         `;
@@ -212,13 +212,13 @@ class FbContextSwitcher extends HTMLElement {
                 const slug = item.dataset.slug;
                 this._setOpen(false);
                 if (type === "user") fb.context.set({ type: "user" });
-                else if (type === "team" && slug) fb.context.set({ type: "team", slug });
+                else if (type === "space" && slug) fb.context.set({ type: "space", slug });
             });
         });
         const manage = this.shadowRoot.querySelector('[data-action="manage"]');
         manage?.addEventListener("click", () => {
             this._setOpen(false);
-            fb.router?.navigate?.("#/teams");
+            fb.router?.navigate?.("#/spaces");
         });
     }
 
@@ -227,9 +227,9 @@ class FbContextSwitcher extends HTMLElement {
         this.render();
     }
 
-    _teamName(slug) {
-        if (!this.teams) return null;
-        const found = this.teams.find(t => t.slug === slug);
+    _spaceName(slug) {
+        if (!this.spaces) return null;
+        const found = this.spaces.find(t => t.slug === slug);
         return found?.name || null;
     }
 

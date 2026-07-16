@@ -19,7 +19,7 @@ public class ListContactsTool : IMcpTool
 
     public string Name => "list_contacts";
     public string Description =>
-        "Lists contacts in the current context (personal or team). Returns name/email/phone/notes and archived flag.";
+        "Lists contacts in the current context (personal or space). Returns name/email/phone/notes and archived flag.";
     public string RequiredScope => "read:contacts";
 
     public object InputSchema => new

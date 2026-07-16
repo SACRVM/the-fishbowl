@@ -1,6 +1,6 @@
 # seed-dev-data
 
-Populates a Fishbowl context (personal or team) with a small, opinionated set
+Populates a Fishbowl context (personal or space) with a small, opinionated set
 of sample notes, todos, and contacts so the UI and MCP tools have something
 to work against during development.
 
@@ -13,8 +13,8 @@ dotnet run --project tools/seed-dev-data
 # Specific user
 dotnet run --project tools/seed-dev-data -- --user 01HZ123...
 
-# Team workspace by slug
-dotnet run --project tools/seed-dev-data -- --context team --context-id my-team
+# Space workspace by slug
+dotnet run --project tools/seed-dev-data -- --context space --context-id my-space
 
 # Custom data directory
 dotnet run --project tools/seed-dev-data -- --data ./fishbowl-data-alt
@@ -80,8 +80,8 @@ Exit codes match the other dev tools:
 | 0    | Seeded (or already seeded — see stdout) |
 | 2    | `system.db` missing                    |
 | 3    | No users in `system.db`                |
-| 5    | `--context team` without `--context-id` |
-| 6    | Team slug not found                    |
+| 5    | `--context space` without `--context-id` |
+| 6    | Space slug not found                   |
 | 8    | Unknown `--context` value              |
 
 stdout is a single-line JSON summary:

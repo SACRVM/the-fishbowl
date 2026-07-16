@@ -12,7 +12,7 @@ class FbKeysSettingsView extends HTMLElement {
     constructor() {
         super();
         this.keys = [];
-        this.teams = [];
+        this.spaces = [];
         this.busy = false;
     }
 
@@ -23,16 +23,16 @@ class FbKeysSettingsView extends HTMLElement {
 
     async refresh() {
         try {
-            const [keys, teams] = await Promise.all([
+            const [keys, spaces] = await Promise.all([
                 fb.api.keys.list(),
-                fb.api.teams.list(),
+                fb.api.spaces.list(),
             ]);
             this.keys = keys || [];
-            this.teams = teams || [];
+            this.spaces = spaces || [];
         } catch (err) {
             console.error("[fb-keys-settings-view] load failed:", err);
             this.keys = [];
-            this.teams = [];
+            this.spaces = [];
         }
         this.renderForm();
         this.renderList();
@@ -288,8 +288,8 @@ class FbKeysSettingsView extends HTMLElement {
 
         const contextOptions = [
             `<option value="user::">Personal</option>`,
-            ...this.teams.map(t =>
-                `<option value="team::${escapeAttr(t.slug)}">Team — ${escapeHtml(t.name)}</option>`),
+            ...this.spaces.map(t =>
+                `<option value="space::${escapeAttr(t.slug)}">Space — ${escapeHtml(t.name)}</option>`),
         ].join("");
 
         mount.innerHTML = `
@@ -348,8 +348,8 @@ class FbKeysSettingsView extends HTMLElement {
             const lastUsed = k.lastUsedAt
                 ? `last used ${formatRelative(k.lastUsedAt)}`
                 : "never used";
-            const ctxLabel = k.contextType === "team"
-                ? `team/${escapeHtml(k.contextId)}`
+            const ctxLabel = k.contextType === "space"
+                ? `space/${escapeHtml(k.contextId)}`
                 : "personal";
             return `
                 <div class="key-row" data-id="${escapeAttr(k.id)}">
@@ -392,7 +392,7 @@ class FbKeysSettingsView extends HTMLElement {
             return;
         }
 
-        const ctxValue = this.querySelector("#key-context").value; // "user::" or "team::{slug}"
+        const ctxValue = this.querySelector("#key-context").value; // "user::" or "space::{slug}"
         const [contextType, contextId] = ctxValue.split("::");
         const scopes = Array.from(this.querySelectorAll(".scopes input:checked"))
             .map(el => el.value);
@@ -408,7 +408,7 @@ class FbKeysSettingsView extends HTMLElement {
             const created = await fb.api.keys.create({
                 name,
                 contextType,
-                contextId: contextType === "team" ? contextId : null,
+                contextId: contextType === "space" ? contextId : null,
                 scopes,
             });
             await this._revealToken(created);
@@ -419,7 +419,7 @@ class FbKeysSettingsView extends HTMLElement {
             const status = err?.status;
             if (status === 400)      this._showStatus(`Invalid: ${err?.body || "check form"}`);
             else if (status === 403) this._showStatus("You can't mint a key for that context.");
-            else if (status === 404) this._showStatus("Unknown team.");
+            else if (status === 404) this._showStatus("Unknown space.");
             else                     this._showStatus("Failed to create key.");
         } finally {
             this.busy = false;

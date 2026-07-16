@@ -19,7 +19,7 @@ namespace Fishbowl.Host.Tests;
 
 // Cross-context isolation tests for the Apps platform.
 // Verifies: app-key A cannot reach app B, personal-app key cannot reach
-// team-app, deleted-app key returns 404, and app key cannot reach notes.
+// space-app, deleted-app key returns 404, and app key cannot reach notes.
 public class AppCrossContextTests : IClassFixture<WebApplicationFactory<Program>>, IDisposable
 {
     private readonly WebApplicationFactory<Program> _factory;
@@ -138,22 +138,22 @@ public class AppCrossContextTests : IClassFixture<WebApplicationFactory<Program>
         Assert.Equal(HttpStatusCode.Forbidden, resp.StatusCode);
     }
 
-    // Personal-app Bearer key has ownerType=user; hitting the team-app route
-    // causes a claim mismatch on the team owner_id — 403.
+    // Personal-app Bearer key has ownerType=user; hitting the space-app route
+    // causes a claim mismatch on the space owner_id — 403.
     [Fact]
-    public async Task BearerKeyForPersonalApp_CannotReachTeamApp_Returns403()
+    public async Task BearerKeyForPersonalApp_CannotReachSpaceApp_Returns403()
     {
         var ct = TestContext.Current.CancellationToken;
 
-        var teams = new TeamRepository(_dbFactory);
-        var team = await teams.CreateAsync(Alice, "xctx-team", ct);
+        var spaces = new SpaceRepository(_dbFactory);
+        var space = await spaces.CreateAsync(Alice, "xctx-space", ct);
 
         var (_, personalBearer) = await CreateAppAndMintKeyAsync("user", Alice, "xctx-personal");
-        await CreateAppAndMintKeyAsync("team", team.Slug, "xctx-team-app");
+        await CreateAppAndMintKeyAsync("space", space.Slug, "xctx-space-app");
 
         var resp = await BearerClient(personalBearer).SendAsync(
             new HttpRequestMessage(HttpMethod.Get,
-                $"/api/v1/apps/team/{team.Slug}/xctx-team-app/tables"),
+                $"/api/v1/apps/space/{space.Slug}/xctx-space-app/tables"),
             ct);
 
         Assert.Equal(HttpStatusCode.Forbidden, resp.StatusCode);

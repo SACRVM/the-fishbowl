@@ -50,8 +50,9 @@ public class DatabaseFactoryTests : IDisposable
         Assert.Contains("users", tables);
         Assert.Contains("user_mappings", tables);
         Assert.Contains("system_config", tables);
-        Assert.Contains("teams", tables);
-        Assert.Contains("team_members", tables);
+        // V2 created teams/team_members; V8 renamed them to spaces/space_members.
+        Assert.Contains("spaces", tables);
+        Assert.Contains("space_members", tables);
 
         Assert.Contains("api_keys", tables);
         Assert.Contains("notification_channels", tables);
@@ -66,7 +67,7 @@ public class DatabaseFactoryTests : IDisposable
         Assert.Contains("must_change_password", userColumns);
 
         var version = connection.ExecuteScalar<long>("PRAGMA user_version");
-        Assert.Equal(7, version);
+        Assert.Equal(8, version);
     }
 
     [Fact]

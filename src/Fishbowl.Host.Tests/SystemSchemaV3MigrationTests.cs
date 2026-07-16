@@ -34,11 +34,12 @@ public class SystemSchemaV3MigrationTests : IDisposable
     }
 
     [Fact]
-    public async Task ApplyV3_FromV2_PreservesExistingTeams()
+    public async Task ApplyV3_FromV2_PreservesExistingSpaces()
     {
         // Seed a v2 system.db (users + user_mappings + system_config + teams
-        // + team_members). Factory must roll it to v3 without touching the
-        // existing rows.
+        // + team_members — historical V2 table names). Factory rolls it through
+        // V3 ... V8; V8 renames teams → spaces and team_members → space_members.
+        // After migration, the rows must survive in the renamed tables.
         var systemPath = Path.Combine(_dataDir, "system.db");
         using (var seed = new SqliteConnection($"Data Source={systemPath}"))
         {
@@ -86,8 +87,9 @@ public class SystemSchemaV3MigrationTests : IDisposable
 
         var userCount = await db.ExecuteScalarAsync<long>("SELECT COUNT(*) FROM users WHERE id = 'u1'");
         Assert.Equal(1, userCount);
-        var teamCount = await db.ExecuteScalarAsync<long>("SELECT COUNT(*) FROM teams WHERE id = 't1'");
-        Assert.Equal(1, teamCount);
+        // V8 renamed teams → spaces; the row must survive under the new table name.
+        var spaceCount = await db.ExecuteScalarAsync<long>("SELECT COUNT(*) FROM spaces WHERE id = 't1'");
+        Assert.Equal(1, spaceCount);
     }
 
     [Fact]

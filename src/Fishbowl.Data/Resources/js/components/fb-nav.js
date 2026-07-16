@@ -91,11 +91,11 @@ class FbNav extends HTMLElement {
     render() {
         const appName = this.getAttribute("app-name") || "";
         const routes = (fb.router?.routes() || []).filter(r => r.hash !== "#/");
-        // currentResource() strips any /team/SLUG prefix so "active" state
+        // currentResource() strips any /space/SLUG prefix so "active" state
         // highlights the right nav item in both contexts.
         const currentResource = fb.router?.currentResource?.() || fb.router?.current() || "#/";
-        // Prefix each nav href with /team/SLUG when a team is active, so
-        // clicking "Notes" from a team workspace keeps you in the team.
+        // Prefix each nav href with /space/SLUG when a space is active, so
+        // clicking "Notes" from a space workspace keeps you in the space.
         const hrefFor = (personalHash) =>
             window.fb?.context?.hashFor ? fb.context.hashFor(personalHash) : personalHash;
 
@@ -615,7 +615,7 @@ class FbNav extends HTMLElement {
         this._routeHandler = () => this.render();
         window.addEventListener("fb:route-registered", this._routeHandler);
 
-        // Context switch: hrefs pick up the new team prefix, active-state
+        // Context switch: hrefs pick up the new space prefix, active-state
         // moves to the correct item.
         this._contextHandler = () => this.render();
         window.addEventListener("fb:context-changed", this._contextHandler);

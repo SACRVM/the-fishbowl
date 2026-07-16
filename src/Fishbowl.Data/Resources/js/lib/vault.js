@@ -20,8 +20,8 @@
  * The passphrase modal is plain DOM (no custom element) — just enough to
  * collect a string once per session. Styled via app.css (.fb-vault-*).
  *
- * Note on team workspaces: every device has its own salt+key, so secrets
- * written by one teammate can't be decrypted by another. Team member
+ * Note on space workspaces: every device has its own salt+key, so secrets
+ * written by one space member can't be decrypted by another. Space member
  * viewing Alice's encrypted secret will see "[decryption failed]" in the
  * body. Acceptable v1 limitation — cross-user sharing of secrets is not
  * what this feature is for.
