@@ -1,0 +1,26 @@
+{
+  "version": 1,
+  "id": "the-fishbowl",
+  "quickLinks": [
+    {
+      "name": "GitHub",
+      "url": "https://github.com/chloe-dream/the-fishbowl",
+      "target": "External"
+    }
+  ],
+  "commands": [
+    {
+      "name": "Run Host",
+      "type": "Shell",
+      "icon": "play",
+      "command": "dotnet",
+      "args": [
+        "run",
+        "--project",
+        "src/Fishbowl.Host"
+      ],
+      "window": "reuse:fishbowl-host",
+      "longRunning": true
+    }
+  ]
+}

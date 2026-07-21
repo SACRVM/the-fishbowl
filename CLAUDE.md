@@ -123,3 +123,7 @@ Lazy migrations keyed on `PRAGMA user_version`. Dapper raw SQL; IDs are ULIDs (`
 ## Husky launcher
 
 The host attaches to [Husky](https://github.com/chloe-dream/husky) when the launcher hosts it (`HuskyClient.AttachIfHostedAsync` returns `null` under `dotnet run` / debugger, so dev is unaffected). Husky-driven shutdown forwards to `app.StopAsync(ct)` so hosted services (Discord bot, embedding initializer, ACME renewal) drain cleanly before the binary swap. End users run `Husky --repo chloe-dream/the-fishbowl --asset 'Fishbowl-{version}-<rid>.zip'`; Husky reads `husky.config.json` from the repo root for `name` + `executable` + timing knobs (currently Windows-pathed; Linux/Mac users override `executable` in their local config). Husky preserves anything outside the update package, so `app/fishbowl-data/` survives upgrades.
+
+## Firepit-Inbox
+
+Beim Session-Start alle `.firepit/inbox/*.md` lesen und verarbeiten. Erledigtes mit `firepit_inbox_complete` markieren (verschiebt nach `inbox/processed/`). Tool lädt erst nach Claude-Code-Neustart — fehlt es, neu starten.

@@ -500,8 +500,15 @@ fishbowl-mods/
 # never land in git. docs/mcp-manual-test-plan.md explains how to regenerate.
 .mcp.json
 
-# Claude Code per-machine config (settings.local.json lives here)
-.claude/
+# Firepit + Claude Code — shared declarative config belongs in the repo
+# (.claude/agents/, .claude/commands/, .firepit/config.json); runtime and
+# per-machine artifacts stay local.
+.firepit/inbox/
+.firepit/runs/
+!.firepit/config.json
+.claude/settings.local.json
+.claude/*.lock
+.claude/agent-memory/
 
 # Test output and coverage artifacts
 test_output.txt
@@ -515,6 +522,5 @@ coverage.cobertura.xml
 .playwright/
 
 # Local agent scratch + uncommitted dev artefacts
-.firepit/
 assets/
 tools/set-config/
