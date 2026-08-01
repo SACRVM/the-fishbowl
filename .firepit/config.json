@@ -1,6 +1,9 @@
 {
   "version": 1,
   "id": "the-fishbowl",
+  "mcpActivations": [
+    { "id": "firepit" }
+  ],
   "quickLinks": [
     {
       "name": "GitHub",
