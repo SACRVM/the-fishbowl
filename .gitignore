@@ -524,3 +524,6 @@ coverage.cobertura.xml
 # Local agent scratch + uncommitted dev artefacts
 assets/
 tools/set-config/
+
+# Firepit + Claude Code — shared config versioned, runtime/personal local
+.firepit/knowledge.db*
