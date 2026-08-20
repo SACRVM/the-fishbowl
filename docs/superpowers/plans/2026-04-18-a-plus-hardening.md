@@ -1393,7 +1393,7 @@ git push origin master
 
 - [ ] **Step 5: Verify pipeline goes green on GitHub**
 
-Open `https://github.com/chloe-dream/the-fishbowl/actions` and confirm the run for the push completes green on both OS jobs.
+Open `https://github.com/SACRVM/the-fishbowl/actions` and confirm the run for the push completes green on both OS jobs.
 
 If it fails, fix the root cause and push a follow-up commit — do not disable the failing step.
 
@@ -2682,7 +2682,7 @@ Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>"
 git push origin master
 ```
 
-Confirm CI goes green on the pushed batch at `https://github.com/chloe-dream/the-fishbowl/actions`.
+Confirm CI goes green on the pushed batch at `https://github.com/SACRVM/the-fishbowl/actions`.
 
 ---
 

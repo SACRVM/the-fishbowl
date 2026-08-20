@@ -1,7 +1,7 @@
 # Deploying Fishbowl on a server
 
 End-to-end runbook for installing Fishbowl on a Windows server under
-[Husky](https://github.com/chloe-dream/husky), keeping it updated, and
+[Husky](https://github.com/SACRVM/husky), keeping it updated, and
 recovering from common operational failures. Linux/macOS deployments work
 the same way with the matching per-RID asset and an `executable` override
 in `husky.config.json`.
@@ -45,14 +45,14 @@ over time.
 
    if (-not (Test-Path $exe)) {
        $zip = Join-Path $env:TEMP 'husky.zip'
-       Invoke-WebRequest 'https://github.com/chloe-dream/husky/releases/latest/download/husky-win-x64.zip' -OutFile $zip -UseBasicParsing
+       Invoke-WebRequest 'https://github.com/SACRVM/husky/releases/latest/download/husky-win-x64.zip' -OutFile $zip -UseBasicParsing
        Expand-Archive $zip $dir -Force
        Remove-Item $zip
    }
 
    # Detached so this PowerShell session can close without killing Husky.
    $proc = Start-Process -FilePath $exe -PassThru `
-       -ArgumentList @('--repo','chloe-dream/the-fishbowl','--asset','Fishbowl-{version}-win-x64.zip','--dir',$dir)
+       -ArgumentList @('--repo','SACRVM/the-fishbowl','--asset','Fishbowl-{version}-win-x64.zip','--dir',$dir)
    Write-Host "Husky started (PID $($proc.Id)). You can close this window." -ForegroundColor Green
    ```
 
@@ -132,7 +132,7 @@ Once any provider is configured, `GET /setup` returns 404 and
 
 ## 4. Automatic updates
 
-Husky checks `chloe-dream/the-fishbowl`'s GitHub Releases every
+Husky checks `SACRVM/the-fishbowl`'s GitHub Releases every
 `checkMinutes` (default 60). When a new tag arrives:
 
 1. Husky downloads the new ZIP.
@@ -191,7 +191,7 @@ scoop install nssm
 ```powershell
 nssm install husky-fishbowl `
     'C:\fishbowl\Husky.exe' `
-    --repo chloe-dream/the-fishbowl `
+    --repo SACRVM/the-fishbowl `
     --asset 'Fishbowl-{version}-win-x64.zip' `
     --dir 'C:\fishbowl'
 

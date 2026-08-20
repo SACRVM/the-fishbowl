@@ -40,7 +40,7 @@ This creates the space (if absent), mints a space-scoped API key, and prints the
 
 ## Deploy on a server
 
-The host ships under [Husky](https://github.com/chloe-dream/husky) — drop this as `run.ps1` into an empty folder on a Windows server and execute it. First run pulls the latest Husky launcher from GitHub; every run Husky checks `chloe-dream/the-fishbowl`'s GitHub Releases and pulls the latest build. To redeploy after a new release tag: just run the script again.
+The host ships under [Husky](https://github.com/SACRVM/husky) — drop this as `run.ps1` into an empty folder on a Windows server and execute it. First run pulls the latest Husky launcher from GitHub; every run Husky checks `SACRVM/the-fishbowl`'s GitHub Releases and pulls the latest build. To redeploy after a new release tag: just run the script again.
 
 ```powershell
 $ErrorActionPreference = 'Stop'
@@ -49,14 +49,14 @@ $exe = Join-Path $dir 'Husky.exe'
 
 if (-not (Test-Path $exe)) {
     $zip = Join-Path $env:TEMP 'husky.zip'
-    Invoke-WebRequest 'https://github.com/chloe-dream/husky/releases/latest/download/husky-win-x64.zip' -OutFile $zip -UseBasicParsing
+    Invoke-WebRequest 'https://github.com/SACRVM/husky/releases/latest/download/husky-win-x64.zip' -OutFile $zip -UseBasicParsing
     Expand-Archive $zip $dir -Force
     Remove-Item $zip
 }
 
 # Detached so this PowerShell session can close without killing the launcher.
 $proc = Start-Process -FilePath $exe -PassThru `
-    -ArgumentList @('--repo','chloe-dream/the-fishbowl','--asset','Fishbowl-{version}-win-x64.zip','--dir',$dir)
+    -ArgumentList @('--repo','SACRVM/the-fishbowl','--asset','Fishbowl-{version}-win-x64.zip','--dir',$dir)
 Write-Host "Husky started (PID $($proc.Id)). You can close this window." -ForegroundColor Green
 ```
 

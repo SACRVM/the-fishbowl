@@ -5,7 +5,7 @@ argument-hint: [test|patch|minor|major|<x.y.z>]
 
 # /release — cut a Fishbowl release
 
-You are cutting a Fishbowl release. Follow these steps **exactly**, in order. **Never skip the confirmation step.** Speak to Chloe in German; tag names and commit messages stay English.
+You are cutting a Fishbowl release. Follow these steps **exactly**, in order. **Never skip the confirmation step.** Speak to the owner in German; tag names and commit messages stay English.
 
 ## What makes a Fishbowl release different
 
@@ -26,7 +26,7 @@ Examples: `/release`, `/release test`, `/release patch`, `/release 0.2.0`, `/rel
 
 ## Step 1 — Sanity checks
 
-Run all of these. If any fails, stop and report to Chloe — do not proceed.
+Run all of these. If any fails, stop and report to the owner — do not proceed.
 
 ```bash
 git rev-parse --abbrev-ref HEAD                                    # must be 'master'
@@ -39,7 +39,7 @@ dotnet build Fishbowl.sln -c Release --nologo
 
 `dotnet build` of a `.Tests` project auto-runs `dotnet test` via `src/Directory.Build.targets`, so the build step also covers tests in this checkout. Don't run `dotnet test` separately — it would double-execute and waste 60-90s.
 
-If format or build fail: **stop**. Leave the working tree alone so Chloe can inspect. Do not auto-fix and re-run.
+If format or build fail: **stop**. Leave the working tree alone so the owner can inspect. Do not auto-fix and re-run.
 
 ## Step 2 — Determine current state
 
@@ -56,7 +56,7 @@ Parse `$ARGUMENTS`:
 
 | Arg | Action |
 |---|---|
-| empty | classify commits by Conventional-Commits prefix. Any `feat:` / `feat(scope):` → **minor**. Only `fix:` → **patch**. Only `docs:` / `chore:` / `refactor:` / `test:` / `build:` / `ci:` → **nothing to release** — stop and tell Chloe |
+| empty | classify commits by Conventional-Commits prefix. Any `feat:` / `feat(scope):` → **minor**. Only `fix:` → **patch**. Only `docs:` / `chore:` / `refactor:` / `test:` / `build:` / `ci:` → **nothing to release** — stop and tell the owner |
 | `test` | same classification as empty, but stop after the plan in Step 4 |
 | `patch` | force Z+1 |
 | `minor` | force Y+1, Z=0 |
@@ -67,7 +67,7 @@ Compute `new_version` from the **last tag**, not from the csproj (there is none)
 
 ## Step 4 — Show the plan, ask for confirmation
 
-Print to Chloe in German, exactly like:
+Print to the owner in German, exactly like:
 
 ```
 Letzter Tag:       v0.1.1
@@ -81,11 +81,11 @@ Was passiert beim Push:
   - Husky-Installs ziehen beim nächsten Poll automatisch nach
 ```
 
-Then list the commits since the last tag, grouped by prefix (feat / fix / chore / docs / refactor / test / build / ci / other), as a sanity check for Chloe.
+Then list the commits since the last tag, grouped by prefix (feat / fix / chore / docs / refactor / test / build / ci / other), as a sanity check for the owner.
 
-**If `$ARGUMENTS` is `test`: stop here. Tell Chloe „Trockenlauf — nichts geändert."**
+**If `$ARGUMENTS` is `test`: stop here. Tell the owner „Trockenlauf — nichts geändert."**
 
-Otherwise: ask **„OK so? [j/n]"** and wait for her answer.
+Otherwise: ask **„OK so? [j/n]"** and wait for the answer.
 - `j` / `ja` / `y` / `yes` → continue to Step 5
 - anything else → abort, change nothing, push nothing
 
@@ -98,21 +98,21 @@ git push origin v<NEW>
 
 That's it. No release commit. No csproj edit. No file changes. The tag *is* the release artefact.
 
-**Never push tags without Step 4 confirmation.** **Never use `--force` on tag pushes** — if a tag with that name already exists somewhere, stop and ask Chloe.
+**Never push tags without Step 4 confirmation.** **Never use `--force` on tag pushes** — if a tag with that name already exists somewhere, stop and ask the owner.
 
 ## Step 6 — Hand off
 
-Tell Chloe in German, exactly like:
+Tell the owner in German, exactly like:
 
 ```
 Release v0.2.0 ist getaggt und gepusht.
-- release.yml läuft → https://github.com/chloe-dream/the-fishbowl/actions
-- 4 RID-Zips in ~6-8 min auf https://github.com/chloe-dream/the-fishbowl/releases/tag/v0.2.0
+- release.yml läuft → https://github.com/SACRVM/the-fishbowl/actions
+- 4 RID-Zips in ~6-8 min auf https://github.com/SACRVM/the-fishbowl/releases/tag/v0.2.0
 - GitHub Release Notes werden automatisch generiert
 - Husky-Server: nächster Launcher-Poll zieht das Update; auf Wunsch run.ps1 erneut ausführen
 ```
 
-Then **stop**. Do not poll the CI run. Do not `gh release view` (it crashes on Windows with the go-keyring bug). If Chloe wants to verify asset upload later, she can hit the releases page directly or use `curl` against `https://api.github.com/repos/chloe-dream/the-fishbowl/releases/tags/v<NEW>`.
+Then **stop**. Do not poll the CI run. Do not `gh release view` (it crashes on Windows with the go-keyring bug). To verify asset upload later, hit the releases page directly or use `curl` against `https://api.github.com/repos/SACRVM/the-fishbowl/releases/tags/v<NEW>`.
 
 ## Hard rules
 
@@ -120,6 +120,6 @@ Then **stop**. Do not poll the CI run. Do not `gh release view` (it crashes on W
 - Branch is `master`, not `main`. A `/release` from any other branch is rejected at Step 1.
 - Never commit a `<Version>` element into any csproj as part of a release — `release.yml` injects the version from the tag at publish time. A hard-coded version in the csproj would shadow that and ship the wrong version number in the banner.
 - Never use `--no-verify`, `--force`, or `--force-with-lease` on any git command in this flow.
-- If the plan in Step 4 shows zero `feat:` and zero `fix:` commits, that's „nichts zu releasen" — stop, tell Chloe, do not invent a release.
-- If `git describe` returns weird output (multiple tags on HEAD, partial match, etc.), stop and ask Chloe instead of guessing.
-- Cross-repo rule applies: this command never touches anything outside `the-fishbowl`. The Husky repo is the launcher's home; if release.yml needs launcher-side changes, file an issue against `chloe-dream/husky`.
+- If the plan in Step 4 shows zero `feat:` and zero `fix:` commits, that's „nichts zu releasen" — stop, tell the owner, do not invent a release.
+- If `git describe` returns weird output (multiple tags on HEAD, partial match, etc.), stop and ask the owner instead of guessing.
+- Cross-repo rule applies: this command never touches anything outside `the-fishbowl`. The Husky repo is the launcher's home; if release.yml needs launcher-side changes, raise it in the Husky repo's issue tracker.
