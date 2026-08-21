@@ -68,4 +68,10 @@ See [`docs/deploy.md`](docs/deploy.md) for the long-form runbook: the recommende
 
 ## Licence
 
-AGPL-3.0
+AGPL-3.0 — full text in [`LICENSE`](LICENSE).
+
+Copyright (c) 2026 Fishbowl contributors
+
+Fishbowl is a network-facing server application, which is what the AGPL is for:
+if you run a modified version and let others interact with it over a network,
+§13 requires you to offer those users the corresponding source of your version.
