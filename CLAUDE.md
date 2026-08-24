@@ -4,7 +4,7 @@ Guidance for Claude Code in this repository.
 
 ## What this project is
 
-Self-hosted personal memory + assistant. **`CONCEPT.md` is the target spec** — external sync, scripting, the full plugin ecosystem are still future design. Implemented projects: `Fishbowl.Core`, `.Data`, `.Api`, `.Host`, `.Mcp` (8 tools), `.Search` (hybrid via `Fishbowl.Data.Search`), `.Bot.Discord` (real bot, 25 tests), `.Scheduler` (event-reminder MVP, 5 tests). Still empty shells: `Fishbowl.Sync`, `Fishbowl.Scripting`. Align with CONCEPT.md — don't invent a different architecture. See `CONTRIBUTING.md` and `docs/superpowers/` for active work.
+Self-hosted personal memory + assistant. **`CONCEPT.md` is the target spec**, but the project is being deliberately slimmed against it — external sync, scripting and the sideloaded-plugin ecosystem have been dropped rather than deferred. Projects: `Fishbowl.Core`, `.Data`, `.Api`, `.Host`, `.Mcp` (8 tools), `.Search` (hybrid via `Fishbowl.Data.Search`), `.Bot.Discord` (real bot), `.Scheduler` (event reminders + daily digest). Every project in the solution has code in it. Don't reintroduce a subsystem just because CONCEPT.md still names it — check `docs/slimming-plan.md` first. See `CONTRIBUTING.md` and `docs/superpowers/` for active work.
 
 ## Working style — adaptive programming
 
@@ -15,7 +15,7 @@ Find the closest existing solution and **extend it**, don't parallel it. Almost-
 - **Multi-step writes**: `_dbFactory.WithContextTransactionAsync(ctx, async (db, tx, ct) => …)` — see `NoteRepository` for `notes` + `notes_fts` syncing.
 - **Schema changes**: add `ApplyVN` in `DatabaseFactory`, bump `PRAGMA user_version`. No EF Core, no migration runner.
 - **UI resources/scripts/templates**: `IResourceProvider.GetAsync(path)` only (disk → DB → embedded). Never direct file I/O.
-- **Plugins**: implement `IFishbowlPlugin`, register via `IFishbowlApi.AddBotClient/AddSyncProvider/AddScheduledJob` (`Fishbowl.Core.Plugins`).
+- **Bot clients**: implement `IBotClient` (`Fishbowl.Core.Plugins`) and `AddSingleton<IBotClient, …>` in `Program.cs`. In-tree only — there is no plugin loader and no sideloading. Both scheduler dispatchers fan out over `GetServices<IBotClient>()`.
 - **Configuration**: in `system.db` via `ISystemRepository.Get/SetConfigAsync` — never `appsettings.json`, never env vars for runtime config.
 - **Frontend backend calls**: `fb.api.notes.list()` etc. — 401s auto-redirect to `/login`. Never `fetch` directly from views/components.
 
@@ -56,8 +56,6 @@ Lazy migrations keyed on `PRAGMA user_version`. Dapper raw SQL; IDs are ULIDs (`
 **`/setup` locked after config.** Once `Google:ClientId` is set, `GET /setup` and `POST /api/setup` return `404` (not 302 — harder to bypass). Validates: ClientId ends `.apps.googleusercontent.com`, ClientSecret ≥ 20 chars. No antiforgery (only responds when unconfigured).
 
 **`IResourceProvider` serves the web UI and mods.** Three-tier: disk (`fishbowl-mods/{path}`) → DB (not yet wired) → embedded in `Fishbowl.Data.dll`. `MapFallback` handles non-API paths; unmatched `/api/*` short-circuits to 404 (so it doesn't serve `index.html`). The private `TryOpenEmbeddedStream` helper tries three path forms because MSBuild's `RecursiveDir` produces Windows-style paths on Windows — keep it.
-
-**Plugins in isolated ALCs.** `PluginLoadContext` uses `AssemblyDependencyResolver` in a collectible ALC so `fishbowl-mods/plugins/` DLLs ship their own deps. `PluginLoader.LoadPlugins` runs at startup (`Plugins:Path`, default `fishbowl-mods/plugins`); failures logged and skipped.
 
 **Discord bot** (`Fishbowl.Bot.Discord`) is the reference `IBotClient` impl, in-tree, not a sideloaded plugin. `DiscordBotHostedService` owns the `DiscordSocketClient` for the host's lifetime — Bulk-overwrites global slash commands on `Ready`, dispatches `SlashCommandExecuted` to `SlashCommandRouter` via a fresh DI scope per invocation, and defers immediately so the 3-second interaction deadline doesn't bite slow paths (`/search` hits the embedding model). DM-only invariant: guild invocations rejected hard at the dispatcher regardless of declared contexts. **Seven commands** in `Commands/*Handler.cs`: `/help`, `/link <code>`, `/unlink`, `/remember`, `/search`, `/recent`, `/upcoming [days]` (calendar events for the next N days, default 7 — times as Discord `<t:…>` markup so they render viewer-local; recurring occurrences pre-expanded by `GetRangeAsync`). `/link` redeems one-shot codes from `IDiscordLinkRepository` (10-min TTL, atomic burn) and writes both `user_mappings (provider="discord", provider_id=<discord_user>)` and `notification_channels` so the DM channel is cached for future sends. `/unlink` is the inverse — deletes the mapping then removes the channel. Token bound from `system.db`'s `Discord:BotToken` via `ConfigurationCache` (same path as Google); empty/`"placeholder"` token → service no-ops with a warning so the host still boots on fresh installs. `/api/setup` accepts and validates `DiscordBotToken` (length + dot-separator shape) and flags `restartRequired: true` because the gateway connection binds at startup. `DiscordBotClient.SendAsync` resolves `notification_channels` → DM channel id → posts; `ReceiveAsync` is deliberately an empty stream (slash-commands not message events). Cold-DM fallback: when the cached channel id misses the gateway cache, looks up the mapped Discord user via `ISystemRepository.GetProviderIdForUserAsync(userId, "discord")`, fetches the user (gateway → REST), opens a fresh DM with `CreateDMChannelAsync`, and re-caches the new channel id so the next send hits the fast path. `SendAsync` is wired live: `Fishbowl.Scheduler.ReminderDispatcher` fires it on event-reminder triggers (see Scheduler section below). Search/recent return titles only — content never leaves the bot (even non-secret notes might be long, or the user might be on screenshare).
 
@@ -114,7 +112,7 @@ Lazy migrations keyed on `PRAGMA user_version`. Dapper raw SQL; IDs are ULIDs (`
 - SQLite `DateTime` stored ISO-8601 (`.ToString("o")`); booleans as `INTEGER 0/1`; IDs are ULIDs.
 - Secrets use `::secret` markdown block + separate `content_secret BLOB` (client-encrypted). **Never include secret content in FTS, embeddings, or chat responses** — non-negotiable; enforced by `SecretStripper` on every MCP return path.
 - **System tags** carry three flags (`is_system`, `user_assignable`, `user_removable`) — set in `Fishbowl.Core.Util.SystemTags.Seeds`. Current seeds: `review:pending` (removable by user), `source:mcp` (locked). Rename/delete of `is_system=1` rows rejected in `TagRepository`.
-- Modding rule: "disk file wins, else default" — uniform across components/styles/scripts/templates/plugins. No registration manifests or whitelists.
+- Modding rule: "disk file wins, else default" — components/styles/scripts/templates only. `fishbowl-mods/` is currently the dev overlay (junctions into `Fishbowl.Data/Resources`); see `docs/slimming-plan.md` for its pending fate.
 
 ## CI
 

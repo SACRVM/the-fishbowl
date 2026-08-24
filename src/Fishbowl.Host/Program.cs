@@ -223,16 +223,6 @@ builder.Services.AddScoped<IMcpTool, AppCountTool>();
 
 builder.Services.AddScoped<ToolRegistry>();
 
-// Load plugins from configured path (defaults to fishbowl-mods/plugins)
-var pluginsPath = builder.Configuration["Plugins:Path"] ?? "fishbowl-mods/plugins";
-using (var tempLoggerFactory = LoggerFactory.Create(lb => lb.AddConsole()))
-{
-    Fishbowl.Host.Plugins.PluginLoader.LoadPlugins(
-        builder.Services,
-        pluginsPath,
-        tempLoggerFactory.CreateLogger("PluginLoader"));
-}
-
 // Authentication Configuration
 var authBuilder = builder.Services.AddAuthentication(options =>
 {

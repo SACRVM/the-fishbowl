@@ -24,7 +24,7 @@ dotnet test --filter "FullyQualifiedName~TestName"   # one test
 
 ## Status
 
-Early development. The foundation is hardened (CI, OpenAPI, plugin contracts, structured logging, typed Dapper mapping). Feature work on search, Discord bot, calendar sync, reminders, spaces, and apps follows — see `docs/superpowers/specs/` for active design work.
+Early development. The foundation is hardened (CI, OpenAPI, structured logging, typed Dapper mapping). The project is currently being deliberately slimmed — see `docs/slimming-plan.md` for what is being dropped and why, and `docs/superpowers/specs/` for active design work.
 
 ## Space-scoped memory via MCP
 

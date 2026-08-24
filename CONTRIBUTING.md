@@ -48,25 +48,18 @@ No data-migration framework yet. When you need backfills, introduce it in the sa
 - For JSON columns (e.g. `notes.tags`), register a `SqlMapper.TypeHandler<T>` via `DapperConventions.Install()`.
 - Register in `Program.cs` as `AddScoped<IMyRepository, MyRepository>()`. DI auto-injects `ILogger<T>`.
 
-## Adding a plugin
+## Adding a notification channel
 
-External plugins are DLLs dropped into `fishbowl-mods/plugins/`. They implement `IFishbowlPlugin`:
+There is no plugin loader and no DLL sideloading — extensions are in-tree. To add a
+delivery channel, implement `IBotClient` (`Fishbowl.Core.Plugins`) and register it:
 
 ```csharp
-public class MyPlugin : IFishbowlPlugin
-{
-    public string Name => "My Plugin";
-    public string Version => "0.1.0";
-    public void Register(IServiceCollection services, IFishbowlApi api)
-    {
-        api.AddBotClient(new MyBot());          // IBotClient
-        api.AddSyncProvider(new MySync());      // ISyncProvider
-        api.AddScheduledJob(new MyJob());       // IScheduledJob
-    }
-}
+builder.Services.AddSingleton<IBotClient, MyBotClient>();
 ```
 
-Plugin DLLs are loaded via an isolated `AssemblyLoadContext`, so they can bundle their own dependency versions without conflicting with the host. A plugin that throws during `Register` is logged and skipped — the host survives.
+Both scheduler dispatchers resolve `GetServices<IBotClient>()` and take the first
+channel the user has enabled, so a new implementation is picked up without touching
+the dispatchers. `Fishbowl.Bot.Discord` is the reference implementation.
 
 ## Configuration
 

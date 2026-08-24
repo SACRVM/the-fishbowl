@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "artifacts": [
+    {
+      "path": "docs/slimming-plan.md",
+      "label": "Slimming plan",
+      "note": "Tier A done; todos, open questions, architecture decisions, appkit asks",
+      "addedAtUtc": "2026-08-23T23:57:02.5403957Z"
+    }
+  ]
+}

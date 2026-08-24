@@ -3,9 +3,7 @@
   <ItemGroup>
     <ProjectReference Include="..\Fishbowl.Api\Fishbowl.Api.csproj" />
     <ProjectReference Include="..\Fishbowl.Bot.Discord\Fishbowl.Bot.Discord.csproj" />
-    <ProjectReference Include="..\Fishbowl.Sync\Fishbowl.Sync.csproj" />
     <ProjectReference Include="..\Fishbowl.Scheduler\Fishbowl.Scheduler.csproj" />
-    <ProjectReference Include="..\Fishbowl.Scripting\Fishbowl.Scripting.csproj" />
     <ProjectReference Include="..\Fishbowl.Mcp\Fishbowl.Mcp.csproj" />
     <ProjectReference Include="..\Fishbowl.Search\Fishbowl.Search.csproj" />
   </ItemGroup>
