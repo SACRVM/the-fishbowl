@@ -14,7 +14,7 @@ namespace Fishbowl.Data.Tests.Repositories;
 //  * Update → replaces the existing blob (so the new content drives vector).
 //  * Delete → removes the row before the notes row disappears.
 //  * EmbeddingUnavailableException is swallowed; the note write still lands.
-//  * `::secret ... ::end` content stays out of the text handed to the model.
+//  * `:::secret ... :::end` content stays out of the text handed to the model.
 public class NoteRepositoryEmbeddingTests : IDisposable
 {
     private readonly string _dataDir;
@@ -135,7 +135,7 @@ public class NoteRepositoryEmbeddingTests : IDisposable
     [Fact]
     public async Task CreateAsync_StripsSecretBlocksFromEmbeddingInput()
     {
-        // Non-negotiable: the secret marker inside `::secret`…`::end` must
+        // Non-negotiable: the secret marker inside `:::secret`…`:::end` must
         // never reach the embedding model — otherwise a semantic query could
         // surface the note on the basis of the hidden text.
         var fake = new FakeEmbeddingService();
@@ -145,7 +145,7 @@ public class NoteRepositoryEmbeddingTests : IDisposable
             new Note
             {
                 Title = "public title",
-                Content = "preamble\n::secret\nleak-marker-xyz123\n::end\ntail",
+                Content = "preamble\n:::secret\nleak-marker-xyz123\n:::end\ntail",
             },
             TestContext.Current.CancellationToken);
 
@@ -158,8 +158,8 @@ public class NoteRepositoryEmbeddingTests : IDisposable
     [Fact]
     public async Task CreateAsync_StripsEncryptedSecretMarkerFromEmbeddingInput()
     {
-        // Vault encryption (commit 71987ad) replaces inline ::secret blocks
-        // with `::secret#N::end` markers and stores the ciphertext in
+        // Vault encryption (commit 71987ad) replaces inline :::secret blocks
+        // with `:::secret#N:::end` markers and stores the ciphertext in
         // content_secret. The marker carries no plaintext, but feeding it
         // to the embedding model would still leak structural information
         // (every note with a marker clusters together in vector space).
@@ -171,13 +171,13 @@ public class NoteRepositoryEmbeddingTests : IDisposable
             new Note
             {
                 Title = "title",
-                Content = "before\n::secret#0::end\nbetween\n::secret#1::end\nafter",
+                Content = "before\n:::secret#0:::end\nbetween\n:::secret#1:::end\nafter",
                 ContentSecret = new byte[] { 1, 2, 3 },
             },
             TestContext.Current.CancellationToken);
 
         Assert.NotNull(fake.LastText);
-        Assert.DoesNotContain("::secret", fake.LastText, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain(":::secret", fake.LastText, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("before", fake.LastText);
         Assert.Contains("after", fake.LastText);
     }

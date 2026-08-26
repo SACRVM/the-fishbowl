@@ -11,7 +11,7 @@ public class Contact
 
     // Free-form Markdown about the person. Kept deliberately small — if the
     // record gets long, a proper Note linked to this contact is the right
-    // shape. No `::secret` blocks here in v1: there's no encrypted-BLOB
+    // shape. No `:::secret` blocks here in v1: there's no encrypted-BLOB
     // column and no decryption UI for contacts, so we do NOT strip markers
     // before FTS either — what you type is what gets indexed.
     public string? Notes { get; set; }

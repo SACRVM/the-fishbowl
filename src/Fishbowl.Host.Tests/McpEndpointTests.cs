@@ -318,7 +318,7 @@ public class McpEndpointTests : IClassFixture<WebApplicationFactory<Program>>, I
         await CallToolAsync(client, "remember", new
         {
             title = "secret-holder",
-            content = $"Public text.\n::secret\n{secretMarker}\n::end\nMore public.",
+            content = $"Public text.\n:::secret\n{secretMarker}\n:::end\nMore public.",
         });
 
         var search = await CallToolAsync(client, "search_memory", new { query = "secret-holder" });

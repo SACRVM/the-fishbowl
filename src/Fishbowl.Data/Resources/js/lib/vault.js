@@ -1,5 +1,5 @@
 /**
- * fb.vault — client-side encryption for ::secret blocks.
+ * fb.vault — client-side encryption for :::secret blocks.
  *
  * Per-device salt (localStorage), passphrase-derived AES-GCM key cached in
  * sessionStorage. Losing the passphrase or clearing localStorage = losing

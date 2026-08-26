@@ -5,7 +5,7 @@
 Layering is enforced by `.csproj` references. **Do not add references that break it.**
 
 ```
-Host  →  Api, Bot.Discord, Sync, Scheduler, Scripting
+Host  →  Api, Bot.Discord, Scheduler, Mcp
          ↓
          Data, Search
          ↓
@@ -37,7 +37,7 @@ No data-migration framework yet. When you need backfills, introduce it in the sa
 - For endpoints served in both personal **and** space workspaces (notes, todos, tags, contacts, events, search), resolve the context with `McpContextClaims.Resolve(user)` → `ContextRef`; the space-nested variant lives in `SpacesApi.cs` and goes through `ResolveSpaceAsync` (which validates membership + Bearer token scope). Readonly space members must be rejected on writes via `SpaceRoleExtensions.CanWrite()`.
 - Gate Bearer scopes with `.RequireScope("read:notes")` / `"write:…"`. Cookie principals bypass the check by design. Adding a new scope? Just pick a colon-delimited name and use it — there's no central registry.
 - Annotate with `.WithName()`, `.WithSummary()`, `.Produces<T>()`, `.Produces(StatusCodes.Status401Unauthorized)` for OpenAPI. Add a case to `OpenApiTests` if the operation name matters (e.g. CLI generation relies on it).
-- Inject `ILogger<T>` into any new service; log writes at `Debug`, failed writes at `Warning`. **Never log PII, secrets, or `::secret` content.**
+- Inject `ILogger<T>` into any new service; log writes at `Debug`, failed writes at `Warning`. **Never log PII, secrets, or `:::secret` content.**
 
 ## Adding a repository
 

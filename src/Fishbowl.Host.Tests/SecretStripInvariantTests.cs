@@ -14,7 +14,7 @@ using Xunit;
 
 namespace Fishbowl.Host.Tests;
 
-// Non-negotiable invariant: the plaintext inside `::secret`…`::end` blocks
+// Non-negotiable invariant: the plaintext inside `:::secret`…`:::end` blocks
 // must never appear in ANY MCP response, and `content_secret` blobs must
 // never be serialised on the way out. Every tool that returns note content
 // is exercised here — if a new tool lands that also returns notes, add a
@@ -59,7 +59,8 @@ public class SecretStripInvariantTests : IClassFixture<WebApplicationFactory<Pro
         });
     }
 
-    private async Task<(HttpClient Client, string NoteId)> SetupClientWithSecretNoteAsync()
+    private async Task<(HttpClient Client, string NoteId)> SetupClientWithSecretNoteAsync(
+        string d = ":::")
     {
         // Seed a note whose content holds a secret marker. Going straight
         // through the repository with NoteSource.Mcp — that's the same
@@ -70,7 +71,7 @@ public class SecretStripInvariantTests : IClassFixture<WebApplicationFactory<Pro
             new Note
             {
                 Title = "note-with-secret",
-                Content = $"Public preamble\n::secret\n{SecretMarker}\n::end\nPublic tail",
+                Content = $"Public preamble\n{d}secret\n{SecretMarker}\n{d}end\nPublic tail",
                 ContentSecret = Encoding.UTF8.GetBytes(OtherSecret),
             },
             NoteSource.Mcp,
@@ -111,6 +112,23 @@ public class SecretStripInvariantTests : IClassFixture<WebApplicationFactory<Pro
         var (client, _) = await SetupClientWithSecretNoteAsync();
         var resp = await client.PostAsync("/mcp",
             RpcBody("search_memory", new { query = "note-with-secret" }),
+            TestContext.Current.CancellationToken);
+        resp.EnsureSuccessStatusCode();
+        var body = await resp.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
+        AssertNoSecretLeak(body);
+    }
+
+    // The delimiter moved from "::" to ":::" and notes written before that
+    // still carry two colons. This is the case that matters most: a stripper
+    // that stopped recognising the old form would not fail loudly, it would
+    // quietly serve plaintext secrets over MCP. Pin it at the wire, not just
+    // in the SecretStripper unit tests.
+    [Fact]
+    public async Task GetMemory_DoesNotLeakSecret_LegacyTwoColonForm()
+    {
+        var (client, id) = await SetupClientWithSecretNoteAsync("::");
+        var resp = await client.PostAsync("/mcp",
+            RpcBody("get_memory", new { id }),
             TestContext.Current.CancellationToken);
         resp.EnsureSuccessStatusCode();
         var body = await resp.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
@@ -191,7 +209,7 @@ public class SecretStripInvariantTests : IClassFixture<WebApplicationFactory<Pro
     [Fact]
     public async Task MarkerForm_AlsoStripped()
     {
-        // Phase 3 encrypted secrets leave `::secret#N::end` markers in the
+        // Phase 3 encrypted secrets leave `:::secret#N:::end` markers in the
         // public content. They carry no plaintext themselves, but leaking
         // them reveals how many secrets a note has and which indices
         // exist — strip to the same placeholder.
@@ -200,7 +218,7 @@ public class SecretStripInvariantTests : IClassFixture<WebApplicationFactory<Pro
             new Note
             {
                 Title = "note-with-marker",
-                Content = "Prefix.\n::secret#0::end\nMiddle.\n::secret#1::end\nSuffix.",
+                Content = "Prefix.\n:::secret#0:::end\nMiddle.\n:::secret#1:::end\nSuffix.",
                 ContentSecret = Encoding.UTF8.GetBytes("{\"v\":1,\"blocks\":[\"opaque\",\"opaque\"]}"),
             },
             NoteSource.Mcp,
@@ -218,8 +236,8 @@ public class SecretStripInvariantTests : IClassFixture<WebApplicationFactory<Pro
         resp.EnsureSuccessStatusCode();
         var body = await resp.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
 
-        Assert.DoesNotContain("::secret#0::end", body);
-        Assert.DoesNotContain("::secret#1::end", body);
+        Assert.DoesNotContain(":::secret#0:::end", body);
+        Assert.DoesNotContain(":::secret#1:::end", body);
         Assert.DoesNotContain("contentSecret", body, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("Prefix.", body);
         Assert.Contains("Suffix.", body);

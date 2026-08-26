@@ -69,9 +69,9 @@ Hand-execute after shipping Phase 5. Run top-to-bottom; each section stands alon
 - Action: via UI, create a note with:
   ```
   public preamble
-  ::secret
+  :::secret
   supersecret-xyz-token
-  ::end
+  :::end
   public tail
   ```
 - Via Claude Code: "search my memory for preamble".

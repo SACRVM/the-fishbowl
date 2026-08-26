@@ -35,7 +35,7 @@ dotnet run --project tools/seed-dev-data -- --force
 The note corpus is grouped by topic (programming, databases, git, cooking,
 music, travel, books, health, personal, work, admin) with a handful of
 deliberately identifier-heavy entries and two `review:pending` notes.
-One note includes a `::secret` block so you can verify the secret-strip path.
+One note includes a `:::secret` block so you can verify the secret-strip path.
 
 ## Testing hybrid search
 

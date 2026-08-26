@@ -33,10 +33,10 @@
  *   Backspace at start of non-first line   merge with previous line
  *   Tab                                    two-space soft tab
  *
- * ::secret / ::end blocks: lines between the boundaries get the
+ * :::secret / :::end blocks: lines between the boundaries get the
  * .secret-body class and a CSS blur so the content isn't readable
  * over someone's shoulder. A reveal toggle (eye icon, contenteditable=
- * false) sits on the ::secret boundary line — clicking it flips
+ * false) sits on the :::secret boundary line — clicking it flips
  * .secret-revealed on every line of the block for session-only
  * unmasking. The active (caret) line inside a secret block still
  * flattens to raw text for editing. This is a purely visual layer:
@@ -192,7 +192,7 @@ class FbMdEditor extends HTMLElement {
         this._editor.addEventListener("copy",        (e) => this._handleCopy(e));
         this._editor.addEventListener("focusout",    (e) => this._handleFocusOut(e));
 
-        // Reveal-toggle click (eye icon on ::secret lines). mousedown.prevent
+        // Reveal-toggle click (eye icon on :::secret lines). mousedown.prevent
         // keeps the caret in the surrounding line rather than leaping into
         // the non-editable span. Use closest() because the real click target
         // is the inner <svg> (or a path/circle/line) — classList on e.target
@@ -232,7 +232,7 @@ class FbMdEditor extends HTMLElement {
 
     /** Render a line's inner DOM from its source. Adds marker spans and
      *  inline wrappers while preserving textContent exactly. `state` carries
-     *  the cross-line trackers: inFence (``` group) and inSecret (::secret
+     *  the cross-line trackers: inFence (``` group) and inSecret (:::secret
      *  group) — each must advance on every line even when rendering wouldn't
      *  otherwise change the output. */
     _renderLine(line, src = null, state = null) {
@@ -242,10 +242,10 @@ class FbMdEditor extends HTMLElement {
         const insideFenceNow = state ? state.inFence : false;
         if (isFenceBoundary && state) state.inFence = !state.inFence;
 
-        // Secret boundary: ::secret opens, ::end closes. Only honoured outside
+        // Secret boundary: :::secret opens, :::end closes. Only honoured outside
         // a code fence — inside a fence these are literal text.
-        const isSecretOpen  = !insideFenceNow && /^::secret(\s|$)/.test(src);
-        const isSecretClose = !insideFenceNow && /^::end(\s|$)/.test(src);
+        const isSecretOpen  = !insideFenceNow && /^:{2,3}secret(\s|$)/.test(src);
+        const isSecretClose = !insideFenceNow && /^:{2,3}end(\s|$)/.test(src);
         const insideSecretNow = state ? state.inSecret : false;
         if (state && isSecretOpen)  state.inSecret = true;
         if (state && isSecretClose) state.inSecret = false;
@@ -354,7 +354,7 @@ class FbMdEditor extends HTMLElement {
         const state = this._stateBefore(line);
         const isFenceBoundary = /^```/.test(src);
         const isSecretBoundary = !state.inFence &&
-            (/^::secret(\s|$)/.test(src) || /^::end(\s|$)/.test(src));
+            (/^:{2,3}secret(\s|$)/.test(src) || /^:{2,3}end(\s|$)/.test(src));
         this._applyBlockClass(line, src, state.inFence, isFenceBoundary,
                               state.inSecret, isSecretBoundary);
     }
@@ -715,7 +715,7 @@ class FbMdEditor extends HTMLElement {
         // boundary. If it's still inside our component, ignore.
         if (e.relatedTarget && this.contains(e.relatedTarget)) return;
         // Full re-render on blur. We used to just re-render active lines, but
-        // that left cross-line state drift — e.g. typing ::secret on a line
+        // that left cross-line state drift — e.g. typing :::secret on a line
         // doesn't mask the lines below until every subsequent line is re-
         // classified with the new inSecret state. Doing it on blur is cheap
         // and guarantees the "resting" view is always correct.
@@ -1363,15 +1363,15 @@ class FbMdEditor extends HTMLElement {
             const text = sib.textContent;
             if (/^```/.test(text)) state.inFence = !state.inFence;
             else if (!state.inFence) {
-                if (/^::secret(\s|$)/.test(text)) state.inSecret = true;
-                else if (/^::end(\s|$)/.test(text)) state.inSecret = false;
+                if (/^:{2,3}secret(\s|$)/.test(text)) state.inSecret = true;
+                else if (/^:{2,3}end(\s|$)/.test(text)) state.inSecret = false;
             }
         }
         return state;
     }
 
-    /** Reveal-toggle click handler. Finds the bounded block from the ::secret
-     *  line the eye icon lives on, walks forward until ::end (or end of doc),
+    /** Reveal-toggle click handler. Finds the bounded block from the :::secret
+     *  line the eye icon lives on, walks forward until :::end (or end of doc),
      *  and flips .secret-revealed on every line in the range. Session-only —
      *  any full re-render (paste, value set) drops the class. */
     _toggleSecretReveal(openLine) {
@@ -1410,8 +1410,8 @@ function parseLineBlock(src) {
     if (/^>\s?/.test(src))          return { type: "quote", classes: "quote" };
     if (/^\s*(---|\*\*\*|___)\s*$/.test(src)) return { type: "hr", classes: "hr" };
     if (/^```/.test(src))           return { type: "fence", classes: "fence" };
-    if (/^::secret(\s|$)/.test(src)) return { type: "secret-open",  classes: "secret-marker secret-open" };
-    if (/^::end(\s|$)/.test(src))    return { type: "secret-close", classes: "secret-marker secret-close" };
+    if (/^:{2,3}secret(\s|$)/.test(src)) return { type: "secret-open",  classes: "secret-marker secret-open" };
+    if (/^:{2,3}end(\s|$)/.test(src))    return { type: "secret-close", classes: "secret-marker secret-close" };
     return { type: "paragraph", classes: "" };
 }
 
@@ -1871,7 +1871,7 @@ const TEMPLATE = `
        fence, but orange). Applies to the two boundary lines + every
        secret-body line, so a multi-line block reads as one shape. When a
        boundary line goes active, the card treatment stays but the raw
-       ::secret / ::end chars come back (like fence active). */
+       :::secret / :::end chars come back (like fence active). */
     .line.secret-marker,
     .line.secret-body {
         background: rgba(245, 158, 11, 0.045);
@@ -1887,7 +1887,7 @@ const TEMPLATE = `
         font-size: 0.9em;
     }
 
-    /* Inactive boundaries: hide the literal '::secret' / '::end' chars so
+    /* Inactive boundaries: hide the literal ':::secret' / ':::end' chars so
        they don't look like code. Chars stay in textContent (font-size: 0),
        so the round-trip invariant holds. */
     .line.secret-marker:not(.active) .block-marker {
@@ -1915,7 +1915,7 @@ const TEMPLATE = `
     }
 
     /* Close boundary (inactive): collapse to a thin footer — the card's
-       visual "bottom edge" with no visible '::end' text. */
+       visual "bottom edge" with no visible ':::end' text. */
     .line.secret-close:not(.active) {
         min-height: 6px;
         height: 6px;
@@ -1953,7 +1953,7 @@ const TEMPLATE = `
         filter: blur(3px);
     }
 
-    /* Reveal toggle — inline SVG eye on the ::secret boundary. SVG shape
+    /* Reveal toggle — inline SVG eye on the :::secret boundary. SVG shape
        children have no text nodes, so line.textContent stays equal to the
        source (the whole editor model depends on that invariant).
        contenteditable=false on the span keeps the caret from landing in
