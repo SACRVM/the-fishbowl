@@ -84,4 +84,9 @@
             return registry.has(name);
         }
     };
+
+    // The shell's <sac-nav> brand mark is Fishbowl's own glyph; the kit
+    // ships no fish. Registered here — before any component script runs —
+    // so the nav's first render already finds it.
+    if (window.sac?.icons && !sac.icons.has("fish")) sac.icons.register("fish", registry.get("fish"));
 })();

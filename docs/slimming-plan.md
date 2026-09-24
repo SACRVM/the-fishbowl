@@ -86,10 +86,21 @@ the app: the `sac.toolbar` projection model is gone, and a view draws its own
 `<sac-nav>`. Fishbowl's `fb.toolbar.set([...])` is exactly that removed model.
 Views must move their chrome inward.
 
-**Next step:** rebuild `fb-hub-view.js` (63 lines) against the vendored kit and
-nothing else. That measures the chrome cost honestly before committing to 8,473
-lines. If it feels good, the rest is legwork; if it drags, 63 lines were spent
-instead of a quarter.
+**Progress (2026-09-24, kit 2.6.0):** vendored at
+`src/Fishbowl.Data/Resources/kit/`. The shell runs on the kit: one global
+`<sac-nav>` replaces `fb-nav`, `fb.router` delegates to `sac.router` +
+`sac.scope`, `fb.toolbar` renders into the nav's toolbar slot (`js/lib/shell.js`).
+Hub, notes, todos and calendar are rebuilt on kit classes and `<sac-split
+collapse>` — usable on a phone (list/detail one pane at a time, touch-sized
+actions, dvh + safe areas). `fb-nav` and `fb-footer` are deleted; the SPA-shell
+rules left `app.css`. The chrome cost turned out small because the kit's SPA
+template still allows a shell-level nav — views did not have to draw their own.
+
+Still `fb-*`: `fb-md-editor` (→ `sac-md-editor`, which has no touch pass yet),
+`fb-tag-chip`/`-input`/`-manage-dialog` (tag semantics differ from `sac-chip`;
+the manage dialog is a desktop `fb-window`), `fb-context-switcher`,
+`fb-collapsible`, `fb-status-banner`, `fb-dialog` (settings views), and the
+rest of `app.css`.
 
 ---
 

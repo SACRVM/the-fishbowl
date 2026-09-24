@@ -240,106 +240,64 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--accent); }
 .fb-logo-mark .top    { flex: 1; background: var(--accent);      border-radius: 10px 10px 0 0; }
 .fb-logo-mark .bottom { flex: 1; background: var(--accent-warm); border-radius: 0 0 10px 10px; }
 
-/* SPA mount point */
-#app-root {
-    padding-top: 50px; /* leave room for fixed <fb-nav> */
-    min-height: 100vh;
+/* SPA shell: #app-root, the hub, tiles and the tile grid come from the
+   vendored kit (kit/css/ui.css, loaded after this file by index.html). */
+
+/* fb.toolbar items in the shell's <sac-nav> (see js/lib/shell.js). */
+.nav-icon-btn.active {
+    color: var(--accent);
+    background: var(--accent-tint);
+}
+.nav-icon-btn:disabled {
+    opacity: 0.35;
+    cursor: default;
 }
 
-/* Hub container */
-.hub-container {
-    max-width: 1400px;
-    margin: 0 auto;
-    padding: 4rem 2rem 2rem;
-}
-.hub-container header {
-    text-align: center;
-    margin-bottom: 3rem;
-}
-.hub-container h1 {
-    font-size: clamp(2.5rem, 8vw, 4rem);
-    font-weight: 800;
-    background: linear-gradient(135deg, #fff 0%, var(--accent) 100%);
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
-    background-clip: text;
-    letter-spacing: -0.03em;
-    margin-bottom: 0.5rem;
-}
-.hub-container .intro-text {
-    color: var(--text-muted);
-    font-size: 1.125rem;
-}
+/* The account menu stays out of the ribbon until the user has loaded;
+   sac-menu's own display would otherwise beat the UA [hidden] rule. */
+#fb-account[hidden] { display: none; }
 
-/* Tile grid */
-.grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-    grid-auto-rows: 280px;
-    gap: 1.5rem;
-}
-
-.tile {
-    position: relative;
-    background: rgba(30, 41, 59, 0.7);
-    backdrop-filter: blur(12px);
-    -webkit-backdrop-filter: blur(12px);
-    border: 1px solid rgba(255, 255, 255, 0.1);
-    border-radius: 24px;
-    padding: 2rem;
-    text-decoration: none;
-    color: var(--text);
+/* Profile window content (js/lib/shell.js). */
+.fb-profile {
     display: flex;
     flex-direction: column;
-    justify-content: flex-end;
-    transition: all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
-    overflow: hidden;
-    cursor: pointer;
+    align-items: center;
+    gap: 0.6rem;
+    text-align: center;
+    padding: 0.5rem 0;
 }
-.tile fb-icon {
-    --icon-size: 48px;
-    margin-bottom: auto;
-    color: var(--accent);
-    transition: transform 0.4s var(--ease-bounce);
+.fb-profile-name {
+    font: 700 1.1rem 'Outfit', sans-serif;
+    color: var(--text);
 }
-.tile h2 {
-    font-size: 1.5rem;
-    font-weight: 700;
-    margin-bottom: 0.25rem;
-}
-.tile p {
+.fb-profile-email {
     color: var(--text-muted);
-    font-size: 0.9rem;
-    margin: 0;
+    font-size: 0.85rem;
+    overflow-wrap: anywhere;
 }
-.tile:hover {
-    transform: translateY(-8px) scale(1.02);
-    border-color: var(--accent);
-    box-shadow: 0 20px 40px rgba(0, 0, 0, 0.4), 0 0 20px rgba(59, 130, 246, 0.2);
-    background: rgba(30, 41, 59, 0.9);
+.fb-profile dl {
+    width: 100%;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0.5rem;
+    margin: 0.75rem 0 0;
+    padding-top: 0.75rem;
+    border-top: 1px solid var(--border);
+    text-align: left;
+    font-size: 0.78rem;
 }
-.tile:hover fb-icon {
-    transform: scale(1.1) rotate(5deg);
+.fb-profile dt {
+    color: var(--text-dim);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    font-weight: 600;
+    margin-bottom: 2px;
 }
-
-/* Tool-page layout */
-.tool-layout {
-    display: flex;
-    height: calc(100vh - 50px);
-    overflow: hidden;
-}
-.tool-sidebar {
-    width: 260px;
-    background: var(--panel);
-    border-right: 1px solid var(--border);
-    padding: 1.5rem 1rem;
-    overflow-y: auto;
-    flex-shrink: 0;
-}
-.tool-main {
-    flex: 1;
-    display: flex;
-    overflow: hidden;
+.fb-profile dd { margin: 0; color: var(--text); }
+.fb-profile .fb-profile-id {
+    font-family: monospace;
+    font-size: 0.72rem;
+    word-break: break-all;
 }
 
 /* Scrollbars are themed globally at the top of this file; per-element
