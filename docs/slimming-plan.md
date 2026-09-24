@@ -205,3 +205,9 @@ Contributions back, in priority order.
    backend, the app needs to declare what it wants and the host what it can
    offer, with graceful degradation. Without it, "premium host" just means
    "incompatible".
+4. **A mobile / responsive foundation.** Neither the kit nor Fishbowl has one —
+   the Fishbowl SPA has zero media queries and is unusable on a phone. Fixing
+   `fb-*` in place is thrown away by tier B, so it belongs in the kit:
+   breakpoints, dvh + safe areas, touch sizing, rail-as-drawer, list/detail
+   collapse for `sac-split`, toolbar overflow in `sac-nav`, dialog as sheet.
+   Full work order: `docs/appkit-mobile-brief.md`.
