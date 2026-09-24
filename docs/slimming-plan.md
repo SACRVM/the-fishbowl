@@ -213,5 +213,6 @@ Contributions back, in priority order.
    Full work order: `docs/appkit-mobile-brief.md`. **Delivered in kit v2.6.0**
    (checked 2026-09-24: `sac-split collapse/show`, rail drawer via the
    `sac-nav` burger, toolbar overflow, dialog sheet, dvh + safe areas, 44px
-   touch targets). Still open: `sac-md-editor` (vendors kit 2.3.2) has no
+   touch targets). Still open: `sac-md-editor` (re-vendored to 2.6.0, but the
+   editor itself is unchanged) has no
    touch/responsive pass — the notes editor is the one gap for phones.
