@@ -2,6 +2,7 @@
 
 **Audience:** the agent working in `SACRVM/sacrvm-appkit`.
 **From:** `the-fishbowl`, 2026-09-24, against kit **v2.4.0** (`9e2c230`).
+**Status:** delivered in kit v2.6.0 (2026-09-24). Kept as the record of what was asked.
 **Goal in one line:** an app built only from the kit is usable on a phone
 (360–430 px wide, touch, portrait) without writing a single media query of its own.
 

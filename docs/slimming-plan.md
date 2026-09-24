@@ -210,4 +210,8 @@ Contributions back, in priority order.
    `fb-*` in place is thrown away by tier B, so it belongs in the kit:
    breakpoints, dvh + safe areas, touch sizing, rail-as-drawer, list/detail
    collapse for `sac-split`, toolbar overflow in `sac-nav`, dialog as sheet.
-   Full work order: `docs/appkit-mobile-brief.md`.
+   Full work order: `docs/appkit-mobile-brief.md`. **Delivered in kit v2.6.0**
+   (checked 2026-09-24: `sac-split collapse/show`, rail drawer via the
+   `sac-nav` burger, toolbar overflow, dialog sheet, dvh + safe areas, 44px
+   touch targets). Still open: `sac-md-editor` (vendors kit 2.3.2) has no
+   touch/responsive pass — the notes editor is the one gap for phones.
