@@ -72,6 +72,7 @@
         // which builds a calendar inside its popover.
         "components/sac-calendar.js",
         "components/sac-date-field.js",
+        "components/sac-time-field.js",
 
         "components/sac-collapsible.js",
         "components/sac-drop-zone.js",

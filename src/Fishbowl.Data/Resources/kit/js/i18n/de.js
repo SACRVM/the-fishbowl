@@ -58,6 +58,9 @@
         "date-field.choose-date": "Datum wählen",
         "date-field.date": "Datum",
         "date-field.placeholder": "jjjj-mm-tt",
+        "date-field.placeholder-dmy-dot": "tt.mm.jjjj",
+        "date-field.placeholder-dmy-slash": "tt/mm/jjjj",
+        "date-field.placeholder-mdy-slash": "mm/tt/jjjj",
 
         "dialog.ok": "OK",
 
@@ -217,6 +220,14 @@
         "theme-toggle.dark": "Dunkel",
         "theme-toggle.label": "Design",
         "theme-toggle.light": "Hell",
+
+        "time-field.am": "AM",
+        "time-field.empty": "leer",
+        "time-field.hours": "Stunden",
+        "time-field.minutes": "Minuten",
+        "time-field.period": "AM/PM",
+        "time-field.pm": "PM",
+        "time-field.time": "Uhrzeit",
 
         "toast.dismiss": "Schließen",
         "toast.notifications": "Benachrichtigungen",
