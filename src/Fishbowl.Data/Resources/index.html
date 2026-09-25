@@ -2,13 +2,26 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <!-- viewport-fit=cover: the kit pads the nav and scroll regions by the
+         safe-area insets, so nothing ends up behind a notch or home bar. -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <meta name="theme-color" content="#0b0f1a">
     <title>The Fishbowl</title>
+    <!-- app.css first: Fishbowl's own tokens (tag palette, vault) and the
+         legacy view styles. The vendored kit's ui.css loads after it and wins
+         wherever both define the same rule. -->
     <link rel="stylesheet" href="/css/app.css">
+    <link rel="stylesheet" href="/kit/css/ui.css">
 </head>
 <body>
-    <!-- lib (load order matters: globals → icons → router+context+api, then components, then views) -->
+    <!-- lib (load order matters: fb globals → kit lib → fb lib, then
+         components, then views) -->
     <script defer src="/js/lib/globals.js"></script>
+    <script defer src="/kit/js/lib/globals.js"></script>
+    <script defer src="/kit/js/lib/icons.js"></script>
+    <script defer src="/kit/js/lib/router.js"></script>
+    <script defer src="/kit/js/lib/scope.js"></script>
+    <script defer src="/kit/js/lib/dialog.js"></script>
     <script defer src="/js/lib/icons.js"></script>
     <script defer src="/js/lib/router.js"></script>
     <script defer src="/js/lib/context.js"></script>
@@ -21,10 +34,18 @@
     <script defer src="/js/vendor/marked.min.js"></script>
     <script defer src="/js/vendor/purify.min.js"></script>
 
-    <!-- components -->
+    <!-- kit components -->
+    <script defer src="/kit/js/components/sac-icon.js"></script>
+    <script defer src="/kit/js/components/sac-nav.js"></script>
+    <script defer src="/kit/js/components/sac-menu.js"></script>
+    <script defer src="/kit/js/components/sac-split.js"></script>
+    <script defer src="/kit/js/components/sac-dialog.js"></script>
+    <script defer src="/kit/js/components/sac-window.js"></script>
+    <script defer src="/kit/js/components/sac-avatar.js"></script>
+    <script defer src="/kit/js/components/sac-footer.js"></script>
+
+    <!-- fishbowl components (not yet replaced by the kit) -->
     <script defer src="/js/components/fb-icon.js"></script>
-    <script defer src="/js/components/fb-footer.js"></script>
-    <script defer src="/js/components/fb-nav.js"></script>
     <script defer src="/js/components/fb-section.js"></script>
     <script defer src="/js/components/fb-toggle.js"></script>
     <script defer src="/js/components/fb-segmented-control.js"></script>
@@ -51,18 +72,25 @@
     <script defer src="/js/views/fb-spaces-settings-view.js"></script>
     <script defer src="/js/views/fb-keys-settings-view.js"></script>
 
-    <!-- shell -->
-    <fb-nav>
-        <fb-context-switcher slot="context"></fb-context-switcher>
-    </fb-nav>
-    <div id="app-root"></div>
+    <!-- shell: account menu, view toolbar, router mount -->
+    <script defer src="/js/lib/shell.js"></script>
 
-    <script defer>
-        window.addEventListener("DOMContentLoaded", () => {
-            // Router mounts views into #app-root. Views register themselves
-            // at script load time (defer preserves the script order above).
-            if (fb.router) fb.router.mount("#app-root");
-        });
-    </script>
+    <sac-nav id="fb-nav" brand="THE FISHBOWL" brand-icon="fish">
+        <fb-context-switcher slot="context"></fb-context-switcher>
+        <!-- fb.toolbar renders the active view's actions here. -->
+        <div slot="toolbar" class="toolbar" id="fb-view-toolbar"></div>
+        <!-- Account menu. When the ribbon runs out of room (a phone), the kit
+             folds it into the "…" menu as a group; sac:select still fires here. -->
+        <sac-menu slot="toolbar" id="fb-account" hidden>
+            <button slot="trigger" class="nav-icon-btn avatar"
+                    aria-label="Account" title="Account">
+                <sac-avatar id="fb-account-avatar"></sac-avatar>
+            </button>
+            <button data-action="profile"><sac-icon name="user"></sac-icon> Profile</button>
+            <hr>
+            <button data-action="logout" data-danger><sac-icon name="log-out"></sac-icon> Log out</button>
+        </sac-menu>
+    </sac-nav>
+    <div id="app-root"></div>
 </body>
 </html>

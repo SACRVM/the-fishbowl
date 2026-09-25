@@ -44,7 +44,7 @@ class FbSpacesSettingsView extends HTMLElement {
     render() {
         this.innerHTML = `
             <style>
-                fb-spaces-settings-view { display: block; padding: 40px 48px; max-width: 780px; }
+                fb-spaces-settings-view { display: block; padding: clamp(1.25rem, 5vw, 40px) clamp(1rem, 5vw, 48px); max-width: 780px; }
                 fb-spaces-settings-view header { margin-bottom: 28px; }
                 fb-spaces-settings-view h1 {
                     font-family: 'Outfit', 'Inter', sans-serif;

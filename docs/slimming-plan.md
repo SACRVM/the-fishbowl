@@ -86,10 +86,25 @@ the app: the `sac.toolbar` projection model is gone, and a view draws its own
 `<sac-nav>`. Fishbowl's `fb.toolbar.set([...])` is exactly that removed model.
 Views must move their chrome inward.
 
-**Next step:** rebuild `fb-hub-view.js` (63 lines) against the vendored kit and
-nothing else. That measures the chrome cost honestly before committing to 8,473
-lines. If it feels good, the rest is legwork; if it drags, 63 lines were spent
-instead of a quarter.
+**Progress (2026-09-24, kit 2.6.0; re-vendored 2.12.2 on 2026-09-25):**
+vendored at `src/Fishbowl.Data/Resources/kit/`. The shell runs on the kit: one global
+`<sac-nav>` replaces `fb-nav`, `fb.router` delegates to `sac.router` +
+`sac.scope`, `fb.toolbar` renders into the nav's toolbar slot (`js/lib/shell.js`).
+Since 2.12 the nav folds the account `<sac-menu>` into its "…" menu as a
+group when the ribbon runs out of room. The kit's runtime language switch
+(2.12) is not wired: Fishbowl's UI is English, so `kit/js/i18n/de.js` and
+`<sac-lang-toggle>` stay unloaded.
+Hub, notes, todos and calendar are rebuilt on kit classes and `<sac-split
+collapse>` — usable on a phone (list/detail one pane at a time, touch-sized
+actions, dvh + safe areas). `fb-nav` and `fb-footer` are deleted; the SPA-shell
+rules left `app.css`. The chrome cost turned out small because the kit's SPA
+template still allows a shell-level nav — views did not have to draw their own.
+
+Still `fb-*`: `fb-md-editor` (→ `sac-md-editor`, which has no touch pass yet),
+`fb-tag-chip`/`-input`/`-manage-dialog` (tag semantics differ from `sac-chip`;
+the manage dialog is a desktop `fb-window`), `fb-context-switcher`,
+`fb-collapsible`, `fb-status-banner`, `fb-dialog` (settings views), and the
+rest of `app.css`.
 
 ---
 
@@ -205,3 +220,14 @@ Contributions back, in priority order.
    backend, the app needs to declare what it wants and the host what it can
    offer, with graceful degradation. Without it, "premium host" just means
    "incompatible".
+4. **A mobile / responsive foundation.** Neither the kit nor Fishbowl has one —
+   the Fishbowl SPA has zero media queries and is unusable on a phone. Fixing
+   `fb-*` in place is thrown away by tier B, so it belongs in the kit:
+   breakpoints, dvh + safe areas, touch sizing, rail-as-drawer, list/detail
+   collapse for `sac-split`, toolbar overflow in `sac-nav`, dialog as sheet.
+   Full work order: `docs/appkit-mobile-brief.md`. **Delivered in kit v2.6.0**
+   (checked 2026-09-24: `sac-split collapse/show`, rail drawer via the
+   `sac-nav` burger, toolbar overflow, dialog sheet, dvh + safe areas, 44px
+   touch targets). Still open: `sac-md-editor` (re-vendored to 2.6.0, but the
+   editor itself is unchanged) has no
+   touch/responsive pass — the notes editor is the one gap for phones.

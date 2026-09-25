@@ -1,11 +1,13 @@
 /**
  * <fb-hub-view>  (mounted at #/)
  *
- * Landing view. Gradient title + subtitle + 2-tile grid.
- * Tile content is static here for v1 (Notes, Todos). Feature work adds tiles
- * as features become real — never show a tile for something that doesn't work.
+ * Landing view: gradient title + subtitle + tile grid, built from the kit's
+ * hub recipe (.hub-container / .grid / .tile in kit/css/ui.css) — on a
+ * narrow phone the tiles turn into rows on their own.
+ * Feature work adds tiles as features become real — never show a tile for
+ * something that doesn't work.
  *
- * No <fb-nav> slide-out from the hub — the tiles are the navigation.
+ * The tiles are the navigation; the shell's burger lists the same routes.
  */
 class FbHubView extends HTMLElement {
     connectedCallback() {
@@ -14,15 +16,26 @@ class FbHubView extends HTMLElement {
         // active workspace instead of dropping back to personal.
         this._onContext = () => this.render();
         window.addEventListener("fb:context-changed", this._onContext);
+        this._loadVersion();
     }
 
     disconnectedCallback() {
         if (this._onContext) window.removeEventListener("fb:context-changed", this._onContext);
     }
 
+    async _loadVersion() {
+        try {
+            const v = await fb.api.version();
+            fb.version = v?.version ?? null;
+        } catch {
+            fb.version = null;
+        }
+        const footer = this.querySelector("sac-footer");
+        if (footer && fb.version) footer.setAttribute("version", fb.version);
+    }
+
     render() {
-        const hrefFor = (personalPath) =>
-            window.fb?.context?.hashFor ? fb.context.hashFor(personalPath) : personalPath;
+        const hrefFor = (personalPath) => fb.context.hashFor(personalPath);
 
         this.innerHTML = `
             <div class="orb"></div>
@@ -33,21 +46,21 @@ class FbHubView extends HTMLElement {
                 </header>
                 <main class="grid">
                     <a class="tile" href="${hrefFor("#/notes")}">
-                        <fb-icon name="note"></fb-icon>
+                        <sac-icon name="note"></sac-icon>
                         <div>
                             <h2>Notes</h2>
                             <p>Write freely. Find anything.</p>
                         </div>
                     </a>
                     <a class="tile" href="${hrefFor("#/todos")}">
-                        <fb-icon name="check"></fb-icon>
+                        <sac-icon name="check"></sac-icon>
                         <div>
                             <h2>Todos</h2>
                             <p>Fast to-dos, always at hand.</p>
                         </div>
                     </a>
                     <a class="tile" href="${hrefFor("#/calendar")}">
-                        <fb-icon name="calendar"></fb-icon>
+                        <sac-icon name="calendar"></sac-icon>
                         <div>
                             <h2>Calendar</h2>
                             <p>Events and reminders, yours.</p>
@@ -55,8 +68,9 @@ class FbHubView extends HTMLElement {
                     </a>
                 </main>
             </div>
-            <fb-footer></fb-footer>
+            <sac-footer brand="THE FISHBOWL"></sac-footer>
         `;
+        if (fb.version) this.querySelector("sac-footer").setAttribute("version", fb.version);
     }
 }
 

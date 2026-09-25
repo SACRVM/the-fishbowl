@@ -41,7 +41,7 @@ class FbKeysSettingsView extends HTMLElement {
     render() {
         this.innerHTML = `
             <style>
-                fb-keys-settings-view { display: block; padding: 40px 48px; max-width: 820px; }
+                fb-keys-settings-view { display: block; padding: clamp(1.25rem, 5vw, 40px) clamp(1rem, 5vw, 48px); max-width: 820px; }
                 fb-keys-settings-view header { margin-bottom: 28px; }
                 fb-keys-settings-view h1 {
                     font-family: 'Outfit', 'Inter', sans-serif;

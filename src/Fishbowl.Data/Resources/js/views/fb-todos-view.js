@@ -1,7 +1,9 @@
 /**
  * <fb-todos-view>  (mounted at #/todos)
  *
- * Two-pane todos UI mirroring fb-notes-view:
+ * Two-pane todos UI mirroring fb-notes-view, on the kit's <sac-split> —
+ * side by side on a wide screen, one pane at a time on a phone (opening a
+ * todo brings the editor forward, the back bar returns to the list):
  *   - List pane: search, "All Todos" header with "hide completed" filter +
  *     new-todo action, rich items (checkbox + title + due-date).
  *   - Editor pane: centered timestamp, title input, due-date input,
@@ -10,8 +12,8 @@
  * Completed todos are always hidden unless the "hide completed" filter
  * is toggled off. When shown, they render dimmed + strikethrough.
  *
- * Light-DOM so app.css tokens apply; all component-specific CSS scoped
- * with `fb-todos-view`.
+ * Light-DOM so the kit's tokens and classes apply; all view-specific CSS
+ * scoped with `fb-todos-view`.
  */
 class FbTodosView extends HTMLElement {
     constructor() {
@@ -45,52 +47,51 @@ class FbTodosView extends HTMLElement {
     render() {
         this.innerHTML = `
             <style>
-                fb-todos-view { display: block; height: 100%; }
-                fb-todos-view [hidden] { display: none !important; }
-                fb-todos-view .tv-layout {
-                    display: flex;
+                /* The view fills the space below the fixed nav; the split
+                   inside takes it over (sac-split sizes to its parent). */
+                fb-todos-view {
+                    display: block;
                     height: calc(100vh - 50px);
+                    height: calc(100dvh - 50px - env(safe-area-inset-top, 0px));
                     background: var(--bg);
                 }
+                fb-todos-view [hidden] { display: none !important; }
 
                 /* --- LIST PANE ------------------------------------------------ */
                 fb-todos-view .tv-list-pane {
-                    width: 340px;
+                    min-height: 100%;
                     background: var(--panel);
-                    border-right: 1px solid var(--border);
                     display: flex;
                     flex-direction: column;
-                    flex-shrink: 0;
                 }
                 fb-todos-view .tv-search {
                     position: relative;
                     padding: 12px 12px 0;
                 }
-                fb-todos-view .tv-search fb-icon {
+                fb-todos-view .tv-search sac-icon {
                     position: absolute;
                     left: 22px;
                     top: 12px;
-                    height: 32px;
+                    bottom: 0;
+                    margin: auto 0;     /* centre the fixed-height icon */
                     display: flex;
                     align-items: center;
                     color: var(--text-muted);
                     --icon-size: 14px;
                     pointer-events: none;
                 }
+                /* Field look, touch height and the 16px-on-touch type come
+                   from the kit's global input rule; only the icon inset and
+                   the compact desktop size are ours. */
                 fb-todos-view .tv-search input {
-                    width: 100%;
-                    background: rgba(0, 0, 0, 0.3);
-                    border: 1px solid var(--border);
-                    border-radius: 8px;
-                    padding: 7px 10px 7px 32px;
-                    color: var(--text);
-                    font-family: inherit;
-                    font-size: 13px;
+                    padding-left: 32px;
+                    font-size: max(13px, 0.8125rem);
                     outline: none;
-                    transition: border-color 0.15s;
+                }
+                @media (pointer: coarse) {
+                    fb-todos-view .tv-search input { font-size: max(16px, 1rem); }
                 }
                 fb-todos-view .tv-search input::placeholder { color: var(--text-muted); }
-                fb-todos-view .tv-search input:focus { border-color: var(--accent); }
 
                 fb-todos-view .tv-list-header {
                     display: flex;
@@ -107,26 +108,13 @@ class FbTodosView extends HTMLElement {
                     letter-spacing: 0.1em;
                     color: var(--text-muted);
                 }
-                fb-todos-view .tv-icon-btn {
-                    padding: 5px 7px;
-                    border-radius: 6px;
-                    background: transparent;
-                    border: none;
-                    color: var(--text-muted);
-                    cursor: pointer;
-                    display: inline-flex;
-                    align-items: center;
-                    transition: background 0.15s, color 0.15s;
+                /* Header buttons are the kit's .icon-btn (44px hit area on
+                   touch); the completed toggle's "on" state is ours. */
+                fb-todos-view .tv-list-header .icon-btn { color: var(--text-muted); }
+                fb-todos-view .tv-list-header .icon-btn.active {
+                    background: color-mix(in srgb, var(--ok) 15%, transparent);
+                    color: var(--ok-text);
                 }
-                fb-todos-view .tv-icon-btn:hover {
-                    background: rgba(255, 255, 255, 0.06);
-                    color: var(--text);
-                }
-                fb-todos-view .tv-icon-btn.active {
-                    background: rgba(34, 197, 94, 0.15);
-                    color: #22c55e;
-                }
-                fb-todos-view .tv-icon-btn fb-icon { --icon-size: 16px; }
 
                 fb-todos-view .tv-items {
                     flex: 1;
@@ -143,10 +131,10 @@ class FbTodosView extends HTMLElement {
                     border: 1px solid transparent;
                     transition: background 0.12s, border-color 0.12s;
                 }
-                fb-todos-view .tv-item:hover { background: rgba(255, 255, 255, 0.04); }
+                fb-todos-view .tv-item:hover { background: var(--hover); }
                 fb-todos-view .tv-item.selected {
-                    background: rgba(59, 130, 246, 0.12);
-                    border-color: rgba(59, 130, 246, 0.28);
+                    background: var(--accent-tint);
+                    border-color: color-mix(in srgb, var(--accent) 28%, transparent);
                 }
 
                 /* Persistent checkbox on the left — primary interaction of a
@@ -171,11 +159,20 @@ class FbTodosView extends HTMLElement {
                 }
                 fb-todos-view .tv-check:hover { border-color: var(--text); }
                 fb-todos-view .tv-check.checked {
-                    background: #22c55e;
-                    border-color: #22c55e;
-                    color: #fff;
+                    background: var(--ok-fill);
+                    border-color: var(--ok-fill);
+                    color: var(--on-ok);
                 }
-                fb-todos-view .tv-check fb-icon { --icon-size: 12px; }
+                fb-todos-view .tv-check sac-icon { --icon-size: 12px; }
+                /* A finger needs more than 18px: an invisible halo takes the
+                   hit area to 44px without moving the layout. */
+                @media (pointer: coarse) {
+                    fb-todos-view .tv-check::after {
+                        content: "";
+                        position: absolute;
+                        inset: -13px;
+                    }
+                }
 
                 fb-todos-view .tv-item-title {
                     font-weight: 600;
@@ -200,7 +197,7 @@ class FbTodosView extends HTMLElement {
                     align-items: center;
                     font-variant-numeric: tabular-nums;
                 }
-                fb-todos-view .tv-item-due fb-icon { --icon-size: 11px; }
+                fb-todos-view .tv-item-due sac-icon { --icon-size: 11px; }
                 fb-todos-view .tv-item-due.overdue { color: var(--danger); }
                 fb-todos-view .tv-item-due.soon    { color: var(--accent-warm); }
 
@@ -212,8 +209,9 @@ class FbTodosView extends HTMLElement {
                 }
                 fb-todos-view .tv-item.completed .tv-item-meta { opacity: 0.55; }
 
-                /* Hover action row: delete only (the checkbox is always
-                   visible, so it's not in this row). */
+                /* Action row: delete only (the checkbox is always visible,
+                   so it's not in this row). Quiet until hover/focus on a
+                   desktop, always shown on touch (.reveal-on-hover). */
                 fb-todos-view .tv-item-actions {
                     position: absolute;
                     top: 6px;
@@ -222,24 +220,10 @@ class FbTodosView extends HTMLElement {
                     gap: 1px;
                 }
                 fb-todos-view .tv-item-action {
-                    padding: 4px;
-                    background: transparent;
-                    border: none;
-                    border-radius: 5px;
+                    --icon-btn-size: 22px;
+                    --icon-btn-icon: 13px;
                     color: var(--text-muted);
-                    cursor: pointer;
-                    display: inline-flex;
-                    align-items: center;
-                    opacity: 0;
-                    transition: opacity 0.12s, background 0.12s, color 0.12s;
                 }
-                fb-todos-view .tv-item-action fb-icon { --icon-size: 13px; }
-                fb-todos-view .tv-item:hover .tv-item-action { opacity: 1; }
-                fb-todos-view .tv-item-action:hover {
-                    background: rgba(255, 255, 255, 0.1);
-                    color: var(--text);
-                }
-                fb-todos-view .tv-item-action.delete:hover { color: var(--danger); }
 
                 fb-todos-view .tv-empty-list {
                     padding: 40px 16px;
@@ -250,15 +234,27 @@ class FbTodosView extends HTMLElement {
 
                 /* --- EDITOR PANE ---------------------------------------------- */
                 fb-todos-view .tv-editor-pane {
-                    flex: 1;
+                    height: 100%;
                     display: flex;
                     flex-direction: column;
                     min-width: 0;
                 }
+                /* Collapsed (phone): the split's pane scrolls under its
+                   sticky back bar, so the editor flows at natural height. */
+                fb-todos-view sac-split[collapsed] .tv-editor-pane {
+                    height: auto;
+                    min-height: 100%;
+                }
+                fb-todos-view sac-split[collapsed] .tv-editor-body {
+                    flex: 1 0 auto;
+                    overflow: visible;
+                }
                 fb-todos-view .tv-editor-body {
                     flex: 1;
                     overflow: auto;
-                    padding: 36px 56px;
+                    /* clamp(), not a breakpoint: roomy on a monitor, tight
+                       on a phone. */
+                    padding: clamp(1.25rem, 4vw, 36px) clamp(1rem, 5vw, 56px);
                     display: flex;
                     flex-direction: column;
                 }
@@ -271,7 +267,7 @@ class FbTodosView extends HTMLElement {
                     color: var(--text-muted);
                     gap: 12px;
                 }
-                fb-todos-view .tv-empty-state fb-icon {
+                fb-todos-view .tv-empty-state sac-icon {
                     --icon-size: 72px;
                     opacity: 0.2;
                 }
@@ -311,20 +307,11 @@ class FbTodosView extends HTMLElement {
                     letter-spacing: 0.1em;
                     color: var(--text-muted);
                 }
+                /* Field look from the kit's input rule (16px on touch). */
                 fb-todos-view .tv-date-input {
-                    background: rgba(0, 0, 0, 0.3);
-                    border: 1px solid var(--border);
-                    border-radius: 8px;
-                    padding: 8px 10px;
-                    color: var(--text);
-                    font-family: inherit;
-                    font-size: 13px;
                     outline: none;
                     max-width: 260px;
-                    color-scheme: dark;
-                    transition: border-color 0.15s;
                 }
-                fb-todos-view .tv-date-input:focus { border-color: var(--accent); }
                 fb-todos-view .tv-date-clear {
                     background: none;
                     border: none;
@@ -340,7 +327,7 @@ class FbTodosView extends HTMLElement {
                     display: block;
                     width: 100%;
                     min-height: 200px;
-                    background: rgba(0, 0, 0, 0.18);
+                    background: var(--field);
                     border: 1px solid var(--border);
                     border-radius: 10px;
                     color: var(--text);
@@ -364,7 +351,8 @@ class FbTodosView extends HTMLElement {
                     align-items: center;
                     gap: 12px;
                     min-height: 32px;
-                    padding: 8px 20px;
+                    padding: 8px clamp(1rem, 4vw, 20px);
+                    padding-bottom: calc(8px + env(safe-area-inset-bottom, 0px));
                     border-top: 1px solid var(--border);
                     background: var(--panel);
                     font-size: 11px;
@@ -378,39 +366,41 @@ class FbTodosView extends HTMLElement {
                     gap: 4px;
                     padding: 2px 8px;
                     border-radius: 999px;
-                    background: rgba(34, 197, 94, 0.12);
-                    border: 1px solid rgba(34, 197, 94, 0.35);
-                    color: #22c55e;
+                    background: color-mix(in srgb, var(--ok) 12%, transparent);
+                    border: 1px solid color-mix(in srgb, var(--ok) 35%, transparent);
+                    color: var(--ok-text);
                     font-size: 10px;
                     font-weight: 600;
                     text-transform: uppercase;
                     letter-spacing: 0.08em;
                 }
-                fb-todos-view .tv-completed-pill fb-icon { --icon-size: 10px; }
+                fb-todos-view .tv-completed-pill sac-icon { --icon-size: 10px; }
             </style>
 
-            <div class="tv-layout">
-                <aside class="tv-list-pane">
+            <sac-split class="tv-split" id="split" collapse show="start"
+                       position="${this._splitPosition()}" min-start="260px" min-end="360px"
+                       aria-label="Resize the todo list">
+                <aside class="tv-list-pane" slot="start">
                     <div class="tv-search">
-                        <fb-icon name="search"></fb-icon>
+                        <sac-icon name="search"></sac-icon>
                         <input type="search" id="search-input" placeholder="Search all todos"/>
                     </div>
                     <div class="tv-list-header">
                         <span class="tv-list-title" id="list-title">Open Todos</span>
-                        <button class="tv-icon-btn" id="toggle-completed-btn" title="Show completed">
-                            <fb-icon name="check"></fb-icon>
+                        <button class="icon-btn" id="toggle-completed-btn" title="Show completed" aria-label="Show completed">
+                            <sac-icon name="check"></sac-icon>
                         </button>
-                        <button class="tv-icon-btn" id="new-btn" title="New todo">
-                            <fb-icon name="plus"></fb-icon>
+                        <button class="icon-btn" id="new-btn" title="New todo" aria-label="New todo">
+                            <sac-icon name="plus"></sac-icon>
                         </button>
                     </div>
                     <div class="tv-items" id="todo-list"></div>
                 </aside>
 
-                <main class="tv-editor-pane">
+                <main class="tv-editor-pane" slot="end">
                     <div class="tv-editor-body">
                         <div class="tv-empty-state" id="editor-empty">
-                            <fb-icon name="check"></fb-icon>
+                            <sac-icon name="check"></sac-icon>
                             <p>Select a todo to edit</p>
                         </div>
                         <div id="editor" hidden>
@@ -431,17 +421,32 @@ class FbTodosView extends HTMLElement {
                             Updated <span id="timestamp"></span>
                         </span>
                         <span class="tv-completed-pill" id="completed-pill" hidden>
-                            <fb-icon name="check"></fb-icon> Completed
+                            <sac-icon name="check"></sac-icon> Completed
                         </span>
                         <div class="tv-editor-footer-spacer"></div>
                     </footer>
                 </main>
-            </div>
+            </sac-split>
         `;
         this.attachHandlers();
     }
 
+    /** The divider position the user left last time (per browser), else the
+     *  default. A convenience only — storage may be unavailable. */
+    _splitPosition() {
+        try { return localStorage.getItem("fb.todos.split") || "28%"; }
+        catch { return "28%"; }
+    }
+
     attachHandlers() {
+        const split = this.querySelector("#split");
+        split.addEventListener("sac:resize", (e) => {
+            try { localStorage.setItem("fb.todos.split", e.detail.position); } catch { /* ignore */ }
+        });
+        // Collapsed (phone): the back bar returns to the list — save on the
+        // way out.
+        split.addEventListener("sac:split-back", () => this.flushSave());
+
         this.querySelector("#new-btn").addEventListener("click", () => this.createTodo());
         this.querySelector("#toggle-completed-btn").addEventListener("click", () => {
             this.hideCompleted = !this.hideCompleted;
@@ -545,14 +550,15 @@ class FbTodosView extends HTMLElement {
             const dueInfo    = this.describeDue(t.dueAt, isDone);
             const rowClasses = [
                 "tv-item",
+                "reveal-on-hover",
                 isSelected ? "selected"  : "",
                 isDone     ? "completed" : "",
             ].filter(Boolean).join(" ");
             const checkSvg = isDone
-                ? `<fb-icon name="check"></fb-icon>`
+                ? `<sac-icon name="check"></sac-icon>`
                 : "";
             return `
-                <div class="${rowClasses}" data-id="${t.id}">
+                <div class="${rowClasses}" data-id="${t.id}" tabindex="0">
                     <button class="tv-check ${isDone ? "checked" : ""}" data-action="check"
                             title="${isDone ? "Mark as not done" : "Mark as done"}"
                             aria-label="${isDone ? "Mark as not done" : "Mark as done"}">${checkSvg}</button>
@@ -560,12 +566,12 @@ class FbTodosView extends HTMLElement {
                     ${dueInfo.text ? `
                         <div class="tv-item-meta">
                             <span class="tv-item-due ${dueInfo.urgency}">
-                                <fb-icon name="clock"></fb-icon>${dueInfo.text}
+                                <sac-icon name="clock"></sac-icon>${dueInfo.text}
                             </span>
                         </div>
                     ` : ""}
                     <div class="tv-item-actions">
-                        <button class="tv-item-action delete" data-action="delete" title="Delete"><fb-icon name="trash"></fb-icon></button>
+                        <button class="icon-btn hover-reveal danger tv-item-action delete" data-action="delete" title="Delete" aria-label="Delete"><sac-icon name="trash"></sac-icon></button>
                     </div>
                 </div>
             `;
@@ -575,6 +581,11 @@ class FbTodosView extends HTMLElement {
             el.addEventListener("click", (e) => {
                 if (e.target.closest(".tv-item-action")) return;
                 if (e.target.closest(".tv-check"))       return;
+                this.select(el.dataset.id);
+            });
+            el.addEventListener("keydown", (e) => {
+                if (e.target !== el || (e.key !== "Enter" && e.key !== " ")) return;
+                e.preventDefault();
                 this.select(el.dataset.id);
             });
             el.querySelectorAll(".tv-check").forEach(btn => {
@@ -629,6 +640,9 @@ class FbTodosView extends HTMLElement {
     }
 
     async select(id) {
+        // Collapsed (phone), opening a row brings the editor forward — also
+        // when it is the row already open behind the list.
+        this.querySelector("#split").show = "end";
         if (this.selectedId === id) return;
         await this.flushSave();
         this.selectedId = id;
@@ -650,6 +664,8 @@ class FbTodosView extends HTMLElement {
 
     clearSelection() {
         this.selectedId = null;
+        // Collapsed, an editor with nothing in it is a dead end.
+        this.querySelector("#split").show = "start";
         this.querySelector("#editor-empty").hidden  = false;
         this.querySelector("#editor").hidden        = true;
         this.querySelector("#editor-footer").hidden = true;
@@ -705,7 +721,7 @@ class FbTodosView extends HTMLElement {
             }
             const dueEl = meta.querySelector(".tv-item-due");
             dueEl.className = `tv-item-due ${dueInfo.urgency}`;
-            dueEl.innerHTML = `<fb-icon name="clock"></fb-icon>${dueInfo.text}`;
+            dueEl.innerHTML = `<sac-icon name="clock"></sac-icon>${dueInfo.text}`;
         } else if (meta) {
             meta.remove();
         }
@@ -745,7 +761,7 @@ class FbTodosView extends HTMLElement {
             { action: "cancel", label: "Cancel", kind: "default" },
             { action: "delete", label: "Delete", kind: "destructive", armAfterMs: 2000 },
         ];
-        const result = await fb.dialog.confirm({
+        const result = await sac.dialog.confirm({
             title:   "Delete this todo?",
             message: "This todo will be permanently deleted.",
             buttons,
