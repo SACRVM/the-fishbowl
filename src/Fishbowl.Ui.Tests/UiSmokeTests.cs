@@ -96,13 +96,70 @@ public class UiSmokeTests : IClassFixture<PlaywrightFixture>
         // Opening a note brings the editor forward.
         await page.Locator(".nv-item", new PageLocatorOptions { HasText = "Phone smoke note" }).First.TapAsync();
         await page.WaitForFunctionAsync("() => document.querySelector('fb-notes-view sac-split').getAttribute('show') === 'end'");
-        Assert.Equal("Phone smoke note", await page.Locator("#title").InputValueAsync());
-        Assert.True(await page.Locator("#title").IsVisibleAsync());
+        // No title field: an API-made note opens with its title as the first line.
+        Assert.Equal("# Phone smoke note\n\nBody",
+            await page.Locator("fb-notes-view #content").EvaluateAsync<string>("e => e.value"));
+        Assert.True(await page.Locator("fb-notes-view #content").IsVisibleAsync());
 
         // The split's back bar returns to the list.
         await split.Locator(".back button").TapAsync();
         await page.WaitForFunctionAsync("() => document.querySelector('fb-notes-view sac-split').getAttribute('show') === 'start'");
         Assert.True(await page.Locator(".nv-item").First.IsVisibleAsync());
+
+        await context.CloseAsync();
+    }
+
+    [Fact]
+    public async Task Notes_TitleIsFirstLine_NeverASecret_Test()
+    {
+        var context = await _fixture.Browser!.NewContextAsync(new BrowserNewContextOptions { IgnoreHTTPSErrors = true });
+        var page = await context.NewPageAsync();
+
+        var created = await page.APIRequest.PostAsync(_fixture.BaseUrl + "/api/v1/notes", new APIRequestContextOptions
+        {
+            DataObject = new { title = "Title line smoke", content = "" },
+        });
+        Assert.True(created.Ok, $"seed note failed: {created.Status}");
+        var id = (await created.JsonAsync())?.GetProperty("id").GetString();
+
+        await page.GotoAsync(_fixture.BaseUrl + "/#/notes");
+        await page.Locator(".nv-item", new PageLocatorOptions { HasText = "Title line smoke" }).First.ClickAsync();
+        var editor = page.Locator("fb-notes-view #content");
+        await page.WaitForFunctionAsync(
+            "() => document.querySelector('fb-notes-view #content')?.value === '# Title line smoke\\n'");
+
+        // The title travels in plain text (FTS, embeddings, MCP), so a leading
+        // secret block is skipped whole and never becomes it. Checked on the
+        // helper directly: saving a secret goes through the vault prompt.
+        Assert.Equal("Derived title", await page.EvaluateAsync<string>(
+            "() => titleFromText(':::secret\\nhunter2\\n:::end\\n# Derived title\\n\\nBody text')"));
+        Assert.Equal("", await page.EvaluateAsync<string>(
+            "() => titleFromText(':::secret\\nhunter2\\n:::end\\n')"));
+
+        // The save path: editing the first line renames the note.
+        await editor.EvaluateAsync(@"e => {
+            e.value = '# Derived title\n\nBody text';
+            e.dispatchEvent(new Event('change'));
+        }");
+
+        string? title = null;
+        for (var i = 0; i < 30 && title != "Derived title"; i++)
+        {
+            await Task.Delay(100, TestContext.Current.CancellationToken);
+            var got = await page.APIRequest.GetAsync($"{_fixture.BaseUrl}/api/v1/notes/{id}");
+            title = (await got.JsonAsync())?.GetProperty("title").GetString();
+        }
+        Assert.Equal("Derived title", title);
+
+        // The list row shows the new title, and its snippet doesn't repeat it.
+        var row = page.Locator(".nv-item", new PageLocatorOptions { HasText = "Derived title" }).First;
+        Assert.DoesNotContain("Derived title", await row.Locator(".nv-item-snippet").TextContentAsync() ?? "");
+
+        // Frameless: no rounded corners, no focus ring on the writing surface.
+        await editor.FocusAsync();
+        var frame = await editor.EvaluateAsync<string>(
+            "e => { const s = getComputedStyle(e); return s.borderTopLeftRadius + '|' + s.boxShadow; }");
+        Assert.Equal("0px|none", frame);
 
         await context.CloseAsync();
     }
