@@ -24,7 +24,7 @@ public static class NoteLimits
     public const int MaxContentLength = 4 * 1024 * 1024;
 
     // 4 MB encrypted blob. Practical upper bound is set by client-side
-    // crypto: each ::secret block becomes IV(12) + ciphertext + tag(16)
+    // crypto: each :::secret block becomes IV(12) + ciphertext + tag(16)
     // base64-encoded inside a JSON envelope. Even with hundreds of
     // secrets, real notes don't approach this.
     public const int MaxContentSecretBytes = 4 * 1024 * 1024;

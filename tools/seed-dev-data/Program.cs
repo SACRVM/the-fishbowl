@@ -176,7 +176,7 @@ var notes = new List<Note>
       "Tag for quick filter.",
       "reading"),
     N("A note with a secret block",
-      "Public bit first.\n\n::secret\nsecretuser: alice\nsecretpass: hunter2\n::end\n\nPublic tail.",
+      "Public bit first.\n\n:::secret\nsecretuser: alice\nsecretpass: hunter2\n:::end\n\nPublic tail.",
       "auth"),
 
     // ── Programming / distributed systems ──
@@ -745,10 +745,10 @@ var notes = new List<Note>
 
       Before the block.
 
-      ::secret
+      :::secret
       apikey: fb_live_REDACTED_FOR_SEED
       passphrase: correct-horse-battery-staple
-      ::end
+      :::end
 
       After the block.
 

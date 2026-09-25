@@ -1,5 +1,12 @@
 /**
- * <fb-md-editor>
+ * <sac-md-editor> — SACRVM APPKIT add-on module (not part of the core kit).
+ *
+ * Zero dependencies beyond the kit's vendored marked + DOMPurify, zero build
+ * step, one classic deferred script. Styling lives in the shadow root but
+ * inherits the kit's seed tokens (--fg, --field, --accent, --text, --border,
+ * --on-accent, ...), each with a dark fallback, so the editor rethemes with
+ * the host page in light and dark like every kit component and still renders
+ * standalone.
  *
  * Obsidian-style "live preview" markdown editor. There is no mode switch:
  *   - The line your caret sits on shows as raw markdown source (flat text).
@@ -26,6 +33,15 @@
  * Methods:
  *   focus() - focus the editor surface.
  *
+ * Language:
+ *   The editor's own strings (toolbar labels and tooltips, the reveal
+ *   toggle, the link prompt) follow the page language the kit way: sac.t()
+ *   with the English text as the inline fallback, relabelled in place on
+ *   sac.lang.onChange. A German table registers itself through
+ *   sac.i18n.add (keys "md-editor.*"); a host adds other languages with the
+ *   same keys. Without the kit's globals.js the editor stays English. The
+ *   `placeholder` attribute is the host's string - translate it there.
+ *
  * Keyboard:
  *   Ctrl/Cmd+B, Ctrl/Cmd+I, Ctrl/Cmd+K    bold / italic / link
  *   Enter                                  split; continues `- `/`* `/`1. ` lists
@@ -33,16 +49,27 @@
  *   Backspace at start of non-first line   merge with previous line
  *   Tab                                    two-space soft tab
  *
- * ::secret / ::end blocks: lines between the boundaries get the
- * .secret-body class and a CSS blur so the content isn't readable
- * over someone's shoulder. A reveal toggle (eye icon, contenteditable=
- * false) sits on the ::secret boundary line — clicking it flips
- * .secret-revealed on every line of the block for session-only
- * unmasking. The active (caret) line inside a secret block still
- * flattens to raw text for editing. This is a purely visual layer:
- * the plaintext is still in the DOM and still in the saved `content`
- * column. Encryption of the actual bytes is the separate Phase 3
- * that swaps the source into content_secret.
+ * :::secret / :::end blocks (fenced-div style, `:{2,3}` accepted on read):
+ * lines between the boundaries get the .secret-body class and a CSS blur so
+ * the content isn't readable over someone's shoulder. A reveal toggle (eye
+ * icon, contenteditable=false) sits on the :::secret boundary line —
+ * clicking it flips .secret-revealed on every line of the block for
+ * session-only unmasking. The active (caret) line inside a secret block
+ * still flattens to raw text for editing.
+ *
+ * SECURITY: this is a purely VISUAL layer. The plaintext stays in the DOM
+ * and in whatever the host saves from `value`. Masking is a courtesy
+ * against shoulder-surfing, never a security boundary — a host that needs
+ * secrets kept from an index, an agent or a wire has to enforce that
+ * server-side (the upstream app strips these blocks on every machine-facing
+ * path; see the README). Do not build on the blur.
+ *
+ * ROADMAP — block-type registry: the masked region is one instance of a
+ * general mechanic (spoiler, collapse, callout share the same bounded-block
+ * parsing this file already does, fence-aware and line-state-tracked). The
+ * planned shape is registerBlock({ match, masked, toggle, className }) so a
+ * host registers its own block names and this file stops knowing what a
+ * "secret" means. Until that lands, :::secret is the single built-in.
  *
  * Dependencies (loaded as globals before this script):
  *   marked     - CommonMark + GFM tokenizer. We only use marked.Lexer.lexInline
@@ -59,10 +86,66 @@ const REVEAL_EYE_SVG =
     `stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">` +
     `<path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>` +
     `<circle cx="12" cy="12" r="3"/>` +
-    `<line class="fb-eye-slash" x1="3" y1="3" x2="21" y2="21"/>` +
+    `<line class="sac-eye-slash" x1="3" y1="3" x2="21" y2="21"/>` +
     `</svg>`;
 
-class FbMdEditor extends HTMLElement {
+// Kit i18n: sac.t when globals.js is loaded, the English fallback when the
+// editor runs without the kit.
+const mdT = (key, fallback) =>
+    (window.sac && typeof window.sac.t === "function") ? window.sac.t("md-editor." + key, fallback) : fallback;
+
+// German strings. Registered lazily (first connect), not at parse time: a
+// page may load this file before the kit's globals.js. ASCII source, so
+// umlauts are escaped.
+let mdStringsAdded = false;
+function mdAddStrings() {
+    if (mdStringsAdded) return;
+    if (!(window.sac && window.sac.i18n && typeof window.sac.i18n.add === "function")) return;
+    mdStringsAdded = true;
+    window.sac.i18n.add("de", {
+        "md-editor.bold":        "Fett (Strg+B)",
+        "md-editor.italic":      "Kursiv (Strg+I)",
+        "md-editor.strike":      "Durchgestrichen",
+        "md-editor.h1":          "\u00dcberschrift 1",
+        "md-editor.h2":          "\u00dcberschrift 2",
+        "md-editor.h3":          "\u00dcberschrift 3",
+        "md-editor.link":        "Link (Strg+K)",
+        "md-editor.linkLabel":   "Link",
+        "md-editor.code":        "Code im Text",
+        "md-editor.codeLabel":   "Code",
+        "md-editor.ul":          "Aufz\u00e4hlung",
+        "md-editor.ulLabel":     "Liste",
+        "md-editor.ol":          "Nummerierte Liste",
+        "md-editor.olLabel":     "1. Liste",
+        "md-editor.quote":       "Zitat",
+        "md-editor.quoteLabel":  "Zitat",
+        "md-editor.hr":          "Trennlinie",
+        "md-editor.hrLabel":     "Linie",
+        "md-editor.linkPrompt":  "Link-Adresse",
+        "md-editor.linkText":    "Linktext",
+        "md-editor.secret":      "Geheim",
+        "md-editor.reveal":      "Geheimen Inhalt zeigen / verbergen",
+    });
+}
+
+// Toolbar strings per data-fmt: [tooltip key, English tooltip, label key,
+// English label]. A null label key keeps the template's glyph (B, I, S, H1..).
+const MD_TOOLBAR_TEXT = {
+    bold:   ["bold",   "Bold (Ctrl+B)",   null, null],
+    italic: ["italic", "Italic (Ctrl+I)", null, null],
+    strike: ["strike", "Strikethrough",   null, null],
+    h1:     ["h1",     "Heading 1",       null, null],
+    h2:     ["h2",     "Heading 2",       null, null],
+    h3:     ["h3",     "Heading 3",       null, null],
+    link:   ["link",   "Link (Ctrl+K)",   "linkLabel",  "Link"],
+    code:   ["code",   "Inline code",     "codeLabel",  "Code"],
+    ul:     ["ul",     "Bullet list",     "ulLabel",    "List"],
+    ol:     ["ol",     "Numbered list",   "olLabel",    "1. List"],
+    quote:  ["quote",  "Blockquote",      "quoteLabel", "Quote"],
+    hr:     ["hr",     "Horizontal rule", "hrLabel",    "HR"],
+};
+
+class SacMdEditor extends HTMLElement {
     static observedAttributes = ["placeholder", "readonly"];
 
     constructor() {
@@ -86,7 +169,12 @@ class FbMdEditor extends HTMLElement {
     }
 
     connectedCallback() {
+        mdAddStrings();
         if (!this.shadowRoot.firstChild) this._render();
+        this._relabel();
+        if (window.sac && window.sac.lang && !this._offLang) {
+            this._offLang = window.sac.lang.onChange(() => this._relabel());
+        }
         // selectionchange fires on document, not the element - the only way
         // to reliably track caret movement inside a contenteditable.
         this._onDocSelect = () => this._handleSelectionChange();
@@ -98,7 +186,33 @@ class FbMdEditor extends HTMLElement {
             document.removeEventListener("selectionchange", this._onDocSelect);
             this._onDocSelect = null;
         }
+        if (this._offLang) { this._offLang(); this._offLang = null; }
     }
+
+    /** Every editor-owned string in the current language, in place - no
+     *  re-render, so the document and the caret are untouched. Only
+     *  attributes and toolbar text change; line textContent never does. */
+    _relabel() {
+        this._toolbar.querySelectorAll("button[data-fmt]").forEach((btn) => {
+            const spec = MD_TOOLBAR_TEXT[btn.dataset.fmt];
+            if (!spec) return;
+            const tip = mdT(spec[0], spec[1]);
+            btn.title = tip;
+            btn.setAttribute("aria-label", tip);
+            if (spec[2]) btn.textContent = mdT(spec[2], spec[3]);
+        });
+        // The :::secret badge is CSS generated content - its word travels as
+        // a custom property holding a CSS string (JSON quoting is valid CSS).
+        this._editor.style.setProperty("--sac-md-secret-label",
+            JSON.stringify(mdT("secret", "Secret")));
+        const reveal = this._revealLabel();
+        this._editor.querySelectorAll(".sac-reveal-toggle").forEach((el) => {
+            el.setAttribute("aria-label", reveal);
+            el.title = reveal;
+        });
+    }
+
+    _revealLabel() { return mdT("reveal", "Show / hide secret body"); }
 
     get value() {
         if (!this._editor) return "";
@@ -192,16 +306,16 @@ class FbMdEditor extends HTMLElement {
         this._editor.addEventListener("copy",        (e) => this._handleCopy(e));
         this._editor.addEventListener("focusout",    (e) => this._handleFocusOut(e));
 
-        // Reveal-toggle click (eye icon on ::secret lines). mousedown.prevent
+        // Reveal-toggle click (eye icon on :::secret lines). mousedown.prevent
         // keeps the caret in the surrounding line rather than leaping into
         // the non-editable span. Use closest() because the real click target
         // is the inner <svg> (or a path/circle/line) — classList on e.target
-        // would miss the wrapping .fb-reveal-toggle span.
+        // would miss the wrapping .sac-reveal-toggle span.
         this._editor.addEventListener("mousedown", (e) => {
-            if (e.target.closest?.(".fb-reveal-toggle")) e.preventDefault();
+            if (e.target.closest?.(".sac-reveal-toggle")) e.preventDefault();
         });
         this._editor.addEventListener("click", (e) => {
-            const toggle = e.target.closest?.(".fb-reveal-toggle");
+            const toggle = e.target.closest?.(".sac-reveal-toggle");
             if (!toggle) return;
             const line = this._lineContaining(toggle);
             if (line) this._toggleSecretReveal(line);
@@ -232,7 +346,7 @@ class FbMdEditor extends HTMLElement {
 
     /** Render a line's inner DOM from its source. Adds marker spans and
      *  inline wrappers while preserving textContent exactly. `state` carries
-     *  the cross-line trackers: inFence (``` group) and inSecret (::secret
+     *  the cross-line trackers: inFence (``` group) and inSecret (:::secret
      *  group) — each must advance on every line even when rendering wouldn't
      *  otherwise change the output. */
     _renderLine(line, src = null, state = null) {
@@ -242,10 +356,10 @@ class FbMdEditor extends HTMLElement {
         const insideFenceNow = state ? state.inFence : false;
         if (isFenceBoundary && state) state.inFence = !state.inFence;
 
-        // Secret boundary: ::secret opens, ::end closes. Only honoured outside
+        // Secret boundary: :::secret opens, :::end closes. Only honoured outside
         // a code fence — inside a fence these are literal text.
-        const isSecretOpen  = !insideFenceNow && /^::secret(\s|$)/.test(src);
-        const isSecretClose = !insideFenceNow && /^::end(\s|$)/.test(src);
+        const isSecretOpen  = !insideFenceNow && /^:{2,3}secret(\s|$)/.test(src);
+        const isSecretClose = !insideFenceNow && /^:{2,3}end(\s|$)/.test(src);
         const insideSecretNow = state ? state.inSecret : false;
         if (state && isSecretOpen)  state.inSecret = true;
         if (state && isSecretClose) state.inSecret = false;
@@ -301,10 +415,10 @@ class FbMdEditor extends HTMLElement {
             // listener below wires the interaction.
             line.innerHTML =
                 `<span class="block-marker">${escapeHtml(src)}</span>` +
-                `<span class="fb-reveal-toggle" contenteditable="false" ` +
+                `<span class="sac-reveal-toggle" contenteditable="false" ` +
                 `      role="button" tabindex="-1" ` +
-                `      aria-label="Toggle secret reveal" ` +
-                `      title="Show / hide secret body">` +
+                `      aria-label="${escapeAttr(this._revealLabel())}" ` +
+                `      title="${escapeAttr(this._revealLabel())}">` +
                 REVEAL_EYE_SVG +
                 `</span>`;
             return;
@@ -354,7 +468,7 @@ class FbMdEditor extends HTMLElement {
         const state = this._stateBefore(line);
         const isFenceBoundary = /^```/.test(src);
         const isSecretBoundary = !state.inFence &&
-            (/^::secret(\s|$)/.test(src) || /^::end(\s|$)/.test(src));
+            (/^:{2,3}secret(\s|$)/.test(src) || /^:{2,3}end(\s|$)/.test(src));
         this._applyBlockClass(line, src, state.inFence, isFenceBoundary,
                               state.inSecret, isSecretBoundary);
     }
@@ -715,7 +829,7 @@ class FbMdEditor extends HTMLElement {
         // boundary. If it's still inside our component, ignore.
         if (e.relatedTarget && this.contains(e.relatedTarget)) return;
         // Full re-render on blur. We used to just re-render active lines, but
-        // that left cross-line state drift — e.g. typing ::secret on a line
+        // that left cross-line state drift — e.g. typing :::secret on a line
         // doesn't mask the lines below until every subsequent line is re-
         // classified with the new inSecret state. Doing it on blur is cheap
         // and guarantees the "resting" view is always correct.
@@ -922,10 +1036,10 @@ class FbMdEditor extends HTMLElement {
                 return this._wrapInLine(line, sel, "`", "`", "code");
             }
             case "link": {
-                const url = window.prompt("Link URL", "https://");
+                const url = window.prompt(mdT("linkPrompt", "Link URL"), "https://");
                 if (!url) return;
                 const safe = /^(https?:|mailto:|#)/i.test(url) ? url : "https://" + url;
-                return this._wrapInLine(line, sel, "[", `](${safe})`, "link text");
+                return this._wrapInLine(line, sel, "[", `](${safe})`, mdT("linkText", "link text"));
             }
         }
     }
@@ -1363,15 +1477,15 @@ class FbMdEditor extends HTMLElement {
             const text = sib.textContent;
             if (/^```/.test(text)) state.inFence = !state.inFence;
             else if (!state.inFence) {
-                if (/^::secret(\s|$)/.test(text)) state.inSecret = true;
-                else if (/^::end(\s|$)/.test(text)) state.inSecret = false;
+                if (/^:{2,3}secret(\s|$)/.test(text)) state.inSecret = true;
+                else if (/^:{2,3}end(\s|$)/.test(text)) state.inSecret = false;
             }
         }
         return state;
     }
 
-    /** Reveal-toggle click handler. Finds the bounded block from the ::secret
-     *  line the eye icon lives on, walks forward until ::end (or end of doc),
+    /** Reveal-toggle click handler. Finds the bounded block from the :::secret
+     *  line the eye icon lives on, walks forward until :::end (or end of doc),
      *  and flips .secret-revealed on every line in the range. Session-only —
      *  any full re-render (paste, value set) drops the class. */
     _toggleSecretReveal(openLine) {
@@ -1410,8 +1524,8 @@ function parseLineBlock(src) {
     if (/^>\s?/.test(src))          return { type: "quote", classes: "quote" };
     if (/^\s*(---|\*\*\*|___)\s*$/.test(src)) return { type: "hr", classes: "hr" };
     if (/^```/.test(src))           return { type: "fence", classes: "fence" };
-    if (/^::secret(\s|$)/.test(src)) return { type: "secret-open",  classes: "secret-marker secret-open" };
-    if (/^::end(\s|$)/.test(src))    return { type: "secret-close", classes: "secret-marker secret-close" };
+    if (/^:{2,3}secret(\s|$)/.test(src)) return { type: "secret-open",  classes: "secret-marker secret-open" };
+    if (/^:{2,3}end(\s|$)/.test(src))    return { type: "secret-close", classes: "secret-marker secret-close" };
     return { type: "paragraph", classes: "" };
 }
 
@@ -1553,8 +1667,8 @@ const TEMPLATE = `
         /* Editor reads as a bordered writing surface with a toolbar strip
            on top — a bare transparent area gives no "you can type here"
            affordance at all. Focus pulls the border toward the accent. */
-        background: rgba(0, 0, 0, 0.18);
-        border: 1px solid var(--border, rgba(255,255,255,0.08));
+        background: var(--field, rgba(0, 0, 0, 0.18));
+        border: 1px solid var(--border, color-mix(in srgb, var(--fg, #fff) 8%, transparent));
         border-radius: 12px;
         transition: border-color 0.15s, box-shadow 0.15s;
     }
@@ -1573,8 +1687,8 @@ const TEMPLATE = `
         gap: 2px;
         flex-wrap: wrap;
         padding: 8px 12px;
-        background: rgba(255, 255, 255, 0.02);
-        border-bottom: 1px solid var(--border, rgba(255,255,255,0.08));
+        background: color-mix(in srgb, var(--fg, #fff) 2%, transparent);
+        border-bottom: 1px solid var(--border, color-mix(in srgb, var(--fg, #fff) 8%, transparent));
         border-radius: 12px 12px 0 0;
     }
     .toolbar button {
@@ -1596,7 +1710,7 @@ const TEMPLATE = `
         line-height: 1;
     }
     .toolbar button:hover {
-        background: rgba(255,255,255,0.06);
+        background: color-mix(in srgb, var(--fg, #fff) 6%, transparent);
         color: var(--text, #fff);
     }
     .toolbar button b, .toolbar button i { font-size: 13px; }
@@ -1604,7 +1718,7 @@ const TEMPLATE = `
         width: 1px;
         height: 20px;
         margin: 0 4px;
-        background: var(--border, rgba(255,255,255,0.08));
+        background: var(--border, color-mix(in srgb, var(--fg, #fff) 8%, transparent));
         align-self: center;
     }
 
@@ -1652,7 +1766,7 @@ const TEMPLATE = `
        jagged text-shape selection. */
     .editor:focus-within .line.active,
     .editor:focus-within .line.sel {
-        background: rgba(255, 255, 255, 0.045);
+        background: color-mix(in srgb, var(--fg, #fff) 4.5%, transparent);
     }
     /* Within that band, the actual text selection uses the accent color
        at low opacity - keeps the "exactly-these-chars-are-selected"
@@ -1703,10 +1817,10 @@ const TEMPLATE = `
        with the gutter instead of hanging inside the padding. The angle-
        bracket marker is hidden when inactive; the left bar is the cue. */
     .line.quote {
-        background: rgba(255, 255, 255, 0.025);
+        background: color-mix(in srgb, var(--fg, #fff) 2.5%, transparent);
         padding-left: 18px;
         margin: 0 -10px;
-        border-left: 3px solid rgba(255, 255, 255, 0.28);
+        border-left: 3px solid color-mix(in srgb, var(--fg, #fff) 28%, transparent);
         border-radius: 0;
         color: var(--text-muted, #bbb);
         font-style: italic;
@@ -1747,7 +1861,7 @@ const TEMPLATE = `
        1.6em min-height doesn't win the cascade and leave the raw dashes
        visible. overflow:hidden clips the hidden text. */
     .line.hr {
-        border-bottom: 1px solid var(--border, rgba(255,255,255,0.15));
+        border-bottom: 1px solid var(--border, color-mix(in srgb, var(--fg, #fff) 15%, transparent));
         margin: 1em 0;
         padding: 0;
         min-height: 1px;
@@ -1788,7 +1902,7 @@ const TEMPLATE = `
 
     .line.fence-body,
     .line.fence:not(.active) {
-        background: rgba(255, 255, 255, 0.05);
+        background: color-mix(in srgb, var(--fg, #fff) 5%, transparent);
         margin: 0 -10px;
         padding: 2px 14px;
         border-radius: 0;
@@ -1801,7 +1915,7 @@ const TEMPLATE = `
        0.045 tint would paint right over the code card. */
     .editor:focus-within .line.fence-body.active,
     .line.fence-body.active {
-        background: rgba(255, 255, 255, 0.07);
+        background: color-mix(in srgb, var(--fg, #fff) 7%, transparent);
         margin: 0 -10px;
         padding: 2px 14px;
         border-radius: 0;
@@ -1826,9 +1940,9 @@ const TEMPLATE = `
         border-top-right-radius: 6px;
         min-height: 10px;
         padding-top: 6px;
-        box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08),
-                    inset 1px 0 0 rgba(255, 255, 255, 0.08),
-                    inset -1px 0 0 rgba(255, 255, 255, 0.08);
+        box-shadow: inset 0 1px 0 color-mix(in srgb, var(--fg, #fff) 8%, transparent),
+                    inset 1px 0 0 color-mix(in srgb, var(--fg, #fff) 8%, transparent),
+                    inset -1px 0 0 color-mix(in srgb, var(--fg, #fff) 8%, transparent);
     }
     /* Closing fence: rounded bottom + bottom border. */
     .line.fence-body + .line.fence:not(.active) {
@@ -1836,27 +1950,27 @@ const TEMPLATE = `
         border-bottom-right-radius: 6px;
         min-height: 10px;
         padding-bottom: 6px;
-        box-shadow: inset 0 -1px 0 rgba(255, 255, 255, 0.08),
-                    inset 1px 0 0 rgba(255, 255, 255, 0.08),
-                    inset -1px 0 0 rgba(255, 255, 255, 0.08);
+        box-shadow: inset 0 -1px 0 color-mix(in srgb, var(--fg, #fff) 8%, transparent),
+                    inset 1px 0 0 color-mix(in srgb, var(--fg, #fff) 8%, transparent),
+                    inset -1px 0 0 color-mix(in srgb, var(--fg, #fff) 8%, transparent);
     }
     /* Body lines get left/right borders so the card has continuous sides. */
     .line.fence-body {
-        box-shadow: inset 1px 0 0 rgba(255, 255, 255, 0.08),
-                    inset -1px 0 0 rgba(255, 255, 255, 0.08);
+        box-shadow: inset 1px 0 0 color-mix(in srgb, var(--fg, #fff) 8%, transparent),
+                    inset -1px 0 0 color-mix(in srgb, var(--fg, #fff) 8%, transparent);
     }
 
     /* Active fence marker (user is editing the fence boundary line):
        dim the raw markers so they read as syntax, keep the card bg. */
     .editor:focus-within .line.fence.active,
     .line.fence.active {
-        background: rgba(255, 255, 255, 0.07);
+        background: color-mix(in srgb, var(--fg, #fff) 7%, transparent);
         margin: 0 -10px;
         padding: 2px 14px;
         border-radius: 0;
         color: var(--text-muted, #888);
-        box-shadow: inset 1px 0 0 rgba(255, 255, 255, 0.08),
-                    inset -1px 0 0 rgba(255, 255, 255, 0.08);
+        box-shadow: inset 1px 0 0 color-mix(in srgb, var(--fg, #fff) 8%, transparent),
+                    inset -1px 0 0 color-mix(in srgb, var(--fg, #fff) 8%, transparent);
     }
 
     /* Selection band inside a code block: keep the card bg, don't let
@@ -1864,14 +1978,14 @@ const TEMPLATE = `
        already have their own bg set by the dedicated .active rules. */
     .editor:focus-within .line.sel.fence-body,
     .editor:focus-within .line.sel.fence {
-        background: rgba(255, 255, 255, 0.09);
+        background: color-mix(in srgb, var(--fg, #fff) 9%, transparent);
     }
 
     /* Secret block — a warm-tinted card (same visual vocabulary as code
        fence, but orange). Applies to the two boundary lines + every
        secret-body line, so a multi-line block reads as one shape. When a
        boundary line goes active, the card treatment stays but the raw
-       ::secret / ::end chars come back (like fence active). */
+       :::secret / :::end chars come back (like fence active). */
     .line.secret-marker,
     .line.secret-body {
         background: rgba(245, 158, 11, 0.045);
@@ -1887,7 +2001,7 @@ const TEMPLATE = `
         font-size: 0.9em;
     }
 
-    /* Inactive boundaries: hide the literal '::secret' / '::end' chars so
+    /* Inactive boundaries: hide the literal ':::secret' / ':::end' chars so
        they don't look like code. Chars stay in textContent (font-size: 0),
        so the round-trip invariant holds. */
     .line.secret-marker:not(.active) .block-marker {
@@ -1902,7 +2016,9 @@ const TEMPLATE = `
         padding-bottom: 4px;
     }
     .line.secret-open:not(.active)::before {
-        content: "🔒 Secret";
+        /* The word comes from _relabel() (page language); the fallback
+           keeps the editor English without the kit. */
+        content: "\\1F512  " var(--sac-md-secret-label, "Secret");
         display: inline-block;
         padding: 2px 10px;
         font-size: 0.78em;
@@ -1915,7 +2031,7 @@ const TEMPLATE = `
     }
 
     /* Close boundary (inactive): collapse to a thin footer — the card's
-       visual "bottom edge" with no visible '::end' text. */
+       visual "bottom edge" with no visible ':::end' text. */
     .line.secret-close:not(.active) {
         min-height: 6px;
         height: 6px;
@@ -1953,13 +2069,13 @@ const TEMPLATE = `
         filter: blur(3px);
     }
 
-    /* Reveal toggle — inline SVG eye on the ::secret boundary. SVG shape
+    /* Reveal toggle — inline SVG eye on the :::secret boundary. SVG shape
        children have no text nodes, so line.textContent stays equal to the
        source (the whole editor model depends on that invariant).
        contenteditable=false on the span keeps the caret from landing in
        it. The diagonal slash is always rendered; we hide it unless the
        block carries .secret-revealed. */
-    .fb-reveal-toggle {
+    .sac-reveal-toggle {
         display: inline-flex;
         align-items: center;
         justify-content: center;
@@ -1975,19 +2091,19 @@ const TEMPLATE = `
     }
     /* Scaled to sit alongside the "Secret" pill text — slightly taller than
        the pill glyph so the icon reads with matching visual weight. */
-    .fb-reveal-toggle svg {
+    .sac-reveal-toggle svg {
         width: 14px;
         height: 14px;
         display: block;
     }
-    .fb-reveal-toggle .fb-eye-slash { visibility: hidden; }
-    .fb-reveal-toggle:hover {
+    .sac-reveal-toggle .sac-eye-slash { visibility: hidden; }
+    .sac-reveal-toggle:hover {
         opacity: 1;
         background: rgba(245, 158, 11, 0.14);
     }
     /* Revealed state: surface the slash through the eye. */
-    .line.secret-revealed .fb-reveal-toggle { opacity: 0.95; }
-    .line.secret-revealed .fb-reveal-toggle .fb-eye-slash { visibility: visible; }
+    .line.secret-revealed .sac-reveal-toggle { opacity: 0.95; }
+    .line.secret-revealed .sac-reveal-toggle .sac-eye-slash { visibility: visible; }
 
     /* Task list: render [ ] / [x] as a visual checkbox while inactive. The
        bracket characters stay in textContent (font-size: 0 hides them
@@ -1998,7 +2114,7 @@ const TEMPLATE = `
         width: 14px;
         height: 14px;
         vertical-align: -3px;
-        border: 1.5px solid var(--border, rgba(255,255,255,0.3));
+        border: 1.5px solid var(--border, color-mix(in srgb, var(--fg, #fff) 30%, transparent));
         border-radius: 3px;
         position: relative;
         color: transparent;
@@ -2025,7 +2141,7 @@ const TEMPLATE = `
         left: 50%;
         top: 50%;
         transform: translate(-50%, -54%);
-        color: #fff;
+        color: var(--on-accent, #fff);
         font-size: 11px;
         line-height: 1;
         font-weight: 700;
@@ -2041,7 +2157,7 @@ const TEMPLATE = `
     .line em     { font-style: italic; }
     .line del    { text-decoration: line-through; opacity: 0.65; }
     .line code {
-        background: rgba(255, 255, 255, 0.08);
+        background: color-mix(in srgb, var(--fg, #fff) 8%, transparent);
         padding: 1px 5px;
         border-radius: 3px;
         font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
@@ -2089,4 +2205,4 @@ const TEMPLATE = `
 <div class="editor" part="editor" contenteditable="plaintext-only" spellcheck="true"></div>
 `;
 
-customElements.define("fb-md-editor", FbMdEditor);
+customElements.define("sac-md-editor", SacMdEditor);

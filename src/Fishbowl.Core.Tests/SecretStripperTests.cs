@@ -8,6 +8,12 @@ namespace Fishbowl.Core.Tests;
 // integration tests in Fishbowl.Host.Tests/SecretStripInvariantTests
 // confirm the wire-level invariant; these tests pin down the parser
 // itself so a regex tweak can't quietly let plaintext slip through.
+//
+// Every delimiter-sensitive case runs as a [Theory] over BOTH forms: ":::" is
+// what new content is written with, "::" is what notes written before the
+// change still carry. A delimiter the stripper stops recognising is plaintext
+// crossing a trust boundary, so the legacy form is pinned here deliberately
+// and must stay pinned until an explicit migration retires it.
 public class SecretStripperTests
 {
     private const string Placeholder = "[secret content hidden]";
@@ -26,33 +32,54 @@ public class SecretStripperTests
         Assert.Equal(input, SecretStripper.Strip(input));
     }
 
-    [Fact]
-    public void Strip_InlineBlock_ReplacedWithPlaceholder()
+    [Theory]
+    [InlineData(":::")]
+    [InlineData("::")]
+    public void Strip_InlineBlock_ReplacedWithPlaceholder(string d)
     {
-        var stripped = SecretStripper.Strip("Before\n::secret\nopenai-api-key\n::end\nAfter");
+        var stripped = SecretStripper.Strip($"Before\n{d}secret\nopenai-api-key\n{d}end\nAfter");
         Assert.Equal($"Before\n{Placeholder}\nAfter", stripped);
     }
 
     [Fact]
-    public void Strip_CaseInsensitive_StillMatches()
+    public void Strip_MixedDelimiterForms_BothStripped()
     {
-        var stripped = SecretStripper.Strip("::SECRET\nshhh\n::END");
+        // A note edited across the delimiter change carries one of each.
+        // Neither may survive.
+        var stripped = SecretStripper.Strip(
+            "A\n::secret\nold-form\n::end\nB\n:::secret\nnew-form\n:::end\nC");
+        Assert.DoesNotContain("old-form", stripped);
+        Assert.DoesNotContain("new-form", stripped);
+        Assert.Contains("A", stripped);
+        Assert.Contains("C", stripped);
+    }
+
+    [Theory]
+    [InlineData(":::")]
+    [InlineData("::")]
+    public void Strip_CaseInsensitive_StillMatches(string d)
+    {
+        var stripped = SecretStripper.Strip($"{d}SECRET\nshhh\n{d}END");
         Assert.Equal(Placeholder, stripped);
     }
 
-    [Fact]
-    public void Strip_EmptyBody_StillStripped()
+    [Theory]
+    [InlineData(":::")]
+    [InlineData("::")]
+    public void Strip_EmptyBody_StillStripped(string d)
     {
         // Encrypted payload with a metadata-only block still gets stripped
         // — the markers themselves leak count, so they must go.
-        var stripped = SecretStripper.Strip("::secret\n\n::end");
+        var stripped = SecretStripper.Strip($"{d}secret\n\n{d}end");
         Assert.Equal(Placeholder, stripped);
     }
 
-    [Fact]
-    public void Strip_MultipleBlocksInOneNote_AllStripped()
+    [Theory]
+    [InlineData(":::")]
+    [InlineData("::")]
+    public void Strip_MultipleBlocksInOneNote_AllStripped(string d)
     {
-        var input = "A\n::secret\nfirst\n::end\nB\n::secret\nsecond\n::end\nC";
+        var input = $"A\n{d}secret\nfirst\n{d}end\nB\n{d}secret\nsecond\n{d}end\nC";
         var stripped = SecretStripper.Strip(input);
         Assert.DoesNotContain("first", stripped);
         Assert.DoesNotContain("second", stripped);
@@ -65,36 +92,45 @@ public class SecretStripperTests
         Assert.Equal(2, matches.Count);
     }
 
-    [Fact]
-    public void Strip_NoTrailingNewline_StillStripped()
+    [Theory]
+    [InlineData(":::")]
+    [InlineData("::")]
+    public void Strip_NoTrailingNewline_StillStripped(string d)
     {
-        // The regex must not require trailing whitespace after ::end.
-        var stripped = SecretStripper.Strip("::secret\nbody\n::end");
+        // The regex must not require trailing whitespace after the closer.
+        var stripped = SecretStripper.Strip($"{d}secret\nbody\n{d}end");
         Assert.Equal(Placeholder, stripped);
     }
 
-    [Fact]
-    public void Strip_MarkerForm_Replaced()
+    [Theory]
+    [InlineData(":::")]
+    [InlineData("::")]
+    public void Strip_MarkerForm_Replaced(string d)
     {
-        var stripped = SecretStripper.Strip("Pre\n::secret#0::end\nMid\n::secret#42::end\nPost");
-        Assert.DoesNotContain("::secret", stripped);
+        var stripped = SecretStripper.Strip(
+            $"Pre\n{d}secret#0{d}end\nMid\n{d}secret#42{d}end\nPost");
+        Assert.DoesNotContain("secret#", stripped);
         Assert.Contains("Pre", stripped);
         Assert.Contains("Mid", stripped);
         Assert.Contains("Post", stripped);
     }
 
-    [Fact]
-    public void Strip_MarkerForm_CaseInsensitive()
+    [Theory]
+    [InlineData(":::")]
+    [InlineData("::")]
+    public void Strip_MarkerForm_CaseInsensitive(string d)
     {
-        Assert.Equal(Placeholder, SecretStripper.Strip("::SECRET#0::END"));
+        Assert.Equal(Placeholder, SecretStripper.Strip($"{d}SECRET#0{d}END"));
     }
 
-    [Fact]
-    public void Strip_MarkerForm_RequiresDigits()
+    [Theory]
+    [InlineData(":::")]
+    [InlineData("::")]
+    public void Strip_MarkerForm_RequiresDigits(string d)
     {
-        // The marker form is `::secret#<int>::end`. Anything else (a user
+        // The marker form is `:::secret#<int>:::end`. Anything else (a user
         // who literally wrote that text) is *not* a marker — leave alone.
-        var input = "::secret#abc::end";
+        var input = $"{d}secret#abc{d}end";
         Assert.Equal(input, SecretStripper.Strip(input));
     }
 
@@ -105,7 +141,7 @@ public class SecretStripperTests
         {
             Id = "01HXX",
             Title = "x",
-            Content = "Public\n::secret\nshhh\n::end",
+            Content = "Public\n:::secret\nshhh\n:::end",
             ContentSecret = new byte[] { 1, 2, 3 },
             Tags = new List<string> { "a" },
         };

@@ -30,7 +30,7 @@ public class HelpCommandHandler : ISlashCommandHandler
             "`/upcoming [days:<n>]` — list your upcoming calendar events",
             "`/help` — show this message",
             string.Empty,
-            "I never reveal secret content (`::secret` blocks) in chat — open them in the web UI.",
+            "I never reveal secret content (`:::secret` blocks) in chat — open them in the web UI.",
         };
         return Task.FromResult(SlashCommandReply.Plain(string.Join("\n", lines)));
     }

@@ -66,31 +66,37 @@
 
     // ── Secret block transforms (Phase 3 encryption) ───────────────────────
     //
-    // Outbound: extract ::secret\n…\n::end bodies from note.content, encrypt
+    // Outbound: extract :::secret\n…\n:::end bodies from note.content, encrypt
     //           each via fb.vault, write them to contentSecret as a JSON
-    //           envelope, and replace the inline body with ::secret#N::end
+    //           envelope, and replace the inline body with :::secret#N:::end
     //           marker. The server never sees plaintext secrets.
     // Inbound:  inverse — decrypt each entry in contentSecret and splice the
-    //           body back between ::secret and ::end so the editor sees the
+    //           body back between :::secret and :::end so the editor sees the
     //           normal inline form.
+    //
+    // Delimiters read as `:{2,3}` and are always written as three. Notes
+    // predating the three-colon form keep their two and must keep decrypting,
+    // so both are accepted on the way in; every value this code emits uses
+    // the current form, which is how content migrates — on next save, not by
+    // a bulk rewrite that cannot see fenced code blocks.
     //
     // Legacy notes with inline bodies and no contentSecret round-trip through
     // here unchanged until they're saved; that save triggers lazy migration.
     // A failure to unlock (user cancels) leaves markers + ciphertext in
     // place; the editor renders them as "[decryption failed]" inside each
-    // ::secret block so the user sees something's encrypted rather than
+    // :::secret block so the user sees something's encrypted rather than
     // silently losing data.
 
-    // ::secret (optional label) \n <body> \n ::end (rest of line). `m` for
+    // :::secret (optional label) \n <body> \n :::end (rest of line). `m` for
     // per-line anchors; non-greedy body so adjacent blocks don't collapse.
     // IMPORTANT: the optional label uses `[ \t]` (horizontal whitespace
     // only), NOT `\s`. With `\s`, the engine greedily consumes the `\n`
-    // after `::secret` into the optional group AND then `[^\n]*` eats the
+    // after `:::secret` into the optional group AND then `[^\n]*` eats the
     // first body line — so the capture group loses the first body line.
     // Bug squashed: always keep the label-matcher confined to the boundary
     // line by using [ \t] to forbid newlines.
-    const INLINE_SECRET_RE = /^::secret(?:[ \t][^\n]*)?\n([\s\S]*?)\n::end[^\n]*$/gm;
-    const MARKER_SECRET_RE = /::secret#(\d+)::end/g;
+    const INLINE_SECRET_RE = /^:{2,3}secret(?:[ \t][^\n]*)?\n([\s\S]*?)\n:{2,3}end[^\n]*$/gm;
+    const MARKER_SECRET_RE = /:{2,3}secret#(\d+):{2,3}end/g;
 
     async function transformNoteOutbound(note) {
         const content = note?.content || "";
@@ -98,14 +104,14 @@
         const rewritten = content.replace(INLINE_SECRET_RE, (_m, body) => {
             const i = bodies.length;
             bodies.push(body);
-            return `::secret#${i}::end`;
+            return `:::secret#${i}:::end`;
         });
         if (bodies.length === 0) {
             // User removed every secret block. Null contentSecret to avoid
             // orphaned ciphertext sitting on the row. Leftover markers
             // without matching inline bodies is a weird state we don't
             // auto-clean — preserve whatever's there so the user can fix it.
-            const hasMarkers = /::secret#\d+::end/.test(content);
+            const hasMarkers = /:{2,3}secret#\d+:{2,3}end/.test(content);
             if (!hasMarkers && note?.contentSecret) {
                 return { ...note, contentSecret: null };
             }
@@ -126,6 +132,10 @@
     async function transformNoteInbound(note) {
         if (!note) return note;
         const content = note.content || "";
+        // Cheap pre-filter before the JSON/base64/crypto work below. Two
+        // colons on purpose: ":::secret#" contains "::secret#", so this one
+        // test covers both delimiter forms. MARKER_SECRET_RE does the real
+        // matching.
         if (!content.includes("::secret#")) return note;
         if (!note.contentSecret) return note;
 
@@ -157,7 +167,7 @@
             }
         }
         const restored = content.replace(MARKER_SECRET_RE,
-            (_m, idx) => `::secret\n${decrypted[idx]}\n::end`);
+            (_m, idx) => `:::secret\n${decrypted[idx]}\n:::end`);
         return { ...note, content: restored };
     }
 

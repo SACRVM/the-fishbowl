@@ -3,24 +3,31 @@ using Fishbowl.Core.Models;
 
 namespace Fishbowl.Core.Util;
 
-// Removes `::secret ... ::end` blocks and `content_secret` blobs from any
+// Removes `:::secret ... :::end` blocks and `content_secret` blobs from any
 // note that's about to cross a trust boundary (MCP response, embeddings
 // input, search snippet). CONCEPT § Core Philosophy § MCP Server makes
 // this non-negotiable — secrets are human-access only.
 public static class SecretStripper
 {
-    // Matches `::secret` on its own line through `::end` on its own line,
+    // Matches `:::secret` on its own line through `:::end` on its own line,
     // inclusive. Singleline so `.` crosses newlines.
+    //
+    // `:{2,3}` accepts both the current three-colon form and the original
+    // two-colon one. New content is always written with three (it reads as a
+    // Pandoc-style fenced div), but notes predating the change keep their two
+    // and must keep being stripped — a delimiter this regex fails to match is
+    // secret content crossing a trust boundary in the clear, so the old form
+    // stays recognised until an explicit migration retires it.
     private static readonly Regex Block = new(
-        @"::secret\s*\r?\n.*?\r?\n\s*::end",
+        @":{2,3}secret\s*\r?\n.*?\r?\n\s*:{2,3}end",
         RegexOptions.Singleline | RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
-    // Post-encryption marker form (Phase 3): `::secret#N::end` on a single
+    // Post-encryption marker form (Phase 3): `:::secret#N:::end` on a single
     // line, where N is the ciphertext index in content_secret. These markers
     // contain no secret data themselves, but leaking them reveals which
     // notes contain secrets and how many — strip anyway, same placeholder.
     private static readonly Regex Marker = new(
-        @"::secret#\d+::end",
+        @":{2,3}secret#\d+:{2,3}end",
         RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
     private const string Placeholder = "[secret content hidden]";

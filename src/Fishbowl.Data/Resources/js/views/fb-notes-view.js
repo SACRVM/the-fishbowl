@@ -4,7 +4,8 @@
  * iCloud-style two-pane notes UI on the kit's <sac-split>:
  *   - List pane (slot "start"): search, "All Notes" header with filter +
  *     new-note actions, rich items (title + date + snippet + pin indicator).
- *   - Editor pane (slot "end"): title + content inputs, tag bar, footer.
+ *   - Editor pane (slot "end"): one frameless <sac-md-editor> filling the
+ *     pane (its first line is the note's title), tag bar, footer.
  * On a wide screen both panes sit side by side and the divider resizes them.
  * Once the split is 768px or narrower (a phone) it shows one pane at a time:
  * opening a note brings the editor forward, the split's back bar returns to
@@ -492,9 +493,8 @@ class FbNotesView extends HTMLElement {
                 fb-notes-view .nv-editor-body {
                     flex: 1;
                     overflow: auto;
-                    /* clamp(), not a breakpoint: roomy on a monitor, tight
-                       on a phone. */
-                    padding: clamp(1.25rem, 4vw, 36px) clamp(1rem, 5vw, 56px);
+                    /* No padding: the editor runs edge to edge and brings
+                       its own text inset. */
                     display: flex;
                     flex-direction: column;
                 }
@@ -515,39 +515,21 @@ class FbNotesView extends HTMLElement {
                     margin: 0;
                     font-size: 14px;
                 }
-                fb-notes-view .nv-title-input {
-                    width: 100%;
-                    font-family: 'Outfit', sans-serif;
-                    font-weight: 800;
-                    font-size: 1.75rem;
-                    letter-spacing: -0.02em;
-                    background: none;
-                    border: none;
-                    color: var(--text);
-                    outline: none;
-                    margin-bottom: 14px;
-                    padding: 0;
-                }
-                fb-notes-view .nv-title-input::placeholder {
-                    color: var(--text-muted);
-                    opacity: 0.55;
-                }
+                /* The editor IS the pane: no card, no rounded corners, no
+                   focus ring — a sheet of paper, not a form field. These
+                   beat the component's own :host frame (outer-document
+                   declarations win over :host ones), so the vendored file
+                   stays untouched. It grows with the pane and with its
+                   content; .nv-editor-body does the scrolling. */
                 fb-notes-view .nv-content-input {
-                    /* fb-md-editor handles its own autosize and renders the
-                       Edit/Preview toggle. Styles here are a safety-net in
-                       case the component fails to upgrade (the element would
-                       show as an unknown inline element with no layout). */
                     display: block;
+                    flex: 1 0 auto;
                     width: 100%;
-                    min-height: 60vh;
-                }
-
-                /* Archived-note editor is read-only. The component's own
-                   readonly attribute hides its toggle and forces preview;
-                   the title input still gets the attr directly. */
-                fb-notes-view .nv-editor.readonly .nv-title-input {
-                    opacity: 0.7;
-                    cursor: not-allowed;
+                    background: transparent;
+                    border: 0;
+                    border-radius: 0;
+                    box-shadow: none;
+                    transition: none;
                 }
 
                 /* Small pill in the editor footer when viewing an archived
@@ -569,12 +551,13 @@ class FbNotesView extends HTMLElement {
                 fb-notes-view .nv-archived-pill sac-icon { --icon-size: 10px; }
 
                 fb-notes-view .nv-editor {
-                    /* No flex:1/column here — we want content to stack normally
-                       and push the outer .nv-editor-body to scroll when it
-                       overflows, rather than forcing the textarea to scroll
-                       internally. */
-                    display: block;
+                    /* Fills the body at least, grows past it with the note —
+                       then .nv-editor-body scrolls, never the editor itself. */
+                    display: flex;
+                    flex-direction: column;
+                    flex: 1 0 auto;
                 }
+                fb-notes-view .nv-editor[hidden] { display: none; }
             </style>
 
             <sac-split class="nv-split" id="split" collapse show="start"
@@ -610,8 +593,7 @@ class FbNotesView extends HTMLElement {
                             <p>Select a note to start writing</p>
                         </div>
                         <div id="editor" class="nv-editor" hidden>
-                            <input id="title" class="nv-title-input" placeholder="Untitled"/>
-                            <fb-md-editor id="content" class="nv-content-input" placeholder="Start writing..."></fb-md-editor>
+                            <sac-md-editor id="content" class="nv-content-input" placeholder="Start writing — the first line is the title"></sac-md-editor>
                         </div>
                     </div>
                     <section class="nv-editor-tagbar" id="tagbar" hidden>
@@ -673,11 +655,8 @@ class FbNotesView extends HTMLElement {
             // masking the perceived latency of the server hop.
             this._searchDebounce = setTimeout(() => this._doSearch(q), 250);
         });
-        const titleEl = this.querySelector("#title");
-        titleEl.addEventListener("blur",  () => this.flushSave());
-        titleEl.addEventListener("input", () => this.scheduleAutoSave());
         const contentEl = this.querySelector("#content");
-        // fb-md-editor re-dispatches `input` on every keystroke and `change`
+        // sac-md-editor re-dispatches `input` on every keystroke and `change`
         // on blur-after-edit from its host, matching native textarea
         // semantics. Autosize is handled inside the component.
         contentEl.addEventListener("change", () => this.flushSave());
@@ -850,7 +829,7 @@ class FbNotesView extends HTMLElement {
         }
 
         list.innerHTML = filtered.map(n => {
-            const snippet = (n.content || "").replace(/\s+/g, " ").slice(0, 80);
+            const snippet = snippetFor(n);
             const date = this.formatDate(n.updatedAt);
             const isSelected = n.id === this.selectedId;
             const archiveTitle = n.archived ? "Unarchive" : "Archive";
@@ -930,13 +909,13 @@ class FbNotesView extends HTMLElement {
         this.querySelector("#editor").hidden        = false;
         this.querySelector("#tagbar").hidden        = false;
         this.querySelector("#editor-footer").hidden = false;
-        this.querySelector("#title").value   = note.title   || "";
-        this.querySelector("#content").value = note.content || "";
+        this._loadedText = editorTextFor(note);
+        this.querySelector("#content").value = this._loadedText;
         this.querySelector("#tag-input").value = note.tags || [];
         this.querySelector("#timestamp").textContent = this.formatFullTimestamp(note.updatedAt);
         this._applyReadOnly(note);
         this.updateToolbar(note);
-        // fb-md-editor autosizes itself on value-set (deferred to next
+        // sac-md-editor autosizes itself on value-set (deferred to next
         // frame internally), so no explicit autosize hook needed here.
         this.renderList();
     }
@@ -946,10 +925,7 @@ class FbNotesView extends HTMLElement {
         const ro = !!note.archived;
         const editor = this.querySelector("#editor");
         editor.classList.toggle("readonly", ro);
-        const title   = this.querySelector("#title");
-        const content = this.querySelector("#content");
-        title.toggleAttribute("readonly", ro);
-        content.toggleAttribute("readonly", ro);
+        this.querySelector("#content").toggleAttribute("readonly", ro);
         this.querySelector("#archived-pill").hidden = !ro;
     }
 
@@ -974,13 +950,16 @@ class FbNotesView extends HTMLElement {
         this._saveDebounce = null;
         const note = this.notes.find(n => n.id === this.selectedId);
         if (!note) return;
-        const newTitle   = this.querySelector("#title").value;
-        const newContent = this.querySelector("#content").value;
-        const newTags    = this.querySelector("#tag-input").value;
+        const text     = this.querySelector("#content").value;
+        const newTags  = this.querySelector("#tag-input").value;
         const tagsChanged = !this._sameTags(note.tags || [], newTags);
-        if (newTitle === note.title && newContent === note.content && !tagsChanged) return;
-        note.title   = newTitle;
-        note.content = newContent;
+        // Compare against what was loaded, not note.content: a note whose
+        // title was prepended for display (see editorTextFor) must not be
+        // rewritten just because it was opened.
+        if (text === this._loadedText && !tagsChanged) return;
+        this._loadedText = text;
+        note.title   = titleFromText(text);
+        note.content = text;
         note.tags    = newTags;
         try {
             await fb.api.notes.update(note.id, note);
@@ -1035,7 +1014,7 @@ class FbNotesView extends HTMLElement {
         if (titleEl) titleEl.textContent = note.title || "Untitled";
         if (dateEl)  dateEl.textContent  = this.formatDate(note.updatedAt);
         if (snippetEl) {
-            const snippet = (note.content || "").replace(/\s+/g, " ").slice(0, 80);
+            const snippet = snippetFor(note);
             snippetEl.textContent = snippet || "No additional text";
         }
         // Replace (or insert) the tagline so colors/names update on save.
@@ -1164,7 +1143,7 @@ class FbNotesView extends HTMLElement {
             this.notes.unshift(created);
             // Let select() set selectedId so its dedupe guard doesn't short-circuit.
             await this.select(created.id);
-            this.querySelector("#title").focus();
+            this.querySelector("#content").focus();
         } catch (err) {
             console.error("[fb-notes-view] create failed:", err);
         }
@@ -1195,6 +1174,59 @@ class FbNotesView extends HTMLElement {
 
 function escapeHtml(s) {
     return String(s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));
+}
+
+const TITLE_MAX = 200;
+const SECRET_OPEN  = /^\s*:{2,3}secret(\s|$)/i;
+const SECRET_CLOSE = /^\s*:{2,3}end\s*$/i;
+const FENCE        = /^\s*(```|~~~)/;
+
+/** The note's title is its first line of text, stripped of markdown line
+ *  markers (heading, quote, list, task). Secret blocks are skipped whole —
+ *  the title is stored in plain text and travels into FTS, embeddings and
+ *  MCP responses, so a secret must never become one. Fence markers are
+ *  skipped too; the code inside them can still title a note. */
+function splitTitle(text) {
+    const lines = String(text || "").split(/\r?\n/);
+    let inSecret = false;
+    for (let i = 0; i < lines.length; i++) {
+        const raw = lines[i];
+        if (inSecret) { if (SECRET_CLOSE.test(raw)) inSecret = false; continue; }
+        if (SECRET_OPEN.test(raw)) { inSecret = true; continue; }
+        if (FENCE.test(raw)) continue;
+        const line = raw
+            .replace(/^\s*#{1,6}\s+/, "")
+            .replace(/^\s*>\s?/, "")
+            .replace(/^\s*(?:[-*+]|\d+[.)])\s+(?:\[[ xX]\]\s+)?/, "")
+            .trim();
+        if (line) {
+            const title = line.length > TITLE_MAX ? line.slice(0, TITLE_MAX).trimEnd() + "…" : line;
+            return { title, body: lines.slice(i + 1).join("\n") };
+        }
+    }
+    return { title: "", body: "" };
+}
+
+function titleFromText(text) { return splitTitle(text).title; }
+
+/** List snippet: the text under the title line, so the row doesn't repeat
+ *  its own title. Notes from elsewhere (title not in content) use it all. */
+function snippetFor(note) {
+    const content = note.content || "";
+    const { title, body } = splitTitle(content);
+    const rest = title && title === (note.title || "").trim() ? body : content;
+    return rest.replace(/\s+/g, " ").trim().slice(0, 80);
+}
+
+/** What the editor shows for a note. Notes written here already open with
+ *  their title line. Notes from elsewhere (MCP `remember`, the Discord bot,
+ *  seed data) carry title and content separately — the title is put back on
+ *  top as a heading so the first-line rule holds for them too. */
+function editorTextFor(note) {
+    const title = (note.title || "").trim();
+    const content = note.content || "";
+    if (!title || titleFromText(content) === title) return content;
+    return content ? `# ${title}\n\n${content}` : `# ${title}\n`;
 }
 
 customElements.define("fb-notes-view", FbNotesView);

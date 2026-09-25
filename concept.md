@@ -116,7 +116,7 @@ If a UI element needs a tooltip to be understood — the UI element is wrong.
 The personal foundation of The Fishbowl. Everything else builds on top of this.
 
 ### Notes
-Rich Markdown notes with tags, pins, and full-text search. Write freely — The Fishbowl organises as you go, suggests tags based on content, and finds anything you have ever written using meaning, not just keywords. A `::secret` block inside any note encrypts that section — invisible to search, invisible to AI, visible only to you after unlocking.
+Rich Markdown notes with tags, pins, and full-text search. Write freely — The Fishbowl organises as you go, suggests tags based on content, and finds anything you have ever written using meaning, not just keywords. A `:::secret` block inside any note encrypts that section — invisible to search, invisible to AI, visible only to you after unlocking.
 
 ### Calendar
 A calendar that belongs to you. Events, reminders, recurring schedules — all stored locally, syncing outward to Google Calendar or iCal if you want, but never depending on them. When something is coming up, The Fishbowl reminds you in whatever chat client you use.
@@ -442,7 +442,7 @@ CREATE TABLE reminders (
 
 ## Notes & Extended Markdown
 
-Notes are written in standard Markdown with one extension: the `::secret` block.
+Notes are written in standard Markdown with one extension: the `:::secret` block.
 
 ### Secret Blocks
 
@@ -450,14 +450,14 @@ Notes are written in standard Markdown with one extension: the `::secret` block.
 # Streaming Account
 Shared with family. Started 2019.
 
-::secret
+:::secret
 username: hello@example.com
 password: hunter2
-::end
+:::end
 ```
 
 Rules:
-- `::secret` blocks are stripped before FTS5 indexing and before embedding generation. Secret content is **never searchable**.
+- `:::secret` blocks are stripped before FTS5 indexing and before embedding generation. Secret content is **never searchable**.
 - The `content_secret` field stores AES-256-GCM encrypted bytes.
 - The encryption key is derived client-side from the user's Master Password using Argon2id.
 - The server stores only the encrypted blob. The key never reaches the server.
@@ -471,7 +471,7 @@ The web UI supports storing the Master Password in the browser's built-in passwo
 
 > *"Your Master Password stays on your device. We never see it. You can let your browser remember it for convenience — but anyone with access to your browser can then see your secrets."*
 
-Master Password protection is **optional**. Users who do not set one can still use all features except `::secret` blocks.
+Master Password protection is **optional**. Users who do not set one can still use all features except `:::secret` blocks.
 
 ### Embedding Model
 
@@ -928,7 +928,7 @@ The UI is built entirely from native Web Components (`customElements.define`). E
   index.html
   app.css
   components/
-    fb-note-editor.js      ← Markdown editor with ::secret block support
+    fb-note-editor.js      ← Markdown editor with :::secret block support
     fb-note-list.js        ← scrollable note list
     fb-calendar-view.js    ← month/week calendar
     fb-search-bar.js       ← search input with live results
@@ -1410,7 +1410,7 @@ The Fishbowl exposes an MCP server endpoint. Any MCP-compatible AI tool — Clau
 
 **What an AI agent can never do via MCP:**
 
-- Read, list, or acknowledge the existence of `::secret` blocks
+- Read, list, or acknowledge the existence of `:::secret` blocks
 - Access encrypted content in any form
 - The MCP server strips all secret-adjacent data before it ever reaches the response serializer — not as a policy check, but as a structural absence
 
@@ -1503,7 +1503,7 @@ The following is in scope for the initial version:
 - Multi-user from day one — registration via OAuth, one SQLite file per user provisioned automatically
 - SQLite per-user architecture with lazy schema versioning
 - Note CRUD with Markdown support
-- `::secret` block full support — Master Password setup in Setup Wizard (optional step), client-side AES-256-GCM encryption via WebCrypto, web-UI-only viewing
+- `:::secret` block full support — Master Password setup in Setup Wizard (optional step), client-side AES-256-GCM encryption via WebCrypto, web-UI-only viewing
 - FTS5 full-text search
 - Basic semantic search (MiniLM embeddings + sqlite-vec)
 - Discord bot: save notes via DM, search via DM, receive reminders
