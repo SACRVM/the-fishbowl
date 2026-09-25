@@ -79,9 +79,10 @@
         <fb-context-switcher slot="context"></fb-context-switcher>
         <!-- fb.toolbar renders the active view's actions here. -->
         <div slot="toolbar" class="toolbar" id="fb-view-toolbar"></div>
-        <!-- Account menu; its trigger stays in the ribbon on every width. -->
+        <!-- Account menu. When the ribbon runs out of room (a phone), the kit
+             folds it into the "…" menu as a group; sac:select still fires here. -->
         <sac-menu slot="toolbar" id="fb-account" hidden>
-            <button slot="trigger" class="nav-icon-btn avatar" data-overflow="never"
+            <button slot="trigger" class="nav-icon-btn avatar"
                     aria-label="Account" title="Account">
                 <sac-avatar id="fb-account-avatar"></sac-avatar>
             </button>

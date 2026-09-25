@@ -86,10 +86,14 @@ the app: the `sac.toolbar` projection model is gone, and a view draws its own
 `<sac-nav>`. Fishbowl's `fb.toolbar.set([...])` is exactly that removed model.
 Views must move their chrome inward.
 
-**Progress (2026-09-24, kit 2.6.0):** vendored at
-`src/Fishbowl.Data/Resources/kit/`. The shell runs on the kit: one global
+**Progress (2026-09-24, kit 2.6.0; re-vendored 2.12.2 on 2026-09-25):**
+vendored at `src/Fishbowl.Data/Resources/kit/`. The shell runs on the kit: one global
 `<sac-nav>` replaces `fb-nav`, `fb.router` delegates to `sac.router` +
 `sac.scope`, `fb.toolbar` renders into the nav's toolbar slot (`js/lib/shell.js`).
+Since 2.12 the nav folds the account `<sac-menu>` into its "…" menu as a
+group when the ribbon runs out of room. The kit's runtime language switch
+(2.12) is not wired: Fishbowl's UI is English, so `kit/js/i18n/de.js` and
+`<sac-lang-toggle>` stay unloaded.
 Hub, notes, todos and calendar are rebuilt on kit classes and `<sac-split
 collapse>` — usable on a phone (list/detail one pane at a time, touch-sized
 actions, dvh + safe areas). `fb-nav` and `fb-footer` are deleted; the SPA-shell
