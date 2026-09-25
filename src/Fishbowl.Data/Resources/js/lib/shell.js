@@ -48,6 +48,65 @@
     }
     window.addEventListener("hashchange", syncTitle);
 
+    // --- Workspace switcher -------------------------------------------------
+    // The kit menu in the nav's `context` slot (it survives toolbar repaints).
+    // The pill names the active workspace and turns --accent-warm inside a
+    // space, so edits to shared data are unmissable. Items: Personal, the
+    // user's spaces (a check marks the active one — the kit fixes item
+    // colours), and "Manage spaces…".
+    const switcher = document.getElementById("fb-context");
+    let spaces = null; // null until loaded
+
+    function renderSwitcher() {
+        if (!switcher) return;
+        const ctx = fb.context.get();
+        const inSpace = ctx.type === "space";
+        const space = inSpace ? spaces?.find(s => s.slug === ctx.slug) : null;
+
+        const pill = switcher.querySelector('[slot="trigger"]');
+        pill.classList.toggle("space", inSpace);
+        pill.querySelector("sac-icon").setAttribute("name", inSpace ? "users" : "user");
+        pill.querySelector(".fb-context-label").textContent = inSpace ? (space?.name || ctx.slug) : "Personal";
+
+        const item = (action, icon, label, active) => {
+            const b = document.createElement("button");
+            b.dataset.action = action;
+            b.innerHTML = `<sac-icon name="${icon}"></sac-icon><span></span>`;
+            b.querySelector("span").textContent = label;
+            if (active) {
+                b.setAttribute("aria-current", "true");
+                b.insertAdjacentHTML("beforeend", `<sac-icon class="fb-context-check" name="check"></sac-icon>`);
+            }
+            return b;
+        };
+        const nodes = [item("ctx:user", "user", "Personal", !inSpace), document.createElement("hr")];
+        if (spaces?.length) {
+            for (const s of spaces) nodes.push(item(`ctx:space:${s.slug}`, "users", s.name || s.slug, inSpace && s.slug === ctx.slug));
+        } else if (spaces) {
+            const empty = document.createElement("span");
+            empty.className = "fb-context-empty";
+            empty.textContent = "No spaces yet";
+            nodes.push(empty);
+        }
+        nodes.push(document.createElement("hr"), item("manage-spaces", "settings", "Manage spaces…", false));
+
+        for (const el of [...switcher.children]) if (el.getAttribute("slot") !== "trigger") el.remove();
+        switcher.append(...nodes);
+    }
+
+    switcher?.addEventListener("sac:select", (e) => {
+        const action = e.detail.action || "";
+        if (action === "ctx:user") fb.context.set({ type: "user" });
+        else if (action.startsWith("ctx:space:")) fb.context.set({ type: "space", slug: action.slice("ctx:space:".length) });
+        else if (action === "manage-spaces") fb.router.navigate("#/spaces");
+    });
+    window.addEventListener("fb:context-changed", renderSwitcher);
+    fb.api.spaces.list()
+        .then((list) => { spaces = list; })
+        .catch((err) => { spaces = []; console.warn("[fb-shell] spaces load failed:", err?.message || err); })
+        .finally(renderSwitcher);
+    renderSwitcher();
+
     // --- Account menu -----------------------------------------------------
     const account = document.getElementById("fb-account");
     const avatar  = document.getElementById("fb-account-avatar");

@@ -149,11 +149,8 @@ public class VaultTests
             // there shows the open note's secret without switching notes.
             await page.WaitForFunctionAsync(
                 "() => document.querySelectorAll('#fb-account [data-action$=\"lock-secrets\"]').length === 1 && document.getElementById('fb-vault-item')?.dataset.action === 'unlock-secrets'");
-            // The account menu itself stays hidden in this fixture (it waits for
-            // /me, which the injected test user has no profile for), so fire
-            // the menu's selection the way a click on the item would.
-            await page.EvaluateAsync(
-                "() => document.getElementById('fb-account').dispatchEvent(new CustomEvent('sac:select', { detail: { action: 'unlock-secrets' } }))");
+            await page.Locator("#fb-account button[slot='trigger']").ClickAsync();
+            await page.Locator("#fb-vault-item").ClickAsync();
             await unlock.WaitForAsync(new LocatorWaitForOptions { Timeout = 5000 });
             await unlock.Locator("input[name='pass']").FillAsync(Passphrase);
             await unlock.GetByRole(AriaRole.Button, new() { Name = "Unlock" }).ClickAsync();

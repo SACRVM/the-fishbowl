@@ -110,6 +110,156 @@ public class UiSmokeTests
         await context.CloseAsync();
     }
 
+    [Theory]
+    [InlineData("#/keys", "fb-keys-settings-view")]
+    [InlineData("#/spaces", "fb-spaces-settings-view")]
+    public async Task SettingsView_LoadsOnKitComponents_Test(string hash, string view)
+    {
+        var context = await _fixture.Browser!.NewContextAsync(new BrowserNewContextOptions { IgnoreHTTPSErrors = true });
+        var page = await context.NewPageAsync();
+        var errors = new List<string>();
+        page.PageError += (_, e) => errors.Add(e);
+
+        await page.GotoAsync(_fixture.BaseUrl + "/" + hash);
+        await page.Locator(view).WaitForAsync(new LocatorWaitForOptions { Timeout = 5000 });
+
+        // The status banner is the kit's now, and every element the view
+        // renders is a registered component — no fb-* leftovers.
+        Assert.Equal(1, await page.Locator($"{view} sac-status-banner").CountAsync());
+        var unknown = await page.EvaluateAsync<string[]>(@"v => [...document.querySelector(v).querySelectorAll('*')]
+            .map(e => e.localName).filter(n => n.includes('-') && !customElements.get(n))", view);
+        Assert.Empty(unknown);
+        Assert.Empty(errors);
+
+        await context.CloseAsync();
+    }
+
+    [Fact]
+    public async Task Notes_TagInput_CreatesAndSavesTag_Test()
+    {
+        var context = await _fixture.Browser!.NewContextAsync(new BrowserNewContextOptions { IgnoreHTTPSErrors = true });
+        var page = await context.NewPageAsync();
+        var created = await page.APIRequest.PostAsync(_fixture.BaseUrl + "/api/v1/notes", new APIRequestContextOptions
+        {
+            DataObject = new { title = "Tag smoke", content = "# Tag smoke\n" },
+        });
+        var id = (await created.JsonAsync())?.GetProperty("id").GetString();
+
+        await page.GotoAsync(_fixture.BaseUrl + "/#/notes");
+        await page.Locator(".nv-item", new PageLocatorOptions { HasText = "Tag smoke" }).First.ClickAsync();
+        var input = page.Locator("fb-notes-view sac-chip-input#tag-input");
+        await input.WaitForAsync(new LocatorWaitForOptions { Timeout = 3000 });
+
+        // A brand-new tag: type it, pick "Create", pick a colour.
+        await input.Locator(".add-btn").ClickAsync();
+        await input.Locator("input.entry").FillAsync("smoke-tag");
+        await input.Locator(".opt.create").ClickAsync();
+        await input.Locator(".swatch-btn[data-color='teal']").ClickAsync();
+
+        // The note saves with the tag, and the tag is registered in its colour.
+        string[] tags = [];
+        for (var i = 0; i < 30 && !tags.Contains("smoke-tag"); i++)
+        {
+            await Task.Delay(100, TestContext.Current.CancellationToken);
+            var note = await (await page.APIRequest.GetAsync($"{_fixture.BaseUrl}/api/v1/notes/{id}")).JsonAsync();
+            tags = note!.Value.GetProperty("tags").EnumerateArray().Select(t => t.GetString()!).ToArray();
+        }
+        Assert.Contains("smoke-tag", tags);
+        var registry = await (await page.APIRequest.GetAsync($"{_fixture.BaseUrl}/api/v1/tags")).JsonAsync();
+        var tag = registry!.Value.EnumerateArray().Single(t => t.GetProperty("name").GetString() == "smoke-tag");
+        Assert.Equal("teal", tag.GetProperty("color").GetString());
+
+        // System tags only the server sets are not offered.
+        var offered = await input.EvaluateAsync<string[]>("e => e.suggestions.map(s => s.name)");
+        Assert.DoesNotContain("source:mcp", offered);
+
+        await context.CloseAsync();
+    }
+
+    [Fact]
+    public async Task WorkspaceSwitcher_SwitchesIntoSpaceAndBack_Test()
+    {
+        var context = await _fixture.Browser!.NewContextAsync(new BrowserNewContextOptions { IgnoreHTTPSErrors = true });
+        var page = await context.NewPageAsync();
+        var name = "Switch smoke " + Guid.NewGuid().ToString("N")[..6];
+        var space = await page.APIRequest.PostAsync(_fixture.BaseUrl + "/api/v1/spaces", new APIRequestContextOptions
+        {
+            DataObject = new { name },
+        });
+        Assert.True(space.Ok, $"space create failed: {space.Status}");
+        var slug = (await space.JsonAsync())!.Value.GetProperty("slug").GetString()!;
+
+        await page.GotoAsync(_fixture.BaseUrl + "/#/notes");
+        var pill = page.Locator("#fb-context [slot='trigger']");
+        await Assertions.Expect(pill).ToContainTextAsync("Personal");
+        Assert.DoesNotContain("space", await pill.GetAttributeAsync("class") ?? "");
+
+        // The menu marks the active workspace and lists the new space.
+        await pill.ClickAsync();
+        await Assertions.Expect(page.Locator("#fb-context button[data-action='ctx:user']")).ToHaveAttributeAsync("aria-current", "true");
+        await page.Locator($"#fb-context button[data-action='ctx:space:{slug}']").ClickAsync();
+
+        // Into the space: URL, label and the warm "shared data" tint.
+        await page.WaitForURLAsync(u => u.Contains($"#/space/{slug}/"), new PageWaitForURLOptions { Timeout = 3000 });
+        await Assertions.Expect(pill).ToContainTextAsync(name);
+        Assert.Contains("space", await pill.GetAttributeAsync("class") ?? "");
+
+        // And back out through "Personal".
+        await pill.ClickAsync();
+        await page.Locator("#fb-context button[data-action='ctx:user']").ClickAsync();
+        await Assertions.Expect(pill).ToContainTextAsync("Personal");
+        Assert.DoesNotContain("#/space/", page.Url);
+
+        // "Manage spaces…" goes to the spaces settings.
+        await pill.ClickAsync();
+        await page.Locator("#fb-context button[data-action='manage-spaces']").ClickAsync();
+        await page.WaitForURLAsync(u => u.EndsWith("#/spaces"), new PageWaitForURLOptions { Timeout = 3000 });
+
+        await context.CloseAsync();
+    }
+
+    [Fact]
+    public async Task TagManager_RecoloursAndProtectsSystemTags_Test()
+    {
+        var context = await _fixture.Browser!.NewContextAsync(new BrowserNewContextOptions { IgnoreHTTPSErrors = true });
+        var page = await context.NewPageAsync();
+        await page.APIRequest.PutAsync(_fixture.BaseUrl + "/api/v1/tags/manage-smoke", new APIRequestContextOptions
+        {
+            DataObject = new { color = "blue" },
+        });
+
+        await page.GotoAsync(_fixture.BaseUrl + "/#/notes");
+        await page.Locator("fb-notes-view").WaitForAsync(new LocatorWaitForOptions { Timeout = 3000 });
+        await page.EvaluateAsync("() => fb.tagManager.open()");
+
+        var win = page.Locator("sac-window#fb-tag-manager");
+        await Assertions.Expect(win).ToHaveAttributeAsync("open", "");
+        // The name sits in the input's value property (never markup), so
+        // find the row by it rather than by an attribute selector.
+        await page.WaitForFunctionAsync(
+            "() => [...document.querySelectorAll('#fb-tag-manager .fb-tags-name')].some(i => i.value === 'manage-smoke')");
+        await page.EvaluateAsync(@"() => [...document.querySelectorAll('#fb-tag-manager .fb-tags-row')]
+            .find(r => r.querySelector('.fb-tags-name').value === 'manage-smoke')
+            .querySelector("".fb-tags-swatch[data-color='green']"").click()");
+
+        string? color = null;
+        for (var i = 0; i < 30 && color != "green"; i++)
+        {
+            await Task.Delay(100, TestContext.Current.CancellationToken);
+            var tags = await (await page.APIRequest.GetAsync(_fixture.BaseUrl + "/api/v1/tags")).JsonAsync();
+            color = tags!.Value.EnumerateArray()
+                .First(t => t.GetProperty("name").GetString() == "manage-smoke").GetProperty("color").GetString();
+        }
+        Assert.Equal("green", color);
+
+        // System tags: name locked, no delete button.
+        var system = win.Locator(".fb-tags-row", new LocatorLocatorOptions { Has = page.Locator(".fb-tags-badge") }).First;
+        Assert.Equal("", await system.Locator("input.fb-tags-name").GetAttributeAsync("readonly"));
+        Assert.Equal(0, await system.Locator(".fb-tags-delete").CountAsync());
+
+        await context.CloseAsync();
+    }
+
     [Fact]
     public async Task Notes_TitleIsFirstLine_NeverASecret_Test()
     {

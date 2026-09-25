@@ -100,10 +100,17 @@ actions, dvh + safe areas). `fb-nav` and `fb-footer` are deleted; the SPA-shell
 rules left `app.css`. The chrome cost turned out small because the kit's SPA
 template still allows a shell-level nav — views did not have to draw their own.
 
-Still `fb-*`: `fb-tag-chip`/`-input`/`-manage-dialog` (tag semantics differ from `sac-chip`;
-the manage dialog is a desktop `fb-window`), `fb-context-switcher`,
-`fb-collapsible`, `fb-status-banner`, `fb-dialog` (settings views), and the
-rest of `app.css`.
+**Components done (2026-09-25):** all 17 `fb-*` components are gone and
+`js/components/` with them. Eight were dead code; `fb-icon`, `fb-status-banner`,
+`fb-collapsible`, `fb-dialog` (+ `fb.dialog`), `fb-window`, `fb-tag-chip` and
+`fb-tag-input` had 1:1 kit counterparts (`sac-chip-input` is the old tag input,
+upstreamed without the registry coupling). The two without one became app code
+from kit parts: the workspace switcher is a `<sac-menu>` in the nav's context
+slot, tag management is `fb.tagManager` on a `<sac-window>`.
+
+Still app-side: the `js/lib` shims (`fb.router` over `sac.router`, `fb.context`
+next to `sac.scope`, `fb.icons`), the keys view's hand-built token-reveal
+overlay (→ `sac-dialog` + `sac-copy-button`), and the rest of `app.css`.
 
 ---
 

@@ -38,10 +38,10 @@ class FbNotesView extends HTMLElement {
         // after each click to only show tags that appear on the remaining
         // notes (plus currently-selected ones), so no UI toggle is needed.
         this.tagFilter = { tags: [] };
-        // Clamp + "more"/"less" tab is owned by <fb-collapsible> around
+        // Clamp + "more"/"less" tab is owned by <sac-collapsible> around
         // the chip strip; expanded state lives on that element, not here.
         this._saveDebounce = null;
-        this._onTagsInvalidated = () => this._renderTagFilter();
+        this._onTagsInvalidated = () => { this._renderTagFilter(); this._refreshTagSuggestions(); };
         // Locking must take already-decrypted secrets off the page too — the
         // key going away alone would leave them in this.notes and the editor.
         // Unlocking elsewhere (the account menu) shows the open note's
@@ -62,6 +62,7 @@ class FbNotesView extends HTMLElement {
         this._setViewToolbar();
         await this.loadNotes();
         this._renderTagFilter();
+        this._refreshTagSuggestions();
     }
 
     /** Top-nav toolbar for this view. Per-note actions (pin/archive/delete)
@@ -488,14 +489,14 @@ class FbNotesView extends HTMLElement {
                     flex-shrink: 0;
                     min-height: 44px;
                 }
-                fb-notes-view .nv-editor-tagbar fb-tag-input {
+                fb-notes-view .nv-editor-tagbar sac-chip-input {
                     flex: 1 1 200px;
                     min-width: min(200px, 100%);
                 }
 
                 /* --- TAG FILTER STRIP (list pane) ----------------------------- */
                 /* Just the chip row layout — clamp, fade, separator line
-                 * and the "more"/"less" tab all come from <fb-collapsible>. */
+                 * and the "more"/"less" tab all come from <sac-collapsible>. */
                 fb-notes-view .nv-tag-filter {
                     display: flex;
                     flex-wrap: wrap;
@@ -588,9 +589,9 @@ class FbNotesView extends HTMLElement {
                     <div class="nv-search-hint" id="search-degraded-hint" hidden>
                         Full-text ranking — embeddings still loading.
                     </div>
-                    <fb-collapsible class="nv-tag-collapsible" id="tag-filter-wrapper" max-height="82px" hidden>
+                    <sac-collapsible class="nv-tag-collapsible" id="tag-filter-wrapper" max-height="82px" hidden>
                         <div class="nv-tag-filter" id="tag-filter"></div>
-                    </fb-collapsible>
+                    </sac-collapsible>
                     <div class="nv-list-header">
                         <span class="nv-list-title" id="list-title">All Notes</span>
                         <button class="icon-btn" id="toggle-archived-btn" title="Show archived" aria-label="Show archived">
@@ -614,7 +615,7 @@ class FbNotesView extends HTMLElement {
                         </div>
                     </div>
                     <section class="nv-editor-tagbar" id="tagbar" hidden>
-                        <fb-tag-input id="tag-input"></fb-tag-input>
+                        <sac-chip-input id="tag-input" add-label="Add tag" allow-create></sac-chip-input>
                     </section>
                     <footer class="nv-editor-footer" id="editor-footer" hidden>
                         <span class="nv-editor-footer-meta">
@@ -685,7 +686,7 @@ class FbNotesView extends HTMLElement {
         contentEl.addEventListener("input",  () => this.scheduleAutoSave());
         contentEl.addEventListener("history-change", (e) => this._refreshHistoryToolbar(e.detail));
         const tagInput = this.querySelector("#tag-input");
-        tagInput.addEventListener("change", () => {
+        tagInput.addEventListener("sac:change", () => {
             // Don't mutate note.tags here — saveSelected compares the
             // current input value against the stored note to decide whether
             // the PUT is needed. Pre-mutating would always produce "no
@@ -694,8 +695,34 @@ class FbNotesView extends HTMLElement {
                 this.scheduleAutoSave();
             }
         });
+        // A tag created in the input (name + colour from its picker) is
+        // persisted right away, so the colour sticks before the note saves.
+        tagInput.addEventListener("sac:create", async (e) => {
+            try {
+                await fb.api.tags.upsertColor(e.detail.name, e.detail.color);
+                fb.tags.invalidate();
+            } catch (err) {
+                console.error("[fb-notes-view] creating tag failed:", err);
+            }
+        });
         // Pin, archive and delete live on each list row (see renderList's
         // action buttons).
+    }
+
+    /** Suggestions for the tag input: every tag the user may assign, most
+     *  used first. System tags that only the server sets (source:mcp) are
+     *  left out — the input would offer something the user can't add. */
+    async _refreshTagSuggestions() {
+        const input = this.querySelector("#tag-input");
+        if (!input) return;
+        try {
+            const tags = await fb.tags.all();
+            input.suggestions = tags
+                .filter(t => t.userAssignable !== false)
+                .map(t => ({ name: t.name, color: t.color, count: t.usageCount }));
+        } catch (err) {
+            console.warn("[fb-notes-view] tag suggestions unavailable:", err);
+        }
     }
 
     /** Render the per-tag chip strip. AND-only filter; the strip narrows
@@ -748,15 +775,15 @@ class FbNotesView extends HTMLElement {
 
         if (wrapper) wrapper.hidden = false;
         strip.innerHTML = visible.map(t =>
-            `<fb-tag-chip name="${t.name}" color="${t.color}" clickable
-                          ${selected.has(t.name) ? "selected" : ""}></fb-tag-chip>`
+            `<sac-chip label="${t.name}" color="${t.color}" clickable
+                      ${selected.has(t.name) ? "selected" : ""}></sac-chip>`
         ).join("");
-        // <fb-collapsible> listens to slotchange + ResizeObserver, so it
+        // <sac-collapsible> listens to slotchange + ResizeObserver, so it
         // re-measures overflow on its own after the innerHTML swap.
 
-        strip.querySelectorAll("fb-tag-chip").forEach(chip => {
+        strip.querySelectorAll("sac-chip").forEach(chip => {
             chip.addEventListener("click", async () => {
-                const name = chip.getAttribute("name");
+                const name = chip.getAttribute("label");
                 if (selected.has(name)) {
                     this.tagFilter.tags = this.tagFilter.tags.filter(t => t !== name);
                 } else {
@@ -778,11 +805,8 @@ class FbNotesView extends HTMLElement {
     }
 
     _openManageDialog() {
-        let dlg = this.querySelector("fb-tag-manage-dialog");
-        if (!dlg) {
-            dlg = document.createElement("fb-tag-manage-dialog");
-            this.appendChild(dlg);
-            dlg.addEventListener("tags-changed", async () => {
+        fb.tagManager.open({
+            onChanged: async () => {
                 // Names/colors may have shifted; reload notes (and re-render
                 // chips on the active note) so stale chips don't linger.
                 await this.loadNotes();
@@ -795,9 +819,8 @@ class FbNotesView extends HTMLElement {
                         this.querySelector("#tag-input").value = refreshed.tags || [];
                     }
                 }
-            });
-        }
-        dlg.open();
+            },
+        });
     }
 
     /** Schedule an autosave after the user stops typing. */

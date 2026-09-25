@@ -138,7 +138,7 @@ class FbKeysSettingsView extends HTMLElement {
                     border-radius: 10px;
                     margin-bottom: 8px;
                 }
-                fb-keys-settings-view .key-row fb-icon { --icon-size: 18px; color: var(--accent); flex-shrink: 0; }
+                fb-keys-settings-view .key-row sac-icon { --icon-size: 18px; color: var(--accent); flex-shrink: 0; }
                 fb-keys-settings-view .key-info { flex: 1; min-width: 0; }
                 fb-keys-settings-view .key-name {
                     font-size: 14px;
@@ -179,7 +179,7 @@ class FbKeysSettingsView extends HTMLElement {
                     border-radius: 6px;
                     transition: color 100ms, background 100ms;
                 }
-                fb-keys-settings-view .revoke-btn fb-icon { --icon-size: 16px; }
+                fb-keys-settings-view .revoke-btn sac-icon { --icon-size: 16px; }
                 fb-keys-settings-view .revoke-btn:hover {
                     color: var(--danger, #ef4444);
                     background: rgba(239, 68, 68, 0.12);
@@ -192,7 +192,7 @@ class FbKeysSettingsView extends HTMLElement {
                 }
 
                 /* Raw-token reveal modal. Uses its own overlay rather than
-                   fb-dialog because the content is custom (monospace token
+                   sac-dialog because the content is custom (monospace token
                    block + copy button + warning). */
                 fb-keys-settings-view .reveal-overlay {
                     position: fixed;
@@ -270,7 +270,7 @@ class FbKeysSettingsView extends HTMLElement {
 
             <div class="panel">
                 <h2>New key</h2>
-                <fb-status-banner id="form-status"></fb-status-banner>
+                <sac-status-banner id="form-status"></sac-status-banner>
                 <div id="form-mount"></div>
             </div>
 
@@ -353,7 +353,7 @@ class FbKeysSettingsView extends HTMLElement {
                 : "personal";
             return `
                 <div class="key-row" data-id="${escapeAttr(k.id)}">
-                    <fb-icon name="key"></fb-icon>
+                    <sac-icon name="key"></sac-icon>
                     <div class="key-info">
                         <p class="key-name">${escapeHtml(k.name)}</p>
                         <div class="key-meta">
@@ -364,7 +364,7 @@ class FbKeysSettingsView extends HTMLElement {
                         <div class="key-meta" style="margin-top: 4px;">${scopes}</div>
                     </div>
                     <button type="button" class="revoke-btn" title="Revoke" aria-label="Revoke">
-                        <fb-icon name="trash"></fb-icon>
+                        <sac-icon name="trash"></sac-icon>
                     </button>
                 </div>
             `;
@@ -431,7 +431,7 @@ class FbKeysSettingsView extends HTMLElement {
         const key = this.keys.find(k => k.id === id);
         if (!key) return;
 
-        const result = await fb.dialog.confirm({
+        const result = await sac.dialog.confirm({
             title: `Revoke "${key.name}"?`,
             message: `The token will stop working immediately. This cannot be undone — you'll have to mint a new key.`,
             buttons: [

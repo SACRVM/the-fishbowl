@@ -113,7 +113,7 @@ class FbSpacesSettingsView extends HTMLElement {
                     border-radius: 10px;
                     margin-bottom: 8px;
                 }
-                fb-spaces-settings-view .space-row fb-icon { --icon-size: 20px; color: var(--accent); flex-shrink: 0; }
+                fb-spaces-settings-view .space-row sac-icon { --icon-size: 20px; color: var(--accent); flex-shrink: 0; }
                 fb-spaces-settings-view .space-info { flex: 1; min-width: 0; }
                 fb-spaces-settings-view .space-name {
                     font-size: 14px;
@@ -156,7 +156,7 @@ class FbSpacesSettingsView extends HTMLElement {
                     border-radius: 6px;
                     transition: color 100ms, background 100ms;
                 }
-                fb-spaces-settings-view .delete-btn fb-icon { --icon-size: 16px; }
+                fb-spaces-settings-view .delete-btn sac-icon { --icon-size: 16px; }
                 fb-spaces-settings-view .delete-btn:hover {
                     color: var(--danger, #ef4444);
                     background: rgba(239, 68, 68, 0.12);
@@ -180,7 +180,7 @@ class FbSpacesSettingsView extends HTMLElement {
             <div id="personal-row"></div>
 
             <div style="margin-top: 32px;">
-                <fb-status-banner id="form-status"></fb-status-banner>
+                <sac-status-banner id="form-status"></sac-status-banner>
                 <div class="create-row">
                     <input type="text" id="name-input" placeholder="New space name (e.g. 'Fishbowl Dev')" maxlength="60"/>
                     <button type="button" id="create-btn">Create space</button>
@@ -220,7 +220,7 @@ class FbSpacesSettingsView extends HTMLElement {
 
         mount.innerHTML = `
             <div class="space-row">
-                <fb-icon name="user"></fb-icon>
+                <sac-icon name="user"></sac-icon>
                 <div class="space-info">
                     <p class="space-name">${escapeHtml(this.me.displayName || this.me.email || "You")}</p>
                     <div class="space-meta">
@@ -243,7 +243,7 @@ class FbSpacesSettingsView extends HTMLElement {
 
         list.innerHTML = this.spaces.map(t => `
             <div class="space-row" data-slug="${escapeAttr(t.slug)}">
-                <fb-icon name="users"></fb-icon>
+                <sac-icon name="users"></sac-icon>
                 <div class="space-info">
                     <p class="space-name">${escapeHtml(t.name)}</p>
                     <div class="space-meta">
@@ -255,7 +255,7 @@ class FbSpacesSettingsView extends HTMLElement {
                 </div>
                 ${t.role === "owner"
                     ? `<button type="button" class="delete-btn" title="Delete space" aria-label="Delete">
-                           <fb-icon name="trash"></fb-icon>
+                           <sac-icon name="trash"></sac-icon>
                        </button>`
                     : ""}
             </div>
@@ -304,7 +304,7 @@ class FbSpacesSettingsView extends HTMLElement {
         const space = this.spaces.find(t => t.slug === slug);
         if (!space) return;
 
-        const result = await fb.dialog.confirm({
+        const result = await sac.dialog.confirm({
             title: `Delete space "${space.name}"?`,
             message: `The space's notes stay on disk (recoverable) but the space is removed. Undo requires manual DB surgery.`,
             buttons: [

@@ -428,6 +428,16 @@ if (app.Environment.IsEnvironment("Testing")
 {
     app.Logger.LogWarning("Playwright test-auth middleware ACTIVE. This must only happen in Fishbowl.Ui.Tests.");
 
+    // The injected principal needs a real user row: spaces reference their
+    // creator and /me reads the profile. Without it, space creation 500s and
+    // the account menu (which waits for /me) never shows in the UI tests.
+    using (var scope = app.Services.CreateScope())
+    {
+        var system = scope.ServiceProvider.GetRequiredService<ISystemRepository>();
+        if (await system.GetUserAsync("test-internal-id") is null)
+            await system.CreateUserAsync("test-internal-id", "Playwright", "playwright@test.invalid", null);
+    }
+
     app.Use(async (context, next) =>
     {
         // Seed the configuration cache per-request so the root route doesn't
