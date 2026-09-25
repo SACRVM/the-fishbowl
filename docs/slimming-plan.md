@@ -100,8 +100,7 @@ actions, dvh + safe areas). `fb-nav` and `fb-footer` are deleted; the SPA-shell
 rules left `app.css`. The chrome cost turned out small because the kit's SPA
 template still allows a shell-level nav — views did not have to draw their own.
 
-Still `fb-*`: `fb-md-editor` (→ `sac-md-editor`, which has no touch pass yet),
-`fb-tag-chip`/`-input`/`-manage-dialog` (tag semantics differ from `sac-chip`;
+Still `fb-*`: `fb-tag-chip`/`-input`/`-manage-dialog` (tag semantics differ from `sac-chip`;
 the manage dialog is a desktop `fb-window`), `fb-context-switcher`,
 `fb-collapsible`, `fb-status-banner`, `fb-dialog` (settings views), and the
 rest of `app.css`.
@@ -187,8 +186,13 @@ Recorded so they stop being re-litigated.
    editing a file and pressing F5 beats a rebuild per line of CSS. The answer is
    probably a **dev-only** path rather than keeping the product promise — but it
    must exist before the disk tier is removed.
-6. **`fb-md-editor` (2,092 lines): keep as an add-on, or drop?** Not in the core
-   kit; the kit's own migration guide lists it as a planned optional module.
+6. **`fb-md-editor` — answered 2026-08-28, done 2026-09-25.** Extracted to
+   `SACRVM/sac-md-editor` as the appkit's optional add-on module and now
+   vendored verbatim at `js/vendor/sac-md-editor/`; `fb-md-editor.js` and this
+   repo's own `marked`/`purify` copies are gone (the kit ships both).
+   `MdEditorTests` pins the consumer contract. Server-side secret enforcement
+   (`SecretStripper`, invariant tests) stays here forever — it never was the
+   editor's job.
 7. **Should the SPA get a strict CSP (`connect-src 'self'`)?** With apps as real
    code in the same realm, and with agents generating that code while reading
    content the user did not write, prompt injection becomes a code path. A CSP
@@ -228,6 +232,5 @@ Contributions back, in priority order.
    Full work order: `docs/appkit-mobile-brief.md`. **Delivered in kit v2.6.0**
    (checked 2026-09-24: `sac-split collapse/show`, rail drawer via the
    `sac-nav` burger, toolbar overflow, dialog sheet, dvh + safe areas, 44px
-   touch targets). Still open: `sac-md-editor` (re-vendored to 2.6.0, but the
-   editor itself is unchanged) has no
+   touch targets). Still open: `sac-md-editor` (vendored, but the editor itself) has no
    touch/responsive pass — the notes editor is the one gap for phones.

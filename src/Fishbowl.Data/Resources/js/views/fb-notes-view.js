@@ -533,7 +533,7 @@ class FbNotesView extends HTMLElement {
                     opacity: 0.55;
                 }
                 fb-notes-view .nv-content-input {
-                    /* fb-md-editor handles its own autosize and renders the
+                    /* sac-md-editor handles its own autosize and renders the
                        Edit/Preview toggle. Styles here are a safety-net in
                        case the component fails to upgrade (the element would
                        show as an unknown inline element with no layout). */
@@ -611,7 +611,7 @@ class FbNotesView extends HTMLElement {
                         </div>
                         <div id="editor" class="nv-editor" hidden>
                             <input id="title" class="nv-title-input" placeholder="Untitled"/>
-                            <fb-md-editor id="content" class="nv-content-input" placeholder="Start writing..."></fb-md-editor>
+                            <sac-md-editor id="content" class="nv-content-input" placeholder="Start writing..."></sac-md-editor>
                         </div>
                     </div>
                     <section class="nv-editor-tagbar" id="tagbar" hidden>
@@ -677,7 +677,7 @@ class FbNotesView extends HTMLElement {
         titleEl.addEventListener("blur",  () => this.flushSave());
         titleEl.addEventListener("input", () => this.scheduleAutoSave());
         const contentEl = this.querySelector("#content");
-        // fb-md-editor re-dispatches `input` on every keystroke and `change`
+        // sac-md-editor re-dispatches `input` on every keystroke and `change`
         // on blur-after-edit from its host, matching native textarea
         // semantics. Autosize is handled inside the component.
         contentEl.addEventListener("change", () => this.flushSave());
@@ -936,7 +936,7 @@ class FbNotesView extends HTMLElement {
         this.querySelector("#timestamp").textContent = this.formatFullTimestamp(note.updatedAt);
         this._applyReadOnly(note);
         this.updateToolbar(note);
-        // fb-md-editor autosizes itself on value-set (deferred to next
+        // sac-md-editor autosizes itself on value-set (deferred to next
         // frame internally), so no explicit autosize hook needed here.
         this.renderList();
     }
