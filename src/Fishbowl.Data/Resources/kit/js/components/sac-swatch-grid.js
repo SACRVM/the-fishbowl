@@ -258,9 +258,9 @@
                                 var(--border-strong) calc(50% - 0.5px),
                                 var(--border-strong) calc(50% + 0.5px),
                                 transparent calc(50% + 0.5px)),
-                            conic-gradient(color-mix(in srgb, var(--fg) 10%, transparent) 90deg,
+                            conic-gradient(var(--checker) 90deg,
                                 transparent 90deg 180deg,
-                                color-mix(in srgb, var(--fg) 10%, transparent) 180deg 270deg,
+                                var(--checker) 180deg 270deg,
                                 transparent 270deg);
                         background-size: 100% 100%, 10px 10px;
                         /* Keep the pattern off the border ring: --border-strong

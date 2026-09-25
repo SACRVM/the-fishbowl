@@ -130,6 +130,13 @@
     --icon-btn-size: 26px;
     --icon-btn-icon: 14px;
 
+    /* Tool button — ONE measure for <sac-toolbox>'s tools and the light-DOM
+       .icon-btn.tool beside them (a selection-actions row under a tool box),
+       so the two can never drift. 18/32 is the same ~56% ratio. Grows to
+       44px under a coarse pointer (§15). */
+    --tool-btn-size: 32px;
+    --tool-btn-icon: 18px;
+
     /* Caption / eyebrow type — the ONE shared shape for uppercase section
        titles (sac-section) and lone light-DOM captions (.sac-caption), so the
        two can never drift. Colour is deliberately NOT here: it is per role —
@@ -189,7 +196,8 @@
 :root,
 .sac-app,
 .sac-app-view,
-sac-window {
+sac-window,
+.on-viewport {
     /* Surfaces — accent-independent but direction-INdependent (the flipped
        seed already produces the right value), so these may live on the scopes. */
     --glass-hue:   color-mix(in srgb, var(--surface) 45%, var(--bg));   /* internal carrier  */
@@ -209,6 +217,16 @@ sac-window {
     --border-strong: color-mix(in srgb, var(--fg) 16%, transparent);
     --hover:         color-mix(in srgb, var(--fg) 8%, transparent);   /* hover wash        */
     --hover-strong:  color-mix(in srgb, var(--fg) 14%, transparent);  /* active/press wash */
+
+    /* Transparency checker. --checker is the translucent square a CSS
+       checkerboard lays over whatever surface it sits on (the .checker
+       utility, color wells, swatches). --checker-a/-b are an OPAQUE pair for
+       canvases, which cannot composite over the page (sac-pixel-canvas).
+       --pixel-grid is the hairline between enlarged pixels. */
+    --checker:    color-mix(in srgb, var(--fg) 10%, transparent);
+    --checker-a:  color-mix(in srgb, var(--fg) 5%, var(--bg));
+    --checker-b:  color-mix(in srgb, var(--fg) 12%, var(--bg));
+    --pixel-grid: color-mix(in srgb, var(--fg) 9%, transparent);
 
     /* Accent derivations — follow --accent automatically, so the per-app
        accent override re-themes these too. */
@@ -280,14 +298,18 @@ sac-window {
     --panel:   color-mix(in srgb, var(--bg) 62%, var(--lift));
     --panel-2: color-mix(in srgb, var(--bg) 30%, var(--lift));
 
-    /* State-as-text re-solved for a white worst-case plane — flip the shared
-       flag variables, and the *-text tokens on the accent scopes follow. */
+    /* State-as-text re-solved for the darkest light plane that carries it —
+       its own 16% tint over --bg (an active item, a status wash), not white:
+       the light ground is off-white, and a white solve measured ~4.1:1 on
+       --bg itself. Each pct is the most seed that still reaches 4.6:1 on
+       that tint (5.2–5.8:1 on --bg). Flip the shared flag variables, and the
+       *-text tokens on the accent scopes follow. */
     --text-solve:           var(--sink);
-    --accent-text-pct:       91%;
-    --accent-edit-text-pct:  93%;
-    --accent-warm-text-pct:  81%;
-    --danger-text-pct:       91%;
-    --ok-text-pct:           75%;
+    --accent-text-pct:       80%;
+    --accent-edit-text-pct:  82%;
+    --accent-warm-text-pct:  72%;
+    --danger-text-pct:       79%;
+    --ok-text-pct:           68%;
 }
 
 /* `data-theme="auto"` follows the OS instead of an explicit choice — same
@@ -311,12 +333,44 @@ sac-window {
         --panel-2: color-mix(in srgb, var(--bg) 30%, var(--lift));
 
         --text-solve:           var(--sink);
-        --accent-text-pct:       91%;
-        --accent-edit-text-pct:  93%;
-        --accent-warm-text-pct:  81%;
-        --danger-text-pct:       91%;
-        --ok-text-pct:           75%;
+        --accent-text-pct:       80%;
+        --accent-edit-text-pct:  82%;
+        --accent-warm-text-pct:  72%;
+        --danger-text-pct:       79%;
+        --ok-text-pct:           68%;
     }
+}
+
+/* On the viewport — the canvas ground is --viewport-bg (black) in EVERY
+   theme, so a kit component placed on it (a drop zone over an empty canvas,
+   a floating hint) must read the DARK derivation even in the light theme.
+   .on-viewport re-seeds the neutrals from the viewport ground and --lift and
+   re-derives everything below it (it is one of the derivation scopes above),
+   so ink, lines, washes, glass and state-as-text all resolve for a dark
+   ground. Seeds and poles only — a custom --viewport-bg still works:
+     <sac-drop-zone class="on-viewport" …></sac-drop-zone>                      */
+.on-viewport {
+    color-scheme: dark;
+    --bg:      var(--viewport-bg);
+    --fg:      color-mix(in srgb, var(--lift) 97%, var(--viewport-bg));
+    --surface: color-mix(in srgb, var(--lift) 14%, var(--viewport-bg));
+
+    /* The :root-only, direction-dependent tokens — their DARK values. */
+    --field:        color-mix(in srgb, var(--sink) 30%, transparent);
+    --glass:        color-mix(in srgb, var(--glass-hue) 70%, transparent);
+    --glass-strong: color-mix(in srgb, var(--glass-hue) 88%, transparent);
+    --panel:        color-mix(in srgb, var(--bg) 95%, var(--lift));
+    --panel-2:      color-mix(in srgb, var(--bg) 90%, var(--lift));
+    --shadow-1: 0 2px 8px  color-mix(in srgb, var(--sink) 35%, transparent);
+    --shadow-2: 0 8px 24px color-mix(in srgb, var(--sink) 45%, transparent);
+    --scrollbar-thumb:       color-mix(in srgb, var(--fg) 18%, transparent);
+    --scrollbar-thumb-hover: color-mix(in srgb, var(--fg) 32%, transparent);
+    --text-solve:           var(--lift);
+    --accent-text-pct:       90%;
+    --accent-edit-text-pct:  86%;
+    --accent-warm-text-pct: 100%;
+    --danger-text-pct:       89%;
+    --ok-text-pct:          100%;
 }
 
 /* --------------------------------------------------------------------------
@@ -682,6 +736,19 @@ a.nav-icon-btn { text-decoration: none; }
 .icon-btn.danger:hover:not(:disabled) { color: var(--danger-text); }
 .icon-btn:disabled { opacity: 0.3; cursor: default; }
 .icon-btn[hidden] { display: none; }
+/* The tool-sized variant: <sac-toolbox>'s measure and states, for action
+   buttons that sit next to tools. It re-points the icon-btn tokens, so the
+   touch halo below computes from the right box too. */
+.icon-btn.tool {
+    --icon-btn-size: var(--tool-btn-size);
+    --icon-btn-icon: var(--tool-btn-icon);
+    color: var(--text-muted);
+}
+.icon-btn.tool.active,
+.icon-btn.tool[aria-pressed="true"] {
+    background: var(--accent-fill);
+    color: var(--on-accent);
+}
 .icon-btn svg {
     width: var(--icon-size);
     height: var(--icon-size);
@@ -806,6 +873,19 @@ a.nav-icon-btn { text-decoration: none; }
 @keyframes skeleton-sweep {
     from { transform: translateX(-100%); }
     to   { transform: translateX(100%); }
+}
+
+/* Transparency checker — any surface that shows "nothing here" behind
+   pixels (a preview canvas, an alpha well). Token squares over whatever
+   ground the element has; --checker-size sets the square (default 8px).
+   Pair with image-rendering: pixelated on the canvas/img it backs. */
+.checker {
+    --checker-size: 8px;
+    background-image:
+        linear-gradient(45deg, var(--checker) 25%, transparent 25%, transparent 75%, var(--checker) 75%),
+        linear-gradient(45deg, var(--checker) 25%, transparent 25%, transparent 75%, var(--checker) 75%);
+    background-size: var(--checker-size) var(--checker-size);
+    background-position: 0 0, calc(var(--checker-size) / 2) calc(var(--checker-size) / 2);
 }
 
 /* --------------------------------------------------------------------------
@@ -1198,6 +1278,13 @@ canvas {
     height: 100% !important;
     display: block;
 }
+/* Opt-out: a canvas shown at its own aspect (a source preview, a thumbnail)
+   keeps its intrinsic size instead of filling its box. */
+canvas.natural {
+    width: auto !important;
+    height: auto !important;
+    max-width: 100%;
+}
 
 /* A pan-zoom layer inside a .viewport pane (see sac.setupPanZoom). */
 .pz-layer {
@@ -1369,6 +1456,7 @@ canvas {
 }
 
 @media (pointer: coarse) {
+    :root { --tool-btn-size: 44px; }
     .btn { min-height: 44px; }
     /* In a toolbar/ribbon the button keeps its 32px look — a 44px fill
        would crowd the 50px ribbon — and an invisible halo takes the hit
@@ -1431,7 +1519,9 @@ canvas {
         left: 0;
         width: var(--drawer-width);
         height: auto;   /* beats .sidebar.fill: top + bottom size the drawer */
-        z-index: 10000;
+        /* Above every floating window (10000–18999) and the open nav
+           (19000), under dialogs (20000). */
+        z-index: 19001;
         padding-left: calc(0.75rem + env(safe-area-inset-left, 0px));
         padding-bottom: calc(0.75rem + env(safe-area-inset-bottom, 0px));
         translate: -105% 0;

@@ -28,6 +28,21 @@
  *     before the arm fires, the timer is cancelled — we don't steal focus
  *     from an actively-interacting user.
  *
+ * Buttons: { action, label, kind: "default"|"primary"|"destructive",
+ *            armAfterMs?, disabled?, labelKey? }. setDisabled(action, flag)
+ *            toggles one later (a Save that waits for a filename). labelKey
+ *            makes `label` the English fallback of sac.t(labelKey): the
+ *            button then follows a runtime language switch in place.
+ *
+ * Validation: dlg.beforeAction = (action) => boolean | Promise<boolean>.
+ *   Called on every BUTTON click (and trigger(action)); answering false keeps
+ *   the dialog open — an overwrite question, an empty required field.
+ *   Escape and the backdrop always cancel (action=null) without asking.
+ *   trigger(action) runs a button's action from code, e.g. Enter in a field.
+ *
+ * Width: --dialog-width (default 420px) on the element — a dialog holding a
+ *   file list wants more room than a question.
+ *
  * Compact (≤768px, or a phone held sideways — ui.css §15): a BOTTOM SHEET — full width, anchored to the
  * bottom edge above the home-indicator safe area, at most 85dvh tall with the
  * body scrolling, actions full-width and stacked (the last button, usually
@@ -47,6 +62,28 @@ class SacDialog extends HTMLElement {
 
     connectedCallback() {
         if (!this.shadowRoot.firstChild) this._render();
+        if (window.sac && sac.lang && !this._offLang) this._offLang = sac.lang.onChange(() => this._relabel());
+    }
+
+    disconnectedCallback() {
+        if (this._offLang) { this._offLang(); this._offLang = null; }
+    }
+
+    /** A button's text: its labelKey through sac.t (label = the English
+     *  fallback), else the caller's label as given. */
+    static _label(spec) {
+        return (spec.labelKey && window.sac && window.sac.t)
+            ? window.sac.t(spec.labelKey, spec.label) : spec.label;
+    }
+
+    /** Language switch: buttons with a labelKey, in place — focus, the arm
+     *  timer and disabled state are untouched. Title and body are the
+     *  caller's. */
+    _relabel() {
+        this.shadowRoot.querySelectorAll(".actions .btn").forEach((btn, i) => {
+            const spec = this.buttons[i];
+            if (spec && spec.labelKey) btn.textContent = SacDialog._label(spec);
+        });
     }
 
     attributeChangedCallback() {
@@ -117,6 +154,29 @@ class SacDialog extends HTMLElement {
         }
     }
 
+    /** Run a button's action as if clicked: ask beforeAction, then close. */
+    async trigger(action) {
+        if (this._resolved || this._asking) return;
+        if (typeof this.beforeAction === "function") {
+            this._asking = true;
+            let ok;
+            try { ok = await this.beforeAction(action); }
+            catch (err) { console.error("[sac-dialog] beforeAction threw:", err); ok = false; }
+            finally { this._asking = false; }
+            if (ok === false) return;
+        }
+        this.close(action);
+    }
+
+    /** Enable / disable one action's button. */
+    setDisabled(action, flag) {
+        const spec = this.buttons.find((b) => b.action === action);
+        if (spec) spec.disabled = !!flag;
+        const btn = Array.from(this.shadowRoot.querySelectorAll(".btn"))
+            .find((b) => b.dataset.action === String(action));
+        if (btn) btn.disabled = !!flag;
+    }
+
     _startArmTimer() {
         const armed = this.buttons.findIndex(b => b.armAfterMs > 0);
         if (armed < 0) return;
@@ -167,7 +227,7 @@ class SacDialog extends HTMLElement {
 
                 .panel {
                     position: relative;
-                    width: 420px;
+                    width: var(--dialog-width, 420px);
                     max-width: calc(100vw - 32px);
                     /* A content-heavy dialog (an About panel, an explainer)
                        must never outgrow the viewport — centered, both ends
@@ -267,6 +327,8 @@ class SacDialog extends HTMLElement {
                     outline: 2px solid var(--accent);
                     outline-offset: 2px;
                 }
+                .btn:disabled { opacity: 0.45; cursor: default; pointer-events: none; }
+                .actions:empty { display: none; }
 
                 /* Ghost buttons: translucent washes, so the ink must follow
                    the THEME (-text variants / --text), never --on-accent —
@@ -374,8 +436,10 @@ class SacDialog extends HTMLElement {
             const btn = document.createElement("button");
             btn.className = "btn" + (spec.kind && spec.kind !== "default" ? " " + spec.kind : "");
             btn.type = "button";
-            btn.textContent = spec.label;
-            btn.addEventListener("click", () => this.close(spec.action));
+            btn.textContent = SacDialog._label(spec);
+            btn.dataset.action = spec.action == null ? "" : String(spec.action);
+            btn.disabled = !!spec.disabled;
+            btn.addEventListener("click", () => this.trigger(spec.action));
             // Any pointer interaction with a *different* button cancels the
             // arm timer so we don't yank focus from the user. pointerdown is
             // the touch equivalent: a finger never "enters" before it lands.
