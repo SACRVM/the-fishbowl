@@ -219,6 +219,51 @@ public class UiSmokeTests
     }
 
     [Fact]
+    public async Task Spaces_CreatedSpaceIsInSwitcherAndOpens_WithoutReload_Test()
+    {
+        var context = await _fixture.Browser!.NewContextAsync(new BrowserNewContextOptions { IgnoreHTTPSErrors = true });
+        var page = await context.NewPageAsync();
+        var name = "Live space " + Guid.NewGuid().ToString("N")[..6];
+
+        // Loaded first, so the switcher's initial list can't contain it.
+        await page.GotoAsync(_fixture.BaseUrl + "/#/spaces");
+        await page.Locator("#name-input").FillAsync(name);
+        await page.Locator("#create-btn").ClickAsync();
+        var row = page.Locator(".space-row", new PageLocatorOptions { HasText = name });
+        await Assertions.Expect(row).ToBeVisibleAsync();
+        var slug = await row.GetAttributeAsync("data-slug");
+
+        // The switcher picked it up with no reload.
+        var pill = page.Locator("#fb-context [slot='trigger']");
+        await pill.ClickAsync();
+        await Assertions.Expect(page.Locator($"#fb-context button[data-action='ctx:space:{slug}']")).ToBeVisibleAsync();
+        await page.Keyboard.PressAsync("Escape");
+
+        // And the row's open button switches into it.
+        await row.Locator(".open-btn").ClickAsync();
+        await page.WaitForURLAsync(u => u.Contains($"#/space/{slug}/notes"), new PageWaitForURLOptions { Timeout = 3000 });
+        await Assertions.Expect(pill).ToContainTextAsync(name);
+
+        // API keys opened from inside the space default to that space, and
+        // list that space's keys first, under its name.
+        var key = await page.APIRequest.PostAsync(_fixture.BaseUrl + "/api/v1/keys", new APIRequestContextOptions
+        {
+            DataObject = new { name = "space key", contextType = "space", contextId = slug, scopes = new[] { "read:notes" } },
+        });
+        Assert.True(key.Ok, $"key create failed: {key.Status}");
+        await page.GotoAsync(_fixture.BaseUrl + $"/#/space/{slug}/keys");
+        await Assertions.Expect(page.Locator("#key-context")).ToHaveValueAsync($"space::{slug}");
+        var firstGroup = page.Locator("#key-list .key-group").First;
+        await Assertions.Expect(firstGroup).ToHaveAttributeAsync("data-context", $"space:{slug}");
+        await Assertions.Expect(firstGroup).ToContainTextAsync(name);
+        // Each row names its context too, not only the group heading.
+        await Assertions.Expect(page.Locator(".key-row", new PageLocatorOptions { HasText = "space key" }).Locator(".key-ctx"))
+            .ToHaveTextAsync(name);
+
+        await context.CloseAsync();
+    }
+
+    [Fact]
     public async Task TagManager_RecoloursAndProtectsSystemTags_Test()
     {
         var context = await _fixture.Browser!.NewContextAsync(new BrowserNewContextOptions { IgnoreHTTPSErrors = true });
@@ -256,6 +301,44 @@ public class UiSmokeTests
         var system = win.Locator(".fb-tags-row", new LocatorLocatorOptions { Has = page.Locator(".fb-tags-badge") }).First;
         Assert.Equal("", await system.Locator("input.fb-tags-name").GetAttributeAsync("readonly"));
         Assert.Equal(0, await system.Locator(".fb-tags-delete").CountAsync());
+
+        await context.CloseAsync();
+    }
+
+    [Fact]
+    public async Task Keys_TokenRevealSurvivesEscape_Test()
+    {
+        var context = await _fixture.Browser!.NewContextAsync(new BrowserNewContextOptions { IgnoreHTTPSErrors = true });
+        var page = await context.NewPageAsync();
+        await page.GotoAsync(_fixture.BaseUrl + "/#/keys");
+        await page.Locator("#key-name").FillAsync("reveal smoke");
+        await page.Locator("#create-btn").ClickAsync();
+
+        var dialog = page.Locator("sac-dialog[title='Key created']");
+        await dialog.WaitForAsync(new LocatorWaitForOptions { Timeout = 5000 });
+        var token = (await dialog.Locator(".fb-token-block").TextContentAsync())!.Trim();
+        Assert.StartsWith("fb_live_", token);
+        Assert.Equal(token, await dialog.Locator("sac-copy-button").GetAttributeAsync("value"));
+
+        // The copy button sits centred beside the token box, a size up from
+        // the kit's 26px default.
+        var block = (await dialog.Locator(".fb-token-block").BoundingBoxAsync())!;
+        var copy = (await dialog.Locator("sac-copy-button button").BoundingBoxAsync())!;
+        Assert.InRange(copy.Y + copy.Height / 2, block.Y + block.Height / 2 - 2, block.Y + block.Height / 2 + 2);
+        Assert.True(copy.Width >= 34, $"copy button only {copy.Width}px wide");
+        await page.ScreenshotAsync(new PageScreenshotOptions { Path = Path.Combine(Path.GetTempPath(), "fishbowl_ui_token_dialog.png") });
+
+        // Escape must not lose a token that is shown only once.
+        await page.Keyboard.PressAsync("Escape");
+        await page.WaitForTimeoutAsync(400);
+        var again = page.Locator("sac-dialog[title='Key created']");
+        await again.WaitForAsync(new LocatorWaitForOptions { Timeout = 3000 });
+        Assert.Equal(token, (await again.Locator(".fb-token-block").TextContentAsync())!.Trim());
+
+        // Only "I've saved it" closes it.
+        await again.GetByRole(AriaRole.Button, new() { Name = "I've saved it" }).ClickAsync();
+        await page.Locator("sac-dialog[title='Key created']").WaitForAsync(
+            new LocatorWaitForOptions { State = WaitForSelectorState.Detached, Timeout = 3000 });
 
         await context.CloseAsync();
     }

@@ -2,7 +2,8 @@
  * Fishbowl — fetch wrapper for /api/v1/*.
  * 401 responses redirect to /login. Non-OK responses throw ApiError.
  *
- * Context-aware: every CRUD wrapper routes through `fb.context.endpoint(path)`
+ * Context-aware: every CRUD wrapper routes through `ctx(path)`, built from
+ * `sac.scope.get()`
  * so a request for "/notes" becomes "/api/v1/notes" when personal is active
  * or "/api/v1/spaces/SLUG/notes" when a space is active. Context-agnostic
  * endpoints (spaces CRUD, API keys, auth, /me) stay on the personal path.
@@ -42,7 +43,15 @@
     // context is active. Called lazily (per request) so switching context
     // doesn't require rebuilding the fb.api object.
     function ctx(path) {
-        return window.fb?.context?.endpoint ? fb.context.endpoint(path) : path;
+        // Not sac.scope.endpoint(): the kit reuses its hash prefix ("space",
+        // singular) for data paths, but the REST nesting is plural.
+        const s = window.sac?.scope?.get?.();
+        return s?.type === "scoped" ? `/spaces/${encodeURIComponent(s.slug)}${path}` : path;
+    }
+
+    function spacesChanged(result) {
+        window.dispatchEvent(new CustomEvent("fb:spaces-changed"));
+        return result;
     }
 
     const crud = (resource) => ({
@@ -127,7 +136,7 @@
             }
             return note;
         }
-        if (window.fb?.context?.get?.().type === "space")
+        if (window.sac?.scope?.get?.().type === "scoped")
             throw new SecretSaveError("Secrets are personal for now — remove the secret block to save this note in a space.");
         if (!note?.id) throw new SecretSaveError("Save the note once before adding a secret to it.");
         if (!window.fb?.vault) throw new SecretSaveError("Secrets are unavailable in this browser.");
@@ -287,11 +296,15 @@
             if (!res.ok) throw new ApiError(res.status, await res.text().catch(() => ""));
             return res.blob();
         }),
+        // create/delete fire `fb:spaces-changed` so the shell's workspace
+        // switcher reloads its list — whoever made the change.
         spaces: {
             list:   ()       => request("/spaces"),
             get:    (slug)   => request(`/spaces/${encodeURIComponent(slug)}`),
-            create: ({ name }) => request("/spaces", { method: "POST", body: JSON.stringify({ name }) }),
-            delete: (slug)   => request(`/spaces/${encodeURIComponent(slug)}`, { method: "DELETE" }),
+            create: ({ name }) => request("/spaces", { method: "POST", body: JSON.stringify({ name }) })
+                .then(spacesChanged),
+            delete: (slug)   => request(`/spaces/${encodeURIComponent(slug)}`, { method: "DELETE" })
+                .then(spacesChanged),
         },
         // API keys — the create() response is the ONLY moment the raw token
         // exists on the client. Store nothing; surface it to the user with a

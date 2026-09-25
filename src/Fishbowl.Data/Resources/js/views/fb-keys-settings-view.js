@@ -154,6 +154,7 @@ class FbKeysSettingsView extends HTMLElement {
                     font-size: 12px;
                     color: var(--text-muted);
                 }
+                fb-keys-settings-view .key-facts { column-gap: 20px; }
                 fb-keys-settings-view .key-prefix {
                     font-family: 'SFMono-Regular', Consolas, monospace;
                     font-size: 12px;
@@ -184,6 +185,28 @@ class FbKeysSettingsView extends HTMLElement {
                     color: var(--danger, #ef4444);
                     background: rgba(239, 68, 68, 0.12);
                 }
+                fb-keys-settings-view .key-ctx {
+                    display: inline-flex;
+                    align-items: center;
+                    gap: 4px;
+                    color: var(--text);
+                }
+                fb-keys-settings-view .key-ctx sac-icon { --icon-size: 12px; }
+                fb-keys-settings-view .key-ctx.space { color: var(--accent-warm); }
+                fb-keys-settings-view .key-group {
+                    display: flex;
+                    align-items: center;
+                    gap: 6px;
+                    font-size: 12px;
+                    font-weight: 600;
+                    text-transform: uppercase;
+                    letter-spacing: 0.06em;
+                    color: var(--text-muted);
+                    margin: 20px 0 10px;
+                }
+                fb-keys-settings-view .key-group:first-child { margin-top: 0; }
+                fb-keys-settings-view .key-group sac-icon { --icon-size: 14px; }
+                fb-keys-settings-view .key-group.current { color: var(--text); }
                 fb-keys-settings-view .empty {
                     text-align: center;
                     color: var(--text-muted);
@@ -191,73 +214,35 @@ class FbKeysSettingsView extends HTMLElement {
                     font-size: 13px;
                 }
 
-                /* Raw-token reveal modal. Uses its own overlay rather than
-                   sac-dialog because the content is custom (monospace token
-                   block + copy button + warning). */
-                fb-keys-settings-view .reveal-overlay {
-                    position: fixed;
-                    inset: 0;
-                    background: rgba(0, 0, 0, 0.7);
+                /* Raw-token reveal (sac-dialog body, light DOM). */
+                .fb-token-warn {
+                    color: var(--accent-warm);
+                    font-size: 13px;
+                }
+                .fb-token-row {
                     display: flex;
                     align-items: center;
-                    justify-content: center;
-                    z-index: 1000;
-                    animation: fb-keys-fade 120ms ease-out;
+                    gap: 8px;
+                    margin-top: 12px;
                 }
-                @keyframes fb-keys-fade { from { opacity: 0; } to { opacity: 1; } }
-                fb-keys-settings-view .reveal-panel {
-                    background: var(--panel);
-                    border: 1px solid var(--accent);
-                    border-radius: 12px;
-                    padding: 28px;
-                    max-width: 520px;
-                    width: calc(100% - 48px);
-                    box-shadow: 0 8px 40px rgba(0, 0, 0, 0.5);
+                /* The kit's ghost copy button, a size up (it inherits
+                   --icon-btn-* into its shadow root). */
+                .fb-token-row sac-copy-button {
+                    --icon-btn-size: 36px;
+                    --icon-btn-icon: 18px;
                 }
-                fb-keys-settings-view .reveal-panel h3 {
-                    margin: 0 0 8px;
-                    font-size: 18px;
-                    font-weight: 700;
-                    color: var(--text);
-                }
-                fb-keys-settings-view .reveal-panel .warn {
-                    color: var(--accent-warm, #f59e0b);
+                .fb-token-block {
+                    flex: 1;
+                    font-family: ui-monospace, 'SFMono-Regular', Consolas, monospace;
                     font-size: 13px;
-                    margin: 0 0 16px;
-                }
-                fb-keys-settings-view .token-block {
-                    font-family: 'SFMono-Regular', Consolas, monospace;
-                    font-size: 13px;
-                    background: rgba(0, 0, 0, 0.4);
+                    background: color-mix(in srgb, var(--bg) 60%, transparent);
                     border: 1px solid var(--border);
                     border-radius: 8px;
                     padding: 12px 14px;
                     color: var(--text);
                     word-break: break-all;
-                    margin-bottom: 14px;
+                    user-select: all;
                 }
-                fb-keys-settings-view .reveal-actions {
-                    display: flex;
-                    gap: 10px;
-                    justify-content: flex-end;
-                }
-                fb-keys-settings-view .reveal-actions button {
-                    font: inherit;
-                    font-size: 14px;
-                    padding: 8px 16px;
-                    border-radius: 8px;
-                    border: 1px solid var(--border);
-                    background: transparent;
-                    color: var(--text);
-                    cursor: pointer;
-                }
-                fb-keys-settings-view .reveal-actions button.primary {
-                    background: var(--accent);
-                    color: #fff;
-                    border-color: var(--accent);
-                    font-weight: 600;
-                }
-                fb-keys-settings-view .reveal-actions button:hover { filter: brightness(1.08); }
             </style>
 
             <header>
@@ -274,10 +259,6 @@ class FbKeysSettingsView extends HTMLElement {
                 <div id="form-mount"></div>
             </div>
 
-            <h2 style="font-size: 12px; font-weight: 600; text-transform: uppercase;
-                       letter-spacing: 0.06em; color: var(--text-muted); margin: 0 0 10px;">
-                Your keys
-            </h2>
             <div id="key-list"></div>
         `;
     }
@@ -286,10 +267,14 @@ class FbKeysSettingsView extends HTMLElement {
         const mount = this.querySelector("#form-mount");
         if (!mount) return;
 
+        // Preselect the workspace the user is in: opened from inside a
+        // space, a new key is for that space unless they pick otherwise.
+        const scope = sac.scope.get();
+        const active = scope.type === "scoped" ? scope.slug : null;
         const contextOptions = [
             `<option value="user::">Personal</option>`,
             ...this.spaces.map(t =>
-                `<option value="space::${escapeAttr(t.slug)}">Space — ${escapeHtml(t.name)}</option>`),
+                `<option value="space::${escapeAttr(t.slug)}"${t.slug === active ? " selected" : ""}>Space — ${escapeHtml(t.name)}</option>`),
         ].join("");
 
         mount.innerHTML = `
@@ -342,33 +327,58 @@ class FbKeysSettingsView extends HTMLElement {
             return;
         }
 
-        list.innerHTML = this.keys.map(k => {
+        // Every key is listed, grouped by the workspace it is bound to; the
+        // workspace the user is in comes first, then Personal, spaces, apps.
+        const scope = sac.scope.get();
+        const activeKey = scope.type === "scoped" ? `space:${scope.slug}` : "user:";
+        const groups = new Map();
+        const describe = (k) => {
+            if (k.contextType === "space") {
+                const space = this.spaces.find(t => t.slug === k.contextId);
+                return { key: `space:${k.contextId}`, icon: "users", label: space?.name || k.contextId };
+            }
+            if (k.contextType === "app") return { key: `app:${k.contextId}`, icon: "cube", label: `App ${k.contextId}` };
+            return { key: "user:", icon: "user", label: "Personal" };
+        };
+        for (const k of this.keys) {
+            const d = describe(k);
+            if (!groups.has(d.key)) groups.set(d.key, { ...d, keys: [] });
+            groups.get(d.key).keys.push(k);
+        }
+        const rank = (g) => g.key === activeKey ? 0 : g.key === "user:" ? 1 : g.key.startsWith("space:") ? 2 : 3;
+        const ordered = [...groups.values()].sort((a, b) => rank(a) - rank(b) || a.label.localeCompare(b.label));
+
+        const row = (k) => {
+            const d = describe(k);
             const scopes = (k.scopes || []).map(s =>
                 `<span class="key-scope">${escapeHtml(s)}</span>`).join(" ");
             const lastUsed = k.lastUsedAt
                 ? `last used ${formatRelative(k.lastUsedAt)}`
                 : "never used";
-            const ctxLabel = k.contextType === "space"
-                ? `space/${escapeHtml(k.contextId)}`
-                : "personal";
             return `
                 <div class="key-row" data-id="${escapeAttr(k.id)}">
                     <sac-icon name="key"></sac-icon>
                     <div class="key-info">
                         <p class="key-name">${escapeHtml(k.name)}</p>
-                        <div class="key-meta">
+                        <div class="key-meta key-facts">
                             <span class="key-prefix">${escapeHtml(k.keyPrefix)}…</span>
-                            <span>${ctxLabel}</span>
+                            <span class="key-ctx${k.contextType === "space" ? " space" : ""}"><sac-icon name="${d.icon}"></sac-icon>${escapeHtml(d.label)}</span>
                             <span>${lastUsed}</span>
                         </div>
-                        <div class="key-meta" style="margin-top: 4px;">${scopes}</div>
+                        <div class="key-meta" style="margin-top: 10px;">${scopes}</div>
                     </div>
                     <button type="button" class="revoke-btn" title="Revoke" aria-label="Revoke">
                         <sac-icon name="trash"></sac-icon>
                     </button>
                 </div>
             `;
-        }).join("");
+        };
+        list.innerHTML = ordered.map(g => `
+            <h2 class="key-group${g.key === activeKey ? " current" : ""}" data-context="${escapeAttr(g.key)}">
+                <sac-icon name="${g.icon}"></sac-icon><span>${escapeHtml(g.label)}</span>
+            </h2>
+            ${g.keys.map(row).join("")}
+        `).join("");
 
         list.querySelectorAll(".revoke-btn").forEach(btn => {
             btn.addEventListener("click", async (e) => {
@@ -450,48 +460,32 @@ class FbKeysSettingsView extends HTMLElement {
         }
     }
 
-    // One-time reveal of the raw token. Returns when the user closes the modal.
-    _revealToken(created) {
-        return new Promise((resolve) => {
-            const overlay = document.createElement("div");
-            overlay.className = "reveal-overlay";
-            overlay.innerHTML = `
-                <div class="reveal-panel">
-                    <h3>Key created</h3>
-                    <p class="warn">
-                        ⚠️ Copy the token now — it is <strong>never</strong> shown again.
-                    </p>
-                    <div class="token-block" id="token-text"></div>
-                    <div class="reveal-actions">
-                        <button type="button" id="copy-btn">Copy</button>
-                        <button type="button" class="primary" id="done-btn">I've saved it</button>
-                    </div>
-                </div>
-            `;
-            overlay.querySelector("#token-text").textContent = created.rawToken;
-
-            const close = () => {
-                overlay.remove();
-                resolve();
-            };
-
-            overlay.querySelector("#copy-btn").addEventListener("click", async () => {
-                try {
-                    await navigator.clipboard.writeText(created.rawToken);
-                    const btn = overlay.querySelector("#copy-btn");
-                    btn.textContent = "Copied";
-                    setTimeout(() => { btn.textContent = "Copy"; }, 1500);
-                } catch (err) {
-                    console.warn("[fb-keys-settings-view] clipboard failed:", err);
-                    const btn = overlay.querySelector("#copy-btn");
-                    btn.textContent = "Clipboard blocked";
-                    setTimeout(() => { btn.textContent = "Copy"; }, 2000);
-                }
-            });
-            overlay.querySelector("#done-btn").addEventListener("click", close);
-
-            this.appendChild(overlay);
+    // One-time reveal of the raw token. Resolves once the user confirms they
+    // saved it. A sac-dialog also closes on Escape and on a backdrop click —
+    // for a token that is never shown again, one slip would lose it for good,
+    // so any close other than "I've saved it" shows the dialog again.
+    async _revealToken(created) {
+        const show = () => new Promise((resolve) => {
+            const dlg = document.createElement("sac-dialog");
+            dlg.setAttribute("title", "Key created");
+            dlg.style.setProperty("--dialog-width", "520px");
+            dlg.buttons = [{ action: "done", label: "I've saved it", kind: "primary" }];
+            dlg.innerHTML = `
+                <p class="fb-token-warn">Copy the token now — it is <strong>never</strong> shown again.</p>
+                <div class="fb-token-row">
+                    <div class="fb-token-block"></div>
+                    <sac-copy-button label="Copy token"></sac-copy-button>
+                </div>`;
+            // The token goes in as text / an attribute value, never markup.
+            dlg.querySelector(".fb-token-block").textContent = created.rawToken;
+            dlg.querySelector("sac-copy-button").setAttribute("value", created.rawToken);
+            dlg.addEventListener("sac:action", (e) => {
+                setTimeout(() => { dlg.remove(); resolve(e.detail.action); }, 120);
+            }, { once: true });
+            document.body.appendChild(dlg);
+            setTimeout(() => dlg.open(), 0);
         });
+        while (await show() !== "done") { /* dismissed by accident — show it again */ }
     }
 
     _setBusy(busy) {
@@ -517,4 +511,4 @@ function formatRelative(iso) {
 }
 
 customElements.define("fb-keys-settings-view", FbKeysSettingsView);
-fb.router.register("#/keys", "fb-keys-settings-view", { label: "API keys", icon: "key" });
+sac.router.register("#/keys", "fb-keys-settings-view", { label: "API keys", icon: "key" });

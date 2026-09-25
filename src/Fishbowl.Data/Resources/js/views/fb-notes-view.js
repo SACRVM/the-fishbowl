@@ -1396,4 +1396,4 @@ function editorTextFor(note) {
 }
 
 customElements.define("fb-notes-view", FbNotesView);
-fb.router.register("#/notes", "fb-notes-view", { label: "Notes", icon: "note" });
+sac.router.register("#/notes", "fb-notes-view", { label: "Notes", icon: "note" });

@@ -147,6 +147,7 @@ class FbSpacesSettingsView extends HTMLElement {
                     user-select: all;
                 }
                 fb-spaces-settings-view .id-chip[title] { cursor: help; }
+                fb-spaces-settings-view .open-btn,
                 fb-spaces-settings-view .delete-btn {
                     background: transparent;
                     border: none;
@@ -156,7 +157,9 @@ class FbSpacesSettingsView extends HTMLElement {
                     border-radius: 6px;
                     transition: color 100ms, background 100ms;
                 }
+                fb-spaces-settings-view .open-btn sac-icon,
                 fb-spaces-settings-view .delete-btn sac-icon { --icon-size: 16px; }
+                fb-spaces-settings-view .open-btn:hover { color: var(--accent); background: var(--hover); }
                 fb-spaces-settings-view .delete-btn:hover {
                     color: var(--danger, #ef4444);
                     background: rgba(239, 68, 68, 0.12);
@@ -253,6 +256,9 @@ class FbSpacesSettingsView extends HTMLElement {
                               title="spaces/${escapeAttr(t.id)}/space.db">${escapeHtml(t.id)}</span>
                     </div>
                 </div>
+                <button type="button" class="open-btn" title="Open this space" aria-label="Open">
+                    <sac-icon name="chevron-right"></sac-icon>
+                </button>
                 ${t.role === "owner"
                     ? `<button type="button" class="delete-btn" title="Delete space" aria-label="Delete">
                            <sac-icon name="trash"></sac-icon>
@@ -260,6 +266,14 @@ class FbSpacesSettingsView extends HTMLElement {
                     : ""}
             </div>
         `).join("");
+
+        // Open = switch the workspace to that space and land on its notes.
+        list.querySelectorAll(".open-btn").forEach(btn => {
+            btn.addEventListener("click", (e) => {
+                const slug = e.currentTarget.closest(".space-row")?.dataset.slug;
+                if (slug) sac.router.navigate(`#/space/${encodeURIComponent(slug)}/notes`);
+            });
+        });
 
         list.querySelectorAll(".delete-btn").forEach(btn => {
             btn.addEventListener("click", async (e) => {
@@ -337,4 +351,4 @@ function escapeHtml(s) {
 function escapeAttr(s) { return escapeHtml(s); }
 
 customElements.define("fb-spaces-settings-view", FbSpacesSettingsView);
-fb.router.register("#/spaces", "fb-spaces-settings-view", { label: "Spaces", icon: "users" });
+sac.router.register("#/spaces", "fb-spaces-settings-view", { label: "Spaces", icon: "users" });

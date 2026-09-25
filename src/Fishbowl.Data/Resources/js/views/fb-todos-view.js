@@ -814,4 +814,4 @@ function escapeHtml(s) {
 }
 
 customElements.define("fb-todos-view", FbTodosView);
-fb.router.register("#/todos", "fb-todos-view", { label: "Todos", icon: "check" });
+sac.router.register("#/todos", "fb-todos-view", { label: "Todos", icon: "check" });

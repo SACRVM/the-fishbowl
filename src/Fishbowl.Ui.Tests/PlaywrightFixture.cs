@@ -62,7 +62,16 @@ public class PlaywrightFixture : IAsyncLifetime
         if (Directory.Exists(ModelCache)) CopyDirectory(ModelCache, Path.Combine(_dataDir, "models"));
 
         _hostProcess = new Process { StartInfo = psi };
+        // Drain stdout/stderr continuously. Redirected but unread, the pipe
+        // buffer fills up after enough logging and every host thread that
+        // writes a log line blocks on it — requests hang for good, and which
+        // one depends on how much the tests before it logged. The last lines
+        // are kept for error messages.
+        _hostProcess.OutputDataReceived += (_, e) => Remember(e.Data);
+        _hostProcess.ErrorDataReceived += (_, e) => Remember(e.Data);
         _hostProcess.Start();
+        _hostProcess.BeginOutputReadLine();
+        _hostProcess.BeginErrorReadLine();
 
         // Wait up to 60s for the host to respond
         await WaitForHttpReady(BaseUrl + "/api/v1/version", TimeSpan.FromSeconds(60));
@@ -100,6 +109,24 @@ public class PlaywrightFixture : IAsyncLifetime
         }
         try { if (Directory.Exists(_dataDir)) Directory.Delete(_dataDir, recursive: true); }
         catch (IOException) { /* a straggling file handle — the OS temp cleaner gets it */ }
+    }
+
+    private readonly Queue<string> _hostLog = new();
+
+    private void Remember(string? line)
+    {
+        if (line is null) return;
+        lock (_hostLog)
+        {
+            _hostLog.Enqueue(line);
+            while (_hostLog.Count > 200) _hostLog.Dequeue();
+        }
+    }
+
+    /// <summary>The host's last log lines — for a failing test's message.</summary>
+    public string HostLogTail()
+    {
+        lock (_hostLog) return string.Join(Environment.NewLine, _hostLog);
     }
 
     private static void CopyDirectory(string from, string to)

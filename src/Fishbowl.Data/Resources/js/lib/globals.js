@@ -2,17 +2,15 @@
  * Fishbowl — global namespace.
  * Loaded first. Populated incrementally by other lib scripts.
  *
- * Mods use window.fb to interact with the system without rebuilding
- * a component (e.g. fb.icons.register, fb.router.navigate).
+ * Routing, workspace scope, icons and dialogs are the kit's (sac.router,
+ * sac.scope, sac.icons, sac.dialog); window.fb holds only what is
+ * Fishbowl's own — fb.api, fb.tags, fb.vault, fb.tagManager, fb.toolbar.
  */
 (function () {
     if (window.fb) return; // idempotent
     window.fb = {
         version: null,                  // populated by /api/v1/version fetch
         api:     null,                  // populated by api.js
-        router:  null,                  // populated by router.js (delegates to sac.router)
-        icons:   null,                  // populated by icons.js
-        dialog:  null,                  // populated by dialog.js
         /**
          * Nav ribbon toolbar — views call fb.toolbar.set([...]) to project
          * action icons into the shell's <sac-nav> ribbon. shell.js registers

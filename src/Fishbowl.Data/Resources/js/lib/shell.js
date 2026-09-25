@@ -41,8 +41,8 @@
     // On compact the ribbon shows one name; give it the active view's label
     // (the hub keeps the brand).
     function syncTitle() {
-        const current = fb.router.currentResource();
-        const route = fb.router.routes().find((r) => r.hash === current);
+        const current = sac.router.currentResource();
+        const route = sac.router.routes().find((r) => r.hash === current);
         if (route && current !== "#/") nav.setAttribute("compact-title", route.label);
         else nav.removeAttribute("compact-title");
     }
@@ -59,8 +59,8 @@
 
     function renderSwitcher() {
         if (!switcher) return;
-        const ctx = fb.context.get();
-        const inSpace = ctx.type === "space";
+        const ctx = sac.scope.get();
+        const inSpace = ctx.type === "scoped";
         const space = inSpace ? spaces?.find(s => s.slug === ctx.slug) : null;
 
         const pill = switcher.querySelector('[slot="trigger"]');
@@ -96,15 +96,27 @@
 
     switcher?.addEventListener("sac:select", (e) => {
         const action = e.detail.action || "";
-        if (action === "ctx:user") fb.context.set({ type: "user" });
-        else if (action.startsWith("ctx:space:")) fb.context.set({ type: "space", slug: action.slice("ctx:space:".length) });
-        else if (action === "manage-spaces") fb.router.navigate("#/spaces");
+        if (action === "ctx:user") sac.scope.set({ type: "root" });
+        else if (action.startsWith("ctx:space:")) sac.scope.set({ type: "scoped", slug: action.slice("ctx:space:".length) });
+        else if (action === "manage-spaces") sac.router.navigate("#/spaces");
     });
-    window.addEventListener("fb:context-changed", renderSwitcher);
-    fb.api.spaces.list()
-        .then((list) => { spaces = list; })
-        .catch((err) => { spaces = []; console.warn("[fb-shell] spaces load failed:", err?.message || err); })
-        .finally(renderSwitcher);
+    window.addEventListener("sac:scope-changed", renderSwitcher);
+
+    // Reloaded on every create/delete (fb.api fires fb:spaces-changed), so a
+    // new space is in the menu at once. If the active space is gone, fall
+    // back to the personal workspace instead of a scope that 404s.
+    function loadSpaces() {
+        return fb.api.spaces.list()
+            .then((list) => {
+                spaces = list || [];
+                const ctx = sac.scope.get();
+                if (ctx.type === "scoped" && !spaces.some(s => s.slug === ctx.slug)) sac.scope.set({ type: "root" });
+            })
+            .catch((err) => { spaces = spaces || []; console.warn("[fb-shell] spaces load failed:", err?.message || err); })
+            .finally(renderSwitcher);
+    }
+    window.addEventListener("fb:spaces-changed", loadSpaces);
+    loadSpaces();
     renderSwitcher();
 
     // --- Account menu -----------------------------------------------------
@@ -159,7 +171,7 @@
         if (!vaultItem.isConnected) account.querySelector('[data-action="profile"]')?.after(vaultItem);
     }
     window.addEventListener("fb:vault-changed", syncVaultItems);
-    window.addEventListener("fb:context-changed", syncVaultItems);
+    window.addEventListener("sac:scope-changed", syncVaultItems);
     syncVaultItems();
 
     function openProfile() {
@@ -211,7 +223,12 @@
     // Deferred scripts have all run by DOMContentLoaded, so every view has
     // registered its route by now.
     window.addEventListener("DOMContentLoaded", () => {
-        fb.router.mount("#app-root");
+        // Registered before sac.router's own hashchange listener (added
+        // inside mount), so the toolbar is empty by the time the incoming
+        // view's connectedCallback runs — an outgoing view never has to
+        // clean up its buttons. Keep the order.
+        window.addEventListener("hashchange", () => fb.toolbar.clear());
+        sac.router.mount("#app-root");
         syncTitle();
     });
 })();

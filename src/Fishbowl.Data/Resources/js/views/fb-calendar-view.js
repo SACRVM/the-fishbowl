@@ -1011,4 +1011,4 @@ function escapeHtml(s) {
 }
 
 customElements.define("fb-calendar-view", FbCalendarView);
-fb.router.register("#/calendar", "fb-calendar-view", { label: "Calendar", icon: "calendar" });
+sac.router.register("#/calendar", "fb-calendar-view", { label: "Calendar", icon: "calendar" });

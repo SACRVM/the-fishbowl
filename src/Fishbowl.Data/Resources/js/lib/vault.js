@@ -74,7 +74,7 @@
     let _initialized = null; // does a vault exist? null = not asked yet
     let _lockTimer = null;
 
-    function inSpace() { return window.fb?.context?.get?.().type === "space"; }
+    function inSpace() { return window.sac?.scope?.get?.().type === "scoped"; }
 
     // ───── session ─────
     function announce() {

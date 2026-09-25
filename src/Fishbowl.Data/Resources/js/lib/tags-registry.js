@@ -66,7 +66,7 @@
     // versa) — drop the cache so the next all()/colorFor() call re-hydrates
     // from the new context. Without this, a tag added in a space workspace
     // never shows up until a manual reload.
-    window.addEventListener("fb:context-changed", () => {
+    window.addEventListener("sac:scope-changed", () => {
         if (fb.tags) fb.tags.invalidate();
     });
 })();

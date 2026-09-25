@@ -108,9 +108,11 @@ upstreamed without the registry coupling). The two without one became app code
 from kit parts: the workspace switcher is a `<sac-menu>` in the nav's context
 slot, tag management is `fb.tagManager` on a `<sac-window>`.
 
-Still app-side: the `js/lib` shims (`fb.router` over `sac.router`, `fb.context`
-next to `sac.scope`, `fb.icons`), the keys view's hand-built token-reveal
-overlay (→ `sac-dialog` + `sac-copy-button`), and the rest of `app.css`.
+**Shims done (2026-09-25):** `fb.router`, `fb.context`, `fb.icons` and
+`fb.dialog` are gone — views and libs call `sac.router`, `sac.scope`,
+`sac.icons` and `sac.dialog` directly; `js/lib/kit-config.js` only sets the
+scope prefix and registers the fish icon. The keys view's token reveal is a
+`sac-dialog` with a `sac-copy-button`. Still app-side: the rest of `app.css`.
 
 ---
 

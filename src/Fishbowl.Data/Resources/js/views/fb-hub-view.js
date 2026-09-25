@@ -15,12 +15,12 @@ class FbHubView extends HTMLElement {
         // Swap hrefs on context switch so clicking a tile keeps you in the
         // active workspace instead of dropping back to personal.
         this._onContext = () => this.render();
-        window.addEventListener("fb:context-changed", this._onContext);
+        window.addEventListener("sac:scope-changed", this._onContext);
         this._loadVersion();
     }
 
     disconnectedCallback() {
-        if (this._onContext) window.removeEventListener("fb:context-changed", this._onContext);
+        if (this._onContext) window.removeEventListener("sac:scope-changed", this._onContext);
     }
 
     async _loadVersion() {
@@ -35,7 +35,7 @@ class FbHubView extends HTMLElement {
     }
 
     render() {
-        const hrefFor = (personalPath) => fb.context.hashFor(personalPath);
+        const hrefFor = (personalPath) => sac.scope.hashFor(personalPath);
 
         this.innerHTML = `
             <div class="orb"></div>
@@ -75,4 +75,4 @@ class FbHubView extends HTMLElement {
 }
 
 customElements.define("fb-hub-view", FbHubView);
-fb.router.register("#/", "fb-hub-view", { label: "Home", icon: "home" });
+sac.router.register("#/", "fb-hub-view", { label: "Home", icon: "home" });
