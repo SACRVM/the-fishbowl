@@ -42,11 +42,23 @@ class FbNotesView extends HTMLElement {
         // the chip strip; expanded state lives on that element, not here.
         this._saveDebounce = null;
         this._onTagsInvalidated = () => this._renderTagFilter();
+        // Locking must take already-decrypted secrets off the page too — the
+        // key going away alone would leave them in this.notes and the editor.
+        // Unlocking elsewhere (the account menu) shows the open note's
+        // secrets right away.
+        this._onVaultChanged = (e) => {
+            if (!e.detail.unlocked) this._repaintLocked();
+            else this._repaintUnlocked();
+        };
     }
 
     async connectedCallback() {
         this.render();
         window.addEventListener("fb-tags-invalidated", this._onTagsInvalidated);
+        window.addEventListener("fb:vault-changed", this._onVaultChanged);
+        // Save pending edits while the key still exists; after the lock a
+        // flush of a note with a secret would have to ask for it again.
+        this._unhookLock = fb.vault?.onBeforeLock?.(() => this.flushSave());
         this._setViewToolbar();
         await this.loadNotes();
         this._renderTagFilter();
@@ -114,15 +126,17 @@ class FbNotesView extends HTMLElement {
         // doesn't drop edits.
         this.flushSave();
         window.removeEventListener("fb-tags-invalidated", this._onTagsInvalidated);
+        window.removeEventListener("fb:vault-changed", this._onVaultChanged);
+        this._unhookLock?.();
         if (window.fb?.toolbar) fb.toolbar.clear();
     }
 
-    async loadNotes() {
+    async loadNotes({ prompt = true } = {}) {
         try {
             const opts = this.tagFilter.tags.length > 0
                 ? { tags: this.tagFilter.tags, match: "all" }
                 : undefined;
-            this.notes = await fb.api.notes.list(opts);
+            this.notes = await fb.api.notes.list(opts, { prompt });
             this.renderList();
         } catch (err) {
             console.error("[fb-notes-view] list failed:", err);
@@ -549,6 +563,9 @@ class FbNotesView extends HTMLElement {
                     letter-spacing: 0.08em;
                 }
                 fb-notes-view .nv-archived-pill sac-icon { --icon-size: 10px; }
+                fb-notes-view .nv-locked-pill { cursor: pointer; font: inherit; font-size: 10px; font-weight: 600; }
+                fb-notes-view .nv-locked-pill:hover { color: var(--text); border-color: var(--accent); }
+                fb-notes-view .nv-locked-pill[hidden] { display: none; }
 
                 fb-notes-view .nv-editor {
                     /* Fills the body at least, grows past it with the note —
@@ -606,6 +623,10 @@ class FbNotesView extends HTMLElement {
                         <span class="nv-archived-pill" id="archived-pill" hidden>
                             <sac-icon name="archive"></sac-icon> Archived · Read-only
                         </span>
+                        <button type="button" class="nv-archived-pill nv-locked-pill" id="locked-pill" hidden
+                                title="Unlock to read and edit this note's secrets">
+                            <sac-icon name="lock"></sac-icon> Secrets locked · Unlock
+                        </button>
                         <div class="nv-editor-footer-spacer"></div>
                     </footer>
                 </main>
@@ -655,6 +676,7 @@ class FbNotesView extends HTMLElement {
             // masking the perceived latency of the server hop.
             this._searchDebounce = setTimeout(() => this._doSearch(q), 250);
         });
+        this.querySelector("#locked-pill").addEventListener("click", () => this._unlockOpenNote());
         const contentEl = this.querySelector("#content");
         // sac-md-editor re-dispatches `input` on every keystroke and `change`
         // on blur-after-edit from its host, matching native textarea
@@ -903,8 +925,11 @@ class FbNotesView extends HTMLElement {
         // against the incoming note's values.
         await this.flushSave();
         this.selectedId = id;
-        const note = this.notes.find(n => n.id === id);
+        let note = this.notes.find(n => n.id === id);
         if (!note) return;
+        // Opening a note whose secrets are still markers (the vault was
+        // locked when the list loaded) is the moment to ask for the key.
+        if (hasLockedSecrets(note)) note = await this._decryptInCache(note);
         this.querySelector("#editor-empty").hidden  = true;
         this.querySelector("#editor").hidden        = false;
         this.querySelector("#tagbar").hidden        = false;
@@ -920,9 +945,77 @@ class FbNotesView extends HTMLElement {
         this.renderList();
     }
 
-    /** Toggle editor inputs + footer pill based on whether the note is archived. */
+    /** Re-fetch one note through the decrypting path (asks to unlock) and
+     *  swap it into the cache. Cancelled → the note stays as it was. */
+    async _decryptInCache(note) {
+        try {
+            const fresh = await fb.api.notes.get(note.id);
+            const i = this.notes.findIndex(n => n.id === note.id);
+            if (i >= 0) this.notes[i] = fresh;
+            return fresh;
+        } catch (err) {
+            console.warn("[fb-notes-view] decrypt on open failed:", err);
+            return note;
+        }
+    }
+
+    /** After a lock: reload the list without asking for the key, so every
+     *  decrypted secret on the page turns back into a marker, and repaint
+     *  the open note from that. The split keeps showing what it showed. */
+    async _repaintLocked() {
+        const split = this.querySelector("#split");
+        const shown = split?.show;
+        const id = this.selectedId;
+        await this.loadNotes({ prompt: false });
+        if (!id) return;
+        const note = this.notes.find(n => n.id === id);
+        if (!note) { this.clearSelection(); return; }
+        this._loadedText = editorTextFor(note);
+        this.querySelector("#content").value = this._loadedText;
+        this._applyReadOnly(note);
+        this.renderList();
+        if (split && shown) split.show = shown;
+    }
+
+    /** After an unlock (the account menu, or writing a secret): decrypt
+     *  just the cached notes still holding markers. Everything else in the
+     *  cache stays as it is — a save may be in flight on one of them, and a
+     *  whole-list reload could put an older server copy over it. The open
+     *  note is repainted only if it was showing placeholders. */
+    async _repaintUnlocked() {
+        const locked = this.notes.filter(hasLockedSecrets);
+        if (locked.length === 0) return;
+        const openWasLocked = locked.some(n => n.id === this.selectedId);
+        await Promise.all(locked.map(n => this._decryptInCache(n)));
+        if (openWasLocked) {
+            const note = this.notes.find(n => n.id === this.selectedId);
+            if (note && !hasLockedSecrets(note)) {
+                this._loadedText = editorTextFor(note);
+                this.querySelector("#content").value = this._loadedText;
+                this._applyReadOnly(note);
+            }
+        }
+        this.renderList();
+    }
+
+    /** "Secrets locked" pill → unlock, then show the note decrypted. */
+    async _unlockOpenNote() {
+        const note = this.notes.find(n => n.id === this.selectedId);
+        if (!note) return;
+        const fresh = await this._decryptInCache(note);
+        if (hasLockedSecrets(fresh)) return; // cancelled
+        this._loadedText = editorTextFor(fresh);
+        this.querySelector("#content").value = this._loadedText;
+        this._applyReadOnly(fresh);
+        this.renderList();
+    }
+
+    /** Read-only while archived, and while the note's secrets are locked —
+     *  editing around `:::secret#N:::end` markers is too easy to get wrong. */
     _applyReadOnly(note) {
-        const ro = !!note.archived;
+        const locked = hasLockedSecrets(note);
+        this.querySelector("#locked-pill").hidden = !locked;
+        const ro = !!note.archived || locked;
         const editor = this.querySelector("#editor");
         editor.classList.toggle("readonly", ro);
         this.querySelector("#content").toggleAttribute("readonly", ro);
@@ -950,16 +1043,24 @@ class FbNotesView extends HTMLElement {
         this._saveDebounce = null;
         const note = this.notes.find(n => n.id === this.selectedId);
         if (!note) return;
-        const text     = this.querySelector("#content").value;
         const newTags  = this.querySelector("#tag-input").value;
         const tagsChanged = !this._sameTags(note.tags || [], newTags);
+        // A note with locked secrets shows placeholders in the editor. Its
+        // text must never be saved — that would replace the real secrets
+        // with the placeholder. Only a tag change goes out; content and
+        // ciphertext stay exactly as the server has them.
+        const locked = hasLockedSecrets(note);
+        const text     = locked ? this._loadedText : this.querySelector("#content").value;
         // Compare against what was loaded, not note.content: a note whose
         // title was prepended for display (see editorTextFor) must not be
         // rewritten just because it was opened.
         if (text === this._loadedText && !tagsChanged) return;
+        const previousText = this._loadedText;
         this._loadedText = text;
-        note.title   = titleFromText(text);
-        note.content = text;
+        if (!locked) {
+            note.title   = titleFromText(text);
+            note.content = text;
+        }
         note.tags    = newTags;
         try {
             await fb.api.notes.update(note.id, note);
@@ -978,9 +1079,25 @@ class FbNotesView extends HTMLElement {
             // elements so the browser doesn't fire the click). Re-sort on
             // next explicit render (select, delete, archive, pin).
             this._updateRowInPlace(note);
+            this._lastSaveError = null;
         } catch (err) {
+            // Not saved: the next edit or flush must try again.
+            if (this._loadedText === text) this._loadedText = previousText;
             console.error("[fb-notes-view] update failed:", err);
+            this._reportSaveError(err);
         }
+    }
+
+    /** One toast per distinct failure — autosave retries every few hundred
+     *  milliseconds while the user types, and the same refusal (a secret in
+     *  a space, a locked vault) shouldn't stack a toast per keystroke. */
+    _reportSaveError(err) {
+        const message = err?.userFacing ? err.message
+            : err?.status === 400 ? (safeJson(err.body)?.reason || "The note was refused by the server.")
+            : "Couldn't save the note.";
+        if (message === this._lastSaveError) return;
+        this._lastSaveError = message;
+        window.sac?.toast?.(message, { kind: "error", title: "Not saved" });
     }
 
     _sameTags(a, b) {
@@ -1172,6 +1289,10 @@ class FbNotesView extends HTMLElement {
     }
 }
 
+function safeJson(s) {
+    try { return JSON.parse(s); } catch { return null; }
+}
+
 function escapeHtml(s) {
     return String(s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));
 }
@@ -1180,6 +1301,7 @@ const TITLE_MAX = 200;
 const SECRET_OPEN  = /^\s*:{2,3}secret(\s|$)/i;
 const SECRET_CLOSE = /^\s*:{2,3}end\s*$/i;
 const FENCE        = /^\s*(```|~~~)/;
+const SECRET_MARKER = /^\s*:{2,3}secret#\d+:{2,3}end\s*$/i;
 
 /** The note's title is its first line of text, stripped of markdown line
  *  markers (heading, quote, list, task). Secret blocks are skipped whole —
@@ -1193,7 +1315,7 @@ function splitTitle(text) {
         const raw = lines[i];
         if (inSecret) { if (SECRET_CLOSE.test(raw)) inSecret = false; continue; }
         if (SECRET_OPEN.test(raw)) { inSecret = true; continue; }
-        if (FENCE.test(raw)) continue;
+        if (FENCE.test(raw) || SECRET_MARKER.test(raw)) continue;
         const line = raw
             .replace(/^\s*#{1,6}\s+/, "")
             .replace(/^\s*>\s?/, "")
@@ -1215,7 +1337,23 @@ function snippetFor(note) {
     const content = note.content || "";
     const { title, body } = splitTitle(content);
     const rest = title && title === (note.title || "").trim() ? body : content;
-    return rest.replace(/\s+/g, " ").trim().slice(0, 80);
+    // A decrypted secret must not surface in the list preview — the editor
+    // blurs secret bodies, a one-line snippet can't.
+    return maskSecrets(rest).replace(/\s+/g, " ").trim().slice(0, 80);
+}
+
+const SECRET_BLOCK_RE  = /^[ \t]*:{2,3}secret(?:[ \t][^\n]*)?\n[\s\S]*?\n[ \t]*:{2,3}end[^\n]*$/gim;
+const SECRET_MARKER_RE = /:{2,3}secret#\d+:{2,3}end/gi;
+const LOCKED_PLACEHOLDER = "locked — unlock to show";
+
+function maskSecrets(text) {
+    return String(text || "").replace(SECRET_BLOCK_RE, "🔒").replace(SECRET_MARKER_RE, "🔒");
+}
+
+/** The note came back with `:::secret#N:::end` markers still in place —
+ *  its ciphertext wasn't decrypted because the vault is locked. */
+function hasLockedSecrets(note) {
+    return !!note?.contentSecret && /:{2,3}secret#\d+:{2,3}end/.test(note.content || "");
 }
 
 /** What the editor shows for a note. Notes written here already open with
@@ -1224,7 +1362,12 @@ function snippetFor(note) {
  *  top as a heading so the first-line rule holds for them too. */
 function editorTextFor(note) {
     const title = (note.title || "").trim();
-    const content = note.content || "";
+    // Locked secrets show as ordinary (blurred) secret blocks with a
+    // placeholder body, not as the raw `:::secret#N:::end` storage marker.
+    // Display only: saveSelected never writes a locked note's text back.
+    const content = hasLockedSecrets(note)
+        ? (note.content || "").replace(SECRET_MARKER_RE, `:::secret\n${LOCKED_PLACEHOLDER}\n:::end`)
+        : note.content || "";
     if (!title || titleFromText(content) === title) return content;
     return content ? `# ${title}\n\n${content}` : `# ${title}\n`;
 }

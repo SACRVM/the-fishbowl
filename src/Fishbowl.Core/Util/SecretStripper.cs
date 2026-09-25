@@ -18,8 +18,12 @@ public static class SecretStripper
     // and must keep being stripped — a delimiter this regex fails to match is
     // secret content crossing a trust boundary in the clear, so the old form
     // stays recognised until an explicit migration retires it.
+    //
+    // The opening line may carry a label (`:::secret AWS root`) — the editor
+    // and the client-side encryption both accept one, so the stripper must
+    // too, or a labelled block would cross a trust boundary in the clear.
     private static readonly Regex Block = new(
-        @":{2,3}secret\s*\r?\n.*?\r?\n\s*:{2,3}end",
+        @":{2,3}secret(?:[ \t][^\r\n]*)?\r?\n.*?\r?\n\s*:{2,3}end",
         RegexOptions.Singleline | RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
     // Post-encryption marker form (Phase 3): `:::secret#N:::end` on a single
@@ -31,6 +35,12 @@ public static class SecretStripper
         RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
     private const string Placeholder = "[secret content hidden]";
+
+    // True when the text holds a secret in either form — an inline block or
+    // an encrypted marker. Used to keep secrets out of contexts that can't
+    // hold them (spaces, until they get a shared vault).
+    public static bool ContainsSecret(string? content)
+        => !string.IsNullOrEmpty(content) && (Block.IsMatch(content) || Marker.IsMatch(content));
 
     public static string? Strip(string? content)
     {

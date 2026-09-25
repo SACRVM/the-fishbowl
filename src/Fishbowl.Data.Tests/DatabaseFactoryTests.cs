@@ -102,7 +102,7 @@ public class DatabaseFactoryTests : IDisposable
 
         // Assert
         var version = connection.ExecuteScalar<int>("PRAGMA user_version");
-        Assert.Equal(6, version);
+        Assert.Equal(7, version);
     }
 
     [Fact]

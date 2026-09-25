@@ -355,6 +355,24 @@ public class ApiKeyAuthTests : IClassFixture<WebApplicationFactory<Program>>, ID
         Assert.Equal(HttpStatusCode.Forbidden, resp.StatusCode);
     }
 
+    // Vault endpoint is cookie-only too (docs/superpowers/specs/
+    // 2026-09-25-secret-vault-design.md) — agents never touch the vault,
+    // same rule as export and reindex. VaultApi.Gate() checks the
+    // AuthenticationType directly (no .RequireScope), so any Bearer token,
+    // any scope, is forbidden. Needs the real Bearer pipeline (not
+    // TestAuthHandler) — same reasoning as Export_BearerToken_Returns403.
+    [Fact]
+    public async Task Vault_BearerToken_Returns403()
+    {
+        var issued = await _keys.IssueAsync(AliceId, ContextRef.User(AliceId), "vault-bearer",
+            new[] { "read:notes" }, TestContext.Current.CancellationToken);
+
+        var client = ClientWithToken(issued.RawToken);
+        var resp = await client.GetAsync("/api/v1/vault",
+            TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.Forbidden, resp.StatusCode);
+    }
+
     [Fact]
     public async Task ValidToken_UpdatesLastUsedAt()
     {

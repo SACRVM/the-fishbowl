@@ -172,7 +172,9 @@ public class NoteRepositoryEmbeddingTests : IDisposable
             {
                 Title = "title",
                 Content = "before\n:::secret#0:::end\nbetween\n:::secret#1:::end\nafter",
-                ContentSecret = new byte[] { 1, 2, 3 },
+                // A v2 envelope (SecretEnvelope refuses anything else).
+                ContentSecret = System.Text.Encoding.UTF8.GetBytes(
+                    $"{{\"v\":2,\"blocks\":[\"{Convert.ToBase64String(new byte[32])}\",\"{Convert.ToBase64String(new byte[32])}\"]}}"),
             },
             TestContext.Current.CancellationToken);
 

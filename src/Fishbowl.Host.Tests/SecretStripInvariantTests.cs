@@ -24,6 +24,15 @@ public class SecretStripInvariantTests : IClassFixture<WebApplicationFactory<Pro
     private const string SecretMarker = "supersecret-token-abc123";
     private const string OtherSecret = "another-extremely-private-value";
 
+    // content_secret must be a v2 envelope (SecretEnvelope) — a block is
+    // base64(iv ‖ ciphertext ‖ tag). Fake "ciphertext" that is really the
+    // plaintext, so a leak of the blob shows up as the literal secret too.
+    private static readonly string OtherSecretBlock = Convert.ToBase64String(
+        [.. new byte[12], .. Encoding.UTF8.GetBytes(OtherSecret), .. new byte[16]]);
+
+    private static byte[] Envelope(params string[] blocks)
+        => Encoding.UTF8.GetBytes(JsonSerializer.Serialize(new { v = 2, blocks }));
+
     private readonly WebApplicationFactory<Program> _factory;
     private readonly DatabaseFactory _dbFactory;
     private readonly ApiKeyRepository _keys;
@@ -72,7 +81,7 @@ public class SecretStripInvariantTests : IClassFixture<WebApplicationFactory<Pro
             {
                 Title = "note-with-secret",
                 Content = $"Public preamble\n{d}secret\n{SecretMarker}\n{d}end\nPublic tail",
-                ContentSecret = Encoding.UTF8.GetBytes(OtherSecret),
+                ContentSecret = Envelope(OtherSecretBlock),
             },
             NoteSource.Mcp,
             TestContext.Current.CancellationToken);
@@ -90,6 +99,7 @@ public class SecretStripInvariantTests : IClassFixture<WebApplicationFactory<Pro
     {
         Assert.DoesNotContain(SecretMarker, responseBody, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain(OtherSecret, responseBody, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain(OtherSecretBlock, responseBody, StringComparison.Ordinal);
         // content_secret lives on the row but must never cross the wire.
         // Both JSON casings are checked because System.Text.Json defaults
         // to camelCase but attribute-annotated shapes may override it.
@@ -219,7 +229,7 @@ public class SecretStripInvariantTests : IClassFixture<WebApplicationFactory<Pro
             {
                 Title = "note-with-marker",
                 Content = "Prefix.\n:::secret#0:::end\nMiddle.\n:::secret#1:::end\nSuffix.",
-                ContentSecret = Encoding.UTF8.GetBytes("{\"v\":1,\"blocks\":[\"opaque\",\"opaque\"]}"),
+                ContentSecret = Envelope(OtherSecretBlock, OtherSecretBlock),
             },
             NoteSource.Mcp,
             TestContext.Current.CancellationToken);

@@ -81,7 +81,7 @@ public static class ContactsApi
             }
             catch (ResourceValidationException ex)
             {
-                return ValidationResults.PayloadTooLarge(ex);
+                return ValidationResults.From(ex);
             }
         })
         .WithName("CreateContact")
@@ -108,7 +108,7 @@ public static class ContactsApi
             }
             catch (ResourceValidationException ex)
             {
-                return ValidationResults.PayloadTooLarge(ex);
+                return ValidationResults.From(ex);
             }
         })
         .WithName("UpdateContact")

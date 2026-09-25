@@ -438,106 +438,46 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--accent); }
     margin-top: 0.5rem;
 }
 
-/* ───── Vault passphrase modal (fb.vault promptPassphrase) ───── */
-/* Plain DOM overlay; glass-styled to match fb-dialog without inheriting
-   its confirm-button shape. Lives in document (not shadow) so autofocus
-   and password managers find the input. */
-.fb-vault-overlay {
-    position: fixed;
-    inset: 0;
-    z-index: 10000;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    background: rgba(0, 0, 0, 0.55);
-    backdrop-filter: blur(6px);
-    animation: fb-vault-fade 0.18s ease-out;
-}
-@keyframes fb-vault-fade {
-    from { opacity: 0; }
-    to   { opacity: 1; }
-}
-.fb-vault-dialog {
-    min-width: 360px;
-    max-width: 480px;
-    padding: 28px 32px 22px;
-    background: var(--panel, #1e1e1e);
-    border: 1px solid var(--border, rgba(255, 255, 255, 0.08));
-    border-radius: 12px;
-    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.6);
-    font-family: 'Inter', sans-serif;
-    color: var(--text, #fff);
-}
-.fb-vault-dialog h2 {
-    margin: 0 0 10px;
-    font-family: 'Outfit', sans-serif;
-    font-weight: 700;
-    font-size: 1.15rem;
-    color: var(--accent-warm, #f59e0b);
-}
-.fb-vault-msg {
-    margin: 0 0 18px;
-    font-size: 0.9rem;
-    line-height: 1.55;
-    color: var(--text-muted, #bbb);
-}
-.fb-vault-msg strong { color: var(--text, #fff); font-weight: 600; }
-.fb-vault-label {
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-    margin-bottom: 12px;
-    font-size: 0.8rem;
-    color: var(--text-muted, #888);
-    letter-spacing: 0.02em;
-}
-.fb-vault-input {
-    padding: 9px 12px;
-    background: rgba(255, 255, 255, 0.04);
-    border: 1px solid var(--border, rgba(255, 255, 255, 0.12));
-    border-radius: 8px;
-    color: var(--text, #fff);
-    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-    font-size: 0.95rem;
-    outline: none;
-    transition: border-color 0.12s, background 0.12s;
-}
-.fb-vault-input:focus {
-    border-color: var(--accent-warm, #f59e0b);
-    background: rgba(255, 255, 255, 0.06);
-}
-.fb-vault-error {
-    margin: 4px 0 12px;
-    font-size: 0.82rem;
-    color: var(--danger, #ef4444);
-}
-.fb-vault-actions {
-    display: flex;
-    justify-content: flex-end;
-    gap: 8px;
-    margin-top: 6px;
-}
-.fb-vault-btn {
-    padding: 8px 16px;
-    background: transparent;
-    border: 1px solid var(--border, rgba(255, 255, 255, 0.15));
-    border-radius: 6px;
-    color: var(--text, #fff);
-    font-family: inherit;
-    font-size: 0.88rem;
-    font-weight: 500;
+/* ───── Secret vault dialogs (fb.vault) ───── */
+/* Light-DOM content slotted into <sac-dialog>, so document CSS applies and
+   password managers find the inputs. The kit styles inputs and labels. */
+.fb-vault { display: flex; flex-direction: column; gap: 10px; }
+.fb-vault p { margin: 0; }
+.fb-vault-field { display: flex; flex-direction: column; gap: 4px; }
+.fb-vault-field[hidden] { display: none; }
+.fb-vault-field input,
+.fb-vault-field textarea { width: 100%; box-sizing: border-box; }
+.fb-vault-hint { color: var(--text-muted); font-size: 0.85rem; }
+.fb-vault-error { color: var(--danger); font-size: 0.85rem; }
+.fb-vault-link {
+    align-self: flex-start;
+    background: none;
+    border: 0;
+    padding: 0;
+    color: var(--accent);
+    font: inherit;
+    font-size: 0.85rem;
     cursor: pointer;
-    transition: background 0.12s, border-color 0.12s;
+    text-decoration: underline;
 }
-.fb-vault-btn:hover {
-    background: rgba(255, 255, 255, 0.06);
+.fb-vault-link[hidden] { display: none; }
+.fb-vault-suggestion {
+    font-family: ui-monospace, monospace;
+    padding: 6px 10px;
+    border-radius: 6px;
+    background: var(--hover);
+    user-select: all;
 }
-.fb-vault-btn.fb-vault-ok {
-    background: rgba(245, 158, 11, 0.15);
-    border-color: rgba(245, 158, 11, 0.4);
-    color: var(--accent-warm, #f59e0b);
+/* 24 recovery words, numbered, in reading order down the columns. */
+.fb-vault-words {
+    margin: 0;
+    padding: 10px 10px 10px 2.4em;
+    columns: 3 7.5em;
+    column-gap: 2.2em;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    font-family: ui-monospace, monospace;
+    line-height: 1.7;
 }
-.fb-vault-btn.fb-vault-ok:hover {
-    background: rgba(245, 158, 11, 0.25);
-    border-color: var(--accent-warm, #f59e0b);
-}
+.fb-vault-confirm-row { display: flex; gap: 10px; flex-wrap: wrap; }
+.fb-vault-confirm-row .fb-vault-field { flex: 1 1 10em; }

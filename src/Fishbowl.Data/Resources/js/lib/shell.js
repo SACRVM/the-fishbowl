@@ -69,7 +69,39 @@
     account.addEventListener("sac:select", (e) => {
         if (e.detail.action === "profile") openProfile();
         if (e.detail.action === "logout")  logout();
+        if (e.detail.action === "lock-secrets") {
+            fb.vault?.lock().then(() => window.sac?.toast?.("Secrets locked.", { kind: "success" }));
+        }
+        if (e.detail.action === "unlock-secrets") {
+            // Cancelling the dialog is a normal answer, not an error.
+            fb.vault?.ensureUnlocked().catch(() => {});
+        }
     });
+
+    // One vault item: "Lock secrets" while unlocked, "Unlock secrets" while
+    // locked, absent while there is no vault yet (nothing to unlock) or in a
+    // space (secrets are personal). Added and removed rather than `hidden`:
+    // <sac-menu> styles its items `display: flex !important`, which beats
+    // the hidden attribute, so a hidden item would still show.
+    const vaultItem = document.createElement("button");
+    vaultItem.id = "fb-vault-item";
+    async function syncVaultItems() {
+        const s = await (fb.vault?.status?.() ?? { available: false });
+        const mode = !s.available ? null
+            : s.unlocked ? "lock"
+            : s.initialized ? "unlock"
+            : null;
+        if (!mode) { vaultItem.remove(); return; }
+        vaultItem.dataset.action = mode === "lock" ? "lock-secrets" : "unlock-secrets";
+        vaultItem.innerHTML = mode === "lock"
+            ? '<sac-icon name="lock"></sac-icon> Lock secrets'
+            : '<sac-icon name="unlock"></sac-icon> Unlock secrets';
+        // Right after "Profile", above the separator.
+        if (!vaultItem.isConnected) account.querySelector('[data-action="profile"]')?.after(vaultItem);
+    }
+    window.addEventListener("fb:vault-changed", syncVaultItems);
+    window.addEventListener("fb:context-changed", syncVaultItems);
+    syncVaultItems();
 
     function openProfile() {
         let win = document.getElementById("fb-profile-window");

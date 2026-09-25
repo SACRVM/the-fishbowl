@@ -165,6 +165,7 @@ builder.Services.AddScoped<IApiKeyRepository, ApiKeyRepository>();
 builder.Services.AddScoped<INotificationChannelRepository, NotificationChannelRepository>();
 builder.Services.AddScoped<IDiscordLinkRepository, DiscordLinkRepository>();
 builder.Services.AddScoped<IReminderRepository, ReminderRepository>();
+builder.Services.AddScoped<IVaultRepository, VaultRepository>();
 
 // Apps platform — the per-app .db registry + DDL generator + row CRUD.
 // All three repos sit at the same scope as the rest of the data-plane.
@@ -769,6 +770,7 @@ app.MapAuthApi();
 app.MapNotificationsApi();
 app.MapSearchApi();
 app.MapExportApi();
+app.MapVaultApi();
 app.MapMcpEndpoint();
 
 // Root route — gate the hub behind setup + authentication so the first click
@@ -854,6 +856,7 @@ static string GetContentType(string path)
         ".css" => "text/css",
         ".js" => "application/javascript",
         ".json" => "application/json",
+        ".txt" => "text/plain; charset=utf-8",
         ".png" => "image/png",
         ".jpg" => "image/jpeg",
         ".ico" => "image/x-icon",

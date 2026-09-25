@@ -89,7 +89,7 @@ public static class NotesApi
             }
             catch (ResourceValidationException ex)
             {
-                return ValidationResults.PayloadTooLarge(ex);
+                return ValidationResults.From(ex);
             }
         })
         .WithName("CreateNote")
@@ -112,7 +112,7 @@ public static class NotesApi
             }
             catch (ResourceValidationException ex)
             {
-                return ValidationResults.PayloadTooLarge(ex);
+                return ValidationResults.From(ex);
             }
         })
         .WithName("UpdateNote")

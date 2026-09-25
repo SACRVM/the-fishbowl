@@ -53,7 +53,7 @@ public static class TodoApi
             }
             catch (ResourceValidationException ex)
             {
-                return ValidationResults.PayloadTooLarge(ex);
+                return ValidationResults.From(ex);
             }
         })
         .WithName("CreateTodo")
@@ -76,7 +76,7 @@ public static class TodoApi
             }
             catch (ResourceValidationException ex)
             {
-                return ValidationResults.PayloadTooLarge(ex);
+                return ValidationResults.From(ex);
             }
         })
         .WithName("UpdateTodo")

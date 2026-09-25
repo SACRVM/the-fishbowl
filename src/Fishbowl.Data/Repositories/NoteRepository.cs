@@ -98,7 +98,7 @@ public class NoteRepository : INoteRepository
     public async Task<string> CreateAsync(ContextRef ctx, string actorUserId, Note note, NoteSource source, CancellationToken ct = default)
     {
         ApplySourceTags(note, source);
-        EnforceLimits(note);
+        EnforceLimits(ctx, note);
 
         if (string.IsNullOrEmpty(note.Id))
             note.Id = Ulid.NewUlid().ToString();
@@ -153,7 +153,7 @@ public class NoteRepository : INoteRepository
     public async Task<bool> UpdateAsync(ContextRef ctx, Note note, NoteSource source, CancellationToken ct = default)
     {
         ApplySourceTags(note, source);
-        EnforceLimits(note);
+        EnforceLimits(ctx, note);
         note.UpdatedAt = DateTime.UtcNow;
 
         return await _dbFactory.WithContextTransactionAsync<bool>(ctx, async (db, tx, token) =>
@@ -417,13 +417,22 @@ public class NoteRepository : INoteRepository
         note.Tags = live.ToList();
     }
 
-    // ────────── Size-limit gate ──────────
-    // Throws ResourceValidationException when a field is past the hard cap.
-    // The API edge catches this and converts to 413; MCP tools see the
-    // same exception type and surface it as a tool error to the caller.
-    private static void EnforceLimits(Note note)
+    // ────────── Write gate ──────────
+    // Throws ResourceValidationException when a field is past the hard cap
+    // (413) or the note can't be accepted as sent (400): a content_secret
+    // that isn't a v2 envelope, or any secret at all in a space — spaces
+    // have no shared vault yet, so a secret there would sit in the space DB
+    // in plaintext. Every write path (cookie, Bearer, MCP) passes through
+    // here; MCP tools surface the same exception as InvalidParams.
+    private static void EnforceLimits(ContextRef ctx, Note note)
     {
-        var error = NoteLimits.Validate(note);
+        var error = NoteLimits.Validate(note) ?? SecretEnvelope.Validate(note.ContentSecret);
+        if (error is null && ctx.Type == ContextType.Space
+            && (note.ContentSecret is not null || SecretStripper.ContainsSecret(note.Content)))
+        {
+            error = new ResourceValidationError(NoteLimits.Resource, "content",
+                "secrets are personal for now — spaces can't hold them", ResourceValidationKind.Invalid);
+        }
         if (error is not null) throw new ResourceValidationException(error);
     }
 

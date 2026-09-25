@@ -64,28 +64,29 @@
         return request(`${ctx("/notes")}?${qs.toString()}`);
     }
 
-    // ── Secret block transforms (Phase 3 encryption) ───────────────────────
+    // ── Secret block transforms (vault v2) ─────────────────────────────────
     //
     // Outbound: extract :::secret\n…\n:::end bodies from note.content, encrypt
     //           each via fb.vault, write them to contentSecret as a JSON
-    //           envelope, and replace the inline body with :::secret#N:::end
-    //           marker. The server never sees plaintext secrets.
+    //           envelope { v: 2, blocks: [...] }, and replace the inline body
+    //           with a :::secret#N:::end marker. The server never sees
+    //           plaintext secrets.
     // Inbound:  inverse — decrypt each entry in contentSecret and splice the
     //           body back between :::secret and :::end so the editor sees the
     //           normal inline form.
     //
-    // Delimiters read as `:{2,3}` and are always written as three. Notes
-    // predating the three-colon form keep their two and must keep decrypting,
-    // so both are accepted on the way in; every value this code emits uses
-    // the current form, which is how content migrates — on next save, not by
-    // a bulk rewrite that cannot see fenced code blocks.
+    // Each block is encrypted with AAD "<note id>|<index>", so ciphertext
+    // can't be moved to another note or reordered within one. A note gets
+    // its id before its first secret (the notes view creates notes empty),
+    // so an id-less note with a secret block is refused, not guessed at.
     //
-    // Legacy notes with inline bodies and no contentSecret round-trip through
-    // here unchanged until they're saved; that save triggers lazy migration.
-    // A failure to unlock (user cancels) leaves markers + ciphertext in
-    // place; the editor renders them as "[decryption failed]" inside each
-    // :::secret block so the user sees something's encrypted rather than
-    // silently losing data.
+    // Spaces have no vault: a note with a secret block is refused there
+    // before any vault prompt (the server refuses it too).
+    //
+    // Delimiters read as `:{2,3}` and are always written as three. A failure
+    // to unlock (user cancels) leaves markers + ciphertext in place; a block
+    // that can't be decrypted shows a bracketed notice inside its :::secret
+    // block so the user sees something's there rather than losing it.
 
     // :::secret (optional label) \n <body> \n :::end (rest of line). `m` for
     // per-line anchors; non-greedy body so adjacent blocks don't collapse.
@@ -97,6 +98,15 @@
     // line by using [ \t] to forbid newlines.
     const INLINE_SECRET_RE = /^:{2,3}secret(?:[ \t][^\n]*)?\n([\s\S]*?)\n:{2,3}end[^\n]*$/gm;
     const MARKER_SECRET_RE = /:{2,3}secret#(\d+):{2,3}end/g;
+    const ENVELOPE_VERSION = 2;
+
+    // Thrown for a save the user has to change, with a message the view can
+    // show as is.
+    class SecretSaveError extends Error {
+        constructor(message) { super(message); this.userFacing = true; }
+    }
+
+    const blockAad = (noteId, index) => `${noteId}|${index}`;
 
     async function transformNoteOutbound(note) {
         const content = note?.content || "";
@@ -117,11 +127,16 @@
             }
             return note;
         }
-        if (!window.fb?.vault) throw new Error("fb.vault unavailable — secret encryption disabled");
-        await fb.vault.ensureUnlocked();
+        if (window.fb?.context?.get?.().type === "space")
+            throw new SecretSaveError("Secrets are personal for now — remove the secret block to save this note in a space.");
+        if (!note?.id) throw new SecretSaveError("Save the note once before adding a secret to it.");
+        if (!window.fb?.vault) throw new SecretSaveError("Secrets are unavailable in this browser.");
+        try { await fb.vault.ensureUnlocked({ setup: true }); }
+        catch (e) { throw new SecretSaveError(e?.message || "Secrets are locked — the note was not saved."); }
         const ciphertexts = [];
-        for (const body of bodies) ciphertexts.push(await fb.vault.encryptBlock(body));
-        const payload = JSON.stringify({ v: 1, blocks: ciphertexts });
+        for (let i = 0; i < bodies.length; i++)
+            ciphertexts.push(await fb.vault.encryptBlock(bodies[i], blockAad(note.id, i)));
+        const payload = JSON.stringify({ v: ENVELOPE_VERSION, blocks: ciphertexts });
         // Base64 of UTF-8 JSON bytes — what the server deserialises into
         // the byte[] ContentSecret column.
         const bytes = new TextEncoder().encode(payload);
@@ -129,7 +144,10 @@
         return { ...note, content: rewritten, contentSecret };
     }
 
-    async function transformNoteInbound(note) {
+    // `prompt: false` — decrypt only if the vault is already unlocked, never
+    // ask. Used to repaint a view right after lock(): its secrets go back to
+    // markers instead of popping the unlock dialog straight away.
+    async function transformNoteInbound(note, { prompt = true } = {}) {
         if (!note) return note;
         const content = note.content || "";
         // Cheap pre-filter before the JSON/base64/crypto work below. Two
@@ -147,10 +165,19 @@
             console.warn("fb.api.notes: invalid content_secret JSON:", e);
             return note;
         }
-        if (payload.v !== 1 || !Array.isArray(payload.blocks)) return note;
+        if (!Array.isArray(payload?.blocks)) return note;
 
+        const restore = (text) => ({
+            ...note,
+            content: content.replace(MARKER_SECRET_RE, (_m, idx) => `:::secret\n${text(idx)}\n:::end`),
+        });
+
+        // v1 was encrypted with a per-browser key that no longer exists.
+        if (payload.v !== ENVELOPE_VERSION) return restore(() => "[unreadable secret from the old vault — type it again]");
+
+        if (!prompt && !window.fb?.vault?.isUnlocked()) return note;
         try { if (window.fb?.vault) await fb.vault.ensureUnlocked(); }
-        catch { return note; } // user cancelled unlock — leave markers visible
+        catch { return note; } // cancelled or unavailable — leave markers visible
 
         const decrypted = {};
         for (const [, idx] of content.matchAll(MARKER_SECRET_RE)) {
@@ -160,25 +187,23 @@
                 decrypted[idx] = `[no ciphertext #${idx}]`;
                 continue;
             }
-            try { decrypted[idx] = await fb.vault.decryptBlock(payload.blocks[n]); }
+            try { decrypted[idx] = await fb.vault.decryptBlock(payload.blocks[n], blockAad(note.id, n)); }
             catch (e) {
                 console.warn(`fb.api.notes: decryptBlock #${n} failed:`, e);
                 decrypted[idx] = "[decryption failed]";
             }
         }
-        const restored = content.replace(MARKER_SECRET_RE,
-            (_m, idx) => `:::secret\n${decrypted[idx]}\n:::end`);
-        return { ...note, content: restored };
+        return restore((idx) => decrypted[idx]);
     }
 
     const rawNotes = crud("notes");
     rawNotes.list = listNotes;
 
     const notes = {
-        list:   async (opts)     => {
+        list:   async (opts, { prompt = true } = {}) => {
             const arr = await rawNotes.list(opts);
             if (!Array.isArray(arr)) return arr;
-            return Promise.all(arr.map(transformNoteInbound));
+            return Promise.all(arr.map(n => transformNoteInbound(n, { prompt })));
         },
         get:    async (id)       => transformNoteInbound(await rawNotes.get(id)),
         create: async (body)     => transformNoteInbound(await rawNotes.create(await transformNoteOutbound(body))),
@@ -285,9 +310,17 @@
         me: {
             get: () => request("/me")
         },
+        // Secret vault key slots — personal only, never context-prefixed
+        // (spaces have no vault). Cookie-only server-side. Used by fb.vault.
+        vault: {
+            get:     ()     => request("/vault/"),
+            addSlot: (slot) => request("/vault/slots", { method: "POST", body: JSON.stringify(slot) }),
+            touch:   (id)   => request(`/vault/slots/${encodeURIComponent(id)}/used`, { method: "POST" }),
+        },
         auth: {
             logout: () => request("/auth/logout", { method: "POST" })
         }
     };
     fb.ApiError = ApiError;
+    fb.SecretSaveError = SecretSaveError;
 })();

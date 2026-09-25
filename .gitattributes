@@ -1,0 +1,4 @@
+# Hash-pinned vendored data: the recovery-word list is checked by SHA-256
+# in js/lib/vault.js. An EOL conversion on checkout would change the hash
+# and lock every user out of their secrets, so git must never touch it.
+src/Fishbowl.Data/Resources/js/vendor/bip39/english.txt -text

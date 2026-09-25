@@ -67,7 +67,7 @@ public static class EventsApi
             }
             catch (ResourceValidationException ex)
             {
-                return ValidationResults.PayloadTooLarge(ex);
+                return ValidationResults.From(ex);
             }
             catch (ArgumentException ex)
             {
@@ -96,7 +96,7 @@ public static class EventsApi
             }
             catch (ResourceValidationException ex)
             {
-                return ValidationResults.PayloadTooLarge(ex);
+                return ValidationResults.From(ex);
             }
             catch (ArgumentException ex)
             {

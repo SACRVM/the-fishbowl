@@ -167,4 +167,31 @@ public class SecretStripperTests
         Assert.Equal(original.Tags, stripped.Tags);
         Assert.NotSame(original.Tags, stripped.Tags);
     }
+
+    [Theory]
+    [InlineData(":::")]
+    [InlineData("::")]
+    public void Strip_LabelledBlock_ReplacedWithPlaceholder(string d)
+    {
+        // The editor and the client-side encryption accept a label after
+        // `secret`; a labelled block reaching the server in plaintext (MCP,
+        // seed data) must be stripped like any other.
+        var stripped = SecretStripper.Strip($"Before\n{d}secret AWS root\nhunter2\n{d}end\nAfter");
+        Assert.Equal($"Before\n{Placeholder}\nAfter", stripped);
+        Assert.DoesNotContain("hunter2", stripped);
+    }
+
+    [Theory]
+    [InlineData(":::secret\nx\n:::end", true)]
+    [InlineData(":::secret label\nx\n:::end", true)]
+    [InlineData("::secret\nx\n::end", true)]
+    [InlineData("before :::secret#0:::end after", true)]
+    [InlineData("no secrets here", false)]
+    [InlineData("the word secret alone", false)]
+    [InlineData("", false)]
+    [InlineData(null, false)]
+    public void ContainsSecret_DetectsBothForms(string? content, bool expected)
+    {
+        Assert.Equal(expected, SecretStripper.ContainsSecret(content));
+    }
 }

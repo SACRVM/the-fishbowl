@@ -159,7 +159,7 @@ public static class SpacesApi
             }
             catch (ResourceValidationException ex)
             {
-                return ValidationResults.PayloadTooLarge(ex);
+                return ValidationResults.From(ex);
             }
         })
         .WithName("CreateSpaceNote")
@@ -182,7 +182,7 @@ public static class SpacesApi
             }
             catch (ResourceValidationException ex)
             {
-                return ValidationResults.PayloadTooLarge(ex);
+                return ValidationResults.From(ex);
             }
         })
         .WithName("UpdateSpaceNote")
@@ -325,7 +325,7 @@ public static class SpacesApi
             }
             catch (ResourceValidationException ex)
             {
-                return ValidationResults.PayloadTooLarge(ex);
+                return ValidationResults.From(ex);
             }
         })
         .WithName("CreateSpaceTodo")
@@ -347,7 +347,7 @@ public static class SpacesApi
             }
             catch (ResourceValidationException ex)
             {
-                return ValidationResults.PayloadTooLarge(ex);
+                return ValidationResults.From(ex);
             }
         })
         .WithName("UpdateSpaceTodo")
@@ -429,7 +429,7 @@ public static class SpacesApi
             }
             catch (ResourceValidationException ex)
             {
-                return ValidationResults.PayloadTooLarge(ex);
+                return ValidationResults.From(ex);
             }
         })
         .WithName("CreateSpaceContact")
@@ -454,7 +454,7 @@ public static class SpacesApi
             }
             catch (ResourceValidationException ex)
             {
-                return ValidationResults.PayloadTooLarge(ex);
+                return ValidationResults.From(ex);
             }
         })
         .WithName("UpdateSpaceContact")
@@ -584,7 +584,7 @@ public static class SpacesApi
             }
             catch (ResourceValidationException ex)
             {
-                return ValidationResults.PayloadTooLarge(ex);
+                return ValidationResults.From(ex);
             }
             catch (ArgumentException ex)
             {
@@ -611,7 +611,7 @@ public static class SpacesApi
             }
             catch (ResourceValidationException ex)
             {
-                return ValidationResults.PayloadTooLarge(ex);
+                return ValidationResults.From(ex);
             }
             catch (ArgumentException ex)
             {

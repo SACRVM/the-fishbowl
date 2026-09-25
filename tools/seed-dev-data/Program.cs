@@ -1,6 +1,7 @@
 using Dapper;
 using Fishbowl.Core;
 using Fishbowl.Core.Models;
+using Fishbowl.Core.Util;
 using Fishbowl.Data;
 using Fishbowl.Data.Repositories;
 
@@ -773,7 +774,14 @@ var notes = new List<Note>
       "ideas", "ui", "review:pending"),
 };
 var noteCount = 0;
-foreach (var n in notes) { await noteRepo.CreateAsync(ctx, userId, n); noteCount++; }
+foreach (var n in notes)
+{
+    // Spaces have no vault, so NoteRepository refuses secret blocks there
+    // (secret vault v2). The personal seed keeps its secret-block samples.
+    if (ctx.Type == ContextType.Space && SecretStripper.ContainsSecret(n.Content)) continue;
+    await noteRepo.CreateAsync(ctx, userId, n);
+    noteCount++;
+}
 
 // ────────── Todos ──────────
 var now = DateTime.UtcNow;

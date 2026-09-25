@@ -373,6 +373,14 @@ public class DatabaseFactory
             ApplyUserV6(connection);
             connection.Execute("PRAGMA user_version = 6");
             _logger.LogInformation("Applied user schema v6 to {DbPath}", ((SqliteConnection)connection).DataSource);
+            version = 6;
+        }
+
+        if (version < 7)
+        {
+            ApplyUserV7(connection);
+            connection.Execute("PRAGMA user_version = 7");
+            _logger.LogInformation("Applied user schema v7 to {DbPath}", ((SqliteConnection)connection).DataSource);
         }
     }
 
@@ -698,6 +706,36 @@ public class DatabaseFactory
                     name        TEXT NOT NULL,
                     created_by  TEXT NOT NULL,
                     created_at  TEXT NOT NULL
+                );", transaction: transaction);
+
+            transaction.Commit();
+        }
+        catch
+        {
+            transaction.Rollback();
+            throw;
+        }
+    }
+
+    // Secret vault v2 (docs/superpowers/specs/2026-09-25-secret-vault-design.md):
+    // wrapped copies of the context's vault key, one row per way to unlock it.
+    // Lives in the context DB, not system.db, so a user/space folder carries
+    // its vault along on cold import.
+    private void ApplyUserV7(IDbConnection connection)
+    {
+        using var transaction = connection.BeginTransaction();
+        try
+        {
+            connection.Execute(@"
+                CREATE TABLE IF NOT EXISTS vault_keyslots (
+                    id             TEXT PRIMARY KEY,
+                    kind           TEXT NOT NULL CHECK (kind IN ('passphrase', 'recovery', 'passkey')),
+                    label          TEXT NOT NULL DEFAULT '',
+                    kdf            TEXT NOT NULL,
+                    credential_id  TEXT,
+                    wrapped_key    BLOB NOT NULL,
+                    created_at     TEXT NOT NULL,
+                    last_used_at   TEXT
                 );", transaction: transaction);
 
             transaction.Commit();
