@@ -2,7 +2,8 @@ using Microsoft.Playwright;
 
 namespace Fishbowl.Ui.Tests;
 
-public class UiSmokeTests : IClassFixture<PlaywrightFixture>
+[Collection(UiCollection.Name)]
+public class UiSmokeTests
 {
     private readonly PlaywrightFixture _fixture;
 

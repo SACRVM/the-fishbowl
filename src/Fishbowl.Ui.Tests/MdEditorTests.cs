@@ -12,7 +12,8 @@ namespace Fishbowl.Ui.Tests;
 /// the readonly attribute, and native input events (autosave depends on
 /// them until upstream roadmap 2 renames to sac:*).
 /// </summary>
-public class MdEditorTests : IClassFixture<PlaywrightFixture>
+[Collection(UiCollection.Name)]
+public class MdEditorTests
 {
     private readonly PlaywrightFixture _fixture;
 
