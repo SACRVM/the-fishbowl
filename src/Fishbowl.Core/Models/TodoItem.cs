@@ -14,4 +14,8 @@ public class TodoItem
     public DateTime CreatedAt { get; set; }
     public DateTime UpdatedAt { get; set; }
     public DateTime? CompletedAt { get; set; }
+
+    // The user's order in the list (ascending). Null on create = append at
+    // the end; null on update = keep the stored position.
+    public double? Position { get; set; }
 }

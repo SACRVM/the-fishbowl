@@ -27,10 +27,18 @@ class FbTodosView extends HTMLElement {
 
     async connectedCallback() {
         this.render();
+        // Drag an open todo to reorder (the kit's sortable: mouse drags after
+        // a 4px move, touch after a long-press, Escape cancels). Done todos
+        // stay where they are, below the open ones.
+        this._sortable = sac.sortable(this.querySelector("#todo-list"), {
+            items: ".tv-item:not(.completed)",
+            onReorder: (from, to) => this._moveTodo(from, to),
+        });
         await this.loadTodos();
     }
 
     disconnectedCallback() {
+        this._sortable?.destroy();
         this.flushSave();
         if (window.fb?.toolbar) fb.toolbar.clear();
     }
@@ -93,10 +101,14 @@ class FbTodosView extends HTMLElement {
                 }
                 fb-todos-view .tv-search input::placeholder { color: var(--text-muted); }
 
+                /* One 12px gutter for the whole list pane: the search field,
+                   the header's buttons and the (highlighted) rows all end
+                   12px from the edge; the header label lines up with the
+                   rows' text (12px gutter + 12px row padding). */
                 fb-todos-view .tv-list-header {
                     display: flex;
                     align-items: center;
-                    padding: 12px 16px 6px;
+                    padding: 12px 12px 6px 24px;
                     gap: 2px;
                 }
                 fb-todos-view .tv-list-title {
@@ -119,19 +131,25 @@ class FbTodosView extends HTMLElement {
                 fb-todos-view .tv-items {
                     flex: 1;
                     overflow-y: auto;
-                    padding: 2px 8px 12px;
+                    padding: 2px 12px 12px;
                 }
 
                 fb-todos-view .tv-item {
                     position: relative;
                     padding: 10px 12px 10px 38px;
-                    border-radius: 10px;
+                    border-radius: var(--radius-m);
                     cursor: pointer;
                     margin-bottom: 2px;
                     border: 1px solid transparent;
                     transition: background 0.12s, border-color 0.12s;
                 }
                 fb-todos-view .tv-item:hover { background: var(--hover); }
+                fb-todos-view .tv-item[data-sortable-dragging] {
+                    background: var(--panel);
+                    border-color: var(--border);
+                    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35);
+                    z-index: 2;
+                }
                 fb-todos-view .tv-item.selected {
                     background: var(--accent-tint);
                     border-color: color-mix(in srgb, var(--accent) 28%, transparent);
@@ -329,7 +347,7 @@ class FbTodosView extends HTMLElement {
                     min-height: 200px;
                     background: var(--field);
                     border: 1px solid var(--border);
-                    border-radius: 10px;
+                    border-radius: var(--radius-m);
                     color: var(--text);
                     font-family: inherit;
                     font-size: 14px;
@@ -365,7 +383,7 @@ class FbTodosView extends HTMLElement {
                     align-items: center;
                     gap: 4px;
                     padding: 2px 8px;
-                    border-radius: 999px;
+                    border-radius: var(--radius-m);
                     background: color-mix(in srgb, var(--ok) 12%, transparent);
                     border: 1px solid color-mix(in srgb, var(--ok) 35%, transparent);
                     color: var(--ok-text);
@@ -407,7 +425,7 @@ class FbTodosView extends HTMLElement {
                             <input id="title" class="tv-title-input" placeholder="What needs doing?"/>
                             <div class="tv-field">
                                 <label for="due-at">Due</label>
-                                <input id="due-at" class="tv-date-input" type="datetime-local"/>
+                                <input id="due-at" class="tv-date-input"/>
                                 <button class="tv-date-clear" id="due-clear" hidden>Clear due date</button>
                             </div>
                             <div class="tv-field">
@@ -470,10 +488,10 @@ class FbTodosView extends HTMLElement {
             this.scheduleAutoSave();
         });
 
-        const dueEl = this.querySelector("#due-at");
+        const dueEl = fb.format.attachInput(this.querySelector("#due-at"), { time: true });
         dueEl.addEventListener("change", () => this.saveSelected());
         this.querySelector("#due-clear").addEventListener("click", () => {
-            dueEl.value = "";
+            fb.format.writeInput(dueEl, null);
             this.querySelector("#due-clear").hidden = true;
             this.saveSelected();
         });
@@ -514,6 +532,42 @@ class FbTodosView extends HTMLElement {
         ]);
     }
 
+    static _byOrder(a, b) {
+        const aDone = !!a.completedAt;
+        const bDone = !!b.completedAt;
+        if (aDone !== bDone) return aDone ? 1 : -1;
+        return (a.position ?? Infinity) - (b.position ?? Infinity)
+            || new Date(a.createdAt || 0) - new Date(b.createdAt || 0)
+            || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);   // ULIDs sort by creation
+    }
+
+    // A drag moved the open row at index `from` to `to` (indices among the
+    // rendered open rows). Give it a position between its new neighbours —
+    // one row written, the others keep theirs.
+    async _moveTodo(from, to) {
+        const ids = [...this.querySelectorAll("#todo-list .tv-item:not(.completed)")].map(el => el.dataset.id);
+        // The DOM already shows the new order; `ids` is it.
+        const byId = (id) => this.todos.find(t => t.id === id);
+        const todo = byId(ids[to]);
+        if (!todo) return;
+        const prev = byId(ids[to - 1]);
+        const next = byId(ids[to + 1]);
+        const before = todo.position;
+        todo.position = prev && next ? (prev.position + next.position) / 2
+            : prev ? prev.position + 1
+            : next ? next.position - 1
+            : todo.position;
+        this.renderList();
+        try {
+            await fb.api.todos.update(todo.id, todo);
+        } catch (err) {
+            console.error("[fb-todos-view] reorder failed:", err);
+            todo.position = before;
+            this.renderList();
+            window.sac?.toast?.("Couldn't save the new order.", { kind: "error" });
+        }
+    }
+
     renderList() {
         const filtered = this.todos.filter(t => {
             if (this.hideCompleted && t.completedAt) return false;
@@ -524,19 +578,10 @@ class FbTodosView extends HTMLElement {
             return true;
         });
 
-        // Sort: incomplete first, then by due-at (earliest first, nulls last),
-        // then by most recently updated.
-        filtered.sort((a, b) => {
-            const aDone = !!a.completedAt;
-            const bDone = !!b.completedAt;
-            if (aDone !== bDone) return aDone ? 1 : -1;
-
-            const aDue = a.dueAt ? new Date(a.dueAt).getTime() : Infinity;
-            const bDue = b.dueAt ? new Date(b.dueAt).getTime() : Infinity;
-            if (aDue !== bDue) return aDue - bDue;
-
-            return new Date(b.updatedAt || 0) - new Date(a.updatedAt || 0);
-        });
+        // Sort: open before done, then the user's own order (position —
+        // drag to change it; a new todo is appended). Ticking one off and
+        // back never moves it. Due dates show on the row but don't reorder.
+        filtered.sort(FbTodosView._byOrder);
 
         const list = this.querySelector("#todo-list");
         if (filtered.length === 0) {
@@ -616,19 +661,19 @@ class FbTodosView extends HTMLElement {
 
         let text;
         if (sameDay) {
-            text = "Today · " + due.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
+            text = "Today · " + fb.format.time(due);
         } else if (isTomorrow) {
             text = "Tomorrow";
         } else if (diff < 0) {
             const days = Math.ceil(-diff / msPerDay);
             text = `${days} day${days === 1 ? "" : "s"} overdue`;
         } else if (diff < 7 * msPerDay) {
-            text = due.toLocaleDateString(undefined, { weekday: "short" });
+            text = fb.format.weekday(due);
         } else {
             const sameYear = due.getFullYear() === now.getFullYear();
             text = sameYear
-                ? due.toLocaleDateString(undefined, { month: "short", day: "numeric" })
-                : due.toLocaleDateString(undefined, { year: "2-digit", month: "numeric", day: "numeric" });
+                ? fb.format.dayMonth(due)
+                : fb.format.date(due);
         }
 
         let urgency = "";
@@ -653,7 +698,7 @@ class FbTodosView extends HTMLElement {
         this.querySelector("#editor-footer").hidden = false;
         this.querySelector("#title").value       = todo.title       || "";
         this.querySelector("#description").value = todo.description || "";
-        this.querySelector("#due-at").value      = todo.dueAt ? this._toLocalInput(todo.dueAt) : "";
+        fb.format.writeInput(this.querySelector("#due-at"), todo.dueAt ? new Date(todo.dueAt) : null);
         this.querySelector("#due-clear").hidden  = !todo.dueAt;
         this.querySelector("#timestamp").textContent = this.formatFullTimestamp(todo.updatedAt);
         this.querySelector("#completed-pill").hidden = !todo.completedAt;
@@ -681,8 +726,8 @@ class FbTodosView extends HTMLElement {
         if (!todo) return;
         const newTitle = this.querySelector("#title").value;
         const newDesc  = this.querySelector("#description").value;
-        const dueVal   = this.querySelector("#due-at").value;
-        const newDue   = dueVal ? new Date(dueVal).toISOString() : null;
+        const due      = fb.format.readInput(this.querySelector("#due-at"));
+        const newDue   = due ? due.toISOString() : null;
 
         if (newTitle === todo.title
             && newDesc === (todo.description || "")
@@ -785,7 +830,7 @@ class FbTodosView extends HTMLElement {
     async createTodo() {
         try {
             const created = await fb.api.todos.create({ title: "" });
-            this.todos.unshift(created);
+            this.todos.push(created);
             await this.select(created.id);
             this.querySelector("#title").focus();
         } catch (err) {
@@ -793,19 +838,8 @@ class FbTodosView extends HTMLElement {
         }
     }
 
-    /** datetime-local expects "yyyy-MM-ddThh:mm" in LOCAL time. */
-    _toLocalInput(iso) {
-        const d = new Date(iso);
-        const pad = n => String(n).padStart(2, "0");
-        return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
-    }
-
     formatFullTimestamp(iso) {
-        if (!iso) return "";
-        const d = new Date(iso);
-        return d.toLocaleDateString(undefined, { year: "numeric", month: "long", day: "numeric" })
-             + " at "
-             + d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
+        return iso ? fb.format.dateTime(iso) : "";
     }
 }
 

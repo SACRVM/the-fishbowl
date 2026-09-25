@@ -296,7 +296,7 @@
             if (!res.ok) throw new ApiError(res.status, await res.text().catch(() => ""));
             return res.blob();
         }),
-        // create/delete fire `fb:spaces-changed` so the shell's workspace
+        // create/update/delete fire `fb:spaces-changed` so the shell's workspace
         // switcher reloads its list — whoever made the change.
         spaces: {
             list:   ()       => request("/spaces"),
@@ -304,6 +304,9 @@
             create: ({ name }) => request("/spaces", { method: "POST", body: JSON.stringify({ name }) })
                 .then(spacesChanged),
             delete: (slug)   => request(`/spaces/${encodeURIComponent(slug)}`, { method: "DELETE" })
+                .then(spacesChanged),
+            // Owner-only. `color` is a palette slot name or null (default).
+            update: (slug, { color }) => request(`/spaces/${encodeURIComponent(slug)}`, { method: "PATCH", body: JSON.stringify({ color }) })
                 .then(spacesChanged),
         },
         // API keys — the create() response is the ONLY moment the raw token
@@ -321,7 +324,10 @@
         version: () => request("/version"),
         providers: () => fetch("/api/auth/providers").then(r => r.json()),
         me: {
-            get: () => request("/me")
+            get: () => request("/me"),
+            // Personal settings, partial: send only what changes —
+            // { accent } (palette slot or null) and/or { dateFormat }.
+            update: (settings) => request("/me", { method: "PATCH", body: JSON.stringify(settings) }),
         },
         // Secret vault key slots — personal only, never context-prefixed
         // (spaces have no vault). Cookie-only server-side. Used by fb.vault.

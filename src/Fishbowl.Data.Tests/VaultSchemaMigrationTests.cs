@@ -27,7 +27,7 @@ public class VaultSchemaMigrationTests : IDisposable
         using var db = factory.CreateConnection("fresh-user");
 
         var version = await db.ExecuteScalarAsync<long>("PRAGMA user_version");
-        Assert.Equal(7, version);
+        Assert.Equal(8, version);
 
         var table = await db.ExecuteScalarAsync<string?>(
             "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'vault_keyslots'");
@@ -55,7 +55,7 @@ public class VaultSchemaMigrationTests : IDisposable
         using var db = factory.CreateContextConnection(ContextRef.Space("fresh-space"));
 
         var version = await db.ExecuteScalarAsync<long>("PRAGMA user_version");
-        Assert.Equal(7, version);
+        Assert.Equal(8, version);
 
         var table = await db.ExecuteScalarAsync<string?>(
             "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'vault_keyslots'");
@@ -112,7 +112,7 @@ public class VaultSchemaMigrationTests : IDisposable
         using var db = factory.CreateConnection(userId);
 
         var version = await db.ExecuteScalarAsync<long>("PRAGMA user_version");
-        Assert.Equal(7, version);
+        Assert.Equal(8, version);
 
         var note = await db.ExecuteScalarAsync<string?>("SELECT title FROM notes WHERE id = 'n1'");
         Assert.Equal("kept", note);

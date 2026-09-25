@@ -65,13 +65,13 @@ class FbSpacesSettingsView extends HTMLElement {
                     padding: 16px;
                     background: var(--panel);
                     border: 1px solid var(--border);
-                    border-radius: 10px;
+                    border-radius: var(--radius-l);
                 }
                 fb-spaces-settings-view .create-row input {
                     flex: 1;
                     background: rgba(0, 0, 0, 0.3);
                     border: 1px solid var(--border);
-                    border-radius: 8px;
+                    border-radius: var(--radius-m);
                     padding: 8px 12px;
                     color: var(--text);
                     font: inherit;
@@ -82,7 +82,7 @@ class FbSpacesSettingsView extends HTMLElement {
                 fb-spaces-settings-view .create-row button {
                     background: var(--accent);
                     border: none;
-                    border-radius: 8px;
+                    border-radius: var(--radius-m);
                     color: #fff;
                     padding: 8px 18px;
                     font: inherit;
@@ -110,7 +110,7 @@ class FbSpacesSettingsView extends HTMLElement {
                     padding: 14px 16px;
                     background: var(--panel);
                     border: 1px solid var(--border);
-                    border-radius: 10px;
+                    border-radius: var(--radius-l);
                     margin-bottom: 8px;
                 }
                 fb-spaces-settings-view .space-row sac-icon { --icon-size: 20px; color: var(--accent); flex-shrink: 0; }
@@ -132,21 +132,34 @@ class FbSpacesSettingsView extends HTMLElement {
                     letter-spacing: 0.05em;
                     font-size: 10px;
                     padding: 2px 8px;
-                    border-radius: 999px;
+                    border-radius: var(--radius-m);
                     background: rgba(59, 130, 246, 0.15);
                     color: var(--accent);
                     font-weight: 700;
                 }
                 fb-spaces-settings-view .id-chip {
                     font-family: 'SFMono-Regular', Consolas, monospace;
-                    font-size: 11px;
                     padding: 1px 6px;
-                    border-radius: 4px;
+                    border-radius: var(--radius-m);
                     background: rgba(0, 0, 0, 0.3);
                     color: var(--text);
                     user-select: all;
                 }
                 fb-spaces-settings-view .id-chip[title] { cursor: help; }
+                /* The space's colour, leading the row. For the owner it is
+                   a button that opens the colour picker. */
+                fb-spaces-settings-view .space-color {
+                    flex-shrink: 0;
+                    width: 22px;
+                    height: 22px;
+                    padding: 0;
+                    border-radius: 50%;
+                    border: 2px solid var(--border);
+                    background: var(--space-color);
+                }
+                fb-spaces-settings-view button.space-color { cursor: pointer; transition: transform 100ms; }
+                fb-spaces-settings-view button.space-color:hover { transform: scale(1.15); border-color: var(--text-muted); }
+                fb-spaces-settings-view button.space-color:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
                 fb-spaces-settings-view .open-btn,
                 fb-spaces-settings-view .delete-btn {
                     background: transparent;
@@ -154,7 +167,7 @@ class FbSpacesSettingsView extends HTMLElement {
                     color: var(--text-muted);
                     cursor: pointer;
                     padding: 6px 8px;
-                    border-radius: 6px;
+                    border-radius: var(--radius-m);
                     transition: color 100ms, background 100ms;
                 }
                 fb-spaces-settings-view .open-btn sac-icon,
@@ -225,7 +238,7 @@ class FbSpacesSettingsView extends HTMLElement {
             <div class="space-row">
                 <sac-icon name="user"></sac-icon>
                 <div class="space-info">
-                    <p class="space-name">${escapeHtml(this.me.displayName || this.me.email || "You")}</p>
+                    <p class="space-name">${escapeHtml(this.me.name || this.me.email || "You")}</p>
                     <div class="space-meta">
                         <span class="id-chip"
                               title="users/${escapeAttr(this.me.id)}/personal.db">${escapeHtml(this.me.id)}</span>
@@ -246,7 +259,10 @@ class FbSpacesSettingsView extends HTMLElement {
 
         list.innerHTML = this.spaces.map(t => `
             <div class="space-row" data-slug="${escapeAttr(t.slug)}">
-                <sac-icon name="users"></sac-icon>
+                ${t.role === "owner"
+                    ? `<button type="button" class="space-color" title="Change colour" aria-label="Change colour"
+                               style="--space-color: ${this._colorVar(t.color)}"></button>`
+                    : `<span class="space-color" title="Space colour" style="--space-color: ${this._colorVar(t.color)}"></span>`}
                 <div class="space-info">
                     <p class="space-name">${escapeHtml(t.name)}</p>
                     <div class="space-meta">
@@ -267,6 +283,13 @@ class FbSpacesSettingsView extends HTMLElement {
             </div>
         `).join("");
 
+        list.querySelectorAll("button.space-color").forEach(btn => {
+            btn.addEventListener("click", (e) => {
+                const slug = e.currentTarget.closest(".space-row")?.dataset.slug;
+                if (slug) this._pickColor(slug);
+            });
+        });
+
         // Open = switch the workspace to that space and land on its notes.
         list.querySelectorAll(".open-btn").forEach(btn => {
             btn.addEventListener("click", (e) => {
@@ -283,6 +306,46 @@ class FbSpacesSettingsView extends HTMLElement {
                 await this._delete(slug);
             });
         });
+    }
+
+    // The colour a space shows: its palette slot, or the kit's default
+    // warm accent (orange) — the palette var, not --accent-warm, which
+    // the active space itself may have overridden.
+    _colorVar(slot) {
+        return fb.accents.cssVar(fb.tags.SLOTS.includes(slot) ? slot : "orange");
+    }
+
+    // Colour picker window: the kit palette plus "Default". Picking one
+    // saves it and closes; it tints the space's switcher pill and the
+    // shared-data highlights while the space is active. Owner-only.
+    _pickColor(slug) {
+        const space = this.spaces.find(t => t.slug === slug);
+        if (!space) return;
+        const dlg = document.createElement("sac-dialog");
+        dlg.setAttribute("title", `Colour — ${space.name}`);
+        dlg.style.setProperty("--dialog-width", "340px");
+        dlg.buttons = [{ action: "close", label: "Close", kind: "default" }];
+        const grid = document.createElement("sac-swatch-grid");
+        grid.setAttribute("selectable", "");
+        grid.setAttribute("columns", "6");
+        grid.className = "fb-space-color-grid";
+        dlg.appendChild(grid);
+        grid.colors = fb.accents.swatches(space.color);
+        // close() fires sac:action too, so one listener removes it either way.
+        dlg.addEventListener("sac:action", () => setTimeout(() => dlg.remove(), 120), { once: true });
+        grid.addEventListener("sac:change", async (e) => {
+            try {
+                await fb.api.spaces.update(slug, { color: fb.accents.slotOf(e.detail.value) });
+                dlg.close("picked");
+                await this.refresh();
+            } catch (err) {
+                console.warn("[fb-spaces-settings-view] colour failed:", err);
+                grid.colors = fb.accents.swatches(space.color);
+                window.sac?.toast?.(err?.status === 403 ? "Only the owner can change the colour." : "Failed to save the colour.", { kind: "error" });
+            }
+        });
+        document.body.appendChild(dlg);
+        setTimeout(() => dlg.open(), 0);
     }
 
     async _create() {

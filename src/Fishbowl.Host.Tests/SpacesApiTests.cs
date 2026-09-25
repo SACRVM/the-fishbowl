@@ -215,6 +215,80 @@ public class SpacesApiTests : IClassFixture<WebApplicationFactory<Program>>, IDi
         Assert.Equal(HttpStatusCode.Unauthorized, resp.StatusCode);
     }
 
+    [Fact]
+    public async Task SpaceColor_OwnerSets_ListAndGetReturnIt_NullResets()
+    {
+        var client = _factory.CreateClient();
+        var ct = TestContext.Current.CancellationToken;
+        await client.SendAsync(Req(HttpMethod.Post, "/api/v1/spaces", UserA, new { name = "Painted" }), ct);
+
+        var patch = await client.SendAsync(Req(HttpMethod.Patch, "/api/v1/spaces/painted", UserA, new { color = "teal" }), ct);
+        Assert.Equal(HttpStatusCode.NoContent, patch.StatusCode);
+
+        var one = await (await client.SendAsync(Req(HttpMethod.Get, "/api/v1/spaces/painted", UserA), ct))
+            .Content.ReadFromJsonAsync<System.Text.Json.JsonElement>(ct);
+        Assert.Equal("teal", one.GetProperty("color").GetString());
+        var list = await (await client.SendAsync(Req(HttpMethod.Get, "/api/v1/spaces", UserA), ct))
+            .Content.ReadFromJsonAsync<System.Text.Json.JsonElement>(ct);
+        Assert.Contains(list.EnumerateArray(), s => s.GetProperty("slug").GetString() == "painted"
+                                                  && s.GetProperty("color").GetString() == "teal");
+
+        await client.SendAsync(Req(HttpMethod.Patch, "/api/v1/spaces/painted", UserA, new { color = (string?)null }), ct);
+        one = await (await client.SendAsync(Req(HttpMethod.Get, "/api/v1/spaces/painted", UserA), ct))
+            .Content.ReadFromJsonAsync<System.Text.Json.JsonElement>(ct);
+        Assert.Equal(System.Text.Json.JsonValueKind.Null, one.GetProperty("color").ValueKind);
+    }
+
+    [Fact]
+    public async Task SpaceColor_UnknownSlot_400_NonOwner_403()
+    {
+        var client = _factory.CreateClient();
+        var ct = TestContext.Current.CancellationToken;
+        await client.SendAsync(Req(HttpMethod.Post, "/api/v1/spaces", UserA, new { name = "Guarded" }), ct);
+
+        var bad = await client.SendAsync(Req(HttpMethod.Patch, "/api/v1/spaces/guarded", UserA, new { color = "#ff0000" }), ct);
+        Assert.Equal(HttpStatusCode.BadRequest, bad.StatusCode);
+        var other = await client.SendAsync(Req(HttpMethod.Patch, "/api/v1/spaces/guarded", UserB, new { color = "red" }), ct);
+        Assert.Equal(HttpStatusCode.Forbidden, other.StatusCode);
+    }
+
+    // /me lives in AccountApi; tested here because this fixture seeds real
+    // user rows, which /me reads.
+    [Fact]
+    public async Task MeAccent_RoundTrips_AndMeNeverCarriesPasswordFields()
+    {
+        var client = _factory.CreateClient();
+        var ct = TestContext.Current.CancellationToken;
+
+        var patch = await client.SendAsync(Req(HttpMethod.Patch, "/api/v1/me", UserA, new { accent = "purple" }), ct);
+        Assert.Equal(HttpStatusCode.NoContent, patch.StatusCode);
+        var bad = await client.SendAsync(Req(HttpMethod.Patch, "/api/v1/me", UserA, new { accent = "chartreuse" }), ct);
+        Assert.Equal(HttpStatusCode.BadRequest, bad.StatusCode);
+
+        var raw = await (await client.SendAsync(Req(HttpMethod.Get, "/api/v1/me", UserA), ct)).Content.ReadAsStringAsync(ct);
+        var me = System.Text.Json.JsonDocument.Parse(raw).RootElement;
+        Assert.Equal("purple", me.GetProperty("accent").GetString());
+        Assert.DoesNotContain("password", raw, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task MeDateFormat_PartialPatch_LeavesTheOtherSettingAlone()
+    {
+        var client = _factory.CreateClient();
+        var ct = TestContext.Current.CancellationToken;
+
+        await client.SendAsync(Req(HttpMethod.Patch, "/api/v1/me", UserB, new { accent = "teal" }), ct);
+        var patch = await client.SendAsync(Req(HttpMethod.Patch, "/api/v1/me", UserB, new { dateFormat = "de" }), ct);
+        Assert.Equal(HttpStatusCode.NoContent, patch.StatusCode);
+        var bad = await client.SendAsync(Req(HttpMethod.Patch, "/api/v1/me", UserB, new { dateFormat = "dd.mm.yyyy" }), ct);
+        Assert.Equal(HttpStatusCode.BadRequest, bad.StatusCode);
+
+        var me = await (await client.SendAsync(Req(HttpMethod.Get, "/api/v1/me", UserB), ct))
+            .Content.ReadFromJsonAsync<System.Text.Json.JsonElement>(ct);
+        Assert.Equal("de", me.GetProperty("dateFormat").GetString());
+        Assert.Equal("teal", me.GetProperty("accent").GetString());   // untouched by the dateFormat patch
+    }
+
     public void Dispose()
     {
         Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();

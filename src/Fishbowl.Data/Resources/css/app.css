@@ -134,7 +134,7 @@
     background: rgba(255, 255, 255, 0.18);
     background-clip: content-box;
     border: 2px solid transparent;
-    border-radius: 8px;
+    border-radius: var(--radius-m);
 }
 *::-webkit-scrollbar-thumb:hover {
     background: rgba(255, 255, 255, 0.32);
@@ -194,7 +194,7 @@ select {
     background-repeat: no-repeat;
     background-position: right 10px center;
     border: 1px solid var(--border);
-    border-radius: 8px;
+    border-radius: var(--radius-m);
     padding: 8px 32px 8px 10px;
     color: var(--text);
     font-family: inherit;
@@ -294,9 +294,36 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--accent); }
     margin-bottom: 2px;
 }
 .fb-profile dd { margin: 0; color: var(--text); }
+/* A date (+ time) row of kit fields (js/lib/format.js attachInput). */
+.fb-date-wrap {
+    display: inline-flex;
+    align-items: flex-end;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+.fb-date-wrap > [hidden] { display: none; }
+
+.fb-profile-select {
+    width: 100%;
+}
+
+.fb-profile-accent {
+    width: 100%;
+    margin-top: 0.75rem;
+    padding-top: 0.75rem;
+    border-top: 1px solid var(--border);
+    text-align: left;
+}
+.fb-profile-label {
+    color: var(--text-dim);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    font-weight: 600;
+    font-size: 0.78rem;
+    margin-bottom: 0.5rem;
+}
 .fb-profile .fb-profile-id {
-    font-family: monospace;
-    font-size: 0.72rem;
+    font-family: 'SFMono-Regular', Consolas, monospace;
     word-break: break-all;
 }
 
@@ -306,7 +333,7 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--accent); }
 /* Base button classes (used inside Shadow DOM too via :host-context support) */
 .btn {
     padding: 0.5rem 1rem;
-    border-radius: 8px;
+    border-radius: var(--radius-m);
     background: var(--glass);
     color: var(--text);
     border: 1px solid var(--border);
@@ -350,7 +377,7 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--accent); }
     backdrop-filter: blur(12px);
     -webkit-backdrop-filter: blur(12px);
     border: 1px solid rgba(255, 255, 255, 0.1);
-    border-radius: 24px;
+    border-radius: var(--radius-l);
     padding: 3rem 2.5rem;
     text-align: center;
 }
@@ -402,7 +429,7 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--accent); }
     padding: 0.6rem 0.8rem;
     background: rgba(0, 0, 0, 0.3);
     border: 1px solid var(--border);
-    border-radius: 8px;
+    border-radius: var(--radius-m);
     font-size: 0.95rem;
     transition: border-color 0.2s;
 }
@@ -423,7 +450,7 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--accent); }
     padding: 0.75rem 1rem;
     background: rgba(255, 255, 255, 0.05);
     border: 1px solid var(--border);
-    border-radius: 10px;
+    border-radius: var(--radius-m);
     color: var(--text);
     font-size: 0.95rem;
     transition: all 0.2s;
@@ -464,7 +491,7 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--accent); }
 .fb-vault-suggestion {
     font-family: ui-monospace, monospace;
     padding: 6px 10px;
-    border-radius: 6px;
+    border-radius: var(--radius-m);
     background: var(--hover);
     user-select: all;
 }
@@ -475,7 +502,7 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--accent); }
     columns: 3 7.5em;
     column-gap: 2.2em;
     border: 1px solid var(--border);
-    border-radius: 8px;
+    border-radius: var(--radius-l);
     font-family: ui-monospace, monospace;
     line-height: 1.7;
 }
@@ -514,7 +541,7 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--accent); }
     letter-spacing: 0.04em;
     padding: 2px 6px;
     border: 1px solid var(--border);
-    border-radius: 999px;
+    border-radius: var(--radius-m);
 }
 .fb-tags-swatches { display: flex; gap: 3px; flex-wrap: wrap; }
 .fb-tags-swatch {
@@ -549,7 +576,7 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--accent); }
     padding: 4px 10px 4px 8px;
     background: none;
     border: 1px solid var(--border);
-    border-radius: 16px;
+    border-radius: var(--radius-m);
     color: var(--text);
     font: inherit;
     font-size: 0.82rem;

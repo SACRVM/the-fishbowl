@@ -14,6 +14,7 @@ namespace Fishbowl.Api.Endpoints;
 public static class SpacesApi
 {
     public record CreateSpaceRequest(string Name);
+    public record UpdateSpaceRequest(string? Color);
 
     public static RouteGroupBuilder MapSpacesApi(this IEndpointRouteBuilder routes)
     {
@@ -34,6 +35,7 @@ public static class SpacesApi
                 name = m.Space.Name,
                 role = m.Role.ToDbValue(),
                 createdAt = m.Space.CreatedAt,
+                color = m.Space.Color,
             }));
         })
         .WithName("ListSpaces")
@@ -81,11 +83,36 @@ public static class SpacesApi
                 name = space.Name,
                 role = role.Value.ToDbValue(),
                 createdAt = space.CreatedAt,
+                color = space.Color,
             });
         })
         .WithName("GetSpace")
         .WithSummary("Gets a single space by slug. Requires membership.")
         .Produces(StatusCodes.Status200OK)
+        .Produces(StatusCodes.Status401Unauthorized)
+        .Produces(StatusCodes.Status403Forbidden)
+        .Produces(StatusCodes.Status404NotFound);
+
+        // Space settings — for now just the colour. Owner-only; `color` is a
+        // palette slot name or null for the default.
+        group.MapPatch("/{slug}", async (
+            string slug, UpdateSpaceRequest body, ClaimsPrincipal user, ISpaceRepository repo, CancellationToken ct) =>
+        {
+            var userId = user.FindFirst("fishbowl_user_id")?.Value;
+            if (string.IsNullOrEmpty(userId)) return Results.Unauthorized();
+            if (body.Color is not null && !TagPalette.IsSlot(body.Color))
+                return Results.BadRequest(new { error = "color must be a palette slot or null" });
+
+            var space = await repo.GetBySlugAsync(slug, ct);
+            if (space is null) return Results.NotFound();
+
+            var ok = await repo.SetColorAsync(space.Id, userId, body.Color, ct);
+            return ok ? Results.NoContent() : Results.Forbid();
+        })
+        .WithName("UpdateSpace")
+        .WithSummary("Updates a space's settings (its colour). Owner only.")
+        .Produces(StatusCodes.Status204NoContent)
+        .Produces(StatusCodes.Status400BadRequest)
         .Produces(StatusCodes.Status401Unauthorized)
         .Produces(StatusCodes.Status403Forbidden)
         .Produces(StatusCodes.Status404NotFound);

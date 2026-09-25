@@ -72,11 +72,11 @@ public class SpaceRepository : ISpaceRepository
     public async Task<IReadOnlyList<SpaceMembership>> ListByMemberAsync(string userId, CancellationToken ct = default)
     {
         using var db = _dbFactory.CreateSystemConnection();
-        var rows = await db.QueryAsync<(string Id, string Slug, string Name, string CreatedBy, string CreatedAt, string Role)>(
+        var rows = await db.QueryAsync<(string Id, string Slug, string Name, string CreatedBy, string CreatedAt, string Role, string? Color)>(
             new CommandDefinition(@"
                 SELECT t.id AS Id, t.slug AS Slug, t.name AS Name,
                        t.created_by AS CreatedBy, t.created_at AS CreatedAt,
-                       m.role AS Role
+                       m.role AS Role, t.color AS Color
                 FROM spaces t
                 JOIN space_members m ON m.space_id = t.id
                 WHERE m.user_id = @userId
@@ -92,6 +92,7 @@ public class SpaceRepository : ISpaceRepository
                 CreatedBy = r.CreatedBy,
                 CreatedAt = DateTime.Parse(r.CreatedAt, System.Globalization.CultureInfo.InvariantCulture,
                     System.Globalization.DateTimeStyles.RoundtripKind),
+                Color = r.Color,
             },
             SpaceRoleExtensions.FromDbValue(r.Role))).ToList();
     }
@@ -119,6 +120,20 @@ public class SpaceRepository : ISpaceRepository
             "SELECT role FROM space_members WHERE space_id = @spaceId AND user_id = @userId",
             new { spaceId, userId }, cancellationToken: ct));
         return role is null ? null : SpaceRoleExtensions.FromDbValue(role);
+    }
+
+    public async Task<bool> SetColorAsync(string spaceId, string actingUserId, string? color, CancellationToken ct = default)
+    {
+        using var db = _dbFactory.CreateSystemConnection();
+        var role = await db.QuerySingleOrDefaultAsync<string?>(new CommandDefinition(
+            "SELECT role FROM space_members WHERE space_id = @spaceId AND user_id = @actingUserId",
+            new { spaceId, actingUserId }, cancellationToken: ct));
+        if (role != SpaceRole.Owner.ToDbValue()) return false;
+
+        await db.ExecuteAsync(new CommandDefinition(
+            "UPDATE spaces SET color = @color WHERE id = @spaceId",
+            new { spaceId, color }, cancellationToken: ct));
+        return true;
     }
 
     public async Task<bool> DeleteAsync(string spaceId, string actingUserId, CancellationToken ct = default)

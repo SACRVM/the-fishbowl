@@ -135,6 +135,154 @@ public class UiSmokeTests
     }
 
     [Fact]
+    public async Task DateFormat_ProfileSetting_DrivesDisplayAndInput_Test()
+    {
+        var context = await _fixture.Browser!.NewContextAsync(new BrowserNewContextOptions { IgnoreHTTPSErrors = true });
+        var page = await context.NewPageAsync();
+        var title = "Format smoke " + Guid.NewGuid().ToString("N")[..6];
+        var created = await page.APIRequest.PostAsync(_fixture.BaseUrl + "/api/v1/todos", new APIRequestContextOptions
+        {
+            DataObject = new { title },
+        });
+        var id = (await created.JsonAsync())!.Value.GetProperty("id").GetString()!;
+
+        // Profile → "Date & time format" → German.
+        await page.GotoAsync(_fixture.BaseUrl + "/#/todos");
+        var account = page.Locator("#fb-account");
+        await Assertions.Expect(account).ToBeVisibleAsync();
+        await account.Locator("[slot='trigger']").ClickAsync();
+        await account.Locator("button[data-action='profile']").ClickAsync();
+        await page.Locator("#fb-date-format").SelectOptionAsync("de");
+        await page.Locator("#fb-profile-window").EvaluateAsync("w => w.close?.()");
+
+        // The kit's date + time fields follow the setting (sac.regional):
+        // the date is typed German-style, the time into its hour/minute
+        // segments; saved as that local instant.
+        await page.Locator(".tv-item", new PageLocatorOptions { HasText = title }).ClickAsync();
+        var due = page.Locator("sac-date-field#due-at");
+        var dueInput = due.Locator("input");
+        var hour = page.Locator("#due-at + sac-time-field input.hour");
+        await Assertions.Expect(dueInput).ToHaveAttributeAsync("placeholder", "dd.mm.yyyy");
+        await dueInput.FillAsync("26.9.2026");
+        await dueInput.PressAsync("Enter");
+        await Assertions.Expect(due).ToHaveAttributeAsync("value", "2026-09-26");
+        await Assertions.Expect(dueInput).ToHaveValueAsync("26.09.2026");
+        await hour.ClickAsync();
+        await page.Keyboard.TypeAsync("1430");
+        await page.Keyboard.PressAsync("Enter");
+        await Assertions.Expect(page.Locator("#due-at + sac-time-field")).ToHaveAttributeAsync("value", "14:30");
+        await page.ScreenshotAsync(new PageScreenshotOptions { Path = Path.Combine(Path.GetTempPath(), "fishbowl_ui_date_fields.png") });
+        await Assertions.Expect(page.Locator(".tv-item", new PageLocatorOptions { HasText = title }).Locator(".tv-item-due"))
+            .ToBeVisibleAsync();
+        var saved = "";
+        for (var i = 0; i < 20 && saved != "2026-9-26-14-30"; i++)
+        {
+            saved = await page.EvaluateAsync<string>(
+                $"async () => {{ const t = await fb.api.todos.get('{id}'); if (!t.dueAt) return ''; const d = new Date(t.dueAt); return [d.getFullYear(), d.getMonth() + 1, d.getDate(), d.getHours(), d.getMinutes()].join('-'); }}");
+            if (saved != "2026-9-26-14-30") await page.WaitForTimeoutAsync(100);
+        }
+        Assert.Equal("2026-9-26-14-30", saved);
+
+        // Back to the default for the other tests.
+        var reset = await page.APIRequest.PatchAsync(_fixture.BaseUrl + "/api/v1/me", new APIRequestContextOptions
+        {
+            DataObject = new Dictionary<string, object?> { ["dateFormat"] = null },
+        });
+        Assert.True(reset.Ok);
+        await context.CloseAsync();
+    }
+
+    [Fact]
+    public async Task Todos_KeepCreationOrder_ThroughDoneAndUndone_Test()
+    {
+        var context = await _fixture.Browser!.NewContextAsync(new BrowserNewContextOptions { IgnoreHTTPSErrors = true });
+        var page = await context.NewPageAsync();
+        var tag = "ord" + Guid.NewGuid().ToString("N")[..6];
+        var ids = new Dictionary<string, string>();
+        foreach (var n in new[] { "A", "B", "C" })
+        {
+            var r = await page.APIRequest.PostAsync(_fixture.BaseUrl + "/api/v1/todos", new APIRequestContextOptions
+            {
+                DataObject = new { title = $"{tag} {n}" },
+            });
+            ids[n] = (await r.JsonAsync())!.Value.GetProperty("id").GetString()!;
+        }
+
+        // B done, then undone again — that used to send it to the end.
+        foreach (var completedAt in new[] { DateTime.UtcNow.ToString("o"), null })
+        {
+            var put = await page.APIRequest.PutAsync(_fixture.BaseUrl + $"/api/v1/todos/{ids["B"]}", new APIRequestContextOptions
+            {
+                DataObject = new { id = ids["B"], title = $"{tag} B", completedAt },
+            });
+            Assert.True(put.Ok, $"todo update failed: {put.Status}");
+        }
+        await page.APIRequest.PostAsync(_fixture.BaseUrl + "/api/v1/todos", new APIRequestContextOptions
+        {
+            DataObject = new { title = $"{tag} D" },
+        });
+
+        await page.GotoAsync(_fixture.BaseUrl + "/#/todos");
+        var rows = page.Locator(".tv-item-title", new PageLocatorOptions { HasText = tag });
+        await Assertions.Expect(rows).ToHaveCountAsync(4);
+        Assert.Equal(new[] { $"{tag} A", $"{tag} B", $"{tag} C", $"{tag} D" },
+            (await rows.AllTextContentsAsync()).Select(t => t.Trim()).ToArray());
+
+        // Drag D above A; the new order survives a reload.
+        var from = (await page.Locator(".tv-item", new PageLocatorOptions { HasText = $"{tag} D" }).BoundingBoxAsync())!;
+        var onto = (await page.Locator(".tv-item", new PageLocatorOptions { HasText = $"{tag} A" }).BoundingBoxAsync())!;
+        await page.Mouse.MoveAsync(from.X + from.Width / 2, from.Y + from.Height / 2);
+        await page.Mouse.DownAsync();
+        await page.Mouse.MoveAsync(from.X + from.Width / 2, from.Y + from.Height / 2 - 10, new MouseMoveOptions { Steps = 3 });
+        await page.Mouse.MoveAsync(onto.X + onto.Width / 2, onto.Y + 4, new MouseMoveOptions { Steps = 12 });
+        await page.Mouse.UpAsync();
+        var expected = new[] { $"{tag} D", $"{tag} A", $"{tag} B", $"{tag} C" };
+        await Assertions.Expect(rows).ToHaveTextAsync(expected);
+        await page.WaitForTimeoutAsync(300); // let the PUT land
+        await page.ReloadAsync();
+        await Assertions.Expect(rows).ToHaveTextAsync(expected);
+
+        await context.CloseAsync();
+    }
+
+    [Fact]
+    public async Task Notes_LongTitle_NeverRunsUnderRowActions_Test()
+    {
+        var context = await _fixture.Browser!.NewContextAsync(new BrowserNewContextOptions { IgnoreHTTPSErrors = true });
+        var page = await context.NewPageAsync();
+        var title = "Overlong title " + Guid.NewGuid().ToString("N") + " that keeps going well past the list column";
+        await page.APIRequest.PostAsync(_fixture.BaseUrl + "/api/v1/notes", new APIRequestContextOptions
+        {
+            DataObject = new { title, content = "# " + title + "\n" },
+        });
+
+        await page.GotoAsync(_fixture.BaseUrl + "/#/notes");
+        var row = page.Locator(".nv-item", new PageLocatorOptions { HasText = title[..40] }).First;
+        await row.HoverAsync();
+        var titleBox = (await row.Locator(".nv-item-title").BoundingBoxAsync())!;
+        var actionsBox = (await row.Locator(".nv-item-actions").BoundingBoxAsync())!;
+        Assert.True(titleBox.X + titleBox.Width <= actionsBox.X,
+            $"title ends at {titleBox.X + titleBox.Width}, actions start at {actionsBox.X}");
+
+        // One gutter: the search field and the rows share both edges — in
+        // the notes and the todos list.
+        foreach (var (hash, search, item) in new[] { ("#/notes", ".nv-search input", ".nv-item"), ("#/todos", ".tv-search input", ".tv-item") })
+        {
+            if (hash == "#/todos")
+            {
+                await page.APIRequest.PostAsync(_fixture.BaseUrl + "/api/v1/todos", new APIRequestContextOptions { DataObject = new { title = "gutter" } });
+                await page.GotoAsync(_fixture.BaseUrl + "/" + hash);
+            }
+            var s = (await page.Locator(search).BoundingBoxAsync())!;
+            var r = (await page.Locator(item).First.BoundingBoxAsync())!;
+            Assert.InRange(r.X, s.X - 0.5, s.X + 0.5);
+            Assert.InRange(r.X + r.Width, s.X + s.Width - 0.5, s.X + s.Width + 0.5);
+        }
+
+        await context.CloseAsync();
+    }
+
+    [Fact]
     public async Task Notes_TagInput_CreatesAndSavesTag_Test()
     {
         var context = await _fixture.Browser!.NewContextAsync(new BrowserNewContextOptions { IgnoreHTTPSErrors = true });
@@ -214,6 +362,57 @@ public class UiSmokeTests
         await pill.ClickAsync();
         await page.Locator("#fb-context button[data-action='manage-spaces']").ClickAsync();
         await page.WaitForURLAsync(u => u.EndsWith("#/spaces"), new PageWaitForURLOptions { Timeout = 3000 });
+
+        await context.CloseAsync();
+    }
+
+    [Fact]
+    public async Task Accents_PersonalAndSpaceColours_ApplyAndPersist_Test()
+    {
+        var context = await _fixture.Browser!.NewContextAsync(new BrowserNewContextOptions { IgnoreHTTPSErrors = true });
+        var page = await context.NewPageAsync();
+        var rootVar = (string name) => page.EvaluateAsync<string>(
+            $"() => document.documentElement.style.getPropertyValue('{name}')");
+
+        // Personal accent: picked in the profile window, applied to --accent,
+        // saved on the user.
+        await page.GotoAsync(_fixture.BaseUrl + "/#/notes");
+        var account = page.Locator("#fb-account");
+        await Assertions.Expect(account).ToBeVisibleAsync();
+        await account.Locator("[slot='trigger']").ClickAsync();
+        await account.Locator("button[data-action='profile']").ClickAsync();
+        await page.Locator("#fb-profile-window sac-swatch[label='teal']").ClickAsync();
+        await page.WaitForFunctionAsync("() => document.documentElement.style.getPropertyValue('--accent') === 'var(--palette-teal)'");
+        var me = await (await page.APIRequest.GetAsync(_fixture.BaseUrl + "/api/v1/me")).JsonAsync();
+        Assert.Equal("teal", me!.Value.GetProperty("accent").GetString());
+
+        // "Default" clears it again (other tests share this user).
+        await page.Locator("#fb-profile-window sac-swatch[label='Default']").ClickAsync();
+        await page.WaitForFunctionAsync("() => document.documentElement.style.getPropertyValue('--accent') === ''");
+
+        // Space colour: picked in the spaces settings, and inside the space
+        // it replaces --accent-warm; back in personal, the default returns.
+        var name = "Colour space " + Guid.NewGuid().ToString("N")[..6];
+        var created = await page.APIRequest.PostAsync(_fixture.BaseUrl + "/api/v1/spaces", new APIRequestContextOptions { DataObject = new { name } });
+        var slug = (await created.JsonAsync())!.Value.GetProperty("slug").GetString()!;
+        await page.GotoAsync(_fixture.BaseUrl + "/#/spaces");
+        var row = page.Locator($".space-row[data-slug='{slug}']");
+        // The row leads with the space's colour; clicking it opens the picker,
+        // picking saves and closes.
+        await row.Locator("button.space-color").ClickAsync();
+        var picker = page.Locator("sac-dialog[open]");
+        await picker.Locator("sac-swatch[label='green']").ClickAsync();
+        await Assertions.Expect(page.Locator("sac-dialog")).ToHaveCountAsync(0);
+        await Assertions.Expect(row.Locator("button.space-color")).ToHaveAttributeAsync("style", new System.Text.RegularExpressions.Regex("palette-green"));
+
+        await page.GotoAsync(_fixture.BaseUrl + $"/#/space/{slug}/notes");
+        await page.WaitForFunctionAsync("() => document.documentElement.style.getPropertyValue('--accent-warm') === 'var(--palette-green)'");
+        // …and the whole UI's accent, not just the switcher tint.
+        Assert.Equal("var(--palette-green)", await rootVar("--accent"));
+        await page.Locator("#fb-context [slot='trigger']").ClickAsync();
+        await page.Locator("#fb-context button[data-action='ctx:user']").ClickAsync();
+        await page.WaitForFunctionAsync("() => document.documentElement.style.getPropertyValue('--accent-warm') === ''");
+        Assert.Equal("", await rootVar("--accent"));
 
         await context.CloseAsync();
     }

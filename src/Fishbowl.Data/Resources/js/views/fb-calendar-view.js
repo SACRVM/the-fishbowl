@@ -142,7 +142,7 @@ class FbCalendarView extends HTMLElement {
                     align-items: baseline;
                     gap: 8px;
                     padding: 8px 10px;
-                    border-radius: 10px;
+                    border-radius: var(--radius-m);
                     cursor: pointer;
                     border: 1px solid transparent;
                     transition: background 0.12s, border-color 0.12s;
@@ -240,7 +240,7 @@ class FbCalendarView extends HTMLElement {
                 fb-calendar-view .cv-day {
                     background: var(--panel);
                     border: 1px solid var(--border);
-                    border-radius: 10px;
+                    border-radius: var(--radius-m);
                     padding: 6px;
                     min-height: 86px;
                     cursor: pointer;
@@ -277,7 +277,7 @@ class FbCalendarView extends HTMLElement {
                     font-size: 11px;
                     line-height: 1.4;
                     padding: 2px 6px;
-                    border-radius: 5px;
+                    border-radius: var(--radius-s);
                     background: color-mix(in srgb, var(--accent) 15%, transparent);
                     border-left: 2px solid var(--accent);
                     color: var(--text);
@@ -313,7 +313,7 @@ class FbCalendarView extends HTMLElement {
                     align-self: flex-start;
                     background: var(--hover);
                     border: 1px solid var(--border);
-                    border-radius: 999px;
+                    border-radius: var(--radius-m);
                     color: var(--text-muted);
                     font-family: inherit;
                     font-size: 12px;
@@ -409,7 +409,7 @@ class FbCalendarView extends HTMLElement {
                     min-height: 160px;
                     background: var(--field);
                     border: 1px solid var(--border);
-                    border-radius: 10px;
+                    border-radius: var(--radius-m);
                     color: var(--text);
                     font-family: inherit;
                     font-size: 14px;
@@ -480,11 +480,11 @@ class FbCalendarView extends HTMLElement {
                             <div class="cv-field-row">
                                 <div class="cv-field">
                                     <label for="cv-start">Starts</label>
-                                    <input id="cv-start" class="cv-date-input" type="datetime-local"/>
+                                    <input id="cv-start" class="cv-date-input"/>
                                 </div>
                                 <div class="cv-field">
                                     <label for="cv-end">Ends</label>
-                                    <input id="cv-end" class="cv-date-input" type="datetime-local"/>
+                                    <input id="cv-end" class="cv-date-input"/>
                                 </div>
                                 <div class="cv-field">
                                     <label for="cv-reminder">Reminder</label>
@@ -562,6 +562,8 @@ class FbCalendarView extends HTMLElement {
             });
             el.addEventListener("blur", () => this.flushSave());
         }
+        fb.format.attachInput(this.querySelector("#cv-start"), { time: true });
+        fb.format.attachInput(this.querySelector("#cv-end"), { time: true });
         this.querySelector("#cv-start").addEventListener("change", () => this.saveEditing());
         this.querySelector("#cv-end").addEventListener("change", () => this.saveEditing());
         this.querySelector("#cv-reminder").addEventListener("change", () => this.saveEditing());
@@ -596,7 +598,7 @@ class FbCalendarView extends HTMLElement {
 
     renderMonth() {
         this.querySelector("#cv-month-title").textContent =
-            this.cursor.toLocaleDateString(undefined, { month: "long", year: "numeric" });
+            fb.format.monthYear(this.cursor);
         this.renderGrid();
         this.renderAgenda();
     }
@@ -607,7 +609,7 @@ class FbCalendarView extends HTMLElement {
         const someMonday = new Date(2024, 0, 1); // Mon Jan 1 2024
         weekdaysEl.innerHTML = Array.from({ length: 7 }, (_, i) => {
             const d = new Date(someMonday.getFullYear(), someMonday.getMonth(), someMonday.getDate() + i);
-            return `<div class="cv-weekday">${d.toLocaleDateString(undefined, { weekday: "short" })}</div>`;
+            return `<div class="cv-weekday">${fb.format.weekday(d)}</div>`;
         }).join("");
 
         const byDay = this._eventsByDay();
@@ -629,8 +631,7 @@ class FbCalendarView extends HTMLElement {
             ].filter(Boolean).join(" ");
 
             const chips = dayEvents.slice(0, MAX_CHIPS).map(e => {
-                const time = e.allDay ? "" : new Date(e.startAt)
-                    .toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
+                const time = e.allDay ? "" : fb.format.time(e.startAt);
                 const repeat = e.rRule ? `<span class="cv-repeat-mark" title="Repeats">&#8635;</span>` : "";
                 return `<div class="cv-chip ${e.allDay ? "all-day" : ""}" data-id="${e.id}" title="${escapeHtml(e.title || "Untitled")}">
                             ${time ? `<span class="cv-chip-time">${time}</span>` : ""}${repeat}${escapeHtml(e.title || "Untitled")}
@@ -688,10 +689,9 @@ class FbCalendarView extends HTMLElement {
 
         agenda.innerHTML = dayKeys.map(key => {
             const d = new Date(key + "T00:00");
-            const header = d.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
+            const header = `${fb.format.weekday(d)} ${fb.format.dayMonth(d)}`;
             const rows = byDay.get(key).map(e => {
-                const time = e.allDay ? "all day" : new Date(e.startAt)
-                    .toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
+                const time = e.allDay ? "all day" : fb.format.time(e.startAt);
                 const repeat = e.rRule ? ` <span class="cv-repeat-mark" title="Repeats">&#8635;</span>` : "";
                 return `
                     <div class="cv-agenda-item ${e.id === this.editing?.id ? "selected" : ""}" data-id="${e.id}">
@@ -791,8 +791,8 @@ class FbCalendarView extends HTMLElement {
         this._applyAllDayMode(!!e.allDay);
         const start = this.querySelector("#cv-start");
         const end = this.querySelector("#cv-end");
-        start.value = e.startAt ? this._toInputValue(e.startAt, !!e.allDay) : "";
-        end.value   = e.endAt   ? this._toInputValue(e.endAt,   !!e.allDay) : "";
+        fb.format.writeInput(start, e.startAt ? new Date(e.startAt) : null);
+        fb.format.writeInput(end,   e.endAt   ? new Date(e.endAt)   : null);
         this.querySelector("#cv-reminder").value = e.reminderMinutes ?? "";
         this._fillRepeat(e.rRule);
         this.querySelector("#cv-location").value = e.location || "";
@@ -816,16 +816,10 @@ class FbCalendarView extends HTMLElement {
         select.value = value;
     }
 
-    /** Switch start/end inputs between date and datetime-local, converting values. */
+    /** Switch start/end between a date and a date + time, keeping the day. */
     _applyAllDayMode(allDay) {
         for (const sel of ["#cv-start", "#cv-end"]) {
-            const input = this.querySelector(sel);
-            const old = input.value;
-            input.type = allDay ? "date" : "datetime-local";
-            if (!old) continue;
-            input.value = allDay
-                ? old.slice(0, 10)
-                : (old.length === 10 ? old + "T09:00" : old);
+            fb.format.setInputTime(this.querySelector(sel), !allDay);
         }
     }
 
@@ -868,20 +862,17 @@ class FbCalendarView extends HTMLElement {
         const hint = this.querySelector("#cv-hint");
         const title = this.querySelector("#cv-title").value.trim();
         const allDay = this.querySelector("#cv-allday").checked;
-        const startVal = this.querySelector("#cv-start").value;
-        const endVal = this.querySelector("#cv-end").value;
+        const startAt = fb.format.readInput(this.querySelector("#cv-start"));
+        let endAt = fb.format.readInput(this.querySelector("#cv-end"));
 
         if (!title) {
             hint.textContent = "Add a title to save";
             return null;
         }
-        if (!startVal) {
+        if (!startAt) {
             hint.textContent = "Start is required";
             return null;
         }
-        const startAt = allDay ? new Date(startVal + "T00:00") : new Date(startVal);
-        let endAt = null;
-        if (endVal) endAt = allDay ? new Date(endVal + "T00:00") : new Date(endVal);
         if (endAt && endAt < startAt) {
             hint.textContent = "End can't be before start";
             return null;
@@ -989,20 +980,8 @@ class FbCalendarView extends HTMLElement {
         }
     }
 
-    /** datetime-local expects "yyyy-MM-ddThh:mm" LOCAL; date expects "yyyy-MM-dd". */
-    _toInputValue(iso, dateOnly) {
-        const d = new Date(iso);
-        const pad = n => String(n).padStart(2, "0");
-        const date = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
-        return dateOnly ? date : `${date}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
-    }
-
     formatFullTimestamp(iso) {
-        if (!iso) return "";
-        const d = new Date(iso);
-        return d.toLocaleDateString(undefined, { year: "numeric", month: "long", day: "numeric" })
-             + " at "
-             + d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
+        return iso ? fb.format.dateTime(iso) : "";
     }
 }
 

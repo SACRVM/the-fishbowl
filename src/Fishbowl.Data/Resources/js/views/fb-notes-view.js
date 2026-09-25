@@ -263,10 +263,14 @@ class FbNotesView extends HTMLElement {
                 }
                 fb-notes-view .nv-search-hint[hidden] { display: none !important; }
 
+                /* One 12px gutter for the whole list pane: the search field,
+                   the header's buttons and the (highlighted) rows all end
+                   12px from the edge; the header label lines up with the
+                   rows' text (12px gutter + 12px row padding). */
                 fb-notes-view .nv-list-header {
                     display: flex;
                     align-items: center;
-                    padding: 12px 16px 6px;
+                    padding: 12px 12px 6px 24px;
                     gap: 2px;
                 }
                 fb-notes-view .nv-list-title {
@@ -289,13 +293,13 @@ class FbNotesView extends HTMLElement {
                 fb-notes-view .nv-items {
                     flex: 1;
                     overflow-y: auto;
-                    padding: 2px 8px 12px;
+                    padding: 2px 12px 12px;
                 }
 
                 fb-notes-view .nv-item {
                     position: relative;
                     padding: 10px 12px;
-                    border-radius: 10px;
+                    border-radius: var(--radius-m);
                     cursor: pointer;
                     margin-bottom: 2px;
                     border: 1px solid transparent;
@@ -311,16 +315,13 @@ class FbNotesView extends HTMLElement {
                     align-items: center;
                     gap: 6px;
                     margin-bottom: 4px;
-                    /* Reserve space so the absolute action row never collides with
-                       the title. Pin indicator alone is ~22px; on hover the full
-                       3-icon row needs more, but title already ellipsis-truncates. */
-                    padding-right: 22px;
+                    /* Always reserve the whole action row (3 × 22px + gaps), so
+                       the icons that fade in on hover never sit on the title —
+                       and the title doesn't re-truncate when they appear. */
+                    padding-right: 72px;
                 }
-                /* Touch shows the whole action row for good (no hover), so
-                   the title makes room for all three buttons. */
-                @media (hover: none) {
-                    fb-notes-view .nv-item-title-row { padding-right: 76px; }
-                }
+                /* A note awaiting review has a fourth button (approve). */
+                fb-notes-view .nv-item.pending .nv-item-title-row { padding-right: 96px; }
                 fb-notes-view .nv-item-title {
                     font-weight: 600;
                     font-size: 14px;
@@ -554,7 +555,7 @@ class FbNotesView extends HTMLElement {
                     align-items: center;
                     gap: 4px;
                     padding: 2px 8px;
-                    border-radius: 999px;
+                    border-radius: var(--radius-m);
                     background: var(--hover);
                     border: 1px solid var(--border);
                     color: var(--text-muted);
@@ -884,6 +885,7 @@ class FbNotesView extends HTMLElement {
                 "reveal-on-hover",
                 isSelected  ? "selected" : "",
                 n.archived  ? "archived" : "",
+                (n.tags || []).includes("review:pending") ? "pending" : "",
             ].filter(Boolean).join(" ");
             const tagLine = this._renderRowTagLine(n.tags);
             const isPending = (n.tags || []).includes("review:pending");
@@ -1297,18 +1299,16 @@ class FbNotesView extends HTMLElement {
         const yesterday = new Date(now); yesterday.setDate(now.getDate() - 1);
         const isYesterday = d.toDateString() === yesterday.toDateString();
         const sameYear = d.getFullYear() === now.getFullYear();
-        if (sameDay)     return d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
+        if (sameDay)     return fb.format.time(d);
         if (isYesterday) return "Yesterday";
-        if (sameYear)    return d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
-        return d.toLocaleDateString(undefined, { year: "2-digit", month: "numeric", day: "numeric" });
+        if (sameYear)    return fb.format.dayMonth(d);
+        return fb.format.date(d);
     }
 
     formatFullTimestamp(iso) {
         if (!iso) return "";
         const d = new Date(iso);
-        return d.toLocaleDateString(undefined, { year: "numeric", month: "long", day: "numeric" })
-             + " at "
-             + d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
+        return fb.format.dateTime(d);
     }
 }
 

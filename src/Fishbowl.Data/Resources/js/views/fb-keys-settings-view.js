@@ -58,7 +58,7 @@ class FbKeysSettingsView extends HTMLElement {
                 fb-keys-settings-view .panel {
                     background: var(--panel);
                     border: 1px solid var(--border);
-                    border-radius: 10px;
+                    border-radius: var(--radius-l);
                     padding: 20px;
                     margin-bottom: 28px;
                 }
@@ -83,7 +83,7 @@ class FbKeysSettingsView extends HTMLElement {
                     width: 100%;
                     background: rgba(0, 0, 0, 0.3);
                     border: 1px solid var(--border);
-                    border-radius: 8px;
+                    border-radius: var(--radius-m);
                     padding: 8px 12px;
                     color: var(--text);
                     font: inherit;
@@ -100,7 +100,7 @@ class FbKeysSettingsView extends HTMLElement {
                     padding: 10px 12px;
                     background: rgba(0, 0, 0, 0.2);
                     border: 1px solid var(--border);
-                    border-radius: 8px;
+                    border-radius: var(--radius-m);
                 }
                 fb-keys-settings-view .scopes label {
                     display: flex;
@@ -117,7 +117,7 @@ class FbKeysSettingsView extends HTMLElement {
                 fb-keys-settings-view .primary-btn {
                     background: var(--accent);
                     border: none;
-                    border-radius: 8px;
+                    border-radius: var(--radius-m);
                     color: #fff;
                     padding: 8px 18px;
                     font: inherit;
@@ -135,7 +135,7 @@ class FbKeysSettingsView extends HTMLElement {
                     padding: 14px 16px;
                     background: var(--panel);
                     border: 1px solid var(--border);
-                    border-radius: 10px;
+                    border-radius: var(--radius-l);
                     margin-bottom: 8px;
                 }
                 fb-keys-settings-view .key-row sac-icon { --icon-size: 18px; color: var(--accent); flex-shrink: 0; }
@@ -157,17 +157,16 @@ class FbKeysSettingsView extends HTMLElement {
                 fb-keys-settings-view .key-facts { column-gap: 20px; }
                 fb-keys-settings-view .key-prefix {
                     font-family: 'SFMono-Regular', Consolas, monospace;
-                    font-size: 12px;
                     color: var(--text);
                     background: rgba(0, 0, 0, 0.3);
                     padding: 1px 6px;
-                    border-radius: 4px;
+                    border-radius: var(--radius-m);
                 }
                 fb-keys-settings-view .key-scope {
                     font-family: 'SFMono-Regular', Consolas, monospace;
                     font-size: 11px;
                     padding: 1px 6px;
-                    border-radius: 999px;
+                    border-radius: var(--radius-m);
                     background: rgba(59, 130, 246, 0.15);
                     color: var(--accent);
                 }
@@ -177,7 +176,7 @@ class FbKeysSettingsView extends HTMLElement {
                     color: var(--text-muted);
                     cursor: pointer;
                     padding: 6px 8px;
-                    border-radius: 6px;
+                    border-radius: var(--radius-m);
                     transition: color 100ms, background 100ms;
                 }
                 fb-keys-settings-view .revoke-btn sac-icon { --icon-size: 16px; }
@@ -237,7 +236,7 @@ class FbKeysSettingsView extends HTMLElement {
                     font-size: 13px;
                     background: color-mix(in srgb, var(--bg) 60%, transparent);
                     border: 1px solid var(--border);
-                    border-radius: 8px;
+                    border-radius: var(--radius-l);
                     padding: 12px 14px;
                     color: var(--text);
                     word-break: break-all;

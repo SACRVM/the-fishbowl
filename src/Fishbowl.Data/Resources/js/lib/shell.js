@@ -48,6 +48,40 @@
     }
     window.addEventListener("hashchange", syncTitle);
 
+    // --- Accent colours -----------------------------------------------------
+    // Both are kit palette slot names ("teal"…) or null for the kit default.
+    // The personal accent is --accent. Inside a space that has a colour,
+    // the space's colour takes over the whole UI: --accent and --accent-warm
+    // (the switcher pill / shared-data tint) both become it, so you see at
+    // a glance whose data you are in. Set inline on :root, so every derived
+    // token (--accent-tint, --accent-fill…) follows. The personal accent is
+    // remembered per browser so the first paint doesn't flash the default.
+    const ACCENT_KEY = "fb.accent";
+    const isSlot = (v) => typeof v === "string" && fb.tags.SLOTS.includes(v);
+    const paletteVar = (slot) => `var(--palette-${slot})`;
+    let personalAccent = null;
+    try { const v = localStorage.getItem(ACCENT_KEY); if (isSlot(v)) personalAccent = v; } catch { /* storage blocked */ }
+
+    function applyAccents() {
+        const root = document.documentElement.style;
+        const ctx = sac.scope.get();
+        const spaceColor = ctx.type === "scoped" ? spaces?.find(s => s.slug === ctx.slug)?.color : null;
+        const accent = isSlot(spaceColor) ? spaceColor : personalAccent;
+        if (accent) root.setProperty("--accent", paletteVar(accent));
+        else root.removeProperty("--accent");
+        if (isSlot(spaceColor)) root.setProperty("--accent-warm", paletteVar(spaceColor));
+        else root.removeProperty("--accent-warm");
+    }
+
+    function setPersonalAccent(slot) {
+        personalAccent = isSlot(slot) ? slot : null;
+        try {
+            if (personalAccent) localStorage.setItem(ACCENT_KEY, personalAccent);
+            else localStorage.removeItem(ACCENT_KEY);
+        } catch { /* storage blocked */ }
+        applyAccents();
+    }
+
     // --- Workspace switcher -------------------------------------------------
     // The kit menu in the nav's `context` slot (it survives toolbar repaints).
     // The pill names the active workspace and turns --accent-warm inside a
@@ -68,11 +102,14 @@
         pill.querySelector("sac-icon").setAttribute("name", inSpace ? "users" : "user");
         pill.querySelector(".fb-context-label").textContent = inSpace ? (space?.name || ctx.slug) : "Personal";
 
-        const item = (action, icon, label, active) => {
+        const item = (action, icon, label, active, color) => {
             const b = document.createElement("button");
             b.dataset.action = action;
             b.innerHTML = `<sac-icon name="${icon}"></sac-icon><span></span>`;
             b.querySelector("span").textContent = label;
+            // The menu forces the item's colour, not its icon's: a space's
+            // own colour shows on its icon.
+            if (color) b.querySelector("sac-icon").style.color = paletteVar(color);
             if (active) {
                 b.setAttribute("aria-current", "true");
                 b.insertAdjacentHTML("beforeend", `<sac-icon class="fb-context-check" name="check"></sac-icon>`);
@@ -81,7 +118,7 @@
         };
         const nodes = [item("ctx:user", "user", "Personal", !inSpace), document.createElement("hr")];
         if (spaces?.length) {
-            for (const s of spaces) nodes.push(item(`ctx:space:${s.slug}`, "users", s.name || s.slug, inSpace && s.slug === ctx.slug));
+            for (const s of spaces) nodes.push(item(`ctx:space:${s.slug}`, "users", s.name || s.slug, inSpace && s.slug === ctx.slug, s.color));
         } else if (spaces) {
             const empty = document.createElement("span");
             empty.className = "fb-context-empty";
@@ -92,6 +129,7 @@
 
         for (const el of [...switcher.children]) if (el.getAttribute("slot") !== "trigger") el.remove();
         switcher.append(...nodes);
+        applyAccents();
     }
 
     switcher?.addEventListener("sac:select", (e) => {
@@ -126,6 +164,8 @@
 
     fb.api.me.get().then((me) => {
         user = me;
+        setPersonalAccent(me.accent);
+        applyDateFormat(me.dateFormat);
         const display = me.name || me.email || "User";
         avatar.setAttribute("name", display);
         if (me.avatarUrl) avatar.setAttribute("src", me.avatarUrl);
@@ -187,9 +227,7 @@
             win.setAttribute("controls", "close");
             document.body.appendChild(win);
         }
-        const joined = user?.createdAt
-            ? new Date(user.createdAt).toLocaleDateString(undefined, { year: "numeric", month: "long", day: "numeric" })
-            : "—";
+        const joined = user?.createdAt ? fb.format.date(user.createdAt) : "—";
         win.innerHTML = `
             <div class="fb-profile">
                 <sac-avatar style="--avatar-size: 72px"></sac-avatar>
@@ -199,7 +237,46 @@
                     <div><dt>Joined</dt><dd>${joined}</dd></div>
                     <div><dt>User ID</dt><dd class="fb-profile-id"></dd></div>
                 </dl>
+                <div class="fb-profile-accent">
+                    <div class="fb-profile-label">Accent colour</div>
+                    <sac-swatch-grid selectable columns="11"></sac-swatch-grid>
+                </div>
+                <div class="fb-profile-accent">
+                    <label class="fb-profile-label" for="fb-date-format">Date &amp; time format</label>
+                    <select id="fb-date-format" class="fb-profile-select">
+                        ${fb.format.NAMES.map((n) => `<option value="${n}"${n === fb.format.name ? " selected" : ""}>${fb.format.example(n)}</option>`).join("")}
+                    </select>
+                </div>
             </div>`;
+        win.querySelector("#fb-date-format").addEventListener("change", async (e) => {
+            const before = fb.format.name;
+            applyDateFormat(e.target.value);
+            try {
+                await fb.api.me.update({ dateFormat: fb.format.name });
+                if (user) user.dateFormat = fb.format.name;
+            } catch (err) {
+                console.warn("[fb-shell] date format save failed:", err?.message || err);
+                applyDateFormat(before);
+                e.target.value = before;
+                window.sac?.toast?.("Couldn't save the date format.", { kind: "error" });
+            }
+        });
+        const grid = win.querySelector("sac-swatch-grid");
+        grid.colors = accentSwatches(personalAccent);
+        grid.addEventListener("sac:change", async (e) => {
+            const slot = swatchSlot(e.detail.value);
+            const before = personalAccent;
+            setPersonalAccent(slot);
+            try {
+                await fb.api.me.update({ accent: slot });
+                if (user) user.accent = slot;
+            } catch (err) {
+                console.warn("[fb-shell] accent save failed:", err?.message || err);
+                setPersonalAccent(before);
+                grid.colors = accentSwatches(before);
+                window.sac?.toast?.("Couldn't save the accent colour.", { kind: "error" });
+            }
+        });
         // User-sourced strings go in via textContent / attributes only.
         const pic = win.querySelector("sac-avatar");
         pic.setAttribute("name", user?.name || user?.email || "");
@@ -209,6 +286,34 @@
         win.querySelector(".fb-profile-id").textContent    = (user?.id || "").slice(0, 8) + "…";
         requestAnimationFrame(() => win.open());
     }
+
+    // Date & time format: fb.format does the formatting; the setting lives on
+    // the user. A change repaints the current view (a fresh element, as a
+    // navigation would) so every date on screen follows.
+    function applyDateFormat(next) {
+        const before = fb.format.name;
+        fb.format.set(next);
+        if (fb.format.name !== before) remountView();
+    }
+    function remountView() {
+        const root = document.getElementById("app-root");
+        const view = root?.firstElementChild;
+        if (view) root.replaceChildren(document.createElement(view.localName));
+    }
+
+    // Swatches for a palette-slot picker: "Default" (no colour) plus every
+    // kit palette slot. Shared with the spaces settings via fb.accents.
+    function accentSwatches(selected) {
+        return [
+            { value: "transparent", label: "Default", selected: !selected },
+            ...fb.tags.SLOTS.map((slot) => ({ value: paletteVar(slot), label: slot, selected: slot === selected })),
+        ];
+    }
+    function swatchSlot(value) {
+        const m = /^var\(--palette-([a-z]+)\)$/.exec(value || "");
+        return m && isSlot(m[1]) ? m[1] : null;
+    }
+    fb.accents = { swatches: accentSwatches, slotOf: swatchSlot, cssVar: paletteVar };
 
     async function logout() {
         try {

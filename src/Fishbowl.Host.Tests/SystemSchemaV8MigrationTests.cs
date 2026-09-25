@@ -205,14 +205,14 @@ public class SystemSchemaV8MigrationTests : IDisposable
     }
 
     [Fact]
-    public async Task V8_BumpsVersionTo8()
+    public async Task V8_BumpsVersionToHead()
     {
         SeedV7Db();
         var factory = new DatabaseFactory(_dataDir);
         using var db = factory.CreateSystemConnection();
 
         var version = await db.ExecuteScalarAsync<long>("PRAGMA user_version");
-        Assert.Equal(8, version);
+        Assert.Equal(9, version); // head; v9 runs on top of v8
     }
 
     [Fact]
@@ -247,7 +247,7 @@ public class SystemSchemaV8MigrationTests : IDisposable
         Assert.DoesNotContain("team_members", tables);
 
         var version = await db.ExecuteScalarAsync<long>("PRAGMA user_version");
-        Assert.Equal(8, version);
+        Assert.Equal(9, version); // head; v9 runs on top of v8
     }
 
     public void Dispose()

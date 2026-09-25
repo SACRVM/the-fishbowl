@@ -24,4 +24,8 @@ public interface ISpaceRepository
     // or the space doesn't exist. Leaves the .db file in place — callers can
     // keep the data for recovery or delete it themselves.
     Task<bool> DeleteAsync(string spaceId, string actingUserId, CancellationToken ct = default);
+
+    // Owner-only. `color` is a TagPalette slot or null (default). Returns
+    // false if the user isn't the owner. Callers validate the slot.
+    Task<bool> SetColorAsync(string spaceId, string actingUserId, string? color, CancellationToken ct = default);
 }

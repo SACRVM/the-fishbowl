@@ -381,6 +381,14 @@ public class DatabaseFactory
             ApplyUserV7(connection);
             connection.Execute("PRAGMA user_version = 7");
             _logger.LogInformation("Applied user schema v7 to {DbPath}", ((SqliteConnection)connection).DataSource);
+            version = 7;
+        }
+
+        if (version < 8)
+        {
+            ApplyUserV8(connection);
+            connection.Execute("PRAGMA user_version = 8");
+            _logger.LogInformation("Applied user schema v8 to {DbPath}", ((SqliteConnection)connection).DataSource);
         }
     }
 
@@ -449,6 +457,14 @@ public class DatabaseFactory
             ApplySystemV8(connection);
             connection.Execute("PRAGMA user_version = 8");
             _logger.LogInformation("Applied system schema v8");
+            version = 8;
+        }
+
+        if (version < 9)
+        {
+            ApplySystemV9(connection);
+            connection.Execute("PRAGMA user_version = 9");
+            _logger.LogInformation("Applied system schema v9");
         }
     }
 
@@ -1125,6 +1141,57 @@ public class DatabaseFactory
                 "CREATE INDEX IF NOT EXISTS idx_api_keys_prefix ON api_keys(key_prefix) WHERE revoked_at IS NULL",
                 transaction: transaction);
 
+            transaction.Commit();
+        }
+        catch
+        {
+            transaction.Rollback();
+            throw;
+        }
+    }
+
+    // V9: per-user and per-space display settings — a space's colour (shown
+    // while you are in it), a user's personal accent (TagPalette slot names,
+    // NULL = kit default) and a user's date & time format (DateFormats name,
+    // NULL = ISO).
+    private void ApplySystemV9(IDbConnection connection)
+    {
+        using var transaction = connection.BeginTransaction();
+        try
+        {
+            connection.Execute("ALTER TABLE spaces ADD COLUMN color TEXT;", transaction: transaction);
+            connection.Execute("ALTER TABLE users ADD COLUMN accent TEXT;", transaction: transaction);
+            connection.Execute("ALTER TABLE users ADD COLUMN date_format TEXT;", transaction: transaction);
+            transaction.Commit();
+        }
+        catch
+        {
+            transaction.Rollback();
+            throw;
+        }
+    }
+
+    // User V8: todos.position — the user's own order (drag to reorder in the
+    // todo list). REAL, so a move writes one row: the midpoint of its new
+    // neighbours. Existing todos are numbered in creation order.
+    private void ApplyUserV8(IDbConnection connection)
+    {
+        using var transaction = connection.BeginTransaction();
+        try
+        {
+            // A stub DB that only carries a version (migration fixtures) has
+            // no todos table; there is nothing to number then.
+            var hasTodos = connection.ExecuteScalar<long>(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'todos'",
+                transaction: transaction) > 0;
+            if (!hasTodos) { transaction.Commit(); return; }
+            connection.Execute("ALTER TABLE todos ADD COLUMN position REAL;", transaction: transaction);
+            connection.Execute(@"
+                UPDATE todos SET position = (
+                    SELECT COUNT(*) FROM todos t2
+                    WHERE t2.created_at < todos.created_at
+                       OR (t2.created_at = todos.created_at AND t2.id <= todos.id));",
+                transaction: transaction);
             transaction.Commit();
         }
         catch

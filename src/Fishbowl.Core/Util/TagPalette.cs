@@ -10,6 +10,10 @@ public static class TagPalette
         "pink", "yellow", "teal", "gray", "indigo",
     };
 
+    // The kit's --palette-* names double as the accent choices for spaces
+    // and a user's personal accent.
+    public static bool IsSlot(string? name) => name is not null && Array.IndexOf(Slots, name) >= 0;
+
     public static string DefaultFor(string name)
     {
         // 32-bit FNV-1a. Mirrored byte-for-byte in tags-registry.js so a tag's

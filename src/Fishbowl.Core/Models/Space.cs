@@ -11,4 +11,5 @@ public class Space
     public string Name { get; set; } = string.Empty;       // human-readable display name
     public string CreatedBy { get; set; } = string.Empty;  // user_id of owner at creation
     public DateTime CreatedAt { get; set; }
+    public string? Color { get; set; }                     // TagPalette slot, null = default
 }

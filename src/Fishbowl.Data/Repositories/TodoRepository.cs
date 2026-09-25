@@ -37,7 +37,7 @@ public class TodoRepository : ITodoRepository
         {
             sql += " WHERE completed_at IS NULL";
         }
-        sql += " ORDER BY created_at DESC";
+        sql += " ORDER BY position, created_at, id";
 
         return await db.QueryAsync<TodoItem>(new CommandDefinition(sql, cancellationToken: ct));
     }
@@ -58,9 +58,12 @@ public class TodoRepository : ITodoRepository
         item.CreatedBy = actorUserId;
 
         using var db = _dbFactory.CreateContextConnection(ctx);
+        // No position given: append after the last todo.
+        item.Position ??= await db.ExecuteScalarAsync<double>(new CommandDefinition(
+            "SELECT COALESCE(MAX(position), 0) + 1 FROM todos", cancellationToken: ct));
         await db.ExecuteAsync(new CommandDefinition(@"
-            INSERT INTO todos (id, title, description, due_at, reminder_at, source, created_by, created_at, updated_at, completed_at)
-            VALUES (@Id, @Title, @Description, @DueAt, @ReminderAt, @Source, @CreatedBy, @CreatedAt, @UpdatedAt, @CompletedAt)",
+            INSERT INTO todos (id, title, description, due_at, reminder_at, source, created_by, created_at, updated_at, completed_at, position)
+            VALUES (@Id, @Title, @Description, @DueAt, @ReminderAt, @Source, @CreatedBy, @CreatedAt, @UpdatedAt, @CompletedAt, @Position)",
             new
             {
                 item.Id,
@@ -72,7 +75,8 @@ public class TodoRepository : ITodoRepository
                 item.CreatedBy,
                 CreatedAt = item.CreatedAt.ToString("o"),
                 UpdatedAt = item.UpdatedAt.ToString("o"),
-                CompletedAt = item.CompletedAt?.ToString("o")
+                CompletedAt = item.CompletedAt?.ToString("o"),
+                item.Position,
             }, cancellationToken: ct));
 
         return item.Id;
@@ -92,7 +96,8 @@ public class TodoRepository : ITodoRepository
                 reminder_at = @ReminderAt,
                 source = @Source,
                 updated_at = @UpdatedAt,
-                completed_at = @CompletedAt
+                completed_at = @CompletedAt,
+                position = COALESCE(@Position, position)
             WHERE id = @Id",
             new
             {
@@ -103,6 +108,7 @@ public class TodoRepository : ITodoRepository
                 item.Source,
                 UpdatedAt = item.UpdatedAt.ToString("o"),
                 CompletedAt = item.CompletedAt?.ToString("o"),
+                item.Position,
                 item.Id
             }, cancellationToken: ct));
 

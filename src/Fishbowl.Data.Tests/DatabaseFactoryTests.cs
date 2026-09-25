@@ -67,7 +67,7 @@ public class DatabaseFactoryTests : IDisposable
         Assert.Contains("must_change_password", userColumns);
 
         var version = connection.ExecuteScalar<long>("PRAGMA user_version");
-        Assert.Equal(8, version);
+        Assert.Equal(9, version);
     }
 
     [Fact]
@@ -102,7 +102,7 @@ public class DatabaseFactoryTests : IDisposable
 
         // Assert
         var version = connection.ExecuteScalar<int>("PRAGMA user_version");
-        Assert.Equal(7, version);
+        Assert.Equal(8, version);
     }
 
     [Fact]
