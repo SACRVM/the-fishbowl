@@ -53,7 +53,11 @@ public class ResourceProvider : IResourceProvider
         if (resource != null)
         {
             _logger.LogDebug("Resource {Path} served from {Source}", resource.Path, resource.Source);
-            if (!bypassCache) _cache.Set(path, resource);
+            // Disk hits stay uncached: the disk tier is the "file wins" overlay,
+            // and an eternal cache entry would pin the first-served content until
+            // a restart — edits to an overlay file must show on the next request.
+            if (!bypassCache && resource.Source == ResourceSource.Embedded)
+                _cache.Set(path, resource);
         }
 
         return resource;
