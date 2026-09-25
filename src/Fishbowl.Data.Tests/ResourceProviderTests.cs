@@ -46,9 +46,11 @@ public class ResourceProviderTests : IDisposable
     }
 
     [Fact]
-    public async Task GetAsync_CachesResourceAfterFirstRead_Test()
+    public async Task GetAsync_DiskResource_IsNotCached_Test()
     {
-        // Arrange
+        // "Disk file wins" includes edits: the overlay tier must serve the
+        // current file content on every request, not the first-served copy.
+        // Only embedded resources (immutable per process) go into the cache.
         var testPath = "cache_test.txt";
         var initialContent = "Initial Content";
         var filePath = Path.Combine(_tempModsDir, testPath);
@@ -56,38 +58,39 @@ public class ResourceProviderTests : IDisposable
 
         var provider = new ResourceProvider(_cache, _tempModsDir);
 
-        // Act 1: First read (should hit disk)
+        // Act 1: First read (hits disk)
         var firstResource = await provider.GetAsync(testPath, TestContext.Current.CancellationToken);
         Assert.Equal(initialContent, Encoding.UTF8.GetString(firstResource!.Data));
 
         // Act 2: Modify disk
         File.WriteAllText(filePath, "Modified Content");
 
-        // Act 3: Read again (should hit cache)
+        // Act 3: Read again (must see the modified file, not a cached copy)
         var secondResource = await provider.GetAsync(testPath, TestContext.Current.CancellationToken);
 
         // Assert
-        Assert.Equal(initialContent, Encoding.UTF8.GetString(secondResource!.Data));
+        Assert.Equal("Modified Content", Encoding.UTF8.GetString(secondResource!.Data));
         Assert.Equal(ResourceSource.Disk, secondResource.Source);
     }
 
     [Fact]
-    public async Task ExistsAsync_UsesCache_Test()
+    public async Task ExistsAsync_DiskResourceDeleted_ReflectsDeletion_Test()
     {
-        // Arrange
+        // Companion to the no-disk-caching rule above: a deleted overlay file
+        // stops existing immediately instead of lingering in the cache.
         var testPath = "exists_cache_test.txt";
         var filePath = Path.Combine(_tempModsDir, testPath);
         File.WriteAllText(filePath, "exists");
 
         var provider = new ResourceProvider(_cache, _tempModsDir);
-        await provider.GetAsync(testPath, TestContext.Current.CancellationToken); // Cache it
+        await provider.GetAsync(testPath, TestContext.Current.CancellationToken);
 
         // Act
-        File.Delete(filePath); // Delete from disk
+        File.Delete(filePath);
         var exists = await provider.ExistsAsync(testPath, TestContext.Current.CancellationToken);
 
         // Assert
-        Assert.True(exists, "Should return true even if deleted from disk, because it is cached.");
+        Assert.False(exists, "A deleted overlay file must not survive via the cache.");
     }
 
     [Fact]
