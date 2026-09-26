@@ -23,17 +23,46 @@
  * Attributes:
  *   storage — suffix of the localStorage key `sac.launcher.<storage>` holding
  *             { v: 1, order: [ids], hidden: [ids], custom: [manifests] }.
- *             Without the attribute: pure render of the registry — no
- *             persistence, no edit mode. Persisted ids that no longer exist
+ *             Without it (and without persist="none"): pure render of
+ *             the registry — no persistence, no edit mode. Persisted ids
+ *             that no longer exist
  *             are ignored and only dropped from storage the next time the
  *             user changes something. `custom` manifests are (re)registered
  *             into sac.apps on connect — they are the user-added apps.
+ *   persist — "local" (default): the `storage` key above. "none": the HOST
+ *             owns persistence — localStorage is never read or written; the
+ *             host feeds `launcher.layout` and saves what `sac:layout`
+ *             reports. Edit mode, drag, hide and menus all keep working
+ *             (with or without `storage`).
+ *   readonly — presence = view only: the arrangement renders (hidden tiles
+ *             stay hidden, sizes and colors apply) but there is no Edit
+ *             button, no drag and no move/hide/remove controls. Tile menus
+ *             and launching still work.
  *   edit    — presence = edit mode. Toggled by the Edit button; settable by
- *             hand. Ignored (removed) when there is no `storage`.
+ *             hand. Ignored (removed) unless editable: `storage` or
+ *             persist="none", and not `readonly`.
  *   drag    — drag reorder: absent = in edit mode only (the default),
  *             "always" = also outside edit mode, "none" = buttons only.
- *             Needs `storage` and sac.sortable (kit/js/lib/sortable.js);
- *             without the helper the move buttons are the only path.
+ *             Needs an editable launcher (see `edit`) and sac.sortable
+ *             (kit/js/lib/sortable.js); without the helper the move buttons
+ *             are the only path.
+ *
+ * Property:
+ *   layout — the user layer as one plain object, in and out:
+ *             { order: [keys], hidden: [keys],
+ *               sizes: { key: "medium" | "wide" | "large" },
+ *               colors: { key: palette slot }, custom: [manifests] }.
+ *             `sizes` overrides a tile's footprint, `colors` its accent with
+ *             a data-palette slot name ("blue", "teal", … — ui.css
+ *             --palette-<slot>), stored as the NAME so a re-theme never
+ *             rewrites saved layouts. Unknown sizes/slots are ignored.
+ *             Setting it replaces the whole layer (a missing field = empty),
+ *             re-syncs the grid in the same task (no flash), swaps the
+ *             custom apps in sac.apps, never writes localStorage and never
+ *             fires sac:layout. May be set before the element connects —
+ *             it then wins over the stored layout. Keys not (yet)
+ *             registered are kept until the next user change. The getter
+ *             returns a copy.
  *
  * Methods:
  *   refresh() — re-read sac.apps.list() and re-sync the grid in place. The
@@ -75,9 +104,12 @@
  * { key, appId, action, launcher }; `appId` is null for a link tile.
  *
  * Events:
- *   sac:layout — detail { order, hidden, customCount } after every
- *                         user change (move / drag / hide / show / add /
- *                         remove). Bubbles + composed.
+ *   sac:layout — detail { order, hidden, customCount, layout } after
+ *                         every user change (move / drag / hide / show /
+ *                         add / remove). `layout` is the full object the
+ *                         `layout` property takes — save it as is;
+ *                         `order` is the effective order (every tile).
+ *                         Bubbles + composed.
  *   sac:tile-action — detail { key, appId, action } when a tile-menu item
  *                         is chosen (action = the item's id, else its
  *                         index). Bubbles + composed; fires after onClick.
@@ -137,11 +169,11 @@
         (window.sac && window.sac.t) ? window.sac.t(key, fallback) : fallback;
 
 class SacLauncher extends HTMLElement {
-    static get observedAttributes() { return ["storage", "edit", "drag"]; }
+    static get observedAttributes() { return ["storage", "persist", "readonly", "edit", "drag"]; }
 
     constructor() {
         super();
-        this._state = { order: [], hidden: [], custom: [] }; // persisted layer
+        this._state = SacLauncher._emptyLayout(); // the user layer (`layout`)
         this._order = [];        // effective full order (known ids only)
         this._tiles = new Map(); // id → cell element
         this._links = [];        // setLinks() — plain link tiles
@@ -159,6 +191,13 @@ class SacLauncher extends HTMLElement {
     }
 
     connectedCallback() {
+        // A `layout` assigned before the element upgraded sits on the
+        // instance and shadows the accessor — replay it through the setter.
+        if (Object.prototype.hasOwnProperty.call(this, "layout")) {
+            const pending = this.layout;
+            delete this.layout;
+            this.layout = pending;
+        }
         if (!this._grid) this._build();
         // Host pages typically register their apps in a DOMContentLoaded
         // handler — i.e. AFTER this component (a deferred script) upgraded.
@@ -169,7 +208,8 @@ class SacLauncher extends HTMLElement {
         if (document.readyState !== "complete") {
             document.addEventListener("DOMContentLoaded", this._onReady);
         }
-        this._loadState();
+        // A host-assigned layout wins over the stored one.
+        if (!this._hostLayout) this._loadState();
         this._sync();
         this._syncEditUI();
         if (window.sac && sac.lang && !this._offLang) this._offLang = sac.lang.onChange(() => this._relabel());
@@ -204,11 +244,11 @@ class SacLauncher extends HTMLElement {
 
     attributeChangedCallback(name, oldV, newV) {
         if (!this._grid || oldV === newV) return;
-        if (name === "storage") {
+        if (name === "storage" || name === "persist") {
             this._loadState();
             this._sync();
             this._syncEditUI();
-        } else if (name === "edit" || name === "drag") {
+        } else if (name === "edit" || name === "drag" || name === "readonly") {
             this._syncEditUI();
         }
     }
@@ -249,6 +289,22 @@ class SacLauncher extends HTMLElement {
 
     get links() { return this._links.map(l => Object.assign({}, l)); }
     set links(list) { this.setLinks(list); }
+
+    /** The user layer as one object (see header). */
+    get layout() { return SacLauncher._copyLayout(this._state); }
+    set layout(value) {
+        const next = SacLauncher._normLayout(value);
+        this._hostLayout = true;
+        // Custom apps follow the layer: the previous layer's leave sac.apps,
+        // the new layer's (re)register — a workspace switch never leaks them.
+        if (window.sac && sac.apps) {
+            const keep = new Set(next.custom.map(m => m.id));
+            this._state.custom.forEach((m) => { if (!keep.has(m.id)) sac.apps.remove(m.id); });
+            next.custom.forEach(m => sac.apps.register(Object.assign({}, m)));
+        }
+        this._state = next;
+        if (this._grid) { this._sync(); this._syncEditUI(); }
+    }
 
     /** Repaint one tile's badge — nothing else (see header). */
     setBadge(key, value) {
@@ -330,10 +386,19 @@ class SacLauncher extends HTMLElement {
         return s ? `sac.launcher.${s}` : null;
     }
 
-    _canEdit() { return this._storageKey() !== null; }
+    /** persist="none": the host owns the layout — no localStorage at all. */
+    _hostOwned() { return this.getAttribute("persist") === "none"; }
+
+    /** Edit mode, drag and the Edit button: someone must own the layout
+     *  (a storage key or the host), and the viewer may change it. */
+    _canEdit() {
+        if (this.hasAttribute("readonly")) return false;
+        return this._hostOwned() || this._storageKey() !== null;
+    }
 
     _loadState() {
-        this._state = { order: [], hidden: [], custom: [] };
+        if (this._hostOwned()) return; // the host's layer stays as it is
+        this._state = SacLauncher._emptyLayout();
         const key = this._storageKey();
         if (!key) return;
         try {
@@ -348,6 +413,9 @@ class SacLauncher extends HTMLElement {
                     if (Array.isArray(data.custom))
                         this._state.custom = data.custom.filter(m =>
                             m && typeof m === "object" && typeof m.id === "string");
+                    const norm = SacLauncher._normLayout(data);
+                    this._state.sizes = norm.sizes;
+                    this._state.colors = norm.colors;
                 }
             }
         } catch (err) {
@@ -360,24 +428,38 @@ class SacLauncher extends HTMLElement {
         }
     }
 
+    /**
+     * Stale keys (apps/tiles no longer registered) drop out here — on a user
+     * change, never proactively on load. Filter against the ENTRY keys, not
+     * app ids: a multi-tile app stores composite "appId::tileId" keys, and
+     * matching those against ids alone discards every multi-tile
+     * customization on save.
+     */
+    _prune() {
+        const known = new Set(this._allEntries().map(e => e.key));
+        const st = this._state;
+        st.order = this._order.filter(id => known.has(id));
+        st.hidden = st.hidden.filter(id => known.has(id));
+        const keepKnown = (map) => {
+            const out = {};
+            Object.keys(map).forEach((k) => { if (known.has(k)) out[k] = map[k]; });
+            return out;
+        };
+        st.sizes = keepKnown(st.sizes);
+        st.colors = keepKnown(st.colors);
+    }
+
     _persist() {
+        if (this._hostOwned()) return;
         const key = this._storageKey();
         if (!key) return;
-        // Stale keys (apps/tiles no longer registered) drop out here — on a
-        // user change, never proactively on load. Filter against the ENTRY
-        // keys, not app ids: a multi-tile app stores composite "appId::tileId"
-        // keys, and matching those against ids alone discards every multi-tile
-        // customization on save.
-        const known = new Set(this._allEntries().map(e => e.key));
-        this._state.order = this._order.filter(id => known.has(id));
-        this._state.hidden = this._state.hidden.filter(id => known.has(id));
+        const st = this._state;
+        const data = { v: 1, order: st.order, hidden: st.hidden, custom: st.custom };
+        // Only when used — a layout without them stays byte-identical to 2.17.
+        if (Object.keys(st.sizes).length) data.sizes = st.sizes;
+        if (Object.keys(st.colors).length) data.colors = st.colors;
         try {
-            localStorage.setItem(key, JSON.stringify({
-                v: 1,
-                order: this._state.order,
-                hidden: this._state.hidden,
-                custom: this._state.custom,
-            }));
+            localStorage.setItem(key, JSON.stringify(data));
         } catch (err) {
             console.warn(`[sac-launcher] could not write ${key}:`, err);
         }
@@ -543,9 +625,14 @@ class SacLauncher extends HTMLElement {
                 // view app, its params for a window app, its accent for both.
                 // The runtime reports load failures itself (console + toast).
                 const t2 = cell._entry;
+                // A palette-slot color rides in resolved: the app (or an
+                // isolated frame) gets a plain color, not a var() reference.
+                const accent = cell._slot
+                    ? (getComputedStyle(cell._tile).getPropertyValue("--accent").trim() || t2.accent)
+                    : t2.accent;
                 if (window.sac && sac.apps) {
                     sac.apps.open(t2.appId, t2.params,
-                        { route: t2.route, accent: t2.accent }).catch(() => {});
+                        { route: t2.route, accent }).catch(() => {});
                 }
             }
         });
@@ -607,16 +694,22 @@ class SacLauncher extends HTMLElement {
         cell.classList.toggle("custom-app", f.custom);
 
         // The tile's accent seed: icon color, hover ring and glow follow —
-        // and the same color rides into the app when opened through it.
-        if (entry.accent) cell._tile.style.setProperty("--accent", entry.accent);
+        // and the same color rides into the app when opened through it. A
+        // layout color (a palette slot) wins over the entry's own accent.
+        const slot = this._state.colors[entry.key];
+        cell._slot = slot || null;
+        const accent = slot ? `var(--palette-${slot})` : entry.accent;
+        if (accent) cell._tile.style.setProperty("--accent", accent);
         else cell._tile.style.removeProperty("--accent");
 
         this._paintBadge(cell);
         this._paintMenu(cell);
 
-        // Manifest-declared footprint; unknown values fall back to medium.
-        cell.classList.toggle("size-wide", entry.tile === "wide");
-        cell.classList.toggle("size-large", entry.tile === "large");
+        // Footprint: the layout's size wins over the entry's `tile`; unknown
+        // values fall back to medium.
+        const size = this._state.sizes[entry.key] || entry.tile;
+        cell.classList.toggle("size-wide", size === "wide");
+        cell.classList.toggle("size-large", size === "large");
 
         cell._left.disabled = f.first;
         cell._right.disabled = f.last;
@@ -746,7 +839,7 @@ class SacLauncher extends HTMLElement {
 
     _syncEditUI() {
         if (this.hasAttribute("edit") && !this._canEdit()) {
-            this.removeAttribute("edit"); // no storage → no edit mode
+            this.removeAttribute("edit"); // nobody owns the layout, or readonly
             return;
         }
         const editing = this.hasAttribute("edit");
@@ -859,12 +952,15 @@ class SacLauncher extends HTMLElement {
         this._state.custom.splice(i, 1);
         this._state.hidden = this._state.hidden.filter(x => x !== id);
         this._state.order = this._state.order.filter(x => x !== id);
+        delete this._state.sizes[id];
+        delete this._state.colors[id];
         if (window.sac && sac.apps) sac.apps.remove(id);
         this._afterChange();
     }
 
     _afterChange() {
         this._sync();
+        this._prune();
         this._persist();
         this.dispatchEvent(new CustomEvent("sac:layout", {
             bubbles: true,
@@ -873,6 +969,7 @@ class SacLauncher extends HTMLElement {
                 order: this._order.slice(),
                 hidden: this._state.hidden.slice(),
                 customCount: this._state.custom.length,
+                layout: this.layout,
             },
         }));
     }
@@ -1397,6 +1494,44 @@ class SacLauncher extends HTMLElement {
     }
 }
 SacLauncher._instances = 0;
+/** Layout sizes and palette slots (ui.css --palette-<slot>) `layout` accepts. */
+SacLauncher.SIZES = ["medium", "wide", "large"];
+SacLauncher.PALETTE = ["blue", "orange", "red", "green", "purple", "pink", "yellow", "teal", "gray", "indigo"];
+SacLauncher._emptyLayout = () => ({ order: [], hidden: [], sizes: {}, colors: {}, custom: [] });
+/** Any value → a clean layout: string keys, deduped lists, known sizes and
+ *  slots only, custom manifests with a string id (shallow copies). */
+SacLauncher._normLayout = (v) => {
+    const out = SacLauncher._emptyLayout();
+    if (!v || typeof v !== "object") return out;
+    const keys = (a) => Array.isArray(a)
+        ? Array.from(new Set(a.filter(x => typeof x === "string" && x))) : [];
+    const pick = (o, allowed) => {
+        const r = {};
+        if (o && typeof o === "object") Object.keys(o).forEach((k) => {
+            if (allowed.includes(o[k])) r[k] = o[k];
+        });
+        return r;
+    };
+    out.order = keys(v.order);
+    out.hidden = keys(v.hidden);
+    out.sizes = pick(v.sizes, SacLauncher.SIZES);
+    out.colors = pick(v.colors, SacLauncher.PALETTE);
+    const seen = new Set();
+    if (Array.isArray(v.custom)) v.custom.forEach((m) => {
+        if (m && typeof m === "object" && typeof m.id === "string" && m.id && !seen.has(m.id)) {
+            seen.add(m.id);
+            out.custom.push(Object.assign({}, m));
+        }
+    });
+    return out;
+};
+SacLauncher._copyLayout = (st) => ({
+    order: st.order.slice(),
+    hidden: st.hidden.slice(),
+    sizes: Object.assign({}, st.sizes),
+    colors: Object.assign({}, st.colors),
+    custom: st.custom.map(m => Object.assign({}, m)),
+});
 /** What sac.sortable may lift: every tile cell (never the Add cell) — and,
  *  outside edit mode (drag="always"), only the visible ones. */
 SacLauncher.DRAG_ITEMS =
