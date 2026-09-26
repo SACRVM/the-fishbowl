@@ -169,6 +169,7 @@ builder.Services.AddScoped<IReminderRepository, ReminderRepository>();
 builder.Services.AddScoped<IVaultRepository, VaultRepository>();
 builder.Services.AddScoped<IMessageRepository, MessageRepository>();
 builder.Services.AddScoped<IUserAdminRepository, UserAdminRepository>();
+builder.Services.AddScoped<IDesktopRepository, DesktopRepository>();
 // Every sign-in (Google, local) goes through the account rules here.
 builder.Services.AddScoped<AccountGate>();
 builder.Services.AddScoped<Fishbowl.Core.Files.IFileService, Fishbowl.Data.Files.FileService>();
@@ -811,6 +812,7 @@ app.MapSearchApi();
 app.MapExportApi();
 app.MapVaultApi();
 app.MapFilesApi();
+app.MapDesktopApi();
 app.MapMcpEndpoint();
 
 // Root route — gate the hub behind setup + authentication so the first click

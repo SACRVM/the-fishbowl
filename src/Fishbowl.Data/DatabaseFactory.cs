@@ -430,6 +430,14 @@ public class DatabaseFactory
             ApplyUserV9(connection);
             connection.Execute("PRAGMA user_version = 9");
             _logger.LogInformation("Applied user schema v9 to {DbPath}", ((SqliteConnection)connection).DataSource);
+            version = 9;
+        }
+
+        if (version < 10)
+        {
+            ApplyUserV10(connection);
+            connection.Execute("PRAGMA user_version = 10");
+            _logger.LogInformation("Applied user schema v10 to {DbPath}", ((SqliteConnection)connection).DataSource);
         }
     }
 
@@ -1313,6 +1321,48 @@ public class DatabaseFactory
                     floor_seq       INTEGER NOT NULL DEFAULT 0,
                     case_sensitive  INTEGER NOT NULL,
                     last_scan_at    TEXT
+                );", transaction: transaction);
+            transaction.Commit();
+        }
+        catch
+        {
+            transaction.Rollback();
+            throw;
+        }
+    }
+
+    // User V10: the desktop (docs/superpowers/specs/2026-09-26-desktop-apps-design.md).
+    // desktop_tiles holds the user's arrangement of built-in and installed
+    // tiles; desktop_apps the apps installed into this workspace — the
+    // manifest as read at install, the pinned entry hash (sandboxed only)
+    // and the capabilities the owner granted. The server never fetches an
+    // app: everything here was posted by the owner's browser.
+    private void ApplyUserV10(IDbConnection connection)
+    {
+        using var transaction = connection.BeginTransaction();
+        try
+        {
+            connection.Execute(@"
+                CREATE TABLE IF NOT EXISTS desktop_tiles (
+                    key         TEXT PRIMARY KEY,
+                    position    REAL,
+                    size        TEXT,
+                    color       TEXT,
+                    hidden      INTEGER NOT NULL DEFAULT 0
+                );
+
+                CREATE TABLE IF NOT EXISTS desktop_apps (
+                    id              TEXT PRIMARY KEY,
+                    manifest_url    TEXT NOT NULL,
+                    manifest        TEXT NOT NULL,
+                    origin          TEXT NOT NULL,
+                    entry_url       TEXT NOT NULL,
+                    entry_integrity TEXT,
+                    version         TEXT,
+                    mode            TEXT NOT NULL CHECK (mode IN ('sandboxed','trusted')),
+                    granted         TEXT NOT NULL DEFAULT '[]',
+                    installed_at    TEXT NOT NULL,
+                    updated_at      TEXT NOT NULL
                 );", transaction: transaction);
             transaction.Commit();
         }

@@ -1,6 +1,7 @@
 using System.Security.Claims;
 using Fishbowl.Api.Endpoints;
 using Fishbowl.Core.Auth;
+using Fishbowl.Core.Desktop;
 using Fishbowl.Core.Files;
 using Fishbowl.Core.Mcp;
 using Fishbowl.Core.Repositories;
@@ -196,6 +197,21 @@ internal static class ConfigSchema
         new(FileLimits.DefaultUserQuotaBytesKey, false, false,
             "The storage quota (bytes, 0 = unlimited) an approval pre-fills for a new account. Hot.",
             ValidateQuotaBytes),
+        new(DesktopPolicy.InstallKey, false, false,
+            "Who may install apps into their personal desktop: everyone (default), admins, or off. A space's owner installs into the space unless this is off. Hot.",
+            ValidateAppsLevel),
+        new(DesktopPolicy.TrustedKey, false, false,
+            "Who may install an app in trusted mode (no sandbox, runs as the user; personal desktops only): everyone (default), admins, or off. Hot.",
+            ValidateAppsLevel),
+        new(DesktopPolicy.AllowedOriginsKey, false, false,
+            "Comma-separated origins apps may be installed from (e.g. https://owner.github.io); empty = any. Hot.",
+            ValidateAppOrigins),
+        new(DesktopPolicy.StoreOwnersKey, false, false,
+            "Comma-separated GitHub owners the App Store tab lists (default SACRVM). Hot.",
+            ValidateStoreOwners),
+        new(DesktopPolicy.StoreTopicKey, false, false,
+            "The GitHub repo topic that marks an app for the App Store tab (default sacrvm-app). Hot.",
+            ValidateStoreTopic),
     };
 
     public static KeySpec? Find(string key) =>
@@ -259,6 +275,40 @@ internal static class ConfigSchema
         long.TryParse(v, out var n) && n >= 0
             ? null
             : "Quota must be a whole number of bytes, 0 or more (0 = unlimited).";
+
+    private static string? ValidateAppsLevel(string v) =>
+        DesktopPolicy.Levels.Contains(v)
+            ? null
+            : "Must be one of: everyone, admins, off.";
+
+    private static string? ValidateAppOrigins(string v)
+    {
+        var entries = v.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        if (entries.Length == 0) return "Provide at least one comma-separated origin (use DELETE to allow any).";
+        foreach (var e in entries)
+        {
+            if (!AppOrigins.TryParseExact(e, out _))
+                return $"Not an https origin (scheme and host only): {e}";
+        }
+        return null;
+    }
+
+    private static string? ValidateStoreOwners(string v)
+    {
+        var owners = DesktopPolicy.ParseList(v);
+        if (owners.Count == 0) return "Provide at least one GitHub owner.";
+        foreach (var o in owners)
+        {
+            if (o.Length > 39 || !o.All(c => char.IsAsciiLetterOrDigit(c) || c == '-') || o.StartsWith('-'))
+                return $"Not a GitHub owner name: {o}";
+        }
+        return null;
+    }
+
+    private static string? ValidateStoreTopic(string v) =>
+        v.Length is > 0 and <= 50 && v.All(c => char.IsAsciiLetterLower(c) || char.IsAsciiDigit(c) || c == '-')
+            ? null
+            : "A topic is lower-case letters, digits and hyphens (max 50).";
 
     private static string? ValidateDiscordToken(string v)
     {

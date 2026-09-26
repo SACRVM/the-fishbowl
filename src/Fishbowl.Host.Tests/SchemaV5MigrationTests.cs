@@ -27,7 +27,7 @@ public class SchemaV5MigrationTests : IDisposable
         // further, but the v5 assertions below still hold: a fresh DB walks
         // through every migration in order.
         var version = await db.ExecuteScalarAsync<long>("PRAGMA user_version");
-        Assert.Equal(9, version);
+        Assert.Equal(10, version);
 
         var table = await db.ExecuteScalarAsync<string?>(
             "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'contacts'");
@@ -84,7 +84,7 @@ public class SchemaV5MigrationTests : IDisposable
         using var db = factory.CreateConnection(userId);
 
         var version = await db.ExecuteScalarAsync<long>("PRAGMA user_version");
-        Assert.Equal(9, version);
+        Assert.Equal(10, version);
 
         var note = await db.ExecuteScalarAsync<string?>(
             "SELECT title FROM notes WHERE id = 'n1'");

@@ -323,6 +323,19 @@ secret blocks live in notes, which no capability exposes.
   `fs` (needs Files backend phase 1), `identity`, theme/lang/regional,
   Settings → Apps (installed list, grants, storage, update, remove), install
   policy. **Blocked on** the kit's isolated runtime.
+  - **Server side done (2026-09-26):**
+    - user/space schema v10 (`desktop_tiles`, `desktop_apps`)
+    - `AppManifestValidator` and `FrameCsp`
+    - the policy keys
+    - `/api/v1/desktop` + the space mirror, including tiles, so D1's
+      storage is ready too
+    - the frame endpoint, and `purgeData`
+
+    Open:
+    - the guest bridge `/js/lib/app-guest.js` (the frame references it)
+    - the install UI, the tiles UI and Settings → Apps
+    - the main SPA's `frame-src 'self'` CSP
+    - trusted-mode loading and its per-user `script-src`
 - **D3 — Files for apps.** The host picker over Files (needs the Files UI
   MVP), save-back handles, "Open with…" from Files via `opens`.
 - **D4 — Reach.**
