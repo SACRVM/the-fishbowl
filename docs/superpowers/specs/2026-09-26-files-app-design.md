@@ -26,10 +26,11 @@ Three things are missing, in order of dependency:
    file store for free.
 
 The look borrows the spirit of Norton Commander (and of retro-crt's
-`apps/commander` demo): two panes, a function-key bar, a highlight bar you drive
-with the arrow keys, marks for batch operations, F3 to look inside, Alt+F1/F2
-to change a pane's "drive". In spirit only — kit tokens, kit components, no raw
-colours, no ASCII-art cosplay.
+`apps/commander` demo): two panes, a shortcut bar, a highlight bar you drive
+with the arrow keys, marks for batch operations, Space to look inside, Alt+1/
+Alt+2 to change a pane's "drive". In spirit only — kit tokens, kit components,
+no raw colours, no ASCII-art cosplay, and a keyboard model that is modern, not
+a DOS function-key emulation (decision 13).
 
 This is an **addition**, which `docs/slimming-plan.md` treats with suspicion.
 It is a product decision the user has taken (2026-09-26); it should be recorded
@@ -332,10 +333,10 @@ shape.
 
 Like an OS file explorer:
 
-- **Delete** (Delete / F8) moves the item to trash — a rename into
+- **Delete** (Delete) moves the item to trash — a rename into
   `files/.trash/<ulid>/<name>` (same volume, atomic, cheap) plus a
   `file_trash` row. No confirm; a `<sac-toast>` offers Undo.
-- **Delete permanently** (Shift+Delete / Shift+F8) removes it after a kit
+- **Delete permanently** (Shift+Delete) removes it after a kit
   confirm. Cookie-only (see API).
 - **Restore** moves it back to `original_path`, recreating missing parent
   folders (as Windows does). If the name is taken: `onConflict=ask` (the UI's
@@ -613,7 +614,7 @@ and a hub tile. **Always the commander layout** — there is no plain-list mode.
 │ ║▐ IMG_0412.jpg   2.3 MB  Sep 21  ▌║ │   lease.pdf        412 KB  Mar 02   │ │
 │ ║ ★IMG_0413.jpg   2.1 MB  Sep 21   ║ │   notes.md           3 KB  today    │ │
 │ ╚═ 2 of 48 marked · 4.4 MB ═════════╝ └─ 12 files · 18.0 MB ────────────────┘ │
-│ 1 Help 3 View 4 Rename 5 Copy 6 Move 7 MkDir 8 Delete ^Q Preview  ▓▓▓▓░ 38% │
+│ Alt+N New  Alt+R Rename  Alt+C Copy→  Alt+M Move→  Del Trash  Alt+P Preview  ▓▓▓▓░ 38% │
 └──────────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -622,11 +623,11 @@ and a hub tile. **Always the commander layout** — there is no plain-list mode.
   and folder**; the **active pane** is the one with focus.
 - **Workspace per pane:** the pane title starts with a `<sac-menu>` listing
   Personal and every space the user is a member of — NC's drive letter.
-  Alt+F1 / Alt+F2 open it for the left / right pane. A space pane's frame is
+  Alt+1 / Alt+2 open it for the left / right pane. A space pane's frame is
   tinted `--accent-warm`, like the context switcher, so writes to shared data
   are unmissable. The left pane starts in the current `sac.scope` workspace.
-  F5/F6 between panes in different workspaces use `POST /files/transfer`;
-  a readonly space pane accepts no drops and offers no F5/F6 target.
+  Alt+C/Alt+M between panes in different workspaces use `POST /files/transfer`;
+  a readonly space pane accepts no drops and offers no Alt+C/Alt+M target.
 - **The retro touch, tokens only:** the active pane gets a
   `border-style: double` frame in `--accent` and a caption-type title; the
   inactive pane a single `--border` hairline. The cursor bar is the kit's
@@ -634,22 +635,25 @@ and a hub tile. **Always the commander layout** — there is no plain-list mode.
   Marked entries use `--accent-warm-text`. Names and sizes in monospace (kit
   gap: `--font-mono`). The frame's bottom edge is a status line: counts,
   marked size, free quota. No scanlines, no CRT glow.
-- **Function-key bar** at the bottom: one light-DOM row of kit buttons, each a
-  `<kbd>` plus a label, clickable, wired to `sac.hotkeys` with
-  `group: "Files"` so `sac-shortcut-sheet` (F1 / `?`) lists them. **No dead
-  keys** (no-dead-links rule): in a readonly space pane F4–F8 are not
-  rendered, not greyed. Holding Shift relabels 8 to "Delete permanently".
-  Upload progress sits at the right end (`<sac-progress>`), with a
-  `<sac-toast>` summary when done.
+- **Shortcut bar** at the bottom, commander look, modern chords: one light-DOM
+  row of kit buttons, each a `<kbd>` showing the chord plus a label
+  ("Alt+N New folder", "Del Trash", "Alt+P Preview" …), clickable, wired to
+  `sac.hotkeys` with `group: "Files"` so `sac-shortcut-sheet` (`?`) lists
+  them. **No dead buttons** (no-dead-links rule): in a readonly space pane the
+  write actions (rename, copy→, move→, new folder, trash) are not rendered,
+  not greyed. Holding Shift relabels Trash to "Delete permanently"
+  (Shift+Delete). Upload progress sits at the right end (`<sac-progress>`),
+  with a `<sac-toast>` summary when done.
 - Uploads: `<sac-drop-zone multiple>` as a full-pane overlay while a file drag
-  hovers the view (and via the toolbar's upload button / Ctrl+U), targeting
+  hovers the view (and via the toolbar's upload button / Alt+U), targeting
   the active pane's folder.
 
 ### Preview pane
 
-**Ctrl+Q** (and the `^Q Preview` key) switches the **right pane** into a
+**Alt+P** (Windows Explorer's own shortcut for its preview pane; also the
+`Alt+P Preview` shortcut-bar button) switches the **right pane** into a
 preview of the left pane's cursor file, following the cursor live; focus moves
-to the left pane; Ctrl+Q again brings the browser back. What it shows:
+to the left pane; Alt+P again brings the browser back. What it shows:
 
 | Type | Rendering |
 |---|---|
@@ -662,35 +666,44 @@ to the left pane; Ctrl+Q again brings the browser back. What it shows:
 | PDF (sniffed) | info card with **Open in new tab** (the `?inline=1` PDF variant, security rule 4) and Download — never embedded |
 | Anything else | info card: name, size, effective type, SHA-256 (short, when cached), modified via `fb.format`, created by (spaces), Download |
 
-**F3** opens the same renderer in a maximised `<sac-window>` (full-screen on a
-phone), with ←/→ walking the images in the folder. One image at a time — no
-thumbnail grid.
+**Space** (quick look) opens the same renderer in a maximised `<sac-window>`
+(full-screen on a phone), with ←/→ walking the images in the folder. One image
+at a time — no thumbnail grid.
 
 ### Keys
+
+No F-keys — see decision 13 for the full mapping and why. Files-view bindings:
 
 | Key | Action | Notes |
 |---|---|---|
 | ↑ ↓ PgUp PgDn Home End | move the cursor | `sac-file-browser` built-in |
-| Enter / Backspace | open folder / up | built-in |
-| Tab | switch active pane | |
-| Alt+F1 / Alt+F2 | workspace of left / right pane | |
-| Insert, Shift+↑/↓ | mark and advance | needs kit marks (gap) |
-| F3 | viewer | |
-| Ctrl+Q | preview pane on/off | |
-| F4 / F2 | rename | inline; F2 is the modern alias |
-| F5 | copy marked/cursor → other pane's folder | progress modal |
-| F6 | move → other pane's folder | |
-| F7 | new folder | `sac-file-browser.newFolder()` |
-| F8 / Delete | to trash | no confirm, toast with Undo |
-| Shift+F8 / Shift+Delete | delete permanently | kit confirm, `armAfterMs` |
-| Ctrl+U | upload into active folder | |
-| F1 / ? | shortcut sheet | |
+| Enter / Backspace or Alt+↑ | open folder / parent folder | built-in |
+| Tab / Shift+Tab | switch active pane | |
+| Alt+1 / Alt+2 | workspace menu of left / right pane | |
+| Shift+↑/↓ (range), mod+A, mod+click (toggle), Esc (clear) | select | needs kit marks (gap) |
+| Space | quick look (maximised viewer) | |
+| Alt+P | preview pane on/off | Windows Explorer's own shortcut |
+| mod+C / mod+X / mod+V | copy / cut / paste, into the active pane's folder | across panes and workspaces |
+| Alt+C / Alt+M | copy / move selection → other pane's folder | progress modal; commander spirit |
+| Alt+R | rename | inline; F2 kept as an optional alias where the keyboard has one |
+| Alt+N | new folder | `sac-file-browser.newFolder()` |
+| Delete | to trash | no confirm, toast with Undo |
+| Shift+Delete | delete permanently | kit confirm, `armAfterMs` |
+| Alt+U / Alt+S | upload / download | |
+| mod+F | filter current folder | |
+| ? | shortcut sheet | `sac-shortcut-sheet`, bound `shift+?` |
 
-F-keys collide with the browser (F3 find, F5 reload, F6 address bar, F1 help,
-F7 caret browsing). They are captured only while the Files view has focus and
-nothing editable is focused, with `preventDefault`; every action also has a
-clickable key, a toolbar/menu path and a modifier alias, so a browser or OS
-that eats the key (macOS without Fn) loses nothing.
+`mod` is the kit's own convention (`sac.hotkeys`, `js/lib/hotkeys.js`): Ctrl
+on Windows/Linux, ⌘ on macOS — used above for C/X/V/A/F so macOS gets its own
+copy/cut/paste/select-all/find chords instead of a Ctrl combo Mac users don't
+have. The Alt+ bindings need no such swap: they register as plain `alt+…`,
+and the kit's `sac.hotkeys.format()` already renders that as ⌥ (Option) on
+macOS, because Option is `altKey` in the DOM on that platform too. Shortcuts
+are active only while the Files view has focus, and never while typing in an
+input (the rename field, the filter box) — `sac.hotkeys`'s own typing guard.
+Every chord above was chosen to dodge the ones a page cannot reliably
+intercept: `Ctrl+N/T/W/L/R/U/Tab`, `Ctrl+Shift+N/C/I/J/T`, `Alt+D/F/E`, and
+every F-key.
 
 Conflicts on copy/move/upload/restore open one kit confirm per clash with
 **Replace / Keep both / Skip** and an "apply to all" checkbox — built on the
@@ -699,11 +712,11 @@ conditional `PUT` / `onConflict` above.
 ### Phone
 
 - **Single column only.** The split collapses to one pane, `no-back`; the
-  preview pane becomes the F3 viewer. Two-pane operations become a
-  **destination picker**: Move/Copy open a kit dialog with a workspace menu and
-  a `readonly` `<sac-file-browser>` to choose the target folder — so
-  cross-workspace transfer works on a phone too.
-- The F-key bar becomes the kit's toolbar items (`fb.toolbar.set`, overflow
+  preview pane becomes the quick-look viewer (Space on a keyboard, a tap on a
+  phone). Two-pane operations become a **destination picker**: Move/Copy open
+  a kit dialog with a workspace menu and a `readonly` `<sac-file-browser>` to
+  choose the target folder — so cross-workspace transfer works on a phone too.
+- The shortcut bar becomes the kit's toolbar items (`fb.toolbar.set`, overflow
   via "…"): upload, new folder, select, move, copy, delete, delete
   permanently.
 - Marking: a "Select" toggle turns rows into checkboxes; long press as a
@@ -732,9 +745,11 @@ or filed upstream. Most important first:
       call, instead of a recursive `list()` plus one `stat()` per file;
    b) optional `store.url(path)` so media and previews use a streaming URL
       instead of `read()`-ing full bytes into a blob;
-   c) **marks**: Insert / Shift+arrows toggle marks independently of the
-      cursor, folders markable, `marked` property + `sac:mark` event;
-   d) **rename** (F2, inline like `newFolder()`), `sac:rename` event;
+   c) **marks**: Shift+arrows (range) / mod+click (toggle) mark independently
+      of the cursor, folders markable, `marked` property + `sac:mark` event —
+      Insert is no longer part of the model, so nothing needs it;
+   d) **rename** (inline like `newFolder()`, triggered by the host's own
+      chord — Alt+R in Fishbowl), `sac:rename` event;
    e) cancellable `sac:request-remove` carrying `{ permanent }` (Shift), so a
       host can trash by default instead of the hard-coded "permanently
       deleted" wording;
@@ -755,9 +770,10 @@ or filed upstream. Most important first:
    pan-zoom, text, Markdown (kit `marked`/`purify`), audio, video, info
    fallback; usable both as a pane and in a window. Fishbowl builds it in the
    view first; the ask is to lift it into the kit.
-5. **`<sac-keybar>`** — a function-key bar bound to `sac.hotkeys` (label, key,
-   enabled, Shift-layer labels), collapsing into `sac-nav`'s toolbar overflow
-   on a phone.
+5. **`<sac-shortcut-bar>`** — a generic shortcut/action bar bound to
+   `sac.hotkeys`, taking arbitrary chords (label, chord, enabled, a
+   Shift-layer for relabeling like Shift+Delete), collapsing into
+   `sac-nav`'s toolbar overflow on a phone.
 6. **`sac.dialog.prompt()`** — a text-input dialog (rename on a phone, "Keep
    both" name edit).
 7. **`sac-drop-zone` folder drops** — `webkitGetAsEntry()` traversal with
@@ -872,11 +888,11 @@ days**, `0` keeps them forever.
    conditional `PUT`, `transfer`, sniffing + security headers, snapshot-data
    copies `files/`.
 2. **UI MVP** — `#/files` commander view with **per-pane workspaces** and
-   cross-workspace F5/F6, store adapter, upload with progress and drop
-   overlay, F-key bar incl. Shift+F8, rename, trash view with restore, Ctrl+Q
-   preview pane and F3 viewer (image, text, Markdown, audio, video, info
-   card), PDF "Open in new tab", Replace / Keep both / Skip, phone single column with destination
-   picker, hub tile.
+   cross-workspace Alt+C/Alt+M, store adapter, upload with progress and drop
+   overlay, shortcut bar incl. Shift+Delete, rename, trash view with restore,
+   Alt+P preview pane and Space quick-look viewer (image, text, Markdown,
+   audio, video, info card), PDF "Open in new tab", Replace / Keep both /
+   Skip, phone single column with destination picker, hub tile.
 3. **Data lifecycle** — export choices (DB / files / both, streamed ZIPs),
    space delete with "archive before deleting", archived spaces (download,
    restore, delete, purge). Should land before Files is announced to users,
@@ -942,18 +958,19 @@ CI runs Linux and Windows; host-dependent tests assert per OS
   `SqliteConnection.ClearAllPools()` before deleting it (Windows). No test
   asserts a file name in the log output.
 - **UI (`Fishbowl.Ui.Tests`, Playwright on the shared host):** upload via the
-  drop-zone's input (`SetInputFilesAsync`) → row appears with size; F7 creates
-  a folder; Tab switches the active pane; Alt+F2 switches the right pane to a
-  space and F5 copies across; F6 moves a marked file; F8 trashes without a
-  confirm and Undo restores; Shift+F8 asks, then purges; Ctrl+Q shows a PNG
-  as `<img>`, `.md` as a rendered heading with **no** `<script>` from a
-  hostile fixture, `.txt` as text, `.mp3` as an `<audio>` whose `src` answers
-  a Range request, a PDF as an info card with no `<iframe>`/`<embed>` whose
-  "Open in new tab" loads a page the browser's PDF viewer renders (the CSP
-  check from security rule 4 — Chromium in CI; Edge and Firefox verified by
-  hand); readonly space pane shows no write keys; phone viewport
-  shows one pane and the Move destination picker with a workspace menu; no
-  request from the view bypasses `fb.api`.
+  drop-zone's input (`SetInputFilesAsync`) → row appears with size; Alt+N
+  creates a folder; Tab switches the active pane; Alt+2 switches the right
+  pane to a space and Alt+C copies across; Alt+M moves a marked file; Delete
+  trashes without a confirm and Undo restores; Shift+Delete asks, then
+  purges; Alt+P shows a PNG as `<img>`, `.md` as a rendered heading with
+  **no** `<script>` from a hostile fixture, `.txt` as text, `.mp3` as an
+  `<audio>` whose `src` answers a Range request, a PDF as an info card with
+  no `<iframe>`/`<embed>` whose "Open in new tab" loads a page the browser's
+  PDF viewer renders (the CSP check from security rule 4 — Chromium in CI;
+  Edge and Firefox verified by hand); readonly space pane shows no write
+  actions in the shortcut bar; phone viewport shows one pane and the Move
+  destination picker with a workspace menu; no request from the view bypasses
+  `fb.api`.
 
 ## Decisions (2026-09-26)
 
@@ -967,11 +984,11 @@ CI runs Linux and Windows; host-dependent tests assert per OS
 2. **Limits are configuration** (`system_config`, `tools/set-config`): max
    file size 2 GiB, quota 20 GiB per context, optional instance cap — defaults,
    not constants.
-3. **Delete like an OS file explorer:** Delete/F8 → trash (restore to the
-   original path, clash → ask or rename); Shift+Delete / Shift+F8 → permanent
+3. **Delete like an OS file explorer:** Delete → trash (restore to the
+   original path, clash → ask or rename); Shift+Delete → permanent
    after a confirm. Trash auto-purges after 30 days by default, 0 = never.
 4. **Commander layout always**, no plain list; the right pane toggles to a
-   preview pane (Ctrl+Q). Phone: single column.
+   preview pane (Alt+P). Phone: single column.
 5. **Workspaces across panes in the MVP**; cross-workspace copy/move with role
    checks (readonly space is never a target), cookie-only.
 6. **Bearer API from the start** (`read:files` / `write:files`) plus a change
@@ -996,3 +1013,45 @@ CI runs Linux and Windows; host-dependent tests assert per OS
 12. **No resumable uploads.** A broken upload is aborted, its temp file
     removed, nothing half-written becomes visible; the user retries. One
     simple `PUT`.
+13. **The keyboard model is modern: no F-keys anywhere.** Many laptops put
+    F1–F12 behind Fn, so a function-key-only binding is one a chunk of the
+    audience can't press without a second chord. The layout stays classic
+    two-pane commander; every action that used to hang off an F-key now hangs
+    off a Ctrl/Alt chord or a plain key instead:
+
+    | Action | Keys |
+    |---|---|
+    | move / open / parent folder | arrows, PgUp/PgDn, Home/End, Enter, Backspace or Alt+↑ |
+    | switch pane | Tab / Shift+Tab |
+    | select | Shift+arrows (range), Ctrl+A, Ctrl+click (toggle), Esc clears |
+    | quick look (maximised viewer, was F3) | Space |
+    | preview pane on/off (was Ctrl+Q) | Alt+P (Windows Explorer's own shortcut) |
+    | copy / cut / paste (into the active pane's folder; works across panes and workspaces) | Ctrl+C / Ctrl+X / Ctrl+V |
+    | copy / move selection to the other pane (commander spirit, was F5/F6) | Alt+C / Alt+M |
+    | rename (was F4/F2) | Alt+R; F2 kept as an optional alias where the keyboard has it |
+    | new folder (was F7) | Alt+N |
+    | to trash / delete permanently (was F8 / Shift+F8) | Delete / Shift+Delete |
+    | upload / download | Alt+U / Alt+S |
+    | filter current folder | Ctrl+F |
+    | workspace menu of left / right pane (was Alt+F1/F2) | Alt+1 / Alt+2 |
+    | show all shortcuts | ? (the kit's sac-shortcut-sheet) |
+
+    **macOS:** Ctrl becomes ⌘ (Cmd) for the C/X/V/A/F row — Mac users have no
+    Ctrl-based copy/cut/paste/select-all/find, so those bind through the
+    kit's own `mod` convention (`sac.hotkeys`, `js/lib/hotkeys.js`: `mod` =
+    Ctrl on Windows/Linux, Meta on macOS). Alt is Option on macOS already —
+    the browser reports Option as `altKey`, and `sac.hotkeys.format()`
+    already renders a bare `alt+…` binding as ⌥ there — so the Alt+ row needs
+    no platform branch, only the existing kit behaviour, described here
+    accurately rather than assumed.
+    **Focus:** every chord above is live only while the Files view has focus
+    and only while nothing editable has focus (the rename field, the filter
+    box) — `sac.hotkeys`'s own typing guard, not a Fishbowl layer.
+    **Chosen to dodge the browser, on purpose:** a page cannot reliably
+    intercept `Ctrl+N/T/W/L/R/U/Tab`, `Ctrl+Shift+N/C/I/J/T`, `Alt+D/F/E`, or
+    any F-key — the browser or OS eats them first — so none of the mapping
+    above uses one.
+    **The bottom bar stays commander-look but becomes a shortcut bar:**
+    labelled, clickable buttons showing the chord ("Alt+N New folder", "Del
+    Trash", "Alt+P Preview" …), with actions disabled/absent where they don't
+    apply (no dead buttons; a readonly space pane shows no write actions).
