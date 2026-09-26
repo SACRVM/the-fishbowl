@@ -5,10 +5,10 @@ using Microsoft.Playwright;
 
 namespace Fishbowl.Ui.Tests;
 
-// The desktop in the browser: square tiles on the kit's <sac-launcher>, fed
-// from fb.desktop's registry; their arrangement (size, colour, hide, order)
-// stored per workspace on the server (persist="none" — the launcher never
-// keeps its own copy), the badges, and the Ctrl/⌘K palette. Every test that
+// The desktop in the browser: SACRVM Desktop's tiles and tile menu on the
+// kit's .grid, fed from fb.desktop's registry; their arrangement (size,
+// colour, hide) stored per workspace on the server, hidden tiles offered
+// back in the toolbar, the badges, and the Ctrl/⌘K palette. Every test that
 // arranges puts the personal desktop back, so the hub smoke test sees the
 // defaults.
 [Collection(UiCollection.Name)]
@@ -38,11 +38,16 @@ public class DesktopTests
         return (context, page, errors);
     }
 
-    private static ILocator Cell(IPage page, string key) => page.Locator($"fb-hub-view .sac-launcher-cell[data-id='{key}']");
+    private static ILocator Cell(IPage page, string key) => page.Locator($"fb-hub-view a.tile[data-key='{key}']");
 
-    private static Task<string[]> OrderAsync(IPage page) =>
-        page.Locator("fb-hub-view .sac-launcher-cell")
-            .EvaluateAllAsync<string[]>("els => els.map(e => e.dataset.id)");
+    private static ILocator ShowHiddenButton(IPage page) => page.Locator("#fb-view-toolbar button[title^='Show hidden tiles']");
+
+    private static async Task OpenMenuAsync(IPage page, string key)
+    {
+        var cell = Cell(page, key);
+        await cell.HoverAsync();
+        await cell.Locator(".tile-menu-btn").ClickAsync();
+    }
 
     private async Task ResetAsync(IPage page, string? space = null)
     {
@@ -92,14 +97,6 @@ public class DesktopTests
     private static bool Hidden(System.Text.Json.JsonElement[] tiles, string key) =>
         Tile(tiles, key) is { } t && t.GetProperty("hidden").GetBoolean();
 
-    private static async Task ChooseAsync(IPage page, string key, string label)
-    {
-        var cell = Cell(page, key);
-        await cell.HoverAsync();
-        await cell.Locator(".sac-launcher-menu-btn").ClickAsync();
-        await cell.Locator(".sac-launcher-menu button[data-action]").Filter(new() { HasText = label }).ClickAsync();
-    }
-
     [Fact]
     public async Task Desktop_TilesRender_AdminTilePersonalOnly_Test()
     {
@@ -117,7 +114,7 @@ public class DesktopTests
             await Assertions.Expect(page.Locator($"fb-hub-view a.tile[href='#/space/{slug}/notes']")).ToBeVisibleAsync(new() { Timeout = 5000 });
             await Assertions.Expect(page.Locator("fb-hub-view a.tile[href*='admin']")).ToHaveCountAsync(0);
             // The owner arranges a space's desktop.
-            await Assertions.Expect(page.Locator("fb-hub-view .sac-launcher-menu").First).ToBeAttachedAsync();
+            await Assertions.Expect(page.Locator("fb-hub-view .tile-menu").First).ToBeAttachedAsync();
             Assert.Empty(errors);
         }
         finally
@@ -135,64 +132,48 @@ public class DesktopTests
             await ResetAsync(page);
             await page.GotoAsync(_fixture.BaseUrl + "/#/");
             await Assertions.Expect(Cell(page, "builtin:todos")).ToBeVisibleAsync(new() { Timeout = 5000 });
+            // Nothing hidden: no toolbar item for it.
+            await Assertions.Expect(ShowHiddenButton(page)).ToHaveCountAsync(0);
 
-            // Squares: a medium tile is as high as it is wide.
-            var sq = (await Cell(page, "builtin:files").BoundingBoxAsync())!;
-            Assert.InRange(sq.Height, sq.Width - 2, sq.Width + 2);
-
-            // Size: wide is two squares side by side, one square high.
-            await ChooseAsync(page, "builtin:todos", "Wide");
+            // Size: the menu marks the current one, wide spans two columns.
+            await OpenMenuAsync(page, "builtin:todos");
+            await Assertions.Expect(Cell(page, "builtin:todos").Locator(".tile-menu button[data-action='size:medium']")).ToHaveTextAsync("✓ Medium tile");
+            await Cell(page, "builtin:todos").Locator(".tile-menu button[data-action='size:wide']").ClickAsync();
             await Assertions.Expect(Cell(page, "builtin:todos")).ToHaveClassAsync(new System.Text.RegularExpressions.Regex("size-wide"));
+            var medium = (await Cell(page, "builtin:files").BoundingBoxAsync())!;
             var wide = (await Cell(page, "builtin:todos").BoundingBoxAsync())!;
-            Assert.InRange(wide.Height, sq.Height - 2, sq.Height + 2);
-            Assert.True(wide.Width > sq.Width * 2 - 2, $"wide {wide.Width} vs square {sq.Width}");
+            Assert.True(wide.Width > medium.Width * 2 - 2, $"wide {wide.Width} vs medium {medium.Width}");
 
-            // Colour, through the picker dialog.
-            await ChooseAsync(page, "builtin:calendar", "Colour");
-            var dialog = page.Locator("sac-dialog[title^='Colour']");
-            await dialog.Locator("sac-swatch").Nth(3).ClickAsync();
-            await Assertions.Expect(Cell(page, "builtin:calendar").Locator("a.tile")).ToHaveAttributeAsync("style", new System.Text.RegularExpressions.Regex("--accent: var\\(--palette-"));
+            // Colour, from the menu's colour row.
+            await OpenMenuAsync(page, "builtin:calendar");
+            await Cell(page, "builtin:calendar").Locator(".tile-tint sac-swatch").Nth(3).ClickAsync();
+            await Assertions.Expect(Cell(page, "builtin:calendar")).ToHaveAttributeAsync("style", new System.Text.RegularExpressions.Regex("--accent: var\\(--palette-"));
 
-            // Hide: gone from the desktop, kept for the Edit mode.
-            await ChooseAsync(page, "builtin:notes", "Hide");
-            await Assertions.Expect(Cell(page, "builtin:notes")).ToBeHiddenAsync();
+            // Hide: gone from the desktop, offered back in the toolbar.
+            await OpenMenuAsync(page, "builtin:notes");
+            await Cell(page, "builtin:notes").Locator(".tile-menu button[data-action='hide']").ClickAsync();
+            await Assertions.Expect(Cell(page, "builtin:notes")).ToHaveCountAsync(0);
+            await Assertions.Expect(ShowHiddenButton(page)).ToHaveAttributeAsync("title", "Show hidden tiles (1)");
 
-            // Order: drag Files in front of Todos.
-            var files = Cell(page, "builtin:files").Locator("a.tile");
-            var todos = Cell(page, "builtin:todos").Locator("a.tile");
-            var from = (await files.BoundingBoxAsync())!;
-            var to = (await todos.BoundingBoxAsync())!;
-            await page.Mouse.MoveAsync(from.X + 40, from.Y + 40);
-            await page.Mouse.DownAsync();
-            await page.Mouse.MoveAsync(from.X + 50, from.Y + 50, new() { Steps = 3 });
-            // Just left of the Todos tile's centre: the grid axis inserts
-            // before the nearest tile when the pointer is on its left half.
-            await page.Mouse.MoveAsync(to.X + to.Width * 0.4f, to.Y + to.Height / 2, new() { Steps = 12 });
-            await page.Mouse.UpAsync();
-            await WaitForServerAsync(page, t => Pos(t, "builtin:files") < Pos(t, "builtin:todos") && Hidden(t, "builtin:notes")
+            await WaitForServerAsync(page, t => Hidden(t, "builtin:notes")
                 && Tile(t, "builtin:todos")?.GetProperty("size").GetString() == "wide"
                 && Tile(t, "builtin:calendar")?.GetProperty("color").ValueKind == System.Text.Json.JsonValueKind.String);
-            var order = await OrderAsync(page);
-            Assert.True(Array.IndexOf(order, "builtin:files") < Array.IndexOf(order, "builtin:todos"), string.Join(",", order));
 
             // All of it on the server: a reload, and another browser.
             foreach (var p in new[] { page, await (await _fixture.Browser!.NewContextAsync(new() { IgnoreHTTPSErrors = true })).NewPageAsync() })
             {
                 await p.GotoAsync(_fixture.BaseUrl + "/#/");
                 await Assertions.Expect(Cell(p, "builtin:todos")).ToHaveClassAsync(new System.Text.RegularExpressions.Regex("size-wide"), new() { Timeout = 5000 });
-                await Assertions.Expect(Cell(p, "builtin:calendar").Locator("a.tile")).ToHaveAttributeAsync("style", new System.Text.RegularExpressions.Regex("--palette-"));
-                await Assertions.Expect(Cell(p, "builtin:notes")).ToBeHiddenAsync();
-                var again = await OrderAsync(p);
-                Assert.True(Array.IndexOf(again, "builtin:files") < Array.IndexOf(again, "builtin:todos"), string.Join(",", again));
+                await Assertions.Expect(Cell(p, "builtin:calendar")).ToHaveAttributeAsync("style", new System.Text.RegularExpressions.Regex("--palette-"));
+                await Assertions.Expect(Cell(p, "builtin:notes")).ToHaveCountAsync(0);
             }
 
-            // Show the hidden tile again: Edit shows it grayed, with a Show control.
-            await page.Locator("fb-hub-view .sac-launcher-edit").ClickAsync();
-            // no-add: Edit mode offers no same-realm "Add app" tile.
-            Assert.Equal(0, await page.Locator("fb-hub-view .sac-launcher-add-cell").CountAsync());
-            await Cell(page, "builtin:notes").Locator(".sac-launcher-ctrl.vis").ClickAsync();
-            await page.Locator("fb-hub-view .sac-launcher-edit").ClickAsync();
+            // Show it again from the toolbar: the item goes once nothing is hidden.
+            await ShowHiddenButton(page).ClickAsync();
+            var dialog = page.Locator("sac-dialog#fb-hidden-tiles");
+            await dialog.Locator("button[data-key='builtin:notes']").ClickAsync();
             await Assertions.Expect(Cell(page, "builtin:notes")).ToBeVisibleAsync();
+            await Assertions.Expect(ShowHiddenButton(page)).ToHaveCountAsync(0);
             await WaitForServerAsync(page, t => !Hidden(t, "builtin:notes"));
             await page.ReloadAsync();
             await Assertions.Expect(Cell(page, "builtin:notes")).ToBeVisibleAsync(new() { Timeout = 5000 });
@@ -225,10 +206,8 @@ public class DesktopTests
         {
             await page.GotoAsync($"{_fixture.BaseUrl}/#/space/{space.Slug}/");
             await Assertions.Expect(page.Locator($"fb-hub-view a.tile[href='#/space/{space.Slug}/notes']")).ToBeVisibleAsync(new() { Timeout = 5000 });
-            // Readonly: the same arrangement, no menus, no Edit, no drag.
-            await Assertions.Expect(page.Locator("fb-hub-view sac-launcher[readonly]")).ToHaveCountAsync(1);
-            await Assertions.Expect(page.Locator("fb-hub-view .sac-launcher-menu")).ToHaveCountAsync(0);
-            await Assertions.Expect(page.Locator("fb-hub-view .sac-launcher-edit")).ToBeHiddenAsync();
+            // Readonly: the same arrangement, no tile menus.
+            await Assertions.Expect(page.Locator("fb-hub-view .tile-menu")).ToHaveCountAsync(0);
             // The server agrees: a member's PUT is refused.
             var res = await page.APIRequest.PutAsync($"{_fixture.BaseUrl}/api/v1/spaces/{space.Slug}/desktop/tiles/builtin:notes",
                 new APIRequestContextOptions { DataObject = new { hidden = true } });
@@ -352,7 +331,7 @@ public class DesktopTests
     }
 
     [Fact]
-    public async Task Desktop_Phone_TwoColumnSquares_Test()
+    public async Task Desktop_Phone_OneColumn_Test()
     {
         var (context, page, errors) = await OpenAsync(new BrowserNewContextOptions
         {
@@ -363,15 +342,14 @@ public class DesktopTests
         });
         try
         {
+            await ResetAsync(page);
             await page.GotoAsync(_fixture.BaseUrl + "/#/");
             await Assertions.Expect(Cell(page, "builtin:notes")).ToBeVisibleAsync(new() { Timeout = 5000 });
-            // Arranging is reachable on touch: the "…" is shown, not hover-only.
-            Assert.Equal("1", await Cell(page, "builtin:notes").Locator(".sac-launcher-menu-btn")
-                .EvaluateAsync<string>("b => getComputedStyle(b).opacity"));
-            // Two columns of squares.
-            var box = (await Cell(page, "builtin:notes").BoundingBoxAsync())!;
-            Assert.InRange(box.Height, box.Width - 2, box.Width + 2);
-            Assert.True(box.Width < 375 / 2, $"tile {box.Width}px wide");
+            // The kit's phone grid: one column of row tiles.
+            var notes = (await Cell(page, "builtin:notes").BoundingBoxAsync())!;
+            var todos = (await Cell(page, "builtin:todos").BoundingBoxAsync())!;
+            Assert.True(notes.Width > 375 / 2, $"tile {notes.Width}px wide");
+            Assert.True(todos.Y > notes.Y, "tiles stack");
             var overflow = await page.EvaluateAsync<int>("() => document.documentElement.scrollWidth - document.documentElement.clientWidth");
             Assert.Equal(0, overflow);
             await page.ScreenshotAsync(new PageScreenshotOptions { Path = Path.Combine(Path.GetTempPath(), "fishbowl_ui_desktop_phone.png") });

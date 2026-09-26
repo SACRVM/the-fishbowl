@@ -316,8 +316,8 @@ secret blocks live in notes, which no capability exposes.
 
 ## Phases
 
-- **D1 — Desktop.** *Done 2026-09-26; moved onto `<sac-launcher>` with square tiles (kit 2.18 host-owned layout, sacrvm-appkit #25) the same day.* Registry-driven tiles for the
-  built-ins, size/colour/order/hide stored per workspace, badges, the
+- **D1 — Desktop.** *Done 2026-09-26. Briefly moved onto `<sac-launcher>` with square tiles the same day, then back: the desktop is now built exactly like SACRVM Desktop (kit hub recipe, its tile menu, no Fishbowl styling over the kit tiles, no Edit mode or drag; hidden tiles come back from the toolbar).* Registry-driven tiles for the
+  built-ins, size/colour/hide stored per workspace, badges, the
   palette. Small and useful on its own, with no foreign code. As built:
   - `js/lib/desktop.js` (`fb.desktop`) holds the registry and fills the
     palette. The desktop itself is `fb-hub-view` on the kit's hub recipe;

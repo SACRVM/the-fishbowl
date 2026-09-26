@@ -2,16 +2,15 @@
  * Fishbowl — the desktop's app registry, the Ctrl/⌘K palette's commands,
  * and the small "open this view and do that" hand-off between them.
  *
- * One registry of built-in apps drives the desktop's <sac-launcher> (#/, fb-hub-view),
+ * One registry of built-in apps drives the desktop's tiles (#/, fb-hub-view),
  * the palette's Apps group and — through the routes the views register —
  * the burger. Admin apps exist only for admins, and only in the personal
  * workspace; nothing is listed that doesn't work.
  *
  * The arrangement (size, colour, order, hidden) is per workspace and lives
  * on the server (fb.api.desktop), so it follows the user across devices.
- * A tile's position is its index in the launcher's order (fb-hub-view
- * writes the tiles a change moved); a tile never arranged sorts by its
- * registry index.
+ * Tiles keep their stored position (the desktop has no reordering UI);
+ * a tile never arranged sorts by its registry index.
  *
  * Palette groups (sac.commands; routes register with palette: false, since
  * the palette would navigate them out of a space):
