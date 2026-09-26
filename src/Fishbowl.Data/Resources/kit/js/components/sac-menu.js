@@ -19,8 +19,10 @@
  * viewport, and re-anchors on scroll/resize while open.
  *
  * Items are plain <button data-action="…"> elements — an <hr> between them
- * draws a separator, `data-danger` tints the hover state red. Anything else
- * you slot (headers, spans) is left alone.
+ * draws a separator, `data-danger` tints the hover state red, `hidden`
+ * hides an item (toggle it at runtime; hidden items are skipped by the
+ * arrow keys and by sac-nav's "…" fold). Anything else you slot (headers,
+ * spans) is left alone.
  *
  * Attributes:
  *   open — presence = panel visible. Reflected by open()/close()/toggle();
@@ -260,6 +262,9 @@ class SacMenu extends HTMLElement {
                     background: color-mix(in srgb, var(--danger) 14%, transparent) !important;
                     color: var(--danger-text) !important;
                 }
+                /* The !important display above would otherwise defeat the
+                   hidden attribute — a hidden item must stay hidden. */
+                .panel ::slotted([hidden]) { display: none !important; }
                 .panel ::slotted(button[disabled]) {
                     opacity: 0.3;
                     cursor: not-allowed;
@@ -393,7 +398,7 @@ class SacMenu extends HTMLElement {
     _items() {
         if (!this._itemSlot) return [];
         return this._itemSlot.assignedElements({ flatten: true })
-            .filter(el => el.matches("button:not([disabled])"));
+            .filter(el => el.matches("button:not([disabled]):not([hidden])"));
     }
 
     /** Tag slotted buttons as menuitems so role="menu" is complete for AT. */

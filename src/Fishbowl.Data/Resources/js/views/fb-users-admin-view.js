@@ -273,7 +273,8 @@ class FbUsersAdminView extends HTMLElement {
 
     /**
      * The account's "…" menu. Only what applies to this account is in it —
-     * items are added, never hidden (kit menus ignore `hidden`).
+     * the menu is rebuilt with each render, so it simply holds the items
+     * that fit the account's state.
      */
     _menu(u) {
         const menu = document.createElement("sac-menu");

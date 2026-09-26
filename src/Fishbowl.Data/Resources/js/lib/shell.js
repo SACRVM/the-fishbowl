@@ -234,26 +234,25 @@
         }
     });
 
-    // One vault item: "Lock secrets" while unlocked, "Unlock secrets" while
-    // locked, absent while there is no vault yet (nothing to unlock) or in a
-    // space (secrets are personal). Added and removed rather than `hidden`:
-    // <sac-menu> styles its items `display: flex !important`, which beats
-    // the hidden attribute, so a hidden item would still show.
-    const vaultItem = document.createElement("button");
-    vaultItem.id = "fb-vault-item";
+    // The vault pair: "Lock secrets" while unlocked, "Unlock secrets" while
+    // locked, neither while there is no vault yet (nothing to unlock) or in a
+    // space (secrets are personal). Both live right after "Profile", above
+    // the separator, and toggle `hidden` (kit >= 2.19 honours it).
+    const vaultItem = (action, icon, label) => {
+        const b = document.createElement("button");
+        b.id = "fb-" + action + "-item";
+        b.dataset.action = action;
+        b.hidden = true;
+        b.innerHTML = `<sac-icon name="${icon}"></sac-icon> ${label}`;
+        return b;
+    };
+    const lockItem = vaultItem("lock-secrets", "lock", "Lock secrets");
+    const unlockItem = vaultItem("unlock-secrets", "unlock", "Unlock secrets");
+    account.querySelector('[data-action="profile"]')?.after(lockItem, unlockItem);
     async function syncVaultItems() {
         const s = await (fb.vault?.status?.() ?? { available: false });
-        const mode = !s.available ? null
-            : s.unlocked ? "lock"
-            : s.initialized ? "unlock"
-            : null;
-        if (!mode) { vaultItem.remove(); return; }
-        vaultItem.dataset.action = mode === "lock" ? "lock-secrets" : "unlock-secrets";
-        vaultItem.innerHTML = mode === "lock"
-            ? '<sac-icon name="lock"></sac-icon> Lock secrets'
-            : '<sac-icon name="unlock"></sac-icon> Unlock secrets';
-        // Right after "Profile", above the separator.
-        if (!vaultItem.isConnected) account.querySelector('[data-action="profile"]')?.after(vaultItem);
+        lockItem.hidden = !(s.available && s.unlocked);
+        unlockItem.hidden = !(s.available && !s.unlocked && s.initialized);
     }
     window.addEventListener("fb:vault-changed", syncVaultItems);
     window.addEventListener("sac:scope-changed", syncVaultItems);

@@ -1349,7 +1349,7 @@ class SacNav extends HTMLElement {
         over.forEach((el) => {
             if (el.localName === "sac-menu") {
                 const items = [...el.children].filter((c) =>
-                    c.matches("button[data-action]") && c.getAttribute("slot") !== "trigger");
+                    c.matches("button[data-action]:not([hidden])") && c.getAttribute("slot") !== "trigger");
                 if (!items.length) return;
                 if (more.querySelector("[data-action]")) more.appendChild(document.createElement("hr"));
                 items.forEach((item) => {

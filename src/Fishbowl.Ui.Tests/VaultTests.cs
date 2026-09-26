@@ -158,16 +158,16 @@ public class VaultTests
             // The account menu now offers unlock, not lock — and unlocking
             // there shows the open note's secret without switching notes.
             await page.WaitForFunctionAsync(
-                "() => document.querySelectorAll('#fb-account [data-action$=\"lock-secrets\"]').length === 1 && document.getElementById('fb-vault-item')?.dataset.action === 'unlock-secrets'");
+                "() => document.getElementById('fb-lock-secrets-item')?.hidden === true && document.getElementById('fb-unlock-secrets-item')?.hidden === false");
             await page.Locator("#fb-account button[slot='trigger']").ClickAsync();
-            await page.Locator("#fb-vault-item").ClickAsync();
+            await page.Locator("#fb-unlock-secrets-item").ClickAsync();
             await unlock.WaitForAsync(new LocatorWaitForOptions { Timeout = 5000 });
             await unlock.Locator("input[name='pass']").FillAsync(Passphrase);
             await unlock.GetByRole(AriaRole.Button, new() { Name = "Unlock" }).ClickAsync();
             await page.WaitForFunctionAsync(
                 "() => document.querySelector('fb-notes-view #content').value.includes('" + Secret + "')");
             await page.WaitForFunctionAsync(
-                "() => document.querySelectorAll('#fb-account [data-action$=\"lock-secrets\"]').length === 1 && document.getElementById('fb-vault-item')?.dataset.action === 'lock-secrets'");
+                "() => document.getElementById('fb-lock-secrets-item')?.hidden === false && document.getElementById('fb-unlock-secrets-item')?.hidden === true");
 
             // Lock again; this time the pill unlocks and brings the secret back.
             await page.EvaluateAsync("() => fb.vault.lock()");

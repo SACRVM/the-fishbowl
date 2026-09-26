@@ -41,6 +41,9 @@
  *   edit    — presence = edit mode. Toggled by the Edit button; settable by
  *             hand. Ignored (removed) unless editable: `storage` or
  *             persist="none", and not `readonly`.
+ *   no-add  — presence = no "Add app" tile and no Add dialog: for a host
+ *             that installs apps through its own flow (an isolated install,
+ *             an owner-only policy). See also sac:request-add.
  *   drag    — drag reorder: absent = in edit mode only (the default),
  *             "always" = also outside edit mode, "none" = buttons only.
  *             Needs an editable launcher (see `edit`) and sac.sortable
@@ -113,6 +116,10 @@
  *   sac:tile-action — detail { key, appId, action } when a tile-menu item
  *                         is chosen (action = the item's id, else its
  *                         index). Bubbles + composed; fires after onClick.
+ *   sac:request-add — the "Add app" tile was pressed. Cancelable:
+ *                         preventDefault() skips the built-in Add dialog so
+ *                         the host runs its own install flow. Bubbles +
+ *                         composed.
  *
  * Tiles:
  *   kind:"page" apps render as real <a> links; window and view apps render
@@ -169,7 +176,7 @@
         (window.sac && window.sac.t) ? window.sac.t(key, fallback) : fallback;
 
 class SacLauncher extends HTMLElement {
-    static get observedAttributes() { return ["storage", "persist", "readonly", "edit", "drag"]; }
+    static get observedAttributes() { return ["storage", "persist", "readonly", "edit", "drag", "no-add"]; }
 
     constructor() {
         super();
@@ -250,6 +257,9 @@ class SacLauncher extends HTMLElement {
             this._syncEditUI();
         } else if (name === "edit" || name === "drag" || name === "readonly") {
             this._syncEditUI();
+        } else if (name === "no-add") {
+            if (newV !== null && this._dialog && this._dialog.hasAttribute("open")) this._dialog.close();
+            this._sync();
         }
     }
 
@@ -347,7 +357,12 @@ class SacLauncher extends HTMLElement {
         addLabel.textContent = t("launcher.add-app", "Add app");
         this._addLabel = addLabel;
         this._addBtn.append(addIcon, addLabel);
-        this._addBtn.addEventListener("click", () => this._openAddDialog());
+        this._addBtn.addEventListener("click", () => {
+            // Cancelable: a host with its own install flow (an isolated
+            // install, a policy check) takes over behind the same tile.
+            const ask = new CustomEvent("sac:request-add", { bubbles: true, composed: true, cancelable: true });
+            if (this.dispatchEvent(ask)) this._openAddDialog();
+        });
         this._addCell.appendChild(this._addBtn);
         this._grid.appendChild(this._addCell);
 
@@ -586,15 +601,18 @@ class SacLauncher extends HTMLElement {
         // Minimal reorder: only nodes actually out of place are moved, so an
         // untouched tile (and any focus inside it) is never disturbed.
         const desired = this._order.map(id => this._tiles.get(id));
-        desired.push(this._addCell);
+        const noAdd = this.hasAttribute("no-add");
+        if (noAdd) this._addCell.remove();
+        else desired.push(this._addCell);
         let cursor = this._grid.firstElementChild;
         for (const cell of desired) {
             if (cell === cursor) cursor = cursor.nextElementSibling;
             else this._grid.insertBefore(cell, cursor);
         }
 
-        // In edit mode the Add tile is visible, so the empty hint would lie.
-        this._empty.hidden = this._order.length > 0 || this.hasAttribute("edit");
+        // In edit mode the Add tile is visible, so the empty hint would lie —
+        // unless there is no Add tile.
+        this._empty.hidden = this._order.length > 0 || (this.hasAttribute("edit") && !noAdd);
     }
 
     _makeCell(entry) {
@@ -979,6 +997,7 @@ class SacLauncher extends HTMLElement {
     /* ------------------------------------------------------------------ */
 
     _openAddDialog() {
+        if (this.hasAttribute("no-add")) return;
         if (!this._dialog) this._buildDialog();
         if (typeof this._dialog.open !== "function") {
             console.warn("[sac-launcher] <sac-dialog> is not loaded.");
