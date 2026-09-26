@@ -32,6 +32,7 @@
     <script defer src="/js/lib/format.js"></script>
     <script defer src="/js/lib/files-store.js"></script>
     <script defer src="/js/lib/accounts.js"></script>
+    <script defer src="/js/lib/desktop.js"></script>
     <script defer src="/js/lib/tags-registry.js"></script>
     <script defer src="/js/lib/tag-manager.js"></script>
 
@@ -66,6 +67,7 @@
     <script defer src="/kit/js/components/sac-tabs.js"></script>
     <script defer src="/kit/js/components/sac-shortcut-sheet.js"></script>
     <script defer src="/kit/js/components/sac-shortcut-bar.js"></script>
+    <script defer src="/kit/js/components/sac-command-palette.js"></script>
 
     <!-- sac-md-editor: appkit add-on module, vendored verbatim from
          SACRVM/sac-md-editor (pinned commit in the VERSION file next to it).
@@ -97,6 +99,12 @@
         </sac-menu>
         <!-- fb.toolbar renders the active view's actions here. -->
         <div slot="toolbar" class="toolbar" id="fb-view-toolbar"></div>
+        <!-- The Ctrl/⌘K palette, made visible (a phone has no Ctrl-K).
+             Outside fb.toolbar, so per-view repaints never drop it. -->
+        <button slot="toolbar" class="nav-icon-btn" id="fb-search-btn"
+                aria-label="Search and commands" title="Search and commands">
+            <sac-icon name="search"></sac-icon>
+        </button>
         <!-- System messages: the envelope + unread count, shown once /me
              loaded. Outside fb.toolbar, so per-view repaints never drop it. -->
         <button slot="toolbar" class="nav-icon-btn has-badge" id="fb-messages-btn"
@@ -116,5 +124,6 @@
         </sac-menu>
     </sac-nav>
     <div id="app-root"></div>
+    <sac-command-palette></sac-command-palette>
 </body>
 </html>

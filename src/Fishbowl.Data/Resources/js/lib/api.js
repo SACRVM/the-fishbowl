@@ -452,6 +452,22 @@
         auth: {
             logout: () => request("/auth/logout", { method: "POST" })
         },
+        // The workspace's desktop: its tile arrangement (and, later, its
+        // installed apps). Scope-aware; cookie-only; in a space only the
+        // owner writes (the GET says so in canArrange). A PUT replaces the
+        // whole tile row — send every field.
+        desktop: {
+            get:     ()          => request(ctx("/desktop")),
+            putTile: (key, tile) => request(ctx(`/desktop/tiles/${encodeURIComponent(key)}`), {
+                method: "PUT",
+                body: JSON.stringify({
+                    position: tile.position ?? null,
+                    size: tile.size ?? null,
+                    color: tile.color ?? null,
+                    hidden: !!tile.hidden,
+                }),
+            }),
+        },
         // System messages — personal, never context-prefixed, cookie-only.
         // Every change fires `fb:messages-changed` so the nav badge follows.
         messages: {

@@ -512,4 +512,4 @@ function formatRelative(iso) {
 }
 
 customElements.define("fb-keys-settings-view", FbKeysSettingsView);
-sac.router.register("#/keys", "fb-keys-settings-view", { label: "API keys", icon: "key" });
+sac.router.register("#/keys", "fb-keys-settings-view", { label: "API keys", icon: "key", palette: false });

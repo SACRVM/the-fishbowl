@@ -42,9 +42,14 @@ class FbCalendarView extends HTMLElement {
     async connectedCallback() {
         this.render();
         await this.loadEvents();
+        // "New event" from the Ctrl-K palette (fb.desktop.go).
+        this._onIntent = () => { if (fb.desktop?.takeIntent("calendar")?.action === "create") this.createEvent(); };
+        window.addEventListener("fb:intent", this._onIntent);
+        this._onIntent();
     }
 
     disconnectedCallback() {
+        if (this._onIntent) window.removeEventListener("fb:intent", this._onIntent);
         this.flushSave();
         if (window.fb?.toolbar) fb.toolbar.clear();
     }
@@ -990,4 +995,4 @@ function escapeHtml(s) {
 }
 
 customElements.define("fb-calendar-view", FbCalendarView);
-sac.router.register("#/calendar", "fb-calendar-view", { label: "Calendar", icon: "calendar" });
+sac.router.register("#/calendar", "fb-calendar-view", { label: "Calendar", icon: "calendar", palette: false });

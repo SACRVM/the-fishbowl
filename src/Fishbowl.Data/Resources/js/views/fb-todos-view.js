@@ -35,9 +35,14 @@ class FbTodosView extends HTMLElement {
             onReorder: (from, to) => this._moveTodo(from, to),
         });
         await this.loadTodos();
+        // "New todo" from the Ctrl-K palette (fb.desktop.go).
+        this._onIntent = () => { if (fb.desktop?.takeIntent("todos")?.action === "create") this.createTodo(); };
+        window.addEventListener("fb:intent", this._onIntent);
+        this._onIntent();
     }
 
     disconnectedCallback() {
+        if (this._onIntent) window.removeEventListener("fb:intent", this._onIntent);
         this._sortable?.destroy();
         this.flushSave();
         if (window.fb?.toolbar) fb.toolbar.clear();
@@ -848,4 +853,4 @@ function escapeHtml(s) {
 }
 
 customElements.define("fb-todos-view", FbTodosView);
-sac.router.register("#/todos", "fb-todos-view", { label: "Todos", icon: "check" });
+sac.router.register("#/todos", "fb-todos-view", { label: "Todos", icon: "check", palette: false });

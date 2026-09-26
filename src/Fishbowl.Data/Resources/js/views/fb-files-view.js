@@ -1311,5 +1311,5 @@
     }
 
     customElements.define("fb-files-view", FbFilesView);
-    sac.router.register("#/files/*", "fb-files-view", { label: "Files", icon: "folder" });
+    sac.router.register("#/files/*", "fb-files-view", { label: "Files", icon: "folder", palette: false });
 })();

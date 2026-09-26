@@ -414,4 +414,4 @@ function escapeHtml(s) {
 function escapeAttr(s) { return escapeHtml(s); }
 
 customElements.define("fb-spaces-settings-view", FbSpacesSettingsView);
-sac.router.register("#/spaces", "fb-spaces-settings-view", { label: "Spaces", icon: "users" });
+sac.router.register("#/spaces", "fb-spaces-settings-view", { label: "Spaces", icon: "users", palette: false });

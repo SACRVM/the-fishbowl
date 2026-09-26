@@ -183,6 +183,15 @@
         console.warn("[fb-shell] failed to load user:", err?.message || err);
     });
 
+    // --- Palette -----------------------------------------------------------
+    // The search button opens the kit's Ctrl/⌘K palette (fb.desktop fills
+    // it); its tooltip names the key the way this platform spells it.
+    const searchBtn = document.getElementById("fb-search-btn");
+    const paletteKey = sac.hotkeys?.format ? sac.hotkeys.format("mod+k") : "Ctrl+K";
+    searchBtn.title = `Search and commands (${paletteKey})`;
+    searchBtn.setAttribute("aria-label", searchBtn.title);
+    searchBtn.addEventListener("click", () => sac.palette?.open());
+
     // --- Messages ----------------------------------------------------------
     // The envelope opens #/messages; its badge is the unread count, kept fresh
     // on every change (fb.api fires fb:messages-changed), on navigation and

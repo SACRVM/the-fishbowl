@@ -63,6 +63,16 @@ class FbNotesView extends HTMLElement {
         await this.loadNotes();
         this._renderTagFilter();
         this._refreshTagSuggestions();
+        // "New note" / a note picked in the Ctrl-K palette (fb.desktop.go).
+        this._onIntent = () => this._takeIntent();
+        window.addEventListener("fb:intent", this._onIntent);
+        this._takeIntent();
+    }
+
+    _takeIntent() {
+        const it = fb.desktop?.takeIntent("notes");
+        if (it?.action === "create") this.createNote();
+        if (it?.action === "open" && it.id) this.select(it.id);
     }
 
     /** Top-nav toolbar for this view. Per-note actions (pin/archive/delete)
@@ -122,6 +132,7 @@ class FbNotesView extends HTMLElement {
     }
 
     disconnectedCallback() {
+        if (this._onIntent) window.removeEventListener("fb:intent", this._onIntent);
         // Router already clears on swap, but guard against any other unmount.
         // Fire-and-forget any pending autosave so a quick view-switch mid-typing
         // doesn't drop edits.
@@ -1396,4 +1407,4 @@ function editorTextFor(note) {
 }
 
 customElements.define("fb-notes-view", FbNotesView);
-sac.router.register("#/notes", "fb-notes-view", { label: "Notes", icon: "note" });
+sac.router.register("#/notes", "fb-notes-view", { label: "Notes", icon: "note", palette: false });

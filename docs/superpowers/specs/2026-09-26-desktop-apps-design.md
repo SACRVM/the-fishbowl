@@ -316,9 +316,22 @@ secret blocks live in notes, which no capability exposes.
 
 ## Phases
 
-- **D1 — Desktop.** Registry-driven tiles for the built-ins, size/colour/
-  order/hide stored per workspace, badges, the palette. Small and useful on
-  its own, with no foreign code.
+- **D1 — Desktop.** *Done 2026-09-26.* Registry-driven tiles for the
+  built-ins, size/colour/order/hide stored per workspace, badges, the
+  palette. Small and useful on its own, with no foreign code. As built:
+  - `js/lib/desktop.js` (`fb.desktop`) holds the registry and fills the
+    palette. The desktop itself is `fb-hub-view` on the kit's hub recipe;
+    `<sac-launcher>` didn't fit (localStorage layout, no tile menu, no
+    drag, no targeted badge update, appkit #16).
+  - Tile colour tints the tile only. It doesn't seed the opened app's
+    accent: Fishbowl's accent is per user and per space, not per app.
+  - The palette lists note *titles*. Full-text search as you type needs an
+    async result source the kit palette doesn't have yet.
+  - Its commands navigate through `sac.scope.hashFor`. The routes register
+    with `palette: false`, because the kit palette would navigate a route
+    out of the active space.
+  - Inside the notes editor, Ctrl/⌘K is the editor's own link shortcut.
+    The nav's search button opens the palette from anywhere.
 - **D2 — Apps.** Install flow, pinning and updates, the frame and bridge,
   `fs` (needs Files backend phase 1), `identity`, theme/lang/regional,
   Settings → Apps (installed list, grants, storage, update, remove), install

@@ -178,4 +178,4 @@ class FbMessagesView extends HTMLElement {
 }
 
 customElements.define("fb-messages-view", FbMessagesView);
-sac.router.register("#/messages", "fb-messages-view", { label: "Messages", icon: "mail" });
+sac.router.register("#/messages", "fb-messages-view", { label: "Messages", icon: "mail", palette: false });
