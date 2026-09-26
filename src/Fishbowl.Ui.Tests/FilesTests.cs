@@ -488,4 +488,170 @@ public class FilesTests
             await context.CloseAsync();
         }
     }
+
+    [Fact]
+    public async Task Files_DeleteButton_HoverOnly_UndoAfterDelete_NotAfterShiftDelete_Test()
+    {
+        var (context, page, errors) = await OpenAsync();
+        try
+        {
+            var folder = Unique("undo-");
+            await PutAsync(page, $"{folder}/a.txt", "a");
+            await PutAsync(page, $"{folder}/b.txt", "b");
+            await page.GotoAsync($"{_fixture.BaseUrl}/#/files/{folder}");
+            await Assertions.Expect(Row(page, "left", "b.txt")).ToHaveCountAsync(1, new() { Timeout = 10000 });
+
+            // The trash button shows on the hovered row only — not on the
+            // cursor row once the pointer is gone, not while rows are marked.
+            static Task<string> Opacity(ILocator del) => del.EvaluateAsync<string>("el => getComputedStyle(el).opacity");
+            static Task<string> Visibility(ILocator del) => del.EvaluateAsync<string>("el => getComputedStyle(el).visibility");
+            await FocusRowAsync(page, "left", "a.txt");
+            await Status(page, "left").HoverAsync();
+            Assert.Equal("0", await Opacity(Row(page, "left", "a.txt").Locator(".del")));
+            await Row(page, "left", "a.txt").HoverAsync();
+            Assert.Equal("1", await Opacity(Row(page, "left", "a.txt").Locator(".del")));
+            await Row(page, "left", "a.txt").ClickAsync(new() { Modifiers = new[] { KeyboardModifier.Control } });
+            await Row(page, "left", "b.txt").ClickAsync(new() { Modifiers = new[] { KeyboardModifier.Control } });
+            await Row(page, "left", "b.txt").HoverAsync();
+            Assert.Equal("hidden", await Visibility(Row(page, "left", "b.txt").Locator(".del")));
+            await page.Keyboard.PressAsync("Escape");
+
+            // Delete → the toast offers Undo, and Undo brings the file back.
+            await FocusRowAsync(page, "left", "a.txt");
+            await page.Keyboard.PressAsync("Delete");
+            await Assertions.Expect(Row(page, "left", "a.txt")).ToHaveCountAsync(0, new() { Timeout = 10000 });
+            // The action button is labelled by sac.t (Undo / Rückgängig — the page
+            // language follows the browser), so it is found by its role in the card.
+            await page.Locator("#sac-toast-stack .toast").Filter(new() { HasText = "Moved 1 item to the trash." }).Locator("button.action").ClickAsync(new() { Timeout = 10000 });
+            await Assertions.Expect(Row(page, "left", "a.txt")).ToHaveCountAsync(1, new() { Timeout = 10000 });
+            Assert.True(await ExistsAsync(page, $"{folder}/a.txt"));
+            await Assertions.Expect(Toast(page, "Restored 1 item.")).ToBeVisibleAsync(new() { Timeout = 10000 });
+
+            // Shift+Delete: gone for good, and its toast has no Undo.
+            await FocusRowAsync(page, "left", "b.txt");
+            await page.Keyboard.PressAsync("Shift+Delete");
+            await page.Locator("sac-dialog[title='Delete permanently?']").GetByRole(AriaRole.Button, new() { Name = "Delete permanently" }).ClickAsync();
+            var permanent = page.Locator("#sac-toast-stack .toast").Filter(new() { HasText = "Deleted 1 item permanently." });
+            await Assertions.Expect(Toast(page, "Deleted 1 item permanently.")).ToBeVisibleAsync(new() { Timeout = 10000 });
+            Assert.Equal(0, await permanent.Locator("button.action").CountAsync());
+            Assert.False(await ExistsAsync(page, $"{folder}/b.txt"));
+            Assert.Empty(errors);
+        }
+        finally
+        {
+            await context.CloseAsync();
+        }
+    }
+
+    [Fact]
+    public async Task Files_TabSwitchesPanes_AndFocusFollows_Test()
+    {
+        var (context, page, errors) = await OpenAsync();
+        try
+        {
+            var folder = Unique("focus-");
+            await PutAsync(page, $"{folder}/f.txt", "f");
+            await page.GotoAsync($"{_fixture.BaseUrl}/#/files/{folder}");
+            await Assertions.Expect(Row(page, "left", "f.txt")).ToHaveCountAsync(1, new() { Timeout = 10000 });
+            await FocusRowAsync(page, "left", "f.txt");
+            const string focused = "side => document.activeElement === document.querySelector(`fb-files-view .fv-pane[data-side='${side}'] sac-file-browser`)";
+            await page.Keyboard.PressAsync("Tab");
+            await Assertions.Expect(Pane(page, "right")).ToHaveAttributeAsync("data-active", "");
+            Assert.True(await page.EvaluateAsync<bool>(focused, "right"));
+            await page.Keyboard.PressAsync("Tab");
+            await Assertions.Expect(Pane(page, "left")).ToHaveAttributeAsync("data-active", "");
+            Assert.True(await page.EvaluateAsync<bool>(focused, "left"));
+            Assert.Empty(errors);
+        }
+        finally
+        {
+            await context.CloseAsync();
+        }
+    }
+
+    [Fact]
+    public async Task Files_ModifiedColumn_FollowsTheUsersDateFormat_Test()
+    {
+        var (context, page, errors) = await OpenAsync();
+        async Task SetFormatAsync(string? name)
+        {
+            var res = await page.APIRequest.PatchAsync($"{_fixture.BaseUrl}/api/v1/me", new APIRequestContextOptions
+            {
+                DataObject = new Dictionary<string, object?> { ["dateFormat"] = name },
+            });
+            Assert.True(res.Ok, $"PATCH /me: {res.Status}");
+        }
+        try
+        {
+            var folder = Unique("regional-");
+            await PutAsync(page, $"{folder}/today.txt", "t");
+            var date = Row(page, "left", "today.txt").Locator(".meta.date");
+
+            // A file from today shows its time: de = 24-hour, us = AM/PM.
+            await SetFormatAsync("de");
+            await page.GotoAsync($"{_fixture.BaseUrl}/#/files/{folder}");
+            await Assertions.Expect(date).ToHaveTextAsync(new System.Text.RegularExpressions.Regex(@"^\d{2}:\d{2}$"), new() { Timeout = 10000 });
+
+            await SetFormatAsync("us");
+            await page.ReloadAsync();
+            await Assertions.Expect(date).ToHaveTextAsync(new System.Text.RegularExpressions.Regex("(AM|PM)"), new() { Timeout = 10000 });
+            Assert.Empty(errors);
+        }
+        finally
+        {
+            await SetFormatAsync(null);
+            await context.CloseAsync();
+        }
+    }
+
+    [Fact]
+    public async Task Files_Phone_LongPressMarksRows_AndTrashRemovesAll_Test()
+    {
+        var (context, page, errors) = await OpenAsync(new BrowserNewContextOptions
+        {
+            IgnoreHTTPSErrors = true,
+            ViewportSize = new ViewportSize { Width = 375, Height = 740 },
+            IsMobile = true,
+            HasTouch = true,
+        });
+        try
+        {
+            var folder = Unique("marks-");
+            await PutAsync(page, $"{folder}/x1.txt", "1");
+            await PutAsync(page, $"{folder}/x2.txt", "2");
+            await PutAsync(page, $"{folder}/keep.txt", "k");
+            await page.GotoAsync($"{_fixture.BaseUrl}/#/files/{folder}");
+            await Assertions.Expect(Row(page, "left", "x2.txt")).ToHaveCountAsync(1, new() { Timeout = 10000 });
+
+            // A finger held still on x1 enters mark mode; a tap marks x2 too.
+            const string press = @"(el, type) => {
+                const r = el.getBoundingClientRect();
+                el.dispatchEvent(new PointerEvent(type, { pointerType: 'touch', pointerId: 7, isPrimary: true,
+                    bubbles: true, composed: true, clientX: r.x + 30, clientY: r.y + r.height / 2 }));
+            }";
+            const string browserOf = "document.querySelector(\"fb-files-view .fv-pane[data-side='left'] sac-file-browser\")";
+            var x1 = Row(page, "left", "x1.txt");
+            await x1.EvaluateAsync(press, "pointerdown");
+            await page.WaitForTimeoutAsync(700);
+            await x1.EvaluateAsync(press, "pointerup");
+            await page.WaitForFunctionAsync($"() => {browserOf}.selecting === true");
+            await Row(page, "left", "x2.txt").TapAsync();
+            await page.WaitForFunctionAsync($"() => {browserOf}.marked.length === 2");
+
+            // Trash (from the nav's "…") works on both marks and ends mark mode.
+            await page.Locator("#fb-nav button.more-btn").ClickAsync();
+            // Two "Trash" entries fold into the menu: the trash window (toolbar)
+            // and the shortcut bar's delete action, which comes last.
+            await page.Locator("#fb-nav").GetByRole(AriaRole.Menuitem, new() { Name = "Trash", Exact = true }).Last.ClickAsync();
+            await Assertions.Expect(Row(page, "left", "x1.txt")).ToHaveCountAsync(0, new() { Timeout = 10000 });
+            await Assertions.Expect(Row(page, "left", "x2.txt")).ToHaveCountAsync(0);
+            await Assertions.Expect(Row(page, "left", "keep.txt")).ToHaveCountAsync(1);
+            Assert.False(await page.EvaluateAsync<bool>($"() => {browserOf}.selecting"));
+            Assert.Empty(errors);
+        }
+        finally
+        {
+            await context.CloseAsync();
+        }
+    }
 }

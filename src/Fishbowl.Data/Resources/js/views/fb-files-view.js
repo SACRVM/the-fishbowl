@@ -24,6 +24,10 @@
  */
 (function () {
     const RIGHT_KEY = "fb.files.right";
+    // The Undo on the trash toast (sac.toast action, relabelled on a
+    // language switch).
+    sac.i18n?.add?.("en", { "fb.files.undo": "Undo" });
+    sac.i18n?.add?.("de", { "fb.files.undo": "Rückgängig" });
     const baseName = (p) => p.slice(p.lastIndexOf("/") + 1);
     const join = (folder, name) => (folder ? `${folder}/${name}` : name);
     const isPdf = (stat) => /pdf/i.test(stat?.type || "") || /\.pdf$/i.test(stat?.name || "");
@@ -365,7 +369,7 @@
                 <div class="fv-filter" hidden>
                     <input type="search" placeholder="Filter this folder" aria-label="Filter this folder">
                 </div>
-                <sac-file-browser multiple no-thumbnails columns="size date">
+                <sac-file-browser multiple no-thumbnails delete-button="hover" columns="size date">
                     <sac-menu slot="title" class="fv-ws">
                         <button slot="trigger" class="fv-ws-btn" type="button" aria-label="Workspace">
                             <sac-icon name="user"></sac-icon><span>Personal</span>
@@ -398,7 +402,10 @@
                 pane.section.addEventListener("focusin", () => this._setActive(pane.side));
                 pane.section.addEventListener("pointerdown", () => this._setActive(pane.side));
                 b.addEventListener("sac:cursor", () => { this._paintStatus(pane); this._followPreview(pane); });
-                b.addEventListener("sac:mark", () => this._paintStatus(pane));
+                b.addEventListener("sac:mark", () => { this._paintStatus(pane); this._paintBar(); });
+                // Touch mark mode (long-press): the kit's bar shows "{n}
+                // selected" + Done; the actions below then work on the marks.
+                b.addEventListener("sac:selecting", () => this._paintBar());
                 b.addEventListener("sac:navigate", (e) => this._navigated(pane, e.detail.path));
                 b.addEventListener("sac:choose", (e) => this._quickLook(pane, e.detail.paths[0]));
                 b.addEventListener("sac:request-remove", (e) => {
@@ -610,8 +617,7 @@
 
         _focusPane(side) {
             this._setActive(side);
-            const list = this._panes[side].browser.shadowRoot?.querySelector(".list");
-            list?.focus({ preventScroll: true });
+            this._panes[side].browser.focus({ preventScroll: true });
         }
 
         get _activePane() { return this._panes[this._active]; }
@@ -673,9 +679,11 @@
             const other = this._otherPane;
             const canWrite = this._writable(pane);
             const phone = this._phone.matches;
+            // Several rows marked (or touch mark mode): no single-row actions.
+            const many = pane.browser.selecting || pane.browser.marked.length > 1;
             const items = [];
-            if (canWrite) items.push({ id: "new", label: "New folder", combo: "alt+n", icon: "folder-plus", action: () => pane.browser.newFolder() });
-            if (canWrite) items.push({ id: "rename", label: "Rename", combo: "alt+r", icon: "pencil", action: () => pane.browser.rename() });
+            if (canWrite && !many) items.push({ id: "new", label: "New folder", combo: "alt+n", icon: "folder-plus", action: () => pane.browser.newFolder() });
+            if (canWrite && !many) items.push({ id: "rename", label: "Rename", combo: "alt+r", icon: "pencil", action: () => pane.browser.rename() });
             if (phone) {
                 items.push({ id: "copy", label: "Copy to…", combo: "alt+c", icon: "copy", action: () => this._pickAndTransfer("copy") });
                 if (canWrite) items.push({ id: "move", label: "Move to…", combo: "alt+m", icon: "move", action: () => this._pickAndTransfer("move") });
@@ -953,25 +961,54 @@
                 if (answer !== "delete") return;
             }
             let done = 0;
+            const trashed = [];   // trash entry ids, for Undo
             for (const p of paths) {
                 try {
                     if (permanent) await pane.store.api.destroy(p);
-                    else await pane.store.api.trash(p);
+                    else trashed.push((await pane.store.api.trash(p))?.id);
                     done++;
                 } catch (err) {
                     sac.toast(explain(err, `Couldn't delete “${baseName(p)}”.`), { kind: "error" });
                     break;
                 }
             }
+            if (pane.browser.selecting) pane.browser.selecting = false;
             await pane.browser.refresh();
             this._loadUsage(pane);
             this._refreshTwin(pane);
-            if (done) {
-                sac.toast(permanent
-                    ? `Deleted ${done} item${done === 1 ? "" : "s"} permanently.`
-                    : `Moved ${done} item${done === 1 ? "" : "s"} to the trash.`, { kind: "success" });
+            if (done && permanent) {
+                sac.toast(`Deleted ${done} item${done === 1 ? "" : "s"} permanently.`, { kind: "success" });
+            } else if (done) {
+                const ids = trashed.filter(Boolean);
+                sac.toast(`Moved ${done} item${done === 1 ? "" : "s"} to the trash.`, {
+                    kind: "success",
+                    action: ids.length ? {
+                        label: "Undo", labelKey: "fb.files.undo",
+                        onClick: () => { this._undoTrash(pane, ids); },
+                    } : undefined,
+                });
             }
             this._focusPane(pane.side);
+        }
+
+        /** Undo a Delete: restore those trash entries to where they were. A
+         *  name that is taken again comes back as a copy ("name (2).ext"),
+         *  the trash window's "Restore as a copy". */
+        async _undoTrash(pane, ids) {
+            const api = pane.store.api;
+            let back = 0;
+            for (const id of ids) {
+                try { await api.restore(id); back++; }
+                catch (err) {
+                    if (err.status !== 409) { sac.toast(explain(err, "Couldn't restore that."), { kind: "error" }); continue; }
+                    try { await api.restore(id, "rename"); back++; }
+                    catch (err2) { sac.toast(explain(err2, "Couldn't restore that."), { kind: "error" }); }
+                }
+            }
+            await pane.browser.refresh();
+            this._loadUsage(pane);
+            this._refreshTwin(pane);
+            if (back) sac.toast(`Restored ${back} item${back === 1 ? "" : "s"}.`, { kind: "success" });
         }
 
         /** The other pane shows the same folder of the same workspace? Refresh it. */
@@ -1049,6 +1086,7 @@
             const dest = await this._pickDestination(op, pane.workspace);
             if (!dest) return;
             const n = await this._transfer({ op, from: pane.workspace, paths, to: dest.workspace, folder: dest.folder });
+            if (pane.browser.selecting) pane.browser.selecting = false;
             await this._afterTransfer(op, pane, null, n, `${this._label(dest.workspace)}${dest.folder ? ` › ${dest.folder}` : ""}`);
         }
 
