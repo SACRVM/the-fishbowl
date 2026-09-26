@@ -71,6 +71,16 @@ public class VaultTests
             }
             await recovery.GetByRole(AriaRole.Button, new() { Name = "I wrote them down" }).ClickAsync();
 
+            // Where the browser reports passkey (PRF) support, setup offers
+            // one — not this test's business.
+            var offer = page.Locator("sac-dialog[title='Unlock with a passkey too?']");
+            try
+            {
+                await offer.WaitForAsync(new LocatorWaitForOptions { Timeout = 3000 });
+                await offer.GetByRole(AriaRole.Button, new() { Name = "Not now" }).ClickAsync();
+            }
+            catch (TimeoutException) { /* no passkey offer here */ }
+
             // ── On the server: markers and ciphertext only. ──
             var stored = await WaitForAsync(async () =>
             {
@@ -189,6 +199,274 @@ public class VaultTests
             await ResetVaultAsync(api, baseUrl);
             await context.CloseAsync();
         }
+    }
+
+    /// <summary>
+    /// Phases 2 + 3: set up from Settings → Secrets with a passkey (Chromium's
+    /// virtual authenticator with PRF), unlock with it after a reload, use it
+    /// to confirm a passphrase change, the last-recoverable-slot guard, and
+    /// the auto-lock setting.
+    /// </summary>
+    [Fact]
+    public async Task Vault_PasskeyAndSecretsSettings_Test()
+    {
+        var context = await _fixture.Browser!.NewContextAsync(new BrowserNewContextOptions { IgnoreHTTPSErrors = true });
+        var page = await context.NewPageAsync();
+        var api = page.APIRequest;
+        // WebAuthn refuses an IP address as its domain; localhost is fine.
+        var baseUrl = _fixture.BaseUrl.Replace("127.0.0.1", "localhost");
+        const string NewPassphrase = "a-brand-new-passphrase-test";
+
+        var cdp = await page.Context.NewCDPSessionAsync(page);
+        await cdp.SendAsync("WebAuthn.enable", new Dictionary<string, object> { ["enableUI"] = false });
+        await cdp.SendAsync("WebAuthn.addVirtualAuthenticator", new Dictionary<string, object>
+        {
+            ["options"] = new Dictionary<string, object>
+            {
+                ["protocol"] = "ctap2",
+                ["ctap2Version"] = "ctap2_1",
+                ["transport"] = "internal",
+                ["hasResidentKey"] = true,
+                ["hasUserVerification"] = true,
+                ["isUserVerified"] = true,
+                ["automaticPresenceSimulation"] = true,
+                ["hasPrf"] = true,
+            },
+        });
+
+        await ResetVaultAsync(api, baseUrl);
+        try
+        {
+            // ── Set up from the settings page, adding a passkey on the way. ──
+            await page.GotoAsync(baseUrl + "/#/secrets");
+            await page.GetByRole(AriaRole.Button, new() { Name = "Set up secrets" }).ClickAsync();
+            var setup = page.Locator("sac-dialog[title='Set up secrets']");
+            await setup.WaitForAsync(new LocatorWaitForOptions { Timeout = 5000 });
+            await setup.Locator("input[name='pass']").FillAsync(Passphrase);
+            await setup.Locator("input[name='confirm']").FillAsync(Passphrase);
+            await setup.GetByRole(AriaRole.Button, new() { Name = "Next" }).ClickAsync();
+            await ConfirmRecoveryWordsAsync(page);
+
+            var offer = page.Locator("sac-dialog[title='Unlock with a passkey too?']");
+            await offer.WaitForAsync(new LocatorWaitForOptions { Timeout = 10000 });
+            await offer.GetByRole(AriaRole.Button, new() { Name = "Add a passkey" }).ClickAsync();
+            await offer.WaitForAsync(new LocatorWaitForOptions { State = WaitForSelectorState.Detached, Timeout = 15000 });
+
+            var rows = page.Locator("fb-secrets-settings-view .slot-row");
+            await Assertions.Expect(rows).ToHaveCountAsync(3, new() { Timeout = 10000 });
+            await Assertions.Expect(page.Locator(".slot-row[data-kind='passkey']")).ToHaveCountAsync(1);
+            await Assertions.Expect(page.Locator("fb-secrets-settings-view .status-text")).ToContainTextAsync("Unlocked");
+
+            // ── Reload: locked; the passkey unlocks. ──
+            await page.ReloadAsync();
+            await Assertions.Expect(page.Locator("fb-secrets-settings-view .status-text")).ToContainTextAsync("Locked");
+            await page.GetByRole(AriaRole.Button, new() { Name = "Unlock", Exact = true }).First.ClickAsync();
+            var unlock = page.Locator("sac-dialog[title='Unlock secrets']");
+            await unlock.WaitForAsync(new LocatorWaitForOptions { Timeout = 5000 });
+            await unlock.GetByRole(AriaRole.Button, new() { Name = "Unlock with a passkey" }).ClickAsync();
+            await unlock.WaitForAsync(new LocatorWaitForOptions { State = WaitForSelectorState.Detached, Timeout = 15000 });
+            await Assertions.Expect(page.Locator("fb-secrets-settings-view .status-text")).ToContainTextAsync("Unlocked");
+            Assert.True(await page.EvaluateAsync<bool>("() => fb.vault.isUnlocked()"));
+
+            // ── Change the passphrase, confirming with the passkey. ──
+            await page.Locator(".slot-row[data-kind='passphrase']").GetByRole(AriaRole.Button, new() { Name = "Change" }).ClickAsync();
+            var confirm = page.Locator("sac-dialog[title=\"Confirm it's you\"]");
+            await confirm.WaitForAsync(new LocatorWaitForOptions { Timeout = 5000 });
+            await confirm.GetByRole(AriaRole.Button, new() { Name = "Unlock with a passkey" }).ClickAsync();
+            var newPass = page.Locator("sac-dialog[title='New passphrase']");
+            await newPass.WaitForAsync(new LocatorWaitForOptions { Timeout = 15000 });
+            await newPass.Locator("input[name='pass']").FillAsync(NewPassphrase);
+            await newPass.Locator("input[name='confirm']").FillAsync(NewPassphrase);
+            await newPass.GetByRole(AriaRole.Button, new() { Name = "Next" }).ClickAsync();
+            await newPass.WaitForAsync(new LocatorWaitForOptions { State = WaitForSelectorState.Detached, Timeout = 15000 });
+            // The new passphrase is derived and saved after the dialog closes.
+            await Assertions.Expect(page.Locator("#sac-toast-stack").GetByText("Passphrase changed.").First).ToBeVisibleAsync(new() { Timeout = 15000 });
+
+            // The old passphrase is refused now, the new one opens the vault.
+            await page.EvaluateAsync("() => fb.vault.lock()");
+            await page.EvaluateAsync("() => { fb.vault.ensureUnlocked().catch(() => {}); }");
+            await unlock.WaitForAsync(new LocatorWaitForOptions { Timeout = 5000 });
+            await unlock.Locator("input[name='pass']").FillAsync(Passphrase);
+            await unlock.GetByRole(AriaRole.Button, new() { Name = "Unlock", Exact = true }).ClickAsync();
+            await Assertions.Expect(unlock.Locator(".fb-vault-error")).ToHaveTextAsync("Wrong passphrase.", new() { Timeout = 10000 });
+            await unlock.Locator("input[name='pass']").FillAsync(NewPassphrase);
+            await unlock.GetByRole(AriaRole.Button, new() { Name = "Unlock", Exact = true }).ClickAsync();
+            await unlock.WaitForAsync(new LocatorWaitForOptions { State = WaitForSelectorState.Detached, Timeout = 10000 });
+
+            // ── Remove: recovery is fine, then the passphrase is the last
+            // recoverable slot and must stay (a passkey alone is no way in).
+            foreach (var kind in new[] { "recovery", "passphrase" })
+            {
+                await page.Locator($".slot-row[data-kind='{kind}'] button.remove").ClickAsync();
+                var ask = page.Locator("sac-dialog[open]");
+                await ask.GetByRole(AriaRole.Button, new() { Name = "Remove" }).ClickAsync();
+                await ask.WaitForAsync(new LocatorWaitForOptions { State = WaitForSelectorState.Detached, Timeout = 5000 });
+            }
+            await Assertions.Expect(page.Locator(".slot-row[data-kind='recovery']")).ToHaveCountAsync(0);
+            await Assertions.Expect(page.Locator(".slot-row[data-kind='passphrase']")).ToHaveCountAsync(1);
+            await Assertions.Expect(page.Locator("#sac-toast-stack").GetByText("Keep at least a passphrase").First).ToBeVisibleAsync();
+
+            // With the recovery key gone, the page offers a new one.
+            await page.GetByRole(AriaRole.Button, new() { Name = "Create a recovery key" }).ClickAsync();
+            var again = page.Locator("sac-dialog[title=\"Confirm it's you\"]");
+            await again.WaitForAsync(new LocatorWaitForOptions { Timeout = 5000 });
+            await again.GetByRole(AriaRole.Button, new() { Name = "Unlock with a passkey" }).ClickAsync();
+            await ConfirmRecoveryWordsAsync(page);
+            await Assertions.Expect(page.Locator(".slot-row[data-kind='recovery']")).ToHaveCountAsync(1, new() { Timeout = 15000 });
+
+            // ── Auto-lock: saved on the user, applied to the session. ──
+            await page.Locator("#autolock").SelectOptionAsync("60");
+            await page.WaitForFunctionAsync("() => fb.vault.autoLockMinutes() === 60");
+            await page.ScreenshotAsync(new PageScreenshotOptions { Path = Path.Combine(Path.GetTempPath(), "fishbowl_ui_secrets_settings.png"), FullPage = true });
+            var me = (await (await api.GetAsync($"{baseUrl}/api/v1/me")).JsonAsync())!.Value;
+            Assert.Equal(60, me.GetProperty("vaultAutoLockMinutes").GetInt32());
+            await api.PatchAsync($"{baseUrl}/api/v1/me", new APIRequestContextOptions
+            {
+                DataObject = new Dictionary<string, object?> { ["vaultAutoLockMinutes"] = null },
+            });
+        }
+        finally
+        {
+            await ResetVaultAsync(api, baseUrl);
+            await context.CloseAsync();
+        }
+    }
+
+    /// <summary>
+    /// The slot-management edges: rename and remove a passkey, "Replace"
+    /// retires the old recovery words, auto-lock really locks when its time
+    /// is up (Playwright's clock, no real wait), the page in a space, and a
+    /// browser without WebAuthn gets a hint instead of an "Add a passkey"
+    /// button.
+    /// </summary>
+    [Fact]
+    public async Task Vault_SlotManagementEdges_Test()
+    {
+        var context = await _fixture.Browser!.NewContextAsync(new BrowserNewContextOptions { IgnoreHTTPSErrors = true });
+        await context.Clock.InstallAsync(new ClockInstallOptions());
+        var page = await context.NewPageAsync();
+        var api = page.APIRequest;
+        var baseUrl = _fixture.BaseUrl.Replace("127.0.0.1", "localhost");
+        await AddVirtualAuthenticatorAsync(page);
+
+        await ResetVaultAsync(api, baseUrl);
+        try
+        {
+            await page.GotoAsync(baseUrl + "/#/secrets");
+            await page.GetByRole(AriaRole.Button, new() { Name = "Set up secrets" }).ClickAsync();
+            var setup = page.Locator("sac-dialog[title='Set up secrets']");
+            await setup.WaitForAsync(new LocatorWaitForOptions { Timeout = 5000 });
+            await setup.Locator("input[name='pass']").FillAsync(Passphrase);
+            await setup.Locator("input[name='confirm']").FillAsync(Passphrase);
+            await setup.GetByRole(AriaRole.Button, new() { Name = "Next" }).ClickAsync();
+            var oldWords = await ConfirmRecoveryWordsAsync(page);
+            var offer = page.Locator("sac-dialog[title='Unlock with a passkey too?']");
+            await offer.WaitForAsync(new LocatorWaitForOptions { Timeout = 10000 });
+            await offer.GetByRole(AriaRole.Button, new() { Name = "Add a passkey" }).ClickAsync();
+            var passkeyRow = page.Locator(".slot-row[data-kind='passkey']");
+            await Assertions.Expect(passkeyRow).ToHaveCountAsync(1, new() { Timeout = 15000 });
+
+            // ── Rename the passkey in place. ──
+            await passkeyRow.Locator("button.rename").ClickAsync();
+            await passkeyRow.Locator(".slot-name input").FillAsync("Work laptop");
+            await passkeyRow.Locator(".slot-name input").PressAsync("Enter");
+            await Assertions.Expect(passkeyRow.Locator(".slot-name")).ToHaveTextAsync("Work laptop");
+
+            // ── Replace the recovery key: the old words stop working. ──
+            await page.Locator(".slot-row[data-kind='recovery']").GetByRole(AriaRole.Button, new() { Name = "Replace" }).ClickAsync();
+            var confirm = page.Locator("sac-dialog[title=\"Confirm it's you\"]");
+            await confirm.WaitForAsync(new LocatorWaitForOptions { Timeout = 5000 });
+            await confirm.GetByRole(AriaRole.Button, new() { Name = "Unlock with a passkey" }).ClickAsync();
+            var newWords = await ConfirmRecoveryWordsAsync(page);
+            Assert.NotEqual(oldWords, newWords);
+            await Assertions.Expect(page.Locator("#sac-toast-stack").GetByText("New recovery key saved").First).ToBeVisibleAsync(new() { Timeout = 15000 });
+            await Assertions.Expect(page.Locator(".slot-row[data-kind='recovery']")).ToHaveCountAsync(1);
+
+            await page.EvaluateAsync("() => fb.vault.lock()");
+            await page.EvaluateAsync("() => { fb.vault.ensureUnlocked().catch(() => {}); }");
+            var unlock = page.Locator("sac-dialog[title='Unlock secrets']");
+            await unlock.WaitForAsync(new LocatorWaitForOptions { Timeout = 5000 });
+            await unlock.GetByRole(AriaRole.Button, new() { Name = "Use the recovery key instead" }).ClickAsync();
+            await unlock.Locator("textarea[name='words']").FillAsync(string.Join(' ', oldWords));
+            await unlock.GetByRole(AriaRole.Button, new() { Name = "Unlock", Exact = true }).ClickAsync();
+            await Assertions.Expect(unlock.Locator(".fb-vault-error")).ToHaveTextAsync("This recovery key doesn't open your secrets.", new() { Timeout = 10000 });
+            await unlock.Locator("textarea[name='words']").FillAsync(string.Join(' ', newWords));
+            await unlock.GetByRole(AriaRole.Button, new() { Name = "Unlock", Exact = true }).ClickAsync();
+            await unlock.WaitForAsync(new LocatorWaitForOptions { State = WaitForSelectorState.Detached, Timeout = 10000 });
+
+            // ── Auto-lock: after its time without a secret operation, locked. ──
+            Assert.True(await page.EvaluateAsync<bool>("() => fb.vault.isUnlocked()"));
+            await page.Clock.FastForwardAsync("14:00");
+            Assert.True(await page.EvaluateAsync<bool>("() => fb.vault.isUnlocked()"));
+            await page.Clock.FastForwardAsync("01:05");
+            await page.WaitForFunctionAsync("() => !fb.vault.isUnlocked()");
+            await Assertions.Expect(page.Locator("fb-secrets-settings-view .status-text")).ToContainTextAsync("Locked");
+
+            // ── Remove the passkey: passphrase and recovery key remain. ──
+            await passkeyRow.Locator("button.remove").ClickAsync();
+            var ask = page.Locator("sac-dialog[open]");
+            await ask.GetByRole(AriaRole.Button, new() { Name = "Remove" }).ClickAsync();
+            await Assertions.Expect(passkeyRow).ToHaveCountAsync(0, new() { Timeout = 10000 });
+            await Assertions.Expect(page.Locator("fb-secrets-settings-view .slot-row")).ToHaveCountAsync(2);
+
+            // ── In a space the page only points back to Personal. ──
+            var space = await api.PostAsync($"{baseUrl}/api/v1/spaces", new APIRequestContextOptions
+            {
+                DataObject = new { name = "Secrets elsewhere " + Guid.NewGuid().ToString("N")[..6] },
+            });
+            var slug = (await space.JsonAsync())!.Value.GetProperty("slug").GetString()!;
+            await page.GotoAsync($"{baseUrl}/#/space/{slug}/secrets");
+            await Assertions.Expect(page.Locator("fb-secrets-settings-view")).ToContainTextAsync("Secrets are personal");
+            await Assertions.Expect(page.Locator("fb-secrets-settings-view .slot-row")).ToHaveCountAsync(0);
+
+            // ── No WebAuthn in the browser: a hint, never a dead button. ──
+            var bare = await context.NewPageAsync();
+            await bare.AddInitScriptAsync("delete window.PublicKeyCredential;");
+            await bare.GotoAsync(baseUrl + "/#/secrets");
+            await Assertions.Expect(bare.Locator("fb-secrets-settings-view")).ToContainTextAsync("Passkeys aren't available");
+            await Assertions.Expect(bare.GetByRole(AriaRole.Button, new() { Name = "Add a passkey" })).ToHaveCountAsync(0);
+        }
+        finally
+        {
+            await ResetVaultAsync(api, baseUrl);
+            await context.CloseAsync();
+        }
+    }
+
+    private static async Task AddVirtualAuthenticatorAsync(IPage page)
+    {
+        var cdp = await page.Context.NewCDPSessionAsync(page);
+        await cdp.SendAsync("WebAuthn.enable", new Dictionary<string, object> { ["enableUI"] = false });
+        await cdp.SendAsync("WebAuthn.addVirtualAuthenticator", new Dictionary<string, object>
+        {
+            ["options"] = new Dictionary<string, object>
+            {
+                ["protocol"] = "ctap2",
+                ["ctap2Version"] = "ctap2_1",
+                ["transport"] = "internal",
+                ["hasResidentKey"] = true,
+                ["hasUserVerification"] = true,
+                ["isUserVerified"] = true,
+                ["automaticPresenceSimulation"] = true,
+                ["hasPrf"] = true,
+            },
+        });
+    }
+
+    private static async Task<string[]> ConfirmRecoveryWordsAsync(IPage page)
+    {
+        var recovery = page.Locator("sac-dialog[title='Your recovery key']");
+        await recovery.WaitForAsync(new LocatorWaitForOptions { Timeout = 10000 });
+        var words = (await recovery.Locator(".fb-vault-words li").AllTextContentsAsync()).Select(w => w.Trim()).ToArray();
+        Assert.Equal(24, words.Length);
+        foreach (var name in new[] { "a", "b" })
+        {
+            var label = await recovery.Locator($"input[name='{name}']").EvaluateAsync<string>("i => i.closest('label').textContent");
+            var position = int.Parse(Regex.Match(label, @"\d+").Value);
+            await recovery.Locator($"input[name='{name}']").FillAsync(words[position - 1]);
+        }
+        await recovery.GetByRole(AriaRole.Button, new() { Name = "I wrote them down" }).ClickAsync();
+        return words;
     }
 
     private static async Task OpenNoteAsync(IPage page, string baseUrl, string title, bool navigate = true)

@@ -335,6 +335,10 @@
             get:     ()     => request("/vault/"),
             addSlot: (slot) => request("/vault/slots", { method: "POST", body: JSON.stringify(slot) }),
             touch:   (id)   => request(`/vault/slots/${encodeURIComponent(id)}/used`, { method: "POST" }),
+            // { label } to rename; { kdf, wrappedKey } together to re-wrap.
+            updateSlot: (id, patch) => request(`/vault/slots/${encodeURIComponent(id)}`, { method: "PATCH", body: JSON.stringify(patch) }),
+            // 409 { error: "last-recoverable-slot" } keeps the last passphrase/recovery slot.
+            deleteSlot: (id) => request(`/vault/slots/${encodeURIComponent(id)}`, { method: "DELETE" }),
         },
         auth: {
             logout: () => request("/auth/logout", { method: "POST" })

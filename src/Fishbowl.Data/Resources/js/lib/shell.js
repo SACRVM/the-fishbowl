@@ -166,6 +166,7 @@
         user = me;
         setPersonalAccent(me.accent);
         applyDateFormat(me.dateFormat);
+        fb.vault?.setAutoLock?.(me.vaultAutoLockMinutes);
         const display = me.name || me.email || "User";
         avatar.setAttribute("name", display);
         if (me.avatarUrl) avatar.setAttribute("src", me.avatarUrl);
@@ -243,9 +244,9 @@
                 </div>
                 <div class="fb-profile-accent">
                     <label class="fb-profile-label" for="fb-date-format">Date &amp; time format</label>
-                    <select id="fb-date-format" class="fb-profile-select">
+                    <span class="select"><select id="fb-date-format" class="fb-profile-select">
                         ${fb.format.NAMES.map((n) => `<option value="${n}"${n === fb.format.name ? " selected" : ""}>${fb.format.example(n)}</option>`).join("")}
-                    </select>
+                    </select></span>
                 </div>
             </div>`;
         win.querySelector("#fb-date-format").addEventListener("change", async (e) => {

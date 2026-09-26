@@ -507,6 +507,21 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--accent); }
     line-height: 1.7;
 }
 .fb-vault-confirm-row { display: flex; gap: 10px; flex-wrap: wrap; }
+/* Passkey first in the unlock dialog; the passphrase is the "or". */
+.fb-vault-passkey { display: flex; flex-direction: column; gap: 10px; }
+.fb-vault-passkey[hidden] { display: none; }
+.fb-vault-passkey .btn { align-self: stretch; justify-content: center; }
+.fb-vault-or {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    color: var(--text-muted);
+    font-size: 0.85rem;
+}
+.fb-vault-or::before,
+.fb-vault-or::after { content: ""; flex: 1; border-top: 1px solid var(--border); }
+.fb-vault-print { display: inline-flex; align-items: center; gap: 6px; }
+.fb-vault-print sac-icon { --icon-size: 14px; }
 .fb-vault-confirm-row .fb-vault-field { flex: 1 1 10em; }
 
 /* ───── Manage tags window (fb.tagManager) ───── */

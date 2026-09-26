@@ -212,7 +212,7 @@ public class SystemSchemaV8MigrationTests : IDisposable
         using var db = factory.CreateSystemConnection();
 
         var version = await db.ExecuteScalarAsync<long>("PRAGMA user_version");
-        Assert.Equal(9, version); // head; v9 runs on top of v8
+        Assert.Equal(10, version); // head; v9 and v10 run on top of v8
     }
 
     [Fact]
@@ -247,7 +247,7 @@ public class SystemSchemaV8MigrationTests : IDisposable
         Assert.DoesNotContain("team_members", tables);
 
         var version = await db.ExecuteScalarAsync<long>("PRAGMA user_version");
-        Assert.Equal(9, version); // head; v9 runs on top of v8
+        Assert.Equal(10, version); // head; v9 and v10 run on top of v8
     }
 
     public void Dispose()

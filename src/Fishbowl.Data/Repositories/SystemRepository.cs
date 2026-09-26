@@ -77,7 +77,7 @@ public class SystemRepository : ISystemRepository
                          created_at AS CreatedAt, password_hash AS PasswordHash,
                          password_salt AS PasswordSalt, is_admin AS IsAdmin,
                          must_change_password AS MustChangePassword, accent AS Accent,
-                         date_format AS DateFormat
+                         date_format AS DateFormat, vault_auto_lock_minutes AS VaultAutoLockMinutes
                   FROM users WHERE id = @userId",
                 new { userId }, cancellationToken: ct));
     }
@@ -148,6 +148,17 @@ public class SystemRepository : ISystemRepository
             new CommandDefinition(
                 "UPDATE users SET date_format = @dateFormat WHERE id = @userId",
                 new { userId, dateFormat },
+                cancellationToken: ct));
+        return affected > 0;
+    }
+
+    public async Task<bool> SetVaultAutoLockAsync(string userId, int? minutes, CancellationToken ct = default)
+    {
+        using var db = _dbFactory.CreateSystemConnection();
+        var affected = await db.ExecuteAsync(
+            new CommandDefinition(
+                "UPDATE users SET vault_auto_lock_minutes = @minutes WHERE id = @userId",
+                new { userId, minutes },
                 cancellationToken: ct));
         return affected > 0;
     }

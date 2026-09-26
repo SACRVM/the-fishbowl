@@ -194,9 +194,13 @@ key pair per user).
    envelope v2 with AAD, memory-only session + auto-lock, setup and unlock
    dialogs, v1 vault code deleted (`vault.js` rewritten, `fb-vault-*` CSS
    replaced by kit dialogs), space save refused.
-2. **Passkey** — PRF probe, registration, passkey-first unlock.
+2. **Passkey** — PRF probe, registration, passkey-first unlock. *(done
+   2026-09-26: kdf `{ "alg": "prf-hkdf-sha256", "salt" }`, the salt is both
+   the PRF eval input and the HKDF salt; offered at setup when supported.)*
 3. **Settings → Secrets** — slot management UI, emergency kit printout,
-   auto-lock setting.
+   auto-lock setting. *(done 2026-09-26: `#/secrets`; slot changes
+   re-authenticate, since the session key is non-extractable; auto-lock is
+   `users.vault_auto_lock_minutes`, 5/15/30/60/240.)*
 4. **Spaces** — separate design.
 
 ## Testing

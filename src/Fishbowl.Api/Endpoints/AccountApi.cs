@@ -38,6 +38,7 @@ public static class AccountApi
                 isAdmin = profile.IsAdmin,
                 accent = profile.Accent,
                 dateFormat = profile.DateFormat,
+                vaultAutoLockMinutes = profile.VaultAutoLockMinutes ?? VaultSettings.DefaultAutoLockMinutes,
             });
         })
         .WithName("GetMe")
@@ -72,12 +73,23 @@ public static class AccountApi
             if (!dateFormat.valid || (dateFormat.value is not null && !DateFormats.IsKnown(dateFormat.value)))
                 return Results.BadRequest(new { error = "dateFormat must be one of iso, de, uk, us or null" });
 
+            // vaultAutoLockMinutes: one of the offered choices, or null for the default.
+            int? autoLock = null;
+            var hasAutoLock = body.TryGetProperty("vaultAutoLockMinutes", out var al);
+            if (hasAutoLock && al.ValueKind != JsonValueKind.Null)
+            {
+                if (al.ValueKind != JsonValueKind.Number || !al.TryGetInt32(out var minutes) || !VaultSettings.IsAutoLockChoice(minutes))
+                    return Results.BadRequest(new { error = $"vaultAutoLockMinutes must be one of {string.Join(", ", VaultSettings.AutoLockChoices)} or null" });
+                autoLock = minutes;
+            }
+
             if (accent.present && !await repo.SetAccentAsync(userId, accent.value, ct)) return Results.NotFound();
+            if (hasAutoLock && !await repo.SetVaultAutoLockAsync(userId, autoLock, ct)) return Results.NotFound();
             if (dateFormat.present && !await repo.SetDateFormatAsync(userId, dateFormat.value, ct)) return Results.NotFound();
             return Results.NoContent();
         })
         .WithName("UpdateMe")
-        .WithSummary("Updates the current user's settings (accent, date & time format). Partial; cookie only.")
+        .WithSummary("Updates the current user's settings (accent, date & time format, vault auto-lock). Partial; cookie only.")
         .Produces(StatusCodes.Status204NoContent)
         .Produces(StatusCodes.Status400BadRequest)
         .Produces(StatusCodes.Status401Unauthorized)

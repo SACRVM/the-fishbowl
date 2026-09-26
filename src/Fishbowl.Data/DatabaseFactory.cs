@@ -465,6 +465,14 @@ public class DatabaseFactory
             ApplySystemV9(connection);
             connection.Execute("PRAGMA user_version = 9");
             _logger.LogInformation("Applied system schema v9");
+            version = 9;
+        }
+
+        if (version < 10)
+        {
+            ApplySystemV10(connection);
+            connection.Execute("PRAGMA user_version = 10");
+            _logger.LogInformation("Applied system schema v10");
         }
     }
 
@@ -1199,6 +1207,14 @@ public class DatabaseFactory
             transaction.Rollback();
             throw;
         }
+    }
+
+    // V10: how long the secret vault stays unlocked without a secret
+    // operation (minutes; NULL = the default 15). A per-user setting, like
+    // the accent: it follows the user to every device.
+    private void ApplySystemV10(IDbConnection connection)
+    {
+        connection.Execute("ALTER TABLE users ADD COLUMN vault_auto_lock_minutes INTEGER;");
     }
 
     private void ApplySystemInitialSchema(IDbConnection connection)

@@ -50,6 +50,9 @@ public interface ISystemRepository
     // Date & time format: a DateFormats name or null (ISO). Callers validate.
     Task<bool> SetDateFormatAsync(string userId, string? dateFormat, CancellationToken ct = default);
 
+    // Secret vault auto-lock in minutes, or null (default). Callers validate.
+    Task<bool> SetVaultAutoLockAsync(string userId, int? minutes, CancellationToken ct = default);
+
     // True if at least one local-auth user exists. The setup wizard uses
     // this (combined with Google:ClientId) to decide whether the wizard
     // is locked out — operators must finish setup once *any* provider is

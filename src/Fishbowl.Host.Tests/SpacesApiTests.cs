@@ -289,6 +289,24 @@ public class SpacesApiTests : IClassFixture<WebApplicationFactory<Program>>, IDi
         Assert.Equal("teal", me.GetProperty("accent").GetString());   // untouched by the dateFormat patch
     }
 
+    [Fact]
+    public async Task MeVaultAutoLock_DefaultsTo15_TakesAChoice_RefusesOthers()
+    {
+        var client = _factory.CreateClient();
+        var ct = TestContext.Current.CancellationToken;
+        async Task<int> Current() => (await (await client.SendAsync(Req(HttpMethod.Get, "/api/v1/me", UserA), ct))
+            .Content.ReadFromJsonAsync<System.Text.Json.JsonElement>(ct)).GetProperty("vaultAutoLockMinutes").GetInt32();
+
+        Assert.Equal(15, await Current());
+        Assert.Equal(HttpStatusCode.NoContent,
+            (await client.SendAsync(Req(HttpMethod.Patch, "/api/v1/me", UserA, new { vaultAutoLockMinutes = 60 }), ct)).StatusCode);
+        Assert.Equal(60, await Current());
+        Assert.Equal(HttpStatusCode.BadRequest,
+            (await client.SendAsync(Req(HttpMethod.Patch, "/api/v1/me", UserA, new { vaultAutoLockMinutes = 10080 }), ct)).StatusCode);
+        await client.SendAsync(Req(HttpMethod.Patch, "/api/v1/me", UserA, new Dictionary<string, object?> { ["vaultAutoLockMinutes"] = null }), ct);
+        Assert.Equal(15, await Current());
+    }
+
     public void Dispose()
     {
         Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();

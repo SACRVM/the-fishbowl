@@ -91,6 +91,7 @@ class FbKeysSettingsView extends HTMLElement {
                     outline: none;
                     box-sizing: border-box;
                 }
+                fb-keys-settings-view select { padding-right: 32px; }   /* room for the kit's chevron */
                 fb-keys-settings-view input:focus,
                 fb-keys-settings-view select:focus { border-color: var(--accent); }
                 fb-keys-settings-view .scopes {
@@ -283,7 +284,7 @@ class FbKeysSettingsView extends HTMLElement {
             </div>
             <div class="field">
                 <label for="key-context">Context</label>
-                <select id="key-context">${contextOptions}</select>
+                <span class="select"><select id="key-context">${contextOptions}</select></span>
             </div>
             <div class="field">
                 <label>Scopes</label>

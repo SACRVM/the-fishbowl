@@ -33,4 +33,7 @@ public class User
 
     // Date & time format — a DateFormats name, null = ISO.
     public string? DateFormat { get; set; }
+
+    // Secret vault auto-lock in minutes (VaultSettings.AutoLockChoices), null = default.
+    public int? VaultAutoLockMinutes { get; set; }
 }
