@@ -212,6 +212,18 @@ internal static class ConfigSchema
         new(DesktopPolicy.StoreTopicKey, false, false,
             "The GitHub repo topic that marks an app for the App Store tab (default sacrvm-app). Hot.",
             ValidateStoreTopic),
+        new("Digest:Enabled", false, false,
+            "The daily \"here's your day\" DM to every user with a linked chat channel: true or false (default false). Hot.",
+            ValidateBool),
+        new("Digest:Hour", false, false,
+            "Server-local hour (0–23) the daily digest goes out at (default 7). Hot.",
+            ValidateHour),
+        new("Logging:RetentionDays", false, true,
+            "Days of daily log files to keep (1–365, default 7). Restart required.",
+            ValidateLogRetentionDays),
+        new("Logging:Format", false, true,
+            "Log file format: plain (default) or json. Restart required.",
+            ValidateLogFormat),
     };
 
     public static KeySpec? Find(string key) =>
@@ -309,6 +321,18 @@ internal static class ConfigSchema
         v.Length is > 0 and <= 50 && v.All(c => char.IsAsciiLetterLower(c) || char.IsAsciiDigit(c) || c == '-')
             ? null
             : "A topic is lower-case letters, digits and hyphens (max 50).";
+
+    private static string? ValidateBool(string v) =>
+        v is "true" or "false" ? null : "Must be exactly \"true\" or \"false\".";
+
+    private static string? ValidateHour(string v) =>
+        int.TryParse(v, out var h) && h is >= 0 and <= 23 ? null : "Hour must be a whole number from 0 to 23.";
+
+    private static string? ValidateLogRetentionDays(string v) =>
+        int.TryParse(v, out var d) && d is >= 1 and <= 365 ? null : "Retention must be a whole number of days from 1 to 365.";
+
+    private static string? ValidateLogFormat(string v) =>
+        v is "plain" or "json" ? null : "Format must be plain or json.";
 
     private static string? ValidateDiscordToken(string v)
     {

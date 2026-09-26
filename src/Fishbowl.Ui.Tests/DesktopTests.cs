@@ -14,7 +14,7 @@ public class DesktopTests
 {
     private const string TestUser = "test-internal-id";
     private static readonly string[] Builtins =
-        { "builtin:notes", "builtin:todos", "builtin:calendar", "builtin:files", "builtin:messages", "builtin:users" };
+        { "builtin:notes", "builtin:todos", "builtin:calendar", "builtin:files", "builtin:messages", "builtin:users", "builtin:settings" };
 
     private readonly PlaywrightFixture _fixture;
 

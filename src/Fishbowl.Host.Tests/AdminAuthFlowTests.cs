@@ -84,6 +84,11 @@ public class AdminAuthFlowTests : IClassFixture<WebApplicationFactory<Program>>,
         foreach (var action in new[] { "approve", "reject", "block", "unblock" })
             Assert.Equal(HttpStatusCode.Forbidden, (await client.PostAsync($"/api/v1/admin/users/p/{action}", null, Ct)).StatusCode);
         Assert.Equal(HttpStatusCode.Forbidden, (await client.PostAsync("/api/v1/messages/x/read", null, Ct)).StatusCode);
+        // A2: managing accounts and settings is cookie-only too.
+        Assert.Equal(HttpStatusCode.Forbidden, (await client.PatchAsJsonAsync("/api/v1/admin/users/p", new { quotaBytes = 1 }, Ct)).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await client.PostAsJsonAsync("/api/v1/admin/users", new { username = "viakey" }, Ct)).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await client.PutAsJsonAsync("/api/v1/admin/config/Digest:Enabled", new { value = "true" }, Ct)).StatusCode);
+        Assert.Null(await _system.GetUserByLocalUsernameAsync("viakey", Ct));
         Assert.Equal(UserStates.Pending, (await _system.GetUserAsync("p", Ct))!.State);
     }
 

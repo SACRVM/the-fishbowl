@@ -7,7 +7,10 @@
  * Requests waiting for approval come first, each with a quota field and
  * Approve / Reject / Block. Then everyone else: who they are, how they sign
  * in, their state and quota, when they last signed in. Never what they
- * store — the admin runs the instance, not the people on it.
+ * store — the admin runs the instance, not the people on it. Each account
+ * has a "…" menu (A2): Storage…, Reset password (local sign-in only),
+ * Make / Remove admin, Disable / Enable, Block / Unblock. "Add local user"
+ * sits in the header.
  *
  * Personal only: in a space the page says so and points back to Personal.
  */
@@ -27,7 +30,9 @@ class FbUsersAdminView extends HTMLElement {
         this.innerHTML = `
             <style>
                 fb-users-admin-view { display: block; padding: clamp(1.25rem, 5vw, 40px) clamp(1rem, 5vw, 48px); max-width: 860px; }
-                fb-users-admin-view header { margin-bottom: 24px; }
+                fb-users-admin-view header { margin-bottom: 24px; display: flex; align-items: flex-start; gap: 16px; }
+                fb-users-admin-view header .head-text { flex: 1; min-width: 0; }
+                fb-users-admin-view header .btn { width: auto; flex-shrink: 0; }
                 fb-users-admin-view h1 {
                     font-family: 'Outfit', 'Inter', sans-serif;
                     font-size: 28px;
@@ -91,17 +96,40 @@ class FbUsersAdminView extends HTMLElement {
                     margin-top: 10px;
                 }
                 fb-users-admin-view .user-actions .btn { width: auto; }
-                fb-users-admin-view .side-actions { display: flex; gap: 8px; flex-shrink: 0; }
-                fb-users-admin-view .side-actions .btn { width: auto; }
                 fb-users-admin-view .fb-quota-field { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--text-muted); }
                 fb-users-admin-view .fb-quota-field input { width: 6em; }
+                fb-users-admin-view .user-row sac-menu { flex-shrink: 0; }
+
+                /* Dialogs this view opens (light DOM, appended to <body>). */
+                .fb-temp-pw-note, .fb-add-user-note { margin: 0 0 12px; font-size: 14px; }
+                .fb-temp-pw-hint { margin: 12px 0 0; font-size: 13px; color: var(--text-muted); }
+                .fb-temp-pw-row { display: flex; align-items: center; gap: 8px; }
+                .fb-temp-pw-row sac-copy-button { --icon-btn-size: 36px; --icon-btn-icon: 18px; }
+                .fb-temp-pw {
+                    flex: 1;
+                    font-family: var(--font-mono);
+                    font-size: 15px;
+                    letter-spacing: 0.04em;
+                    background: var(--field);
+                    border: 1px solid var(--border);
+                    border-radius: var(--radius-m);
+                    padding: 10px 12px;
+                    color: var(--text);
+                    user-select: all;
+                }
+                .fb-add-optional { color: var(--text-muted); font-weight: 400; }
+                .fb-add-quota { margin-top: 12px; }
+                .fb-add-error { margin: 10px 0 0; color: var(--danger); font-size: 13px; }
             </style>
             <header>
-                <h1>Users</h1>
-                <p class="subtitle">
-                    Who can use this Fishbowl. You see who people are and how much room they have —
-                    never what they keep here.
-                </p>
+                <div class="head-text">
+                    <h1>Users</h1>
+                    <p class="subtitle">
+                        Who can use this Fishbowl. You see who people are and how much room they have —
+                        never what they keep here.
+                    </p>
+                </div>
+                <button type="button" class="btn" id="add-user" hidden>Add local user</button>
             </header>
             <div id="users-body"></div>
         `;
@@ -111,7 +139,9 @@ class FbUsersAdminView extends HTMLElement {
         const mount = this.querySelector("#users-body");
         if (!mount) return;
 
+        const add = this.querySelector("#add-user");
         if (sac.scope.get().type === "scoped") {
+            add.hidden = true;
             mount.innerHTML = `
                 <div class="panel">
                     <p>Users are managed for the whole Fishbowl, from your personal workspace.</p>
@@ -129,6 +159,9 @@ class FbUsersAdminView extends HTMLElement {
             mount.innerHTML = `<div class="panel"><p class="muted">The user list can't be loaded right now.</p></div>`;
             return;
         }
+        this._defaultQuota = data?.defaultQuotaBytes ?? null;
+        add.hidden = false;
+        add.onclick = async () => { if (await fb.accounts.addLocalUser(this._defaultQuota)) this.refresh(); };
         const users = data?.users || [];
         const pending = users.filter(u => u.state === "pending");
         const others = users.filter(u => u.state !== "pending");
@@ -234,21 +267,64 @@ class FbUsersAdminView extends HTMLElement {
             `Storage ${fb.accounts.formatBytes(u.quotaBytes)}`,
             u.lastSignInAt ? `Last sign-in ${fb.format.dateTime(u.lastSignInAt)}` : "Never signed in since the upgrade",
         ]);
-        if (!u.self) {
-            const side = document.createElement("div");
-            side.className = "side-actions";
-            if (u.state === "blocked") {
-                const b = this._button("Unblock", "btn");
-                b.addEventListener("click", () => fb.accounts.unblock(u));
-                side.appendChild(b);
-            } else {
-                const b = this._button("Block", "btn");
-                b.addEventListener("click", () => fb.accounts.block(u));
-                side.appendChild(b);
-            }
-            row.appendChild(side);
-        }
+        row.appendChild(this._menu(u));
         return row;
+    }
+
+    /**
+     * The account's "…" menu. Only what applies to this account is in it —
+     * items are added, never hidden (kit menus ignore `hidden`).
+     */
+    _menu(u) {
+        const menu = document.createElement("sac-menu");
+        const trigger = document.createElement("button");
+        trigger.slot = "trigger";
+        trigger.type = "button";
+        trigger.className = "icon-btn";
+        trigger.title = `Manage ${u.name || u.email || "account"}`;
+        trigger.setAttribute("aria-label", trigger.title);
+        const more = document.createElement("sac-icon");
+        more.setAttribute("name", "more");
+        trigger.appendChild(more);
+        menu.appendChild(trigger);
+
+        const item = (action, label, icon, danger) => {
+            const b = document.createElement("button");
+            b.dataset.action = action;
+            if (danger) b.dataset.danger = "";
+            const i = document.createElement("sac-icon");
+            i.setAttribute("name", icon);
+            b.append(i, document.createTextNode(" " + label));
+            menu.appendChild(b);
+        };
+        const active = u.state === "active";
+        item("quota", "Storage…", "backup");
+        if ((u.providers || []).includes("local") && u.state !== "blocked") item("reset", "Reset password", "key");
+        if (active && !u.isAdmin) item("admin-on", "Make admin", "star");
+        if (u.isAdmin) item("admin-off", "Remove admin", "star");
+        if (!u.self) {
+            menu.appendChild(document.createElement("hr"));
+            if (active) item("disable", "Disable", "lock", true);
+            if (u.state === "disabled") item("enable", "Enable", "unlock");
+            if (u.state === "blocked") item("unblock", "Unblock", "unlock");
+            else item("block", "Block", "close", true);
+        }
+
+        const acts = {
+            quota: () => fb.accounts.setQuota(u, this._defaultQuota),
+            reset: () => fb.accounts.resetPassword(u),
+            "admin-on": () => fb.accounts.setAdmin(u, true),
+            "admin-off": () => fb.accounts.setAdmin(u, false),
+            disable: () => fb.accounts.setDisabled(u, true),
+            enable: () => fb.accounts.setDisabled(u, false),
+            block: () => fb.accounts.block(u),
+            unblock: () => fb.accounts.unblock(u),
+        };
+        menu.addEventListener("sac:select", async (e) => {
+            const run = acts[e.detail.action];
+            if (run && await run()) this.refresh();
+        });
+        return menu;
     }
 
     _button(label, cls) {

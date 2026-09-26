@@ -1,8 +1,9 @@
 # Administration, approval and messages — design
 
-Status: **A1 done** (2026-09-26) — pending approval, sign-up policy,
-system messages, the Users view and the admin log are built; A2/A3 are
-next. Revised after the first review. Prompted by
+Status: **A1 and A2 done** (2026-09-26) — pending approval, sign-up policy,
+system messages with the chat fan-out, the Users app (add local user,
+reset, quota, admin, disable/enable), System settings and the admin log
+are built; A3 is next. Revised after the first review. Prompted by
 the desktop's install policy (`2026-09-26-desktop-apps-design.md`): a policy
 needs someone who sets it.
 
@@ -249,11 +250,12 @@ Routes `#/admin/...` are personal-workspace only; in a space they show the
 
   Quota at approval is stored now and enforced once the Files data-lifecycle
   phase lands.
-- **A2 — Manage:**
+- **A2 — Manage (done):**
   - rest of Users (add local, reset, quota, admin, disable)
   - System settings app
   - bot fan-out for messages
-  - `quota.warning`
+  - `quota.warning` (moved to the Files data-lifecycle phase, which
+    enforces quotas)
 - **A3 — Lifecycle:**
   - delete with archive
   - archive + System app, shared with the space-archive work from Files

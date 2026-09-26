@@ -95,6 +95,16 @@ public class UserAdminRepository : IUserAdminRepository
         return affected > 0;
     }
 
+    public async Task<bool> SetQuotaAsync(string userId, long? quotaBytes, CancellationToken ct = default)
+    {
+        if (quotaBytes is < 0) throw new ArgumentOutOfRangeException(nameof(quotaBytes));
+        using var db = _dbFactory.CreateSystemConnection();
+        var affected = await db.ExecuteAsync(new CommandDefinition(
+            "UPDATE users SET quota_bytes = @quotaBytes WHERE id = @userId",
+            new { userId, quotaBytes }, cancellationToken: ct));
+        return affected > 0;
+    }
+
     public async Task<bool> DeletePendingAsync(string userId, CancellationToken ct = default)
     {
         using var db = _dbFactory.CreateSystemConnection();

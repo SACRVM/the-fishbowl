@@ -1,4 +1,5 @@
 using System.Security.Claims;
+using System.Text.Json;
 using Dapper;
 using Fishbowl.Core;
 using Fishbowl.Core.Auth;
@@ -123,13 +124,8 @@ public static class AdminApi
             // Validate the local credentials before we write anything to
             // system.db — same rules as setup.
             var username = request!.Username?.Trim().ToLowerInvariant() ?? string.Empty;
-            if (username.Length < 3 || username.Length > 64)
-                return Results.BadRequest(new { error = "Username must be 3–64 characters." });
-            foreach (var ch in username)
-            {
-                if (!(char.IsLetterOrDigit(ch) || ch is '_' or '.' or '-'))
-                    return Results.BadRequest(new { error = "Username may only contain letters, digits, _, . or -." });
-            }
+            var usernameError = ValidateUsername(username);
+            if (usernameError is not null) return Results.BadRequest(new { error = usernameError });
             if (string.IsNullOrEmpty(request.Password) || request.Password.Length < 12)
                 return Results.BadRequest(new { error = "Password must be at least 12 characters." });
 
@@ -383,6 +379,193 @@ public static class AdminApi
         .WithName("UnblockUser")
         .WithSummary("Undoes a block: an approved account becomes active, anything else goes back to pending.")
         .RequireAuthorization();
+
+        MapManage(group);
+    }
+
+    // A2 — managing accounts that exist: add a local user, change the quota,
+    // make or remove an admin, disable / enable. Every change is one audit
+    // row per field; responses carry metadata only.
+    private static void MapManage(RouteGroupBuilder group)
+    {
+        group.MapPost("/users", async (
+            HttpRequest request,
+            ClaimsPrincipal caller,
+            ISystemRepository system,
+            IUserAdminRepository admin,
+            IPasswordHasher hasher,
+            CancellationToken ct) =>
+        {
+            if (!await IsCookieAdminAsync(caller, system, ct)) return Results.Forbid();
+
+            CreateLocalUserRequest? body;
+            try { body = await request.ReadFromJsonAsync<CreateLocalUserRequest>(ct); }
+            catch (JsonException) { body = null; }
+            catch (InvalidOperationException) { body = null; }
+            if (body is null) return Results.BadRequest(new { error = "Body must be JSON: { username, displayName?, quotaBytes? }." });
+
+            var username = body.Username?.Trim().ToLowerInvariant() ?? string.Empty;
+            var usernameError = ValidateUsername(username);
+            if (usernameError is not null) return Results.BadRequest(new { error = usernameError });
+            if (body.QuotaBytes is < 0) return Results.BadRequest(new { error = "quotaBytes must be 0 (unlimited) or more." });
+            var displayName = string.IsNullOrWhiteSpace(body.DisplayName) ? username : body.DisplayName.Trim();
+            if (displayName.Length > 100) return Results.BadRequest(new { error = "Display name must be 100 characters or fewer." });
+            if (await system.GetUserByLocalUsernameAsync(username, ct) is not null)
+                return Results.Conflict(new { error = "Username is already taken." });
+
+            // Created by an admin = approved by that admin: the row goes
+            // through pending -> approve so approved_by/approved_at say who,
+            // and a later unblock restores it to active, not to pending.
+            var userId = Guid.NewGuid().ToString();
+            await system.CreateUserAsync(userId, displayName, email: null, avatarUrl: null, ct);
+            await system.CreateUserMappingAsync(userId, "local", username, ct);
+            await admin.SetStateAsync(userId, UserStates.Pending, ct);
+            await admin.ApproveAsync(userId, ActorId(caller), body.QuotaBytes, ct);
+            var tempPassword = GenerateTempPassword();
+            var hash = hasher.Hash(tempPassword);
+            await system.SetPasswordAsync(userId, hash.Hash, hash.Salt, mustChange: true, ct);
+            await admin.RecordAdminActionAsync(ActorId(caller), AdminActions.CreateLocal, "user", userId, ct);
+
+            return Results.Ok(new
+            {
+                id = userId,
+                username,
+                tempPassword,
+                mustChangeOnNextLogin = true,
+                state = UserStates.Active,
+                quotaBytes = body.QuotaBytes,
+            });
+        })
+        .WithName("CreateLocalUser")
+        .WithSummary("Adds an active local-password account; returns its temporary password exactly once.")
+        .RequireAuthorization();
+
+        // Partial: { quotaBytes?: number|null, isAdmin?: bool, disabled?: bool }.
+        // Absent fields stay as they are; quotaBytes null = the default. The
+        // whole patch is validated before anything is written.
+        group.MapPatch("/users/{userId}", async (
+            string userId,
+            HttpRequest request,
+            ClaimsPrincipal caller,
+            ISystemRepository system,
+            IUserAdminRepository admin,
+            IApiKeyRepository keys,
+            CancellationToken ct) =>
+        {
+            if (!await IsCookieAdminAsync(caller, system, ct)) return Results.Forbid();
+
+            JsonElement body;
+            try { body = await request.ReadFromJsonAsync<JsonElement>(ct); }
+            catch (JsonException) { return Results.BadRequest(new { error = "Body must be a JSON object." }); }
+            catch (InvalidOperationException) { return Results.BadRequest(new { error = "Body must be a JSON object." }); }
+            if (body.ValueKind != JsonValueKind.Object)
+                return Results.BadRequest(new { error = "Body must be a JSON object." });
+
+            var setQuota = body.TryGetProperty("quotaBytes", out var quotaEl);
+            long? quota = null;
+            if (setQuota)
+            {
+                if (quotaEl.ValueKind == JsonValueKind.Number && quotaEl.TryGetInt64(out var q) && q >= 0) quota = q;
+                else if (quotaEl.ValueKind != JsonValueKind.Null)
+                    return Results.BadRequest(new { error = "quotaBytes must be null (default), 0 (unlimited) or more." });
+            }
+            bool? isAdmin = null, disabled = null;
+            if (body.TryGetProperty("isAdmin", out var adminEl))
+            {
+                if (adminEl.ValueKind is not (JsonValueKind.True or JsonValueKind.False))
+                    return Results.BadRequest(new { error = "isAdmin must be true or false." });
+                isAdmin = adminEl.GetBoolean();
+            }
+            if (body.TryGetProperty("disabled", out var disEl))
+            {
+                if (disEl.ValueKind is not (JsonValueKind.True or JsonValueKind.False))
+                    return Results.BadRequest(new { error = "disabled must be true or false." });
+                disabled = disEl.GetBoolean();
+            }
+            if (!setQuota && isAdmin is null && disabled is null)
+                return Results.BadRequest(new { error = "Nothing to change: send quotaBytes, isAdmin or disabled." });
+
+            var target = await system.GetUserAsync(userId, ct);
+            if (target is null) return Results.NotFound(new { error = "No such user." });
+            var self = userId == ActorId(caller);
+            var lastAdmin = target.IsAdmin && target.State == UserStates.Active
+                && await admin.CountActiveAdminsAsync(ct) <= 1;
+
+            // Validate every requested change first; write only if all pass.
+            var grant = isAdmin == true && !target.IsAdmin;
+            var revoke = isAdmin == false && target.IsAdmin;
+            var disable = disabled == true && target.State != UserStates.Disabled;
+            var enable = disabled == false && target.State == UserStates.Disabled;
+            if (grant && target.State != UserStates.Active)
+                return Results.Conflict(new { error = "not-active", state = target.State });
+            if (revoke && lastAdmin)
+                return Results.Conflict(new { error = "last-admin" });
+            if (disable)
+            {
+                if (self) return Results.BadRequest(new { error = "You can't disable yourself." });
+                if (target.State != UserStates.Active)
+                    return Results.Conflict(new { error = "not-active", state = target.State });
+                if (lastAdmin) return Results.Conflict(new { error = "last-admin" });
+            }
+            if (disabled == false && target.State is not (UserStates.Disabled or UserStates.Active))
+                return Results.Conflict(new { error = "not-disabled", state = target.State });
+
+            var actor = ActorId(caller);
+            if (setQuota && quota != target.QuotaBytes)
+            {
+                await admin.SetQuotaAsync(userId, quota, ct);
+                await admin.RecordAdminActionAsync(actor, AdminActions.SetQuota, "user", userId, ct);
+            }
+            if (grant)
+            {
+                await system.SetAdminAsync(userId, true, ct);
+                await admin.RecordAdminActionAsync(actor, AdminActions.MakeAdmin, "user", userId, ct);
+            }
+            if (revoke)
+            {
+                await system.SetAdminAsync(userId, false, ct);
+                await admin.RecordAdminActionAsync(actor, AdminActions.RemoveAdmin, "user", userId, ct);
+            }
+            if (disable)
+            {
+                // Sign-in is refused and the request gate ends a live session
+                // at its next request; the keys go too, so nothing keeps
+                // working behind the admin's back. The data stays.
+                await admin.SetStateAsync(userId, UserStates.Disabled, ct);
+                foreach (var key in await keys.ListByUserAsync(userId, ct))
+                    await keys.RevokeAsync(key.Id, userId, ct);
+                await admin.RecordAdminActionAsync(actor, AdminActions.Disable, "user", userId, ct);
+            }
+            if (enable)
+            {
+                await admin.SetStateAsync(userId, UserStates.Active, ct);
+                await admin.RecordAdminActionAsync(actor, AdminActions.Enable, "user", userId, ct);
+            }
+
+            var now = await system.GetUserAsync(userId, ct);
+            return Results.Ok(new
+            {
+                id = userId,
+                isAdmin = now!.IsAdmin,
+                state = now.State,
+                quotaBytes = now.QuotaBytes,
+            });
+        })
+        .WithName("UpdateAdminUser")
+        .WithSummary("Changes an account's quota, admin flag or disabled state. Disabling ends live sessions and revokes the account's API keys; data stays.")
+        .RequireAuthorization();
+    }
+
+    // Same rules as setup and cold import.
+    private static string? ValidateUsername(string username)
+    {
+        if (username.Length < 3 || username.Length > 64) return "Username must be 3–64 characters.";
+        foreach (var ch in username)
+        {
+            if (!(char.IsLetterOrDigit(ch) || ch is '_' or '.' or '-'))
+                return "Username may only contain letters, digits, _, . or -.";
+        }
+        return null;
     }
 
     private static async Task<long> DefaultQuotaAsync(ISystemRepository system, CancellationToken ct)
@@ -434,6 +617,8 @@ public static class AdminApi
 
 public sealed record ApproveUserRequest(long? QuotaBytes = null, bool? MakeAdmin = null);
 
+public sealed record CreateLocalUserRequest(string? Username, string? DisplayName = null, long? QuotaBytes = null);
+
 // The action names in admin_audit. Only ids ride along, never values.
 public static class AdminActions
 {
@@ -442,6 +627,11 @@ public static class AdminActions
     public const string Block = "user.block";
     public const string Unblock = "user.unblock";
     public const string MakeAdmin = "user.make-admin";
+    public const string RemoveAdmin = "user.remove-admin";
+    public const string SetQuota = "user.quota";
+    public const string Disable = "user.disable";
+    public const string Enable = "user.enable";
+    public const string CreateLocal = "user.create";
     public const string ImportUser = "user.import";
     public const string ResetPassword = "user.reset-password";
     public const string ConfigSet = "config.set";

@@ -29,6 +29,7 @@
         { key: "builtin:files",    hash: "#/files",       name: "Files",    icon: "folder",   desc: "Real files, two panes, any workspace." },
         { key: "builtin:messages", hash: "#/messages",    name: "Messages", icon: "mail",     desc: "What Fishbowl has to tell you." },
         { key: "builtin:users",    hash: "#/admin/users", name: "Users",    icon: "users",    desc: "Approve and manage accounts.", admin: true, personal: true },
+        { key: "builtin:settings", hash: "#/admin/settings", name: "System settings", icon: "settings", desc: "How this Fishbowl runs.", admin: true, personal: true },
     ];
 
     const SETTINGS = [

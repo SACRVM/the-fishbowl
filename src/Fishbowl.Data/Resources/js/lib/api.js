@@ -486,6 +486,17 @@
             reject:  (id) => request(`/admin/users/${encodeURIComponent(id)}/reject`,  { method: "POST" }).then(messagesChanged),
             block:   (id) => request(`/admin/users/${encodeURIComponent(id)}/block`,   { method: "POST" }).then(messagesChanged),
             unblock: (id) => request(`/admin/users/${encodeURIComponent(id)}/unblock`, { method: "POST" }).then(messagesChanged),
+            // { username, displayName?, quotaBytes? } → { id, username, tempPassword, … } — the password once.
+            createUser:    (body)     => request("/admin/users", { method: "POST", body: JSON.stringify(body) }),
+            // Partial: { quotaBytes?: number|null, isAdmin?: bool, disabled?: bool }.
+            updateUser:    (id, body) => request(`/admin/users/${encodeURIComponent(id)}`,
+                { method: "PATCH", body: JSON.stringify(body) }),
+            resetPassword: (id)       => request(`/admin/users/${encodeURIComponent(id)}/reset-password`, { method: "POST" }),
+            // System settings: [{ key, value (secrets redacted), isSet, secret, restartRequired, description }].
+            config:      ()           => request("/admin/config"),
+            setConfig:   (key, value) => request(`/admin/config/${encodeURIComponent(key)}`,
+                { method: "PUT", body: JSON.stringify({ value }) }),
+            clearConfig: (key)        => request(`/admin/config/${encodeURIComponent(key)}`, { method: "DELETE" }),
         }
     };
     fb.ApiError = ApiError;

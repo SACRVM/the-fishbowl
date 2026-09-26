@@ -21,6 +21,10 @@ public interface IUserAdminRepository
 
     Task<bool> TouchSignInAsync(string userId, CancellationToken ct = default);
 
+    // The account's storage quota in bytes: null = the instance default,
+    // 0 = unlimited.
+    Task<bool> SetQuotaAsync(string userId, long? quotaBytes, CancellationToken ct = default);
+
     // Removes a never-approved shell: its mappings and its users row. Refuses
     // (false) for anything but a pending account.
     Task<bool> DeletePendingAsync(string userId, CancellationToken ct = default);

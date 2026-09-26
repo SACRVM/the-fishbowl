@@ -25,4 +25,8 @@ public static class MessageKinds
 
     // To the user: an admin approved the account.
     public const string UserApproved = "user.approved";
+
+    // To the user: their storage crossed 90% of the quota. Data:
+    // { usedBytes, quotaBytes }. Once per crossing.
+    public const string QuotaWarning = "quota.warning";
 }

@@ -167,7 +167,12 @@ builder.Services.AddScoped<INotificationChannelRepository, NotificationChannelRe
 builder.Services.AddScoped<IDiscordLinkRepository, DiscordLinkRepository>();
 builder.Services.AddScoped<IReminderRepository, ReminderRepository>();
 builder.Services.AddScoped<IVaultRepository, VaultRepository>();
-builder.Services.AddScoped<IMessageRepository, MessageRepository>();
+// The inbox, with each new message's subject also sent to the recipient's
+// chat channel (Discord DM) when one is linked.
+builder.Services.AddScoped<MessageRepository>();
+builder.Services.AddSingleton<Fishbowl.Api.Accounts.SystemMessageNotifier>();
+builder.Services.AddScoped<IMessageRepository>(sp => new Fishbowl.Api.Accounts.NotifyingMessageRepository(
+    sp.GetRequiredService<MessageRepository>(), sp.GetRequiredService<Fishbowl.Api.Accounts.SystemMessageNotifier>()));
 builder.Services.AddScoped<IUserAdminRepository, UserAdminRepository>();
 builder.Services.AddScoped<IDesktopRepository, DesktopRepository>();
 // Every sign-in (Google, local) goes through the account rules here.
