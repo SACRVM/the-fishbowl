@@ -36,6 +36,7 @@ public static class AccountApi
                 avatarUrl = profile.AvatarUrl,
                 createdAt = profile.CreatedAt,
                 isAdmin = profile.IsAdmin,
+                state = profile.State,
                 accent = profile.Accent,
                 dateFormat = profile.DateFormat,
                 vaultAutoLockMinutes = profile.VaultAutoLockMinutes ?? VaultSettings.DefaultAutoLockMinutes,

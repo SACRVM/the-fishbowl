@@ -65,9 +65,13 @@ public class DatabaseFactoryTests : IDisposable
         Assert.Contains("password_salt", userColumns);
         Assert.Contains("is_admin", userColumns);
         Assert.Contains("must_change_password", userColumns);
+        // V11: account state + approval + quota.
+        Assert.Contains("state", userColumns);
+        Assert.Contains("quota_bytes", userColumns);
+        Assert.Contains("last_sign_in_at", userColumns);
 
         var version = connection.ExecuteScalar<long>("PRAGMA user_version");
-        Assert.Equal(10, version);
+        Assert.Equal(11, version);
     }
 
     [Fact]
@@ -102,7 +106,7 @@ public class DatabaseFactoryTests : IDisposable
 
         // Assert
         var version = connection.ExecuteScalar<int>("PRAGMA user_version");
-        Assert.Equal(8, version);
+        Assert.Equal(9, version);
     }
 
     [Fact]

@@ -77,7 +77,9 @@ public class SystemRepository : ISystemRepository
                          created_at AS CreatedAt, password_hash AS PasswordHash,
                          password_salt AS PasswordSalt, is_admin AS IsAdmin,
                          must_change_password AS MustChangePassword, accent AS Accent,
-                         date_format AS DateFormat, vault_auto_lock_minutes AS VaultAutoLockMinutes
+                         date_format AS DateFormat, vault_auto_lock_minutes AS VaultAutoLockMinutes,
+                         state AS State, quota_bytes AS QuotaBytes, approved_by AS ApprovedBy,
+                         approved_at AS ApprovedAt, last_sign_in_at AS LastSignInAt
                   FROM users WHERE id = @userId",
                 new { userId }, cancellationToken: ct));
     }
@@ -94,7 +96,7 @@ public class SystemRepository : ISystemRepository
                 @"SELECT u.id AS Id, u.name AS Name, u.email AS Email, u.avatar_url AS AvatarUrl,
                          u.created_at AS CreatedAt, u.password_hash AS PasswordHash,
                          u.password_salt AS PasswordSalt, u.is_admin AS IsAdmin,
-                         u.must_change_password AS MustChangePassword
+                         u.must_change_password AS MustChangePassword, u.state AS State
                   FROM users u
                   INNER JOIN user_mappings m
                       ON m.user_id = u.id AND m.provider = 'local' AND m.provider_id = @username",
@@ -178,6 +180,14 @@ public class SystemRepository : ISystemRepository
         using var db = _dbFactory.CreateSystemConnection();
         var ids = await db.QueryAsync<string>(
             new CommandDefinition("SELECT id FROM users", cancellationToken: ct));
+        return ids.ToList();
+    }
+
+    public async Task<IReadOnlyList<string>> ListActiveUserIdsAsync(CancellationToken ct = default)
+    {
+        using var db = _dbFactory.CreateSystemConnection();
+        var ids = await db.QueryAsync<string>(
+            new CommandDefinition("SELECT id FROM users WHERE state = 'active'", cancellationToken: ct));
         return ids.ToList();
     }
 

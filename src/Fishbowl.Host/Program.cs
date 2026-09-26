@@ -7,6 +7,7 @@ using Fishbowl.Core;
 using Fishbowl.Data;
 using Fishbowl.Core.Repositories;
 using Fishbowl.Data.Repositories;
+using Fishbowl.Api.Accounts;
 using Fishbowl.Api.Endpoints;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Options;
@@ -166,6 +167,11 @@ builder.Services.AddScoped<INotificationChannelRepository, NotificationChannelRe
 builder.Services.AddScoped<IDiscordLinkRepository, DiscordLinkRepository>();
 builder.Services.AddScoped<IReminderRepository, ReminderRepository>();
 builder.Services.AddScoped<IVaultRepository, VaultRepository>();
+builder.Services.AddScoped<IMessageRepository, MessageRepository>();
+builder.Services.AddScoped<IUserAdminRepository, UserAdminRepository>();
+// Every sign-in (Google, local) goes through the account rules here.
+builder.Services.AddScoped<AccountGate>();
+builder.Services.AddScoped<Fishbowl.Core.Files.IFileService, Fishbowl.Data.Files.FileService>();
 
 // Apps platform — the per-app .db registry + DDL generator + row CRUD.
 // All three repos sit at the same scope as the rest of the data-plane.
@@ -291,28 +297,23 @@ authBuilder.AddGoogle(options =>
         var email = context.Principal?.FindFirstValue(ClaimTypes.Email);
         var avatar = context.Principal?.FindFirstValue("urn:google:image");
 
-        var internalUserId = await repo.GetUserIdByMappingAsync(provider, providerId);
-
-        if (string.IsNullOrEmpty(internalUserId))
+        // The account rules (domain allow-list, blocked/disabled, admin
+        // bootstrap, the sign-up policy) live in AccountGate, shared with the
+        // local login. A new account under `approval` comes back pending:
+        // it still gets a cookie, and the request gate keeps it to /pending.
+        var gate = context.HttpContext.RequestServices.GetRequiredService<Fishbowl.Api.Accounts.AccountGate>();
+        var decision = await gate.SignInExternalAsync(provider, providerId, name, email, avatar, context.HttpContext.RequestAborted);
+        if (!decision.Allowed)
         {
-            internalUserId = Guid.NewGuid().ToString();
-            await repo.CreateUserAsync(internalUserId, name, email, avatar);
-            await repo.CreateUserMappingAsync(internalUserId, provider, providerId);
-
-            var provisionLogger = context.HttpContext.RequestServices.GetService<ILoggerFactory>()?.CreateLogger("Auth");
-            provisionLogger?.LogInformation("Provisioned user {UserId} via {Provider}", internalUserId, provider);
-        }
-        else
-        {
-            // Refresh the profile snapshot — name/avatar may change Google-side
-            // and we want our cached copy to stay current. Upsert is a no-op
-            // when nothing changed.
-            await repo.UpsertUserAsync(internalUserId, name, email, avatar);
+            context.Response.Redirect("/login?authError=" + Uri.EscapeDataString(
+                Fishbowl.Api.Accounts.SignInRefusals.Describe(decision.Refusal!)));
+            context.HandleResponse();
+            return;
         }
 
         // Add internal ID as a claim - this is what our APIs will use
         var identity = (ClaimsIdentity)context.Principal!.Identity!;
-        identity.AddClaim(new Claim("fishbowl_user_id", internalUserId));
+        identity.AddClaim(new Claim("fishbowl_user_id", decision.UserId!));
     };
 
     // Log Google-side failures server-side so we can see the actual error
@@ -436,6 +437,9 @@ if (app.Environment.IsEnvironment("Testing")
         var system = scope.ServiceProvider.GetRequiredService<ISystemRepository>();
         if (await system.GetUserAsync("test-internal-id") is null)
             await system.CreateUserAsync("test-internal-id", "Playwright", "playwright@test.invalid", null);
+        // An active admin, like the operator of a fresh install: the admin
+        // views are part of what the UI tests drive.
+        await system.SetAdminAsync("test-internal-id", isAdmin: true);
     }
 
     app.Use(async (context, next) =>
@@ -489,6 +493,9 @@ if (app.Environment.IsDevelopment())
 }
 
 app.UseAuthentication();
+// Account state after authentication: a pending account is kept to /pending,
+// a disabled or blocked one loses its session on the next request.
+app.UseAccountState();
 app.UseAuthorization();
 
 app.MapOpenApi("/api/openapi.json");
@@ -748,6 +755,27 @@ app.MapPost("/api/setup", async (
     });
 });
 
+// The waiting page of a pending account (server-rendered, like /login).
+// Anyone else is sent on: not signed in → /login, active → the app.
+app.MapGet(AccountStateMiddleware.PendingPath, async (
+    HttpContext context,
+    ISystemRepository system,
+    IResourceProvider resources,
+    CancellationToken ct) =>
+{
+    var userId = context.User.Identity?.IsAuthenticated == true
+        ? context.User.FindFirst("fishbowl_user_id")?.Value
+        : null;
+    if (string.IsNullOrEmpty(userId)) return Results.Redirect("/login");
+    var user = await system.GetUserAsync(userId, ct);
+    if (user?.State != Fishbowl.Core.Auth.UserStates.Pending) return Results.Redirect("/");
+
+    var resource = await resources.GetAsync("pending.html");
+    return resource != null
+        ? Results.Bytes(resource.Data, "text/html")
+        : Results.NotFound("Pending page not found.");
+});
+
 app.MapGet("/logout", async (HttpContext context) =>
 {
     await context.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);
@@ -776,11 +804,13 @@ app.MapAppsApi();
 app.MapAccountApi();
 app.MapAdminApi();
 app.MapAdminConfigEndpoints();
+app.MapMessagesApi();
 app.MapAuthApi();
 app.MapNotificationsApi();
 app.MapSearchApi();
 app.MapExportApi();
 app.MapVaultApi();
+app.MapFilesApi();
 app.MapMcpEndpoint();
 
 // Root route — gate the hub behind setup + authentication so the first click

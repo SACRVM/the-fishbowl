@@ -3,6 +3,7 @@ using Dapper;
 using Fishbowl.Core;
 using Fishbowl.Core.Auth;
 using Fishbowl.Core.Mcp;
+using Fishbowl.Core.Models;
 using Fishbowl.Core.Repositories;
 using Fishbowl.Data;
 using Microsoft.AspNetCore.Builder;
@@ -71,6 +72,7 @@ public static class AdminApi
             ISystemRepository system,
             DatabaseFactory dbFactory,
             IPasswordHasher hasher,
+            IUserAdminRepository admin,
             CancellationToken ct) =>
         {
             if (!await IsCookieAdminAsync(user, system, ct))
@@ -147,6 +149,7 @@ public static class AdminApi
             await system.CreateUserMappingAsync(folder, "local", username, ct);
             var hash = hasher.Hash(request.Password);
             await system.SetPasswordAsync(folder, hash.Hash, hash.Salt, ct: ct);
+            await admin.RecordAdminActionAsync(ActorId(user), AdminActions.ImportUser, "user", folder, ct);
 
             return Results.Ok(new
             {
@@ -168,6 +171,7 @@ public static class AdminApi
             ClaimsPrincipal caller,
             ISystemRepository system,
             IPasswordHasher hasher,
+            IUserAdminRepository admin,
             CancellationToken ct) =>
         {
             if (!await IsCookieAdminAsync(caller, system, ct))
@@ -191,6 +195,7 @@ public static class AdminApi
             var tempPassword = GenerateTempPassword();
             var hash = hasher.Hash(tempPassword);
             await system.SetPasswordAsync(userId, hash.Hash, hash.Salt, mustChange: true, ct);
+            await admin.RecordAdminActionAsync(ActorId(caller), AdminActions.ResetPassword, "user", userId, ct);
 
             return Results.Ok(new
             {
@@ -204,8 +209,190 @@ public static class AdminApi
         .WithSummary("Generates a temp password for a local user and forces a change on next login.")
         .RequireAuthorization();
 
+        MapUserManagement(group);
+
         return routes;
     }
+
+    // The Users app: every account with its metadata, never its content, plus
+    // approve / reject / block / unblock. Each write is one admin_audit row
+    // and resolves the user.pending messages about that account for every
+    // admin at once.
+    private static void MapUserManagement(RouteGroupBuilder group)
+    {
+        group.MapGet("/users", async (
+            ClaimsPrincipal caller,
+            ISystemRepository system,
+            IUserAdminRepository admin,
+            CancellationToken ct) =>
+        {
+            if (!await IsCookieAdminAsync(caller, system, ct)) return Results.Forbid();
+            var me = ActorId(caller);
+            var rows = await admin.ListUsersAsync(ct);
+            var users = rows
+                .OrderBy(u => u.State == UserStates.Pending ? 0 : 1)
+                .ThenBy(u => u.State == UserStates.Pending ? u.CreatedAt : DateTime.MinValue)
+                .ThenBy(u => u.Name ?? u.Email ?? u.Id, StringComparer.OrdinalIgnoreCase)
+                .Select(u => new
+                {
+                    id = u.Id,
+                    name = u.Name,
+                    email = u.Email,
+                    providers = u.Providers,
+                    isAdmin = u.IsAdmin,
+                    state = u.State,
+                    quotaBytes = u.QuotaBytes,
+                    createdAt = u.CreatedAt,
+                    lastSignInAt = u.LastSignInAt,
+                    approvedAt = u.ApprovedAt,
+                    self = u.Id == me,
+                });
+            return Results.Ok(new
+            {
+                signUp = SignUpPolicy.ParseMode(await system.GetConfigAsync(SignUpPolicy.ModeKey, ct)),
+                defaultQuotaBytes = await DefaultQuotaAsync(system, ct),
+                users,
+            });
+        })
+        .WithName("ListAdminUsers")
+        .WithSummary("Every account's metadata: name, e-mail, sign-in methods, state, quota, dates. Never content.")
+        .RequireAuthorization();
+
+        group.MapPost("/users/{userId}/approve", async (
+            string userId,
+            HttpRequest request,
+            ClaimsPrincipal caller,
+            ISystemRepository system,
+            IUserAdminRepository admin,
+            IMessageRepository messages,
+            CancellationToken ct) =>
+        {
+            if (!await IsCookieAdminAsync(caller, system, ct)) return Results.Forbid();
+
+            // Optional body { quotaBytes?: number|null, makeAdmin?: bool },
+            // read by hand so a bare POST works too.
+            long? quota = null;
+            var makeAdmin = false;
+            if (request.HasJsonContentType())
+            {
+                ApproveUserRequest? body;
+                try { body = await request.ReadFromJsonAsync<ApproveUserRequest>(ct); }
+                catch (System.Text.Json.JsonException) { return Results.BadRequest(new { error = "Body must be JSON: { quotaBytes?, makeAdmin? }." }); }
+                catch (InvalidOperationException) { return Results.BadRequest(new { error = "Body must be JSON: { quotaBytes?, makeAdmin? }." }); }
+                if (body?.QuotaBytes is < 0) return Results.BadRequest(new { error = "quotaBytes must be 0 (unlimited) or more." });
+                quota = body?.QuotaBytes;
+                makeAdmin = body?.MakeAdmin == true;
+            }
+
+            var target = await system.GetUserAsync(userId, ct);
+            if (target is null) return Results.NotFound(new { error = "No such user." });
+            if (target.State != UserStates.Pending)
+                return Results.Conflict(new { error = "not-pending", state = target.State });
+
+            if (!await admin.ApproveAsync(userId, ActorId(caller), quota, ct))
+                return Results.Conflict(new { error = "not-pending" });
+            if (makeAdmin) await system.SetAdminAsync(userId, true, ct);
+
+            await messages.ResolveAsync(MessageKinds.UserPending, "user", userId, ct);
+            await messages.CreateAsync(new[] { userId }, MessageKinds.UserApproved, "user", userId, null, ct);
+            await admin.RecordAdminActionAsync(ActorId(caller), AdminActions.Approve, "user", userId, ct);
+            if (makeAdmin) await admin.RecordAdminActionAsync(ActorId(caller), AdminActions.MakeAdmin, "user", userId, ct);
+
+            return Results.Ok(new { id = userId, state = UserStates.Active, quotaBytes = quota, isAdmin = makeAdmin });
+        })
+        .WithName("ApproveUser")
+        .WithSummary("Activates a pending account, optionally with a quota and as an admin.")
+        .RequireAuthorization();
+
+        group.MapPost("/users/{userId}/reject", async (
+            string userId,
+            ClaimsPrincipal caller,
+            ISystemRepository system,
+            IUserAdminRepository admin,
+            IMessageRepository messages,
+            CancellationToken ct) =>
+        {
+            if (!await IsCookieAdminAsync(caller, system, ct)) return Results.Forbid();
+            var target = await system.GetUserAsync(userId, ct);
+            if (target is null) return Results.NotFound(new { error = "No such user." });
+            if (target.State != UserStates.Pending)
+                return Results.Conflict(new { error = "not-pending", state = target.State });
+
+            // The shell goes: row + mappings. A later sign-in asks again.
+            if (!await admin.DeletePendingAsync(userId, ct))
+                return Results.Conflict(new { error = "not-pending" });
+            await messages.ResolveAsync(MessageKinds.UserPending, "user", userId, ct);
+            await messages.DeleteForRecipientAsync(userId, ct);
+            await admin.RecordAdminActionAsync(ActorId(caller), AdminActions.Reject, "user", userId, ct);
+            return Results.NoContent();
+        })
+        .WithName("RejectUser")
+        .WithSummary("Deletes a pending account (row + sign-in mappings). The identity may ask again.")
+        .RequireAuthorization();
+
+        group.MapPost("/users/{userId}/block", async (
+            string userId,
+            ClaimsPrincipal caller,
+            ISystemRepository system,
+            IUserAdminRepository admin,
+            IMessageRepository messages,
+            CancellationToken ct) =>
+        {
+            if (!await IsCookieAdminAsync(caller, system, ct)) return Results.Forbid();
+            if (userId == ActorId(caller))
+                return Results.BadRequest(new { error = "You can't block yourself." });
+            var target = await system.GetUserAsync(userId, ct);
+            if (target is null) return Results.NotFound(new { error = "No such user." });
+            if (target.State == UserStates.Blocked) return Results.NoContent();
+            if (target.IsAdmin && target.State == UserStates.Active && await admin.CountActiveAdminsAsync(ct) <= 1)
+                return Results.Conflict(new { error = "last-admin" });
+
+            // Kept as a row, so the same identity can't ask again; the request
+            // gate ends a live session at its next request.
+            await admin.SetStateAsync(userId, UserStates.Blocked, ct);
+            await messages.ResolveAsync(MessageKinds.UserPending, "user", userId, ct);
+            await admin.RecordAdminActionAsync(ActorId(caller), AdminActions.Block, "user", userId, ct);
+            return Results.NoContent();
+        })
+        .WithName("BlockUser")
+        .WithSummary("Blocks an account: no sign-in, a live session ends at its next request, the identity can't ask again.")
+        .RequireAuthorization();
+
+        group.MapPost("/users/{userId}/unblock", async (
+            string userId,
+            ClaimsPrincipal caller,
+            ISystemRepository system,
+            IUserAdminRepository admin,
+            CancellationToken ct) =>
+        {
+            if (!await IsCookieAdminAsync(caller, system, ct)) return Results.Forbid();
+            var target = await system.GetUserAsync(userId, ct);
+            if (target is null) return Results.NotFound(new { error = "No such user." });
+            if (target.State != UserStates.Blocked)
+                return Results.Conflict(new { error = "not-blocked", state = target.State });
+
+            // Never a way around approval: an account without an approval
+            // stamp goes back to pending (the admin approves it next), one
+            // that was approved becomes active again. Admins are always
+            // restored — they were active to become admins.
+            var next = target.ApprovedAt is null && !target.IsAdmin ? UserStates.Pending : UserStates.Active;
+            await admin.SetStateAsync(userId, next, ct);
+            await admin.RecordAdminActionAsync(ActorId(caller), AdminActions.Unblock, "user", userId, ct);
+            return Results.Ok(new { id = userId, state = next });
+        })
+        .WithName("UnblockUser")
+        .WithSummary("Undoes a block: an approved account becomes active, anything else goes back to pending.")
+        .RequireAuthorization();
+    }
+
+    private static async Task<long> DefaultQuotaAsync(ISystemRepository system, CancellationToken ct)
+    {
+        var raw = await system.GetConfigAsync(Fishbowl.Core.Files.FileLimits.DefaultUserQuotaBytesKey, ct);
+        return long.TryParse(raw, out var v) && v >= 0 ? v : Fishbowl.Core.Files.FileLimits.DefaultUserQuotaBytes;
+    }
+
+    private static string ActorId(ClaimsPrincipal user) =>
+        user.FindFirst(McpContextClaims.UserId)?.Value ?? "";
 
     // 12 chars from a 60-symbol alphabet (lowercase + digits + hand-picked
     // upper). Excludes look-alikes (I/l/0/O/1) so the operator can read it
@@ -243,6 +430,22 @@ public static class AdminApi
         }
         return true;
     }
+}
+
+public sealed record ApproveUserRequest(long? QuotaBytes = null, bool? MakeAdmin = null);
+
+// The action names in admin_audit. Only ids ride along, never values.
+public static class AdminActions
+{
+    public const string Approve = "user.approve";
+    public const string Reject = "user.reject";
+    public const string Block = "user.block";
+    public const string Unblock = "user.unblock";
+    public const string MakeAdmin = "user.make-admin";
+    public const string ImportUser = "user.import";
+    public const string ResetPassword = "user.reset-password";
+    public const string ConfigSet = "config.set";
+    public const string ConfigClear = "config.clear";
 }
 
 public sealed record ImportUserRequest(

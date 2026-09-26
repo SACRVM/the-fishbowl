@@ -64,6 +64,10 @@ public interface ISystemRepository
     // the registry to find unimported data.
     Task<IReadOnlyList<string>> ListUserIdsAsync(CancellationToken ct = default);
 
+    // Only accounts in state `active` — what background work (reminders,
+    // digest) iterates, so a pending account never gets a context DB opened.
+    Task<IReadOnlyList<string>> ListActiveUserIdsAsync(CancellationToken ct = default);
+
     // Configuration
     Task<string?> GetConfigAsync(string key, CancellationToken ct = default);
     Task<bool> SetConfigAsync(string key, string value, CancellationToken ct = default);

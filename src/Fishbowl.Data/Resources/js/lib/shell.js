@@ -172,11 +172,46 @@
         if (me.avatarUrl) avatar.setAttribute("src", me.avatarUrl);
         account.querySelector('[slot="trigger"]').title = display;
         account.hidden = false;
+        messagesBtn.hidden = false;
+        refreshUnread();
+        // The admin apps exist only for admins: registered here, never for
+        // anyone else, so they are in no nav, palette or route table.
+        if (me.isAdmin) fb.accounts.registerAdminRoutes();
     }).catch((err) => {
         // 401 → already redirected by api.js. Anything else degrades
         // silently: the shell works, just without the account menu.
         console.warn("[fb-shell] failed to load user:", err?.message || err);
     });
+
+    // --- Messages ----------------------------------------------------------
+    // The envelope opens #/messages; its badge is the unread count, kept fresh
+    // on every change (fb.api fires fb:messages-changed), on navigation and
+    // once a minute (an admin sees a new request without reloading).
+    const messagesBtn = document.getElementById("fb-messages-btn");
+    messagesBtn.addEventListener("click", () => sac.router.navigate("#/messages"));
+    async function refreshUnread() {
+        if (messagesBtn.hidden) return;
+        let n = 0;
+        try { n = (await fb.api.messages.unreadCount())?.unread || 0; }
+        catch { return; }
+        let badge = messagesBtn.querySelector(".badge-count");
+        if (n > 0) {
+            if (!badge) {
+                badge = document.createElement("span");
+                badge.className = "badge-count";
+                messagesBtn.appendChild(badge);
+            }
+            badge.textContent = n > 99 ? "99+" : String(n);
+            messagesBtn.title = `Messages — ${n} unread`;
+        } else {
+            badge?.remove();
+            messagesBtn.title = "Messages";
+        }
+        messagesBtn.setAttribute("aria-label", messagesBtn.title);
+    }
+    window.addEventListener("fb:messages-changed", refreshUnread);
+    window.addEventListener("hashchange", refreshUnread);
+    setInterval(refreshUnread, 60_000);
 
     account.addEventListener("sac:select", (e) => {
         if (e.detail.action === "profile") openProfile();

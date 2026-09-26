@@ -94,7 +94,7 @@ public class DailyDigestDispatcher : BackgroundService
 
         var todayStamp = nowLocal.ToString("yyyy-MM-dd");
         var sent = 0;
-        foreach (var userId in await system.ListUserIdsAsync(ct))
+        foreach (var userId in await system.ListActiveUserIdsAsync(ct))
         {
             if (ct.IsCancellationRequested) break;
             try

@@ -124,6 +124,10 @@
         }
 
         function clearError() { errorEl.style.display = "none"; }
+        // A refused sign-in (Google or the account gate) comes back here with
+        // the reason as ?authError=… — shown as text, never as HTML.
+        const authError = new URLSearchParams(window.location.search).get("authError");
+        if (authError) showError(authError);
 
         // Swap the visible form. Carries the username forward and pre-fills the
         // "temporary password" field with whatever the user just typed (saves
@@ -195,6 +199,11 @@
                 }
                 if (res.status === 401) {
                     showError("Wrong username or password.");
+                    return;
+                }
+                if (res.status === 403) {
+                    const body = await res.json().catch(() => ({}));
+                    showError(body?.message || "This account can't sign in.");
                     return;
                 }
                 const text = await res.text().catch(() => "");

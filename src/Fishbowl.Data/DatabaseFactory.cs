@@ -74,6 +74,16 @@ public class DatabaseFactory
         _ => throw new ArgumentException($"Unknown context type: {ctx.Type}", nameof(ctx)),
     };
 
+    // The context's folder — users/{userId}/ or spaces/{spaceId}/ — which
+    // holds the DB and, since user schema v9, the files/ tree. Only
+    // Fishbowl.Data.Files touches files/.
+    public string ResolveContextFolder(ContextRef ctx) => ctx.Type switch
+    {
+        ContextType.User => Path.Combine(_usersPath, ctx.Id),
+        ContextType.Space => Path.Combine(_spacesPath, ctx.Id),
+        _ => throw new ArgumentException($"Context type {ctx.Type} has no folder of its own.", nameof(ctx)),
+    };
+
     // App DBs live nested under their owner:
     //   users/<userId>/apps/<appId>/app.db
     //   spaces/<spaceId>/apps/<appId>/app.db
@@ -123,6 +133,7 @@ public class DatabaseFactory
     {
         var dbPath = ResolveContextPath(ctx);
         MigrateLegacyLayoutIfPresent(ctx, dbPath);
+        if (ctx.Type == ContextType.User && !File.Exists(dbPath)) EnsureAccountMayStore(ctx.Id);
 
         // Ensure the parent folder exists before SQLite tries to create the
         // file — SqliteOpenMode.ReadWriteCreate creates the file but not the
@@ -132,6 +143,20 @@ public class DatabaseFactory
             Directory.CreateDirectory(parent);
 
         return OpenAndInitialize(dbPath, EnsureUserInitialized, loadVec: true);
+    }
+
+    // The second wall behind the request gate: a personal DB is only ever
+    // created for an active account. A users row in any other state (pending,
+    // disabled, blocked) refuses; no row at all is allowed, because tooling
+    // and tests open contexts for ids that were never registered. Runs only
+    // when the file doesn't exist yet, so existing DBs pay nothing.
+    private void EnsureAccountMayStore(string userId)
+    {
+        using var system = CreateSystemConnection();
+        var state = system.ExecuteScalar<string?>(
+            "SELECT state FROM users WHERE id = @userId", new { userId });
+        if (state is not null && state != Fishbowl.Core.Auth.UserStates.Active)
+            throw new Fishbowl.Core.Auth.InactiveAccountException(userId, state);
     }
 
     // Idempotent one-shot move for installs that pre-date folder-per-context.
@@ -389,6 +414,14 @@ public class DatabaseFactory
             ApplyUserV8(connection);
             connection.Execute("PRAGMA user_version = 8");
             _logger.LogInformation("Applied user schema v8 to {DbPath}", ((SqliteConnection)connection).DataSource);
+            version = 8;
+        }
+
+        if (version < 9)
+        {
+            ApplyUserV9(connection);
+            connection.Execute("PRAGMA user_version = 9");
+            _logger.LogInformation("Applied user schema v9 to {DbPath}", ((SqliteConnection)connection).DataSource);
         }
     }
 
@@ -473,6 +506,14 @@ public class DatabaseFactory
             ApplySystemV10(connection);
             connection.Execute("PRAGMA user_version = 10");
             _logger.LogInformation("Applied system schema v10");
+            version = 10;
+        }
+
+        if (version < 11)
+        {
+            ApplySystemV11(connection);
+            connection.Execute("PRAGMA user_version = 11");
+            _logger.LogInformation("Applied system schema v11");
         }
     }
 
@@ -1209,12 +1250,130 @@ public class DatabaseFactory
         }
     }
 
+    // User V9: the Files app (docs/superpowers/specs/2026-09-26-files-app-design.md).
+    // The folder files/ beside this DB is the truth for names, tree and bytes;
+    // these tables hold only what the file system can't: a rebuildable index
+    // (reconcile baseline + sniffed type / hash cache), the change journal
+    // (seq = sync cursor), trash bookkeeping and one state row.
+    private void ApplyUserV9(IDbConnection connection)
+    {
+        using var transaction = connection.BeginTransaction();
+        try
+        {
+            connection.Execute(@"
+                CREATE TABLE IF NOT EXISTS file_index (
+                    path_key    TEXT PRIMARY KEY,
+                    path        TEXT NOT NULL,
+                    parent_key  TEXT NOT NULL,
+                    kind        TEXT NOT NULL CHECK (kind IN ('file','folder','link')),
+                    size        INTEGER,
+                    mtime       TEXT,
+                    sha256      TEXT,
+                    mime        TEXT,
+                    created_by  TEXT
+                );
+                CREATE INDEX IF NOT EXISTS ix_file_index_parent ON file_index (parent_key);
+
+                CREATE TABLE IF NOT EXISTS file_changes (
+                    seq         INTEGER PRIMARY KEY AUTOINCREMENT,
+                    op          TEXT NOT NULL CHECK (op IN ('create','modify','move','delete')),
+                    kind        TEXT NOT NULL CHECK (kind IN ('file','folder')),
+                    path        TEXT NOT NULL,
+                    old_path    TEXT,
+                    size        INTEGER,
+                    mtime       TEXT,
+                    etag        TEXT,
+                    sha256      TEXT,
+                    trashed     INTEGER NOT NULL DEFAULT 0,
+                    source      TEXT NOT NULL CHECK (source IN ('api','disk')),
+                    actor       TEXT,
+                    at          TEXT NOT NULL
+                );
+
+                CREATE TABLE IF NOT EXISTS file_trash (
+                    id            TEXT PRIMARY KEY,
+                    original_path TEXT NOT NULL,
+                    kind          TEXT NOT NULL,
+                    size          INTEGER NOT NULL,
+                    deleted_at    TEXT NOT NULL,
+                    deleted_by    TEXT
+                );
+
+                CREATE TABLE IF NOT EXISTS file_state (
+                    id              INTEGER PRIMARY KEY CHECK (id = 1),
+                    epoch           TEXT NOT NULL,
+                    floor_seq       INTEGER NOT NULL DEFAULT 0,
+                    case_sensitive  INTEGER NOT NULL,
+                    last_scan_at    TEXT
+                );", transaction: transaction);
+            transaction.Commit();
+        }
+        catch
+        {
+            transaction.Rollback();
+            throw;
+        }
+    }
+
     // V10: how long the secret vault stays unlocked without a secret
     // operation (minutes; NULL = the default 15). A per-user setting, like
     // the accent: it follows the user to every device.
     private void ApplySystemV10(IDbConnection connection)
     {
         connection.Execute("ALTER TABLE users ADD COLUMN vault_auto_lock_minutes INTEGER;");
+    }
+
+    // V11: administration. Account state + approval + quota on users (every
+    // existing row is active, so an upgrade locks nobody out), the system
+    // inbox (`messages`, ids and numbers only) and the admin log
+    // (`admin_audit`, ids only — never names, e-mail or values).
+    private void ApplySystemV11(IDbConnection connection)
+    {
+        using var transaction = connection.BeginTransaction();
+        try
+        {
+            AddColumnIfMissing(connection, transaction, "users", "state", "TEXT NOT NULL DEFAULT 'active'");
+            AddColumnIfMissing(connection, transaction, "users", "quota_bytes", "INTEGER");
+            AddColumnIfMissing(connection, transaction, "users", "approved_by", "TEXT");
+            AddColumnIfMissing(connection, transaction, "users", "approved_at", "TEXT");
+            AddColumnIfMissing(connection, transaction, "users", "last_sign_in_at", "TEXT");
+
+            connection.Execute(@"
+                CREATE TABLE IF NOT EXISTS messages (
+                    id            TEXT PRIMARY KEY,
+                    recipient_id  TEXT NOT NULL,
+                    kind          TEXT NOT NULL,
+                    subject_type  TEXT,
+                    subject_id    TEXT,
+                    data          TEXT,
+                    created_at    TEXT NOT NULL,
+                    read_at       TEXT,
+                    done_at       TEXT
+                );", transaction: transaction);
+            connection.Execute(
+                "CREATE INDEX IF NOT EXISTS idx_messages_recipient ON messages(recipient_id, created_at);",
+                transaction: transaction);
+            connection.Execute(
+                "CREATE INDEX IF NOT EXISTS idx_messages_subject ON messages(kind, subject_type, subject_id);",
+                transaction: transaction);
+
+            connection.Execute(@"
+                CREATE TABLE IF NOT EXISTS admin_audit (
+                    id           TEXT PRIMARY KEY,
+                    actor_id     TEXT NOT NULL,
+                    action       TEXT NOT NULL,
+                    target_type  TEXT,
+                    target_id    TEXT,
+                    at           TEXT NOT NULL
+                );", transaction: transaction);
+
+            transaction.Commit();
+        }
+        catch
+        {
+            transaction.Rollback();
+            throw;
+        }
     }
 
     private void ApplySystemInitialSchema(IDbConnection connection)

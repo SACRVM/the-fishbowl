@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Waiting for approval · The Fishbowl</title>
+    <link rel="stylesheet" href="/css/app.css">
+</head>
+<body>
+    <div class="orb"></div>
+
+    <!-- The one page a pending account can reach (AccountStateMiddleware).
+         Server-rendered like /login: no SPA, no API beyond /api/v1/me. -->
+    <div class="auth-shell">
+        <div class="auth-card">
+            <h1>THE FISHBOWL</h1>
+            <p class="tagline">Your account is waiting for approval.</p>
+            <p class="auth-note" id="pending-who"></p>
+            <p class="auth-note">
+                An admin of this Fishbowl has been told. You'll get access as soon as they
+                approve it — sign in again then, or just reload this page.
+            </p>
+            <div class="auth-actions">
+                <button type="button" class="btn primary" id="pending-check">Check again</button>
+                <a class="btn" href="/logout">Sign out</a>
+            </div>
+        </div>
+    </div>
+    <script>
+    (async function () {
+        const who = document.getElementById("pending-who");
+        async function check() {
+            try {
+                const res = await fetch("/api/v1/me");
+                if (res.status === 401) { window.location.href = "/login"; return; }
+                const me = await res.json();
+                if (me.state && me.state !== "pending") { window.location.href = "/"; return; }
+                const name = me.email || me.name || "";
+                who.textContent = name ? "Signed in as " + name + "." : "";
+            } catch { /* offline: stay here */ }
+        }
+        document.getElementById("pending-check").addEventListener("click", check);
+        check();
+    })();
+    </script>
+</body>
+</html>

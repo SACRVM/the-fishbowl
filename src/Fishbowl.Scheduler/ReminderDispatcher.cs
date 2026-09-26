@@ -101,7 +101,7 @@ public class ReminderDispatcher : BackgroundService
             return 0;
         }
 
-        var userIds = await system.ListUserIdsAsync(ct);
+        var userIds = await system.ListActiveUserIdsAsync(ct);
         var totalFired = 0;
 
         foreach (var userId in userIds)

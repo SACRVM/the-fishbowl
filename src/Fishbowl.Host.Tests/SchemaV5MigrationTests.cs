@@ -23,11 +23,11 @@ public class SchemaV5MigrationTests : IDisposable
         var factory = new DatabaseFactory(_dataDir);
         using var db = factory.CreateConnection("fresh-user");
 
-        // V6 (apps registry), V7 (vault_keyslots) and V8 (todo position) bump the current version
+        // V6 (apps registry), V7 (vault_keyslots), V8 (todo position) and V9 (files) bump the current version
         // further, but the v5 assertions below still hold: a fresh DB walks
         // through every migration in order.
         var version = await db.ExecuteScalarAsync<long>("PRAGMA user_version");
-        Assert.Equal(8, version);
+        Assert.Equal(9, version);
 
         var table = await db.ExecuteScalarAsync<string?>(
             "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'contacts'");
@@ -84,7 +84,7 @@ public class SchemaV5MigrationTests : IDisposable
         using var db = factory.CreateConnection(userId);
 
         var version = await db.ExecuteScalarAsync<long>("PRAGMA user_version");
-        Assert.Equal(8, version);
+        Assert.Equal(9, version);
 
         var note = await db.ExecuteScalarAsync<string?>(
             "SELECT title FROM notes WHERE id = 'n1'");

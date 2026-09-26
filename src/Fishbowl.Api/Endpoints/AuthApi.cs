@@ -1,4 +1,5 @@
 using System.Security.Claims;
+using Fishbowl.Api.Accounts;
 using Fishbowl.Core.Auth;
 using Fishbowl.Core.Models;
 using Fishbowl.Core.Repositories;
@@ -34,6 +35,7 @@ public static class AuthApi
             HttpContext context,
             ISystemRepository system,
             IPasswordHasher hasher,
+            AccountGate gate,
             CancellationToken ct) =>
         {
             if (string.IsNullOrWhiteSpace(request?.Username) || string.IsNullOrEmpty(request.Password))
@@ -42,6 +44,13 @@ public static class AuthApi
             var user = await system.GetUserByLocalUsernameAsync(request.Username, ct);
             if (!VerifyOrSpendDummyTime(hasher, user, request.Password))
                 return Results.Unauthorized();
+
+            // Blocked / disabled accounts are refused even with the right
+            // password — after the check, so the refusal isn't an oracle.
+            var decision = await gate.SignInExistingAsync(user!, ct);
+            if (!decision.Allowed)
+                return Results.Json(new { error = decision.Refusal, message = SignInRefusals.Describe(decision.Refusal!) },
+                    statusCode: StatusCodes.Status403Forbidden);
 
             // Force-rotate path: temp password is correct, but the user must
             // pick their own before we issue a session cookie. Returning 200
@@ -79,6 +88,7 @@ public static class AuthApi
             HttpContext context,
             ISystemRepository system,
             IPasswordHasher hasher,
+            AccountGate gate,
             CancellationToken ct) =>
         {
             if (string.IsNullOrWhiteSpace(request?.Username)
@@ -97,6 +107,11 @@ public static class AuthApi
             var user = await system.GetUserByLocalUsernameAsync(request.Username, ct);
             if (!VerifyOrSpendDummyTime(hasher, user, request.CurrentPassword))
                 return Results.Unauthorized();
+
+            var decision = await gate.SignInExistingAsync(user!, ct);
+            if (!decision.Allowed)
+                return Results.Json(new { error = decision.Refusal, message = SignInRefusals.Describe(decision.Refusal!) },
+                    statusCode: StatusCodes.Status403Forbidden);
 
             var fresh = hasher.Hash(request.NewPassword);
             await system.SetPasswordAsync(user!.Id, fresh.Hash, fresh.Salt, mustChange: false, ct);

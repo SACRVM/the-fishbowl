@@ -464,6 +464,20 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--accent); }
     font-size: 0.85rem;
     margin-top: 0.5rem;
 }
+/* The waiting page of a pending account (pending.html). */
+.auth-card .auth-note {
+    color: var(--text);
+    font-size: 0.9rem;
+    margin: 0 0 1rem;
+}
+.auth-card .auth-note:empty { display: none; }
+.auth-card .auth-actions {
+    display: flex;
+    gap: 0.75rem;
+    justify-content: center;
+    margin-top: 1.5rem;
+}
+.auth-card .auth-actions .btn { width: auto; }
 
 /* ───── Secret vault dialogs (fb.vault) ───── */
 /* Light-DOM content slotted into <sac-dialog>, so document CSS applies and

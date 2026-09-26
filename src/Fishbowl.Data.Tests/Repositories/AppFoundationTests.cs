@@ -37,9 +37,9 @@ public class AppFoundationTests : IDisposable
     {
         using var sys = _factory.CreateSystemConnection();
 
-        // V7 added owner columns; V8–V10 ran on top — current head is 10.
+        // V7 added owner columns; V8–V11 ran on top — current head is 11.
         var version = sys.ExecuteScalar<long>("PRAGMA user_version");
-        Assert.Equal(10, version);
+        Assert.Equal(11, version);
 
         var cols = sys.Query<string>("SELECT name FROM pragma_table_info('api_keys')").ToList();
         Assert.Contains("owner_type", cols);

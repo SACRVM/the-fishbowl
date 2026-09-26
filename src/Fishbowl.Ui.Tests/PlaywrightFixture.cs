@@ -23,6 +23,10 @@ public class PlaywrightFixture : IAsyncLifetime
     // so a completed download is kept here and seeded into the next run.
     private static readonly string ModelCache = Path.Combine(Path.GetTempPath(), "fishbowl_ui_model_cache");
     public string BaseUrl { get; private set; } = string.Empty;
+
+    // The host's data folder, for tests that seed state the UI can't create
+    // itself (a pending account needs a Google sign-in).
+    public string DataDir => _dataDir;
     public IPlaywright? Playwright { get; private set; }
     public IBrowser? Browser { get; private set; }
 

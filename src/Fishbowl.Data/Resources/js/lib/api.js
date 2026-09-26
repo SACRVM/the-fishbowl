@@ -49,6 +49,11 @@
         return s?.type === "scoped" ? `/spaces/${encodeURIComponent(s.slug)}${path}` : path;
     }
 
+    function messagesChanged(result) {
+        window.dispatchEvent(new CustomEvent("fb:messages-changed"));
+        return result;
+    }
+
     function spacesChanged(result) {
         window.dispatchEvent(new CustomEvent("fb:spaces-changed"));
         return result;
@@ -342,6 +347,25 @@
         },
         auth: {
             logout: () => request("/auth/logout", { method: "POST" })
+        },
+        // System messages — personal, never context-prefixed, cookie-only.
+        // Every change fires `fb:messages-changed` so the nav badge follows.
+        messages: {
+            list:        (unread) => request(`/messages${unread ? "?unread=true" : ""}`),
+            unreadCount: ()       => request("/messages/unread-count"),
+            read:        (id)     => request(`/messages/${encodeURIComponent(id)}/read`, { method: "POST" })
+                .then(messagesChanged),
+        },
+        // Instance administration — admins only (403 otherwise), cookie-only.
+        admin: {
+            users:   ()   => request("/admin/users"),
+            // { quotaBytes } null = the instance default, 0 = unlimited.
+            approve: (id, { quotaBytes = null, makeAdmin = false } = {}) =>
+                request(`/admin/users/${encodeURIComponent(id)}/approve`,
+                    { method: "POST", body: JSON.stringify({ quotaBytes, makeAdmin }) }).then(messagesChanged),
+            reject:  (id) => request(`/admin/users/${encodeURIComponent(id)}/reject`,  { method: "POST" }).then(messagesChanged),
+            block:   (id) => request(`/admin/users/${encodeURIComponent(id)}/block`,   { method: "POST" }).then(messagesChanged),
+            unblock: (id) => request(`/admin/users/${encodeURIComponent(id)}/unblock`, { method: "POST" }).then(messagesChanged),
         }
     };
     fb.ApiError = ApiError;

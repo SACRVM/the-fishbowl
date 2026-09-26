@@ -1,4 +1,5 @@
 using System;
+using Fishbowl.Core.Auth;
 
 namespace Fishbowl.Core.Models;
 
@@ -36,4 +37,15 @@ public class User
 
     // Secret vault auto-lock in minutes (VaultSettings.AutoLockChoices), null = default.
     public int? VaultAutoLockMinutes { get; set; }
+
+    // Account state (UserStates): pending until an admin approves a new
+    // sign-up; disabled/blocked can't sign in. Existing rows are active.
+    public string State { get; set; } = UserStates.Active;
+
+    // Storage quota in bytes set at approval; null = the instance default.
+    public long? QuotaBytes { get; set; }
+
+    public string? ApprovedBy { get; set; }
+    public DateTime? ApprovedAt { get; set; }
+    public DateTime? LastSignInAt { get; set; }
 }

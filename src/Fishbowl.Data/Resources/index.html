@@ -27,6 +27,7 @@
     <script defer src="/js/lib/vault.js"></script>
     <script defer src="/js/lib/api.js"></script>
     <script defer src="/js/lib/format.js"></script>
+    <script defer src="/js/lib/accounts.js"></script>
     <script defer src="/js/lib/tags-registry.js"></script>
     <script defer src="/js/lib/tag-manager.js"></script>
 
@@ -68,6 +69,8 @@
     <script defer src="/js/views/fb-spaces-settings-view.js"></script>
     <script defer src="/js/views/fb-keys-settings-view.js"></script>
     <script defer src="/js/views/fb-secrets-settings-view.js"></script>
+    <script defer src="/js/views/fb-messages-view.js"></script>
+    <script defer src="/js/views/fb-users-admin-view.js"></script>
 
     <!-- shell: account menu, view toolbar, router mount -->
     <script defer src="/js/lib/shell.js"></script>
@@ -82,6 +85,12 @@
         </sac-menu>
         <!-- fb.toolbar renders the active view's actions here. -->
         <div slot="toolbar" class="toolbar" id="fb-view-toolbar"></div>
+        <!-- System messages: the envelope + unread count, shown once /me
+             loaded. Outside fb.toolbar, so per-view repaints never drop it. -->
+        <button slot="toolbar" class="nav-icon-btn has-badge" id="fb-messages-btn"
+                aria-label="Messages" title="Messages" hidden>
+            <sac-icon name="mail"></sac-icon>
+        </button>
         <!-- Account menu. When the ribbon runs out of room (a phone), the kit
              folds it into the "…" menu as a group; sac:select still fires here. -->
         <sac-menu slot="toolbar" id="fb-account" hidden>

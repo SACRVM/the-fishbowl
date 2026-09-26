@@ -1,4 +1,7 @@
 using System.Security.Claims;
+using Fishbowl.Api.Endpoints;
+using Fishbowl.Core.Auth;
+using Fishbowl.Core.Files;
 using Fishbowl.Core.Mcp;
 using Fishbowl.Core.Repositories;
 using Microsoft.AspNetCore.Authentication.Google;
@@ -64,6 +67,7 @@ public static class ConfigAdminEndpoints
             ISystemRepository system,
             ConfigurationCache cache,
             IOptionsMonitorCache<GoogleOptions> googleCache,
+            IUserAdminRepository admin,
             CancellationToken ct) =>
         {
             if (!await IsCookieAdminAsync(user, system, ct)) return Results.Forbid();
@@ -81,6 +85,7 @@ public static class ConfigAdminEndpoints
 
             await system.SetConfigAsync(spec.Key, value, ct);
             cache.Set(spec.Key, value);
+            await admin.RecordAdminActionAsync(ActorId(user), AdminActions.ConfigSet, "config", spec.Key, ct);
 
             // Force-rebuild AspNetCore's GoogleOptions snapshot so the next
             // challenge uses the new credentials. Without this, an in-flight
@@ -105,6 +110,7 @@ public static class ConfigAdminEndpoints
             ISystemRepository system,
             ConfigurationCache cache,
             IOptionsMonitorCache<GoogleOptions> googleCache,
+            IUserAdminRepository admin,
             CancellationToken ct) =>
         {
             if (!await IsCookieAdminAsync(user, system, ct)) return Results.Forbid();
@@ -118,6 +124,7 @@ public static class ConfigAdminEndpoints
             // the audit trail of "this key existed once" via `updated_at`.
             await system.SetConfigAsync(spec.Key, string.Empty, ct);
             cache.Set(spec.Key, null);
+            await admin.RecordAdminActionAsync(ActorId(user), AdminActions.ConfigClear, "config", spec.Key, ct);
             if (spec.Key.StartsWith("Google:", StringComparison.Ordinal))
                 googleCache.Clear();
 
@@ -134,6 +141,9 @@ public static class ConfigAdminEndpoints
 
         return routes;
     }
+
+    private static string ActorId(ClaimsPrincipal user) =>
+        user.FindFirst(McpContextClaims.UserId)?.Value ?? "";
 
     private static async Task<bool> IsCookieAdminAsync(
         ClaimsPrincipal user, ISystemRepository system, CancellationToken ct)
@@ -177,6 +187,15 @@ internal static class ConfigSchema
         new("Discord:BotToken", true, true,
             "Discord bot token. Restart required (gateway connection binds at host start).",
             ValidateDiscordToken),
+        new(SignUpPolicy.ModeKey, false, false,
+            "Who may create an account: approval (default — an admin approves each new one), open, or closed. Hot.",
+            ValidateSignUpMode),
+        new(SignUpPolicy.AllowedDomainsKey, false, false,
+            "Comma-separated e-mail domains new accounts must come from (empty = any). Existing accounts are unaffected. Hot.",
+            ValidateEmailDomains),
+        new(FileLimits.DefaultUserQuotaBytesKey, false, false,
+            "The storage quota (bytes, 0 = unlimited) an approval pre-fills for a new account. Hot.",
+            ValidateQuotaBytes),
     };
 
     public static KeySpec? Find(string key) =>
@@ -218,6 +237,28 @@ internal static class ConfigSchema
         v is "true" or "false"
             ? null
             : "Acme:AcceptTos must be exactly the string \"true\" or \"false\".";
+
+    private static string? ValidateSignUpMode(string v) =>
+        SignUpPolicy.Modes.Contains(v)
+            ? null
+            : "Auth:SignUp must be one of: approval, open, closed.";
+
+    private static string? ValidateEmailDomains(string v)
+    {
+        var domains = SignUpPolicy.ParseDomains(v);
+        if (domains.Count == 0) return "Provide at least one comma-separated domain (use DELETE to allow any).";
+        foreach (var d in domains)
+        {
+            if (Uri.CheckHostName(d) != UriHostNameType.Dns || !d.Contains('.'))
+                return $"Not a valid e-mail domain: {d}";
+        }
+        return null;
+    }
+
+    private static string? ValidateQuotaBytes(string v) =>
+        long.TryParse(v, out var n) && n >= 0
+            ? null
+            : "Quota must be a whole number of bytes, 0 or more (0 = unlimited).";
 
     private static string? ValidateDiscordToken(string v)
     {

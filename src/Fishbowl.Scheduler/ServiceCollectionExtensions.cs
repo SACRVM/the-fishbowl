@@ -18,6 +18,8 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IReminderRepository, ReminderRepository>();
         services.AddHostedService<ReminderDispatcher>();
         services.AddHostedService<DailyDigestDispatcher>();
+        // Needs IFileService (registered by the host).
+        services.AddHostedService<FilesMaintenanceService>();
         return services;
     }
 }

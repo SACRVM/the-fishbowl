@@ -22,6 +22,12 @@ public static class ScopeCatalog
     public const string ReadEvents = "read:events";
     public const string WriteEvents = "write:events";
 
+    // Files app. Opt-in per key — never added to existing keys. Permanent
+    // delete, empty trash and cross-workspace transfer stay cookie-only
+    // whatever the key carries.
+    public const string ReadFiles = "read:files";
+    public const string WriteFiles = "write:files";
+
     // Apps platform — single-app-wide trio. `app:admin` gates DDL
     // (create/alter/drop table, create index); read/write gate row CRUD.
     // No per-table or per-row scopes in MVP — the bearer token *is* the
@@ -37,6 +43,7 @@ public static class ScopeCatalog
         ReadTasks, WriteTasks,
         ReadContacts, WriteContacts,
         ReadEvents, WriteEvents,
+        ReadFiles, WriteFiles,
         AppRead, AppWrite, AppAdmin,
     };
 

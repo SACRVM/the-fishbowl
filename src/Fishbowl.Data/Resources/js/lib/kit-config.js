@@ -22,4 +22,9 @@
             '<ellipse cx="10" cy="12" rx="7" ry="4"/><path d="M17 12l4-3v6z"/>' +
             '<circle cx="6" cy="11" r="1" fill="currentColor"/><path d="M7 14q1 0.6 2 0"/>');
     }
+    // The system inbox's envelope; the kit ships no mail icon yet.
+    if (!sac.icons.has("mail")) {
+        sac.icons.register("mail",
+            '<rect x="2" y="4" width="20" height="16" rx="2"/><path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"/>');
+    }
 })();

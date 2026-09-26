@@ -689,13 +689,14 @@ public static class SpacesApi
         return group.RequireAuthorization();
     }
 
-    private record SpaceResolution(Space? Space, SpaceRole? Role, IResult? Error);
+    internal record SpaceResolution(Space? Space, SpaceRole? Role, IResult? Error);
 
     // Resolves {slug} → Space + the caller's SpaceRole. Returns an Error result
     // (401/404/403) when the caller isn't authenticated, the space doesn't
     // exist, or the caller isn't a member. Keeps the endpoint handlers above
     // declarative.
-    private static async Task<SpaceResolution> ResolveSpaceAsync(
+    // Shared with FilesApi, which mounts its own space mirror.
+    internal static async Task<SpaceResolution> ResolveSpaceAsync(
         string slug, ClaimsPrincipal user, ISpaceRepository spaces, CancellationToken ct)
     {
         var userId = user.FindFirst(McpContextClaims.UserId)?.Value;
