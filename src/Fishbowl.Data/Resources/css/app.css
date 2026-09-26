@@ -1,114 +1,14 @@
 /* ==========================================================================
-   Fishbowl — App-wide styles
-   Design tokens at :root. Shadow-DOM components inherit via CSS custom
-   properties.
+   Fishbowl — app-only styles.
+   Everything shared — fonts, theme tokens, scrollbars, base, forms, buttons,
+   cards, empty states, the centred card shell — is the vendored kit's
+   (kit/css/ui.css, loaded after this file on every page). What stays here is
+   what the kit has no pattern for; never a copy or a restyle of a kit part.
    ========================================================================== */
 
-/* Self-hosted fonts (OFL 1.1). Served from /fonts/ via the embedded resource
-   pipeline so we don't phone home to fonts.googleapis.com on every load.
-   Mirrors the old <link> request: Inter 400/500/600, Outfit 600/700/800.
-   latin + latin-ext subsets (covers most European text); anything outside
-   those unicode-ranges falls back to the system sans stack below. */
-@font-face {
-    font-family: 'Inter';
-    font-style: normal;
-    font-weight: 400;
-    font-display: swap;
-    src: url('/fonts/inter-latin.woff2') format('woff2');
-    unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
-}
-@font-face {
-    font-family: 'Inter';
-    font-style: normal;
-    font-weight: 500;
-    font-display: swap;
-    src: url('/fonts/inter-latin.woff2') format('woff2');
-    unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
-}
-@font-face {
-    font-family: 'Inter';
-    font-style: normal;
-    font-weight: 600;
-    font-display: swap;
-    src: url('/fonts/inter-latin.woff2') format('woff2');
-    unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
-}
-@font-face {
-    font-family: 'Inter';
-    font-style: normal;
-    font-weight: 400 600;
-    font-display: swap;
-    src: url('/fonts/inter-latin-ext.woff2') format('woff2');
-    unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
-}
-@font-face {
-    font-family: 'Outfit';
-    font-style: normal;
-    font-weight: 600;
-    font-display: swap;
-    src: url('/fonts/outfit-latin.woff2') format('woff2');
-    unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
-}
-@font-face {
-    font-family: 'Outfit';
-    font-style: normal;
-    font-weight: 700;
-    font-display: swap;
-    src: url('/fonts/outfit-latin.woff2') format('woff2');
-    unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
-}
-@font-face {
-    font-family: 'Outfit';
-    font-style: normal;
-    font-weight: 800;
-    font-display: swap;
-    src: url('/fonts/outfit-latin.woff2') format('woff2');
-    unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
-}
-@font-face {
-    font-family: 'Outfit';
-    font-style: normal;
-    font-weight: 600 800;
-    font-display: swap;
-    src: url('/fonts/outfit-latin-ext.woff2') format('woff2');
-    unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
-}
-
 :root {
-    /* Tell the browser we're a dark UI so native chrome follows suit:
-       <select> popup lists, date-picker popovers, autofill, scrollbar
-       defaults. Without this they render light-mode white. */
-    color-scheme: dark;
-
-    /* Slate background family — bg/panel/glass share one hue so glass
-       surfaces sit ON the page instead of floating foreign above it
-       (UI-refinement Stufe A; previously near-black #0a0a0a/#1e1e1e). */
-    --bg:           #0b0f1a;
-    --panel:        #171b24;
-    --accent:       #3b82f6;
-    --accent-edit:  #a855f7;
-    --accent-warm:  #f97316;
-    --danger:       #ef4444;
-    --border:       rgba(255, 255, 255, 0.08);
-    --text:         #f8fafc;
-    /* Two-step secondary text: --text-muted carries dates/snippets/labels
-       (must pass WCAG AA on --panel, 6.7:1); --text-dim is strictly
-       tertiary — never the only carrier of information. */
-    --text-muted:   #94a3b8;
-    --text-dim:     #64748b;
-    --glass:        rgba(15, 23, 42, 0.7);
-    --bg-dark:      #000000;
-
-    /* Motion + elevation rails (Stufe A): use these instead of ad-hoc
-       cubic-beziers and box-shadows so views stay in one motion language. */
-    --ease-bounce:  cubic-bezier(0.175, 0.885, 0.32, 1.275);
-    --ease-smooth:  cubic-bezier(0.4, 0, 0.2, 1);
-    --shadow-1:     0 2px 8px rgba(0, 0, 0, 0.35);
-    --shadow-2:     0 8px 24px rgba(0, 0, 0, 0.45);
-
-    /* Tag palette. Slot names mirror Fishbowl.Core.Util.TagPalette.Slots so the
-       backend can store names instead of hex and a future theme can shift the
-       palette without rewriting persisted tag colors. */
+    /* Tag palette, read by the notes view (var(--tag-<slot>)). Slot names
+       mirror Fishbowl.Core.Util.TagPalette.Slots. */
     --tag-blue:     #3b82f6;
     --tag-orange:   #f97316;
     --tag-red:      #ef4444;
@@ -119,114 +19,6 @@
     --tag-teal:     #14b8a6;
     --tag-gray:     #64748b;
     --tag-indigo:   #6366f1;
-}
-
-/* Modern themed scrollbars — global.
-   Note: this `*` selector does NOT pierce Shadow DOM; components with their
-   own scrollable areas inside shadow roots must duplicate these rules. */
-* {
-    scrollbar-width: thin;
-    scrollbar-color: rgba(255, 255, 255, 0.18) transparent;
-}
-*::-webkit-scrollbar { width: 10px; height: 10px; }
-*::-webkit-scrollbar-track { background: transparent; }
-*::-webkit-scrollbar-thumb {
-    background: rgba(255, 255, 255, 0.18);
-    background-clip: content-box;
-    border: 2px solid transparent;
-    border-radius: var(--radius-m);
-}
-*::-webkit-scrollbar-thumb:hover {
-    background: rgba(255, 255, 255, 0.32);
-    background-clip: content-box;
-}
-*::-webkit-scrollbar-corner { background: transparent; }
-
-* { box-sizing: border-box; }
-
-html, body {
-    margin: 0;
-    padding: 0;
-    min-height: 100vh;
-    background: var(--bg);
-    color: var(--text);
-    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
-    font-size: 14px;
-    line-height: 1.5;
-    -webkit-font-smoothing: antialiased;
-}
-
-h1, h2, h3, h4, h5, h6 {
-    font-family: 'Outfit', sans-serif;
-    font-weight: 700;
-    letter-spacing: -0.02em;
-    margin: 0;
-}
-
-a { color: var(--accent); text-decoration: none; }
-a:hover { text-decoration: underline; }
-/* Block-level link cards are buttons in spirit — hover-underlining their
-   whole text body reads as a rendering glitch. (0,2,0) outweighs
-   a:hover's (0,1,1). */
-.tile:hover { text-decoration: none; }
-
-button {
-    font-family: inherit;
-    cursor: pointer;
-    border: none;
-    background: none;
-    color: inherit;
-}
-
-input, textarea {
-    font-family: inherit;
-    color: inherit;
-}
-
-/* Baseline for every light-DOM <select>: dark field + custom chevron
-   (appearance:none kills the native arrow, so we paint our own).
-   View-specific classes may add sizing but must not re-declare
-   `background` shorthand — that would wipe the chevron image. */
-select {
-    appearance: none;
-    background-color: rgba(0, 0, 0, 0.3);
-    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%2394a3b8' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
-    background-repeat: no-repeat;
-    background-position: right 10px center;
-    border: 1px solid var(--border);
-    border-radius: var(--radius-m);
-    padding: 8px 32px 8px 10px;
-    color: var(--text);
-    font-family: inherit;
-    font-size: 13px;
-    outline: none;
-    cursor: pointer;
-    transition: border-color 0.15s;
-}
-select:focus { border-color: var(--accent); }
-select option { background-color: var(--panel); color: var(--text); }
-
-input[type="checkbox"], input[type="radio"] { accent-color: var(--accent); }
-
-/* Decorative background orb — used on hub, login, setup */
-.orb {
-    position: fixed;
-    width: 50vw;
-    height: 50vw;
-    background: radial-gradient(circle, rgba(59, 130, 246, 0.05) 0%, transparent 70%);
-    border-radius: 50%;
-    top: -10vw;
-    right: -10vw;
-    z-index: -1;
-    pointer-events: none;
-}
-
-/* Glassmorphic panel */
-.glass {
-    background: rgba(15, 23, 42, 0.85);
-    backdrop-filter: blur(12px);
-    -webkit-backdrop-filter: blur(12px);
-    border: 1px solid rgba(255, 255, 255, 0.1);
 }
 
 /* Logo mark — blue top, orange bottom (goldfish) */
@@ -243,7 +35,9 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--accent); }
 /* SPA shell: #app-root, the hub, tiles and the tile grid come from the
    vendored kit (kit/css/ui.css, loaded after this file by index.html). */
 
-/* fb.toolbar items in the shell's <sac-nav> (see js/lib/shell.js). */
+/* fb.toolbar items in the shell's <sac-nav> (see js/lib/shell.js). The kit's
+   .nav-icon-btn has no pressed or disabled state (only .icon-btn.tool does),
+   so a toggled toolbar item says so here. */
 .nav-icon-btn.active {
     color: var(--accent);
     background: var(--accent-tint);
@@ -323,161 +117,101 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--accent); }
     margin-bottom: 0.5rem;
 }
 .fb-profile .fb-profile-id {
-    font-family: 'SFMono-Regular', Consolas, monospace;
+    font-family: var(--font-mono);
     word-break: break-all;
 }
 
-/* Scrollbars are themed globally at the top of this file; per-element
-   webkit rules were previously duplicated here — no longer needed. */
-
-/* Base button classes (used inside Shadow DOM too via :host-context support) */
-.btn {
-    padding: 0.5rem 1rem;
-    border-radius: var(--radius-m);
-    background: var(--glass);
-    color: var(--text);
-    border: 1px solid var(--border);
-    font-size: 0.875rem;
-    transition: all 0.2s;
-}
-.btn:hover {
-    background: rgba(255, 255, 255, 0.08);
-    border-color: rgba(255, 255, 255, 0.2);
-}
-.btn.primary {
-    background: var(--accent);
-    border-color: var(--accent);
-    color: white;
-    transition: all 0.2s var(--ease-bounce);
-}
-.btn.primary:hover {
-    background: #2563eb;
-    border-color: #2563eb;
-    transform: translateY(-1px);
-    box-shadow: 0 4px 12px rgba(59, 130, 246, 0.3);
-}
-.btn.danger {
-    background: var(--danger);
-    border-color: var(--danger);
-    color: white;
-}
-
-/* Centered pre-auth card (login + setup) */
-.auth-shell {
-    min-height: 100vh;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    padding: 2rem;
-}
-.auth-card {
-    width: 100%;
-    max-width: 440px;
-    background: rgba(30, 41, 59, 0.7);
-    backdrop-filter: blur(12px);
-    -webkit-backdrop-filter: blur(12px);
-    border: 1px solid rgba(255, 255, 255, 0.1);
-    border-radius: var(--radius-l);
-    padding: 3rem 2.5rem;
-    text-align: center;
-}
-.auth-card .fb-logo-mark {
-    width: 28px;
-    height: 40px;
-    margin: 0 auto 1rem;
-}
-/* Login screen uses the full fishbowl illustration instead of the pill —
-   bigger canvas + room for the goldfish, water, bubbles, glass highlight. */
-.auth-card .fb-fishbowl {
+/* Sign-in, setup and the pending page: the kit's .center-shell /
+   .center-card. Only their form layout is Fishbowl's. */
+.center-card .fb-fishbowl {
     display: block;
     width: 88px;
     height: 88px;
     margin: 0 auto 1.25rem;
-    filter: drop-shadow(0 8px 20px rgba(59, 130, 246, 0.28));
 }
-.auth-card h1 {
-    font-family: 'Outfit', sans-serif;
-    font-size: 2rem;
-    font-weight: 800;
-    letter-spacing: -0.02em;
-    background: linear-gradient(135deg, #fff 0%, var(--accent) 100%);
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
-    background-clip: text;
-    margin-bottom: 0.5rem;
-}
-.auth-card .tagline {
-    color: var(--text-muted);
-    margin-bottom: 2rem;
-    font-size: 0.95rem;
-}
-.auth-card .form-group {
-    text-align: left;
-    margin-bottom: 1rem;
-}
-.auth-card label {
+.center-card .fb-logo-mark { width: 28px; height: 40px; margin: 0 auto 1rem; }
+.center-card .form-group { text-align: left; margin-bottom: 1rem; }
+.center-card .providers,
+.center-card .auth-actions { display: flex; flex-direction: column; gap: 0.75rem; }
+.center-card .auth-actions { margin-top: 1.5rem; }
+.center-card form { margin-top: 1rem; }
+.center-card form > .btn.primary { margin-top: 1rem; }
+
+.center-card .error { color: var(--danger-text); font-size: 0.85rem; margin-top: 0.5rem; }
+.center-card .auth-note { font-size: 0.9rem; margin: 0 0 1rem; }
+.center-card .auth-note:empty { display: none; }
+.center-card details { text-align: left; margin-top: 1rem; }
+.center-card details > summary { cursor: pointer; color: var(--text-muted); font-size: 0.9rem; }
+.center-card details > p { color: var(--text-muted); font-size: 0.85rem; margin: 0.75rem 0; }
+
+/* ───── Settings pages (#/keys, #/spaces, #/secrets, #/data, #/messages,
+   #/admin/users, #/admin/settings) ─────
+   The kit has no "page with a title" recipe for an SPA view, so the frame
+   is one rule set here instead of a copy per view. Inside it: kit parts —
+   .card panels headed by <sac-section>, .btn in a .toolbar strip,
+   .empty-state, <sac-chip>, <sac-status-banner>, <sac-progress>. */
+.fb-page {
     display: block;
-    font-size: 0.8rem;
-    color: var(--text-muted);
-    margin-bottom: 0.3rem;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
+    max-width: 860px;
+    padding: clamp(1.25rem, 5vw, 40px) clamp(1rem, 5vw, 48px);
 }
-.auth-card input[type="text"],
-.auth-card input[type="password"] {
-    width: 100%;
-    padding: 0.6rem 0.8rem;
-    background: rgba(0, 0, 0, 0.3);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-m);
-    font-size: 0.95rem;
-    transition: border-color 0.2s;
-}
-.auth-card input:focus {
-    outline: none;
-    border-color: var(--accent);
-}
-.auth-card .providers {
+.fb-page > header { display: flex; align-items: flex-start; gap: 16px; margin-bottom: 24px; }
+.fb-page > header > div { flex: 1; min-width: 0; }
+.fb-page > header h1 { font-size: 28px; margin: 0 0 6px; }
+.fb-page > header .subtitle { color: var(--text-muted); margin: 0; }
+.fb-page .card { margin-bottom: 20px; }
+.fb-page .card > sac-section { margin-bottom: 0; }
+.fb-page .card p { margin: 0 0 12px; }
+.fb-page .muted { color: var(--text-muted); font-size: 13px; }
+.fb-page .field { margin-bottom: 14px; }
+.fb-page code { font-family: var(--font-mono); overflow-wrap: anywhere; }
+/* One row style: the kit's list-detail row — flat, a divider between. */
+.fb-row { display: flex; align-items: center; gap: 14px; padding: 12px 0; }
+.fb-row + .fb-row { border-top: 1px solid var(--border); }
+.fb-row > sac-icon { --icon-size: 20px; color: var(--accent); flex-shrink: 0; }
+.fb-row-info { flex: 1; min-width: 0; }
+.fb-row-name { font-weight: 600; margin: 0 0 2px; overflow-wrap: anywhere; }
+.fb-row-meta {
     display: flex;
-    flex-direction: column;
-    gap: 0.75rem;
-}
-.auth-card .provider-btn {
-    display: flex;
+    flex-wrap: wrap;
     align-items: center;
-    justify-content: center;
-    gap: 0.6rem;
-    padding: 0.75rem 1rem;
-    background: rgba(255, 255, 255, 0.05);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-m);
-    color: var(--text);
-    font-size: 0.95rem;
-    transition: all 0.2s;
+    column-gap: 16px;
+    row-gap: 4px;
+    font-size: 12px;
+    color: var(--text-muted);
 }
-.auth-card .provider-btn:hover {
-    background: rgba(255, 255, 255, 0.1);
-    border-color: var(--accent);
-}
-.auth-card .error {
-    color: var(--danger);
-    font-size: 0.85rem;
-    margin-top: 0.5rem;
-}
-/* The waiting page of a pending account (pending.html). */
-.auth-card .auth-note {
-    color: var(--text);
-    font-size: 0.9rem;
-    margin: 0 0 1rem;
-}
-.auth-card .auth-note:empty { display: none; }
-.auth-card .auth-actions {
+.fb-row .toolbar { flex-shrink: 0; flex-wrap: wrap; }
+
+/* A checkbox with its sentence (scopes, setup's ACME terms, archive-before-
+   delete): the kit's <label> is a block caption above a field; this one
+   reads inline. The kit has no checkbox-label pattern (sac-toggle is a
+   switch, for settings that apply at once). */
+label.fb-check {
     display: flex;
-    gap: 0.75rem;
-    justify-content: center;
-    margin-top: 1.5rem;
+    gap: 0.5rem;
+    align-items: flex-start;
+    margin: 0;
+    text-transform: none;
+    letter-spacing: 0;
+    font-weight: 400;
+    font-size: 0.85rem;
+    color: var(--text);
+    cursor: pointer;
 }
-.auth-card .auth-actions .btn { width: auto; }
+
+/* The storage-quota field (fb.accounts.quotaField): "Storage [ n ] GB" in
+   one line — a number field between words, not a caption above it. */
+label.fb-quota-field {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    margin: 0;
+    text-transform: none;
+    letter-spacing: 0;
+    font-weight: 400;
+    font-size: 13px;
+}
+label.fb-quota-field input { width: 6em; }
 
 /* ───── Secret vault dialogs (fb.vault) ───── */
 /* Light-DOM content slotted into <sac-dialog>, so document CSS applies and
@@ -562,26 +296,8 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--accent); }
     color: var(--text-muted);
     font-style: italic;
 }
-.fb-tags-badge {
-    flex-shrink: 0;
-    font-size: 10px;
-    color: var(--text-muted);
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
-    padding: 2px 6px;
-    border: 1px solid var(--border);
-    border-radius: var(--radius-m);
-}
-.fb-tags-swatches { display: flex; gap: 3px; flex-wrap: wrap; }
-.fb-tags-swatch {
-    width: 16px; height: 16px;
-    padding: 0;
-    border-radius: 50%;
-    border: 2px solid transparent;
-    cursor: pointer;
-}
-.fb-tags-swatch:hover { transform: scale(1.18); }
-.fb-tags-swatch.active { border-color: var(--text); }
+/* The grid's cells fill its width; in a row it needs one. */
+.fb-tags-row sac-swatch-grid { flex-shrink: 0; width: 17rem; }
 .fb-tags-count {
     flex-shrink: 0;
     width: 28px;
@@ -589,40 +305,14 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--accent); }
     font-size: 10px;
     color: var(--text-muted);
 }
-@media (pointer: coarse) {
-    /* Swatches keep their size but get a 44px hit area. */
-    .fb-tags-swatch { position: relative; }
-    .fb-tags-swatch::after { content: ""; position: absolute; inset: -14px; }
-    .fb-tags-swatches { gap: 10px; }
-}
 
-/* ───── Workspace switcher (shell.js, kit <sac-menu> in the nav) ───── */
-.fb-context-pill {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    max-width: 220px;
-    padding: 4px 10px 4px 8px;
-    background: none;
-    border: 1px solid var(--border);
-    border-radius: var(--radius-m);
-    color: var(--text);
-    font: inherit;
-    font-size: 0.82rem;
-    font-weight: 500;
-    cursor: pointer;
-}
-.fb-context-pill:hover { background: var(--hover); }
-.fb-context-pill sac-icon { --icon-size: 14px; }
-.fb-context-caret { --icon-size: 12px; opacity: 0.7; }
+/* ───── Workspace switcher (shell.js, kit <sac-menu> in the nav) ─────
+   The trigger is the kit's labeled ribbon button; a space is shared data,
+   so inside one it takes the warm accent. */
+.fb-context-pill { max-width: 220px; }
+.fb-context-pill.space { color: var(--accent-warm); }
 .fb-context-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-/* A space is shared data: the warm accent says so. */
-.fb-context-pill.space {
-    color: var(--accent-warm);
-    border-color: color-mix(in srgb, var(--accent-warm) 40%, transparent);
-}
-.fb-context-pill.space:hover { background: color-mix(in srgb, var(--accent-warm) 14%, transparent); }
-.fb-context-check { margin-left: auto; --icon-size: 14px; color: var(--accent); }
+.fb-context-check { margin-left: auto; color: var(--accent); }
 .fb-context-empty {
     display: block;
     padding: 7px 10px;

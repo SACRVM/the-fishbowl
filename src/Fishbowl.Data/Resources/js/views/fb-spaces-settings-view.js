@@ -50,110 +50,13 @@ class FbSpacesSettingsView extends HTMLElement {
     }
 
     render() {
+        this.classList.add("fb-page");
         this.innerHTML = `
             <style>
-                fb-spaces-settings-view { display: block; padding: clamp(1.25rem, 5vw, 40px) clamp(1rem, 5vw, 48px); max-width: 780px; }
-                fb-spaces-settings-view header { margin-bottom: 28px; }
-                fb-spaces-settings-view h1 {
-                    font-family: 'Outfit', 'Inter', sans-serif;
-                    font-size: 28px;
-                    font-weight: 700;
-                    margin: 0 0 6px;
-                    color: var(--text);
-                }
-                fb-spaces-settings-view .subtitle {
-                    color: var(--text-muted);
-                    font-size: 14px;
-                    margin: 0;
-                }
-                fb-spaces-settings-view .create-row {
-                    display: flex;
-                    gap: 8px;
-                    margin-bottom: 32px;
-                    padding: 16px;
-                    background: var(--panel);
-                    border: 1px solid var(--border);
-                    border-radius: var(--radius-l);
-                }
-                fb-spaces-settings-view .create-row input {
-                    flex: 1;
-                    background: rgba(0, 0, 0, 0.3);
-                    border: 1px solid var(--border);
-                    border-radius: var(--radius-m);
-                    padding: 8px 12px;
-                    color: var(--text);
-                    font: inherit;
-                    font-size: 14px;
-                    outline: none;
-                }
-                fb-spaces-settings-view .create-row input:focus { border-color: var(--accent); }
-                fb-spaces-settings-view .create-row button {
-                    background: var(--accent);
-                    border: none;
-                    border-radius: var(--radius-m);
-                    color: #fff;
-                    padding: 8px 18px;
-                    font: inherit;
-                    font-weight: 600;
-                    cursor: pointer;
-                    transition: filter 120ms;
-                }
-                fb-spaces-settings-view .create-row button:disabled {
-                    opacity: 0.5; cursor: not-allowed;
-                }
-                fb-spaces-settings-view .create-row button:not(:disabled):hover { filter: brightness(1.1); }
-
-                fb-spaces-settings-view .list-title {
-                    font-size: 12px;
-                    font-weight: 600;
-                    text-transform: uppercase;
-                    letter-spacing: 0.06em;
-                    color: var(--text-muted);
-                    margin: 0 0 10px;
-                }
-                fb-spaces-settings-view .space-row {
-                    display: flex;
-                    align-items: center;
-                    gap: 14px;
-                    padding: 14px 16px;
-                    background: var(--panel);
-                    border: 1px solid var(--border);
-                    border-radius: var(--radius-l);
-                    margin-bottom: 8px;
-                }
-                fb-spaces-settings-view .space-row sac-icon { --icon-size: 20px; color: var(--accent); flex-shrink: 0; }
-                fb-spaces-settings-view .space-info { flex: 1; min-width: 0; }
-                fb-spaces-settings-view .space-name {
-                    font-size: 14px;
-                    font-weight: 600;
-                    color: var(--text);
-                    margin: 0 0 2px;
-                }
-                fb-spaces-settings-view .space-meta {
-                    display: flex;
-                    gap: 12px;
-                    font-size: 12px;
-                    color: var(--text-muted);
-                }
-                fb-spaces-settings-view .space-meta .role {
-                    text-transform: uppercase;
-                    letter-spacing: 0.05em;
-                    font-size: 10px;
-                    padding: 2px 8px;
-                    border-radius: var(--radius-m);
-                    background: rgba(59, 130, 246, 0.15);
-                    color: var(--accent);
-                    font-weight: 700;
-                }
-                fb-spaces-settings-view .id-chip {
-                    font-family: 'SFMono-Regular', Consolas, monospace;
-                    padding: 1px 6px;
-                    border-radius: var(--radius-m);
-                    background: rgba(0, 0, 0, 0.3);
-                    color: var(--text);
-                    user-select: all;
-                }
-                fb-spaces-settings-view .id-chip[title] { cursor: help; }
+                /* Page frame, cards, rows, buttons and chips are the kit's
+                   (app.css .fb-page / .fb-row); only this page's own bits. */
+                fb-spaces-settings-view .create-row { display: flex; align-items: center; gap: 8px; }
+                fb-spaces-settings-view .create-row input { flex: 1; min-width: 0; }
                 /* The space's colour, leading the row. For the owner it is
                    a button that opens the colour picker. */
                 fb-spaces-settings-view .space-color {
@@ -162,68 +65,52 @@ class FbSpacesSettingsView extends HTMLElement {
                     height: 22px;
                     padding: 0;
                     border-radius: 50%;
-                    border: 2px solid var(--border);
+                    border: 1px solid var(--border);
                     background: var(--space-color);
                 }
-                fb-spaces-settings-view button.space-color { cursor: pointer; transition: transform 100ms; }
-                fb-spaces-settings-view button.space-color:hover { transform: scale(1.15); border-color: var(--text-muted); }
+                fb-spaces-settings-view button.space-color { cursor: pointer; }
                 fb-spaces-settings-view button.space-color:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-                fb-spaces-settings-view .open-btn,
-                fb-spaces-settings-view .delete-btn {
-                    background: transparent;
-                    border: none;
-                    color: var(--text-muted);
-                    cursor: pointer;
-                    padding: 6px 8px;
-                    border-radius: var(--radius-m);
-                    transition: color 100ms, background 100ms;
-                }
-                fb-spaces-settings-view .open-btn sac-icon,
-                fb-spaces-settings-view .delete-btn sac-icon { --icon-size: 16px; }
-                fb-spaces-settings-view .open-btn:hover { color: var(--accent); background: var(--hover); }
-                fb-spaces-settings-view .delete-btn:hover {
-                    color: var(--danger, #ef4444);
-                    background: rgba(239, 68, 68, 0.12);
-                }
-                fb-spaces-settings-view a.open-btn { display: inline-flex; align-items: center; }
-                fb-spaces-settings-view .archive-row .space-meta { flex-wrap: wrap; column-gap: 16px; }
                 /* The delete dialog's body lives in the dialog, outside the view. */
-                .fb-space-delete p { margin: 0 0 12px; color: var(--text); font-size: 14px; }
+                .fb-space-delete p { margin: 0 0 12px; }
                 .fb-space-delete .fb-space-delete-hint { color: var(--text-muted); font-size: 13px; margin: 8px 0 0; }
-                .fb-space-archive { display: inline-flex; align-items: center; gap: 8px; font-size: 14px; cursor: pointer; }
-                fb-spaces-settings-view .empty {
-                    text-align: center;
-                    color: var(--text-muted);
-                    padding: 32px 0;
-                    font-size: 13px;
-                }
             </style>
 
-            <header>
+            <header><div>
                 <h1>Spaces</h1>
                 <p class="subtitle">
                     Shared workspaces — each space has its own notes, separate from your personal data.
                 </p>
-            </header>
+            </div></header>
 
-            <h2 class="list-title">Personal workspace</h2>
-            <div id="personal-row"></div>
-
-            <div style="margin-top: 32px;">
-                <sac-status-banner id="form-status"></sac-status-banner>
-                <div class="create-row">
-                    <input type="text" id="name-input" placeholder="New space name (e.g. 'Fishbowl Dev')" maxlength="60"/>
-                    <button type="button" id="create-btn">Create space</button>
-                </div>
+            <div class="card">
+                <sac-section title="Personal workspace">
+                    <div id="personal-row"></div>
+                </sac-section>
             </div>
 
-            <h2 class="list-title">Your spaces</h2>
-            <div id="space-list"></div>
+            <div class="card">
+                <sac-section title="New space">
+                    <sac-status-banner id="form-status"></sac-status-banner>
+                    <div class="create-row">
+                        <input type="text" id="name-input" placeholder="New space name (e.g. 'Fishbowl Dev')" maxlength="60"/>
+                        <div class="toolbar">
+                            <button type="button" class="btn primary" id="create-btn">Create space</button>
+                        </div>
+                    </div>
+                </sac-section>
+            </div>
 
-            <section id="archive-section" hidden>
-                <h2 class="list-title">Archived spaces</h2>
-                <div id="archive-list"></div>
-            </section>
+            <div class="card">
+                <sac-section title="Your spaces">
+                    <div id="space-list"></div>
+                </sac-section>
+            </div>
+
+            <div class="card" id="archive-section" hidden>
+                <sac-section title="Archived spaces">
+                    <div id="archive-list"></div>
+                </sac-section>
+            </div>
         `;
 
         const input  = this.querySelector("#name-input");
@@ -249,18 +136,17 @@ class FbSpacesSettingsView extends HTMLElement {
         if (!mount) return;
 
         if (!this.me?.id) {
-            mount.innerHTML = `<div class="empty">loading…</div>`;
+            mount.innerHTML = `<p class="muted">Loading…</p>`;
             return;
         }
 
         mount.innerHTML = `
-            <div class="space-row">
+            <div class="fb-row space-row">
                 <sac-icon name="user"></sac-icon>
-                <div class="space-info">
-                    <p class="space-name">${escapeHtml(this.me.name || this.me.email || "You")}</p>
-                    <div class="space-meta">
-                        <span class="id-chip"
-                              title="users/${escapeAttr(this.me.id)}/personal.db">${escapeHtml(this.me.id)}</span>
+                <div class="fb-row-info">
+                    <p class="fb-row-name">${escapeHtml(this.me.name || this.me.email || "You")}</p>
+                    <div class="fb-row-meta">
+                        <code title="users/${escapeAttr(this.me.id)}/personal.db">${escapeHtml(this.me.id)}</code>
                     </div>
                 </div>
             </div>
@@ -272,30 +158,34 @@ class FbSpacesSettingsView extends HTMLElement {
         if (!list) return;
 
         if (this.spaces.length === 0) {
-            list.innerHTML = `<div class="empty">no spaces yet — create one above</div>`;
+            list.innerHTML = `
+                <div class="empty-state">
+                    <sac-icon name="users"></sac-icon>
+                    <h3>No spaces yet</h3>
+                    <p>Create one above.</p>
+                </div>`;
             return;
         }
 
         list.innerHTML = this.spaces.map(t => `
-            <div class="space-row" data-slug="${escapeAttr(t.slug)}">
+            <div class="fb-row space-row" data-slug="${escapeAttr(t.slug)}">
                 ${t.role === "owner"
                     ? `<button type="button" class="space-color" title="Change colour" aria-label="Change colour"
                                style="--space-color: ${this._colorVar(t.color)}"></button>`
                     : `<span class="space-color" title="Space colour" style="--space-color: ${this._colorVar(t.color)}"></span>`}
-                <div class="space-info">
-                    <p class="space-name">${escapeHtml(t.name)}</p>
-                    <div class="space-meta">
+                <div class="fb-row-info">
+                    <p class="fb-row-name">${escapeHtml(t.name)}</p>
+                    <div class="fb-row-meta">
                         <span>/${escapeHtml(t.slug)}</span>
-                        <span class="role">${escapeHtml(t.role)}</span>
-                        <span class="id-chip"
-                              title="spaces/${escapeAttr(t.id)}/space.db">${escapeHtml(t.id)}</span>
+                        <sac-chip class="role" label="${escapeAttr(t.role)}"></sac-chip>
+                        <code title="spaces/${escapeAttr(t.id)}/space.db">${escapeHtml(t.id)}</code>
                     </div>
                 </div>
-                <button type="button" class="open-btn" title="Open this space" aria-label="Open">
+                <button type="button" class="icon-btn open-btn" title="Open this space" aria-label="Open">
                     <sac-icon name="chevron-right"></sac-icon>
                 </button>
                 ${t.role === "owner"
-                    ? `<button type="button" class="delete-btn" title="Delete space" aria-label="Delete">
+                    ? `<button type="button" class="icon-btn danger delete-btn" title="Delete space" aria-label="Delete">
                            <sac-icon name="trash"></sac-icon>
                        </button>`
                     : ""}
@@ -410,7 +300,7 @@ class FbSpacesSettingsView extends HTMLElement {
             dlg.innerHTML = `
                 <div class="fb-space-delete">
                     <p>Its notes, todos, events and files are removed for every member, and its API keys stop working.</p>
-                    <label class="fb-space-archive">
+                    <label class="fb-check fb-space-archive">
                         <input type="checkbox" name="archive" checked>
                         <span>Archive before deleting</span>
                     </label>
@@ -463,21 +353,21 @@ class FbSpacesSettingsView extends HTMLElement {
         section.hidden = this.archives.length === 0;
         list.replaceChildren(...this.archives.map(a => {
             const row = document.createElement("div");
-            row.className = "space-row archive-row";
+            row.className = "fb-row space-row archive-row";
             row.dataset.archive = a.id;
             row.innerHTML = `
                 <span class="space-color" style="--space-color: ${this._colorVar(a.color)}"></span>
-                <div class="space-info">
-                    <p class="space-name"></p>
-                    <div class="space-meta"><span class="archived-at"></span><span class="expires"></span></div>
+                <div class="fb-row-info">
+                    <p class="fb-row-name space-name"></p>
+                    <div class="fb-row-meta"><span class="archived-at"></span><span class="expires"></span></div>
                 </div>
-                <a class="open-btn" title="Download the archive" aria-label="Download" download>
+                <a class="icon-btn open-btn" title="Download the archive" aria-label="Download" download>
                     <sac-icon name="download"></sac-icon>
                 </a>
-                <button type="button" class="open-btn restore-btn" title="Restore as a new space" aria-label="Restore">
+                <button type="button" class="icon-btn open-btn restore-btn" title="Restore as a new space" aria-label="Restore">
                     <sac-icon name="undo"></sac-icon>
                 </button>
-                <button type="button" class="delete-btn" title="Delete the archive" aria-label="Delete archive">
+                <button type="button" class="icon-btn danger delete-btn" title="Delete the archive" aria-label="Delete archive">
                     <sac-icon name="trash"></sac-icon>
                 </button>`;
             row.querySelector(".space-name").textContent = a.name;

@@ -5,12 +5,13 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Login · The Fishbowl</title>
     <link rel="stylesheet" href="/css/app.css">
+    <link rel="stylesheet" href="/kit/css/ui.css">
 </head>
 <body>
     <div class="orb"></div>
 
-    <div class="auth-shell">
-        <div class="auth-card">
+    <div class="center-shell">
+        <div class="center-card">
             <svg class="fb-fishbowl" viewBox="0 0 120 120" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
                 <defs>
                     <radialGradient id="fb-water" cx="50%" cy="35%" r="70%">
@@ -70,7 +71,7 @@
             <div class="providers" id="providers">
                 <!-- Populated by JS -->
             </div>
-            <form id="local-form" class="local-login" style="display:none; margin-top: 1rem;">
+            <form id="local-form" class="local-login" style="display:none;">
                 <div class="form-group">
                     <label for="local-username">Username</label>
                     <input type="text" id="local-username" name="username"
@@ -81,12 +82,12 @@
                     <input type="password" id="local-password" name="password"
                            autocomplete="current-password" required>
                 </div>
-                <button type="submit" class="btn primary" style="width:100%;">
+                <button type="submit" class="btn primary">
                     Sign in
                 </button>
             </form>
 
-            <form id="change-form" class="local-login" style="display:none; margin-top: 1rem;">
+            <form id="change-form" class="local-login" style="display:none;">
                 <p class="tagline">An administrator reset your password. Pick a new one to continue.</p>
                 <div class="form-group">
                     <label for="change-username">Username</label>
@@ -103,7 +104,7 @@
                     <input type="password" id="change-new" name="newPassword"
                            autocomplete="new-password" placeholder="at least 12 characters" required>
                 </div>
-                <button type="submit" class="btn primary" style="width:100%;">
+                <button type="submit" class="btn primary">
                     Save and sign in
                 </button>
             </form>
@@ -155,7 +156,7 @@
             // OAuth providers (everything except local) get a button each.
             const oauthProviders = providers.filter(p => p.id !== "local");
             providersEl.innerHTML = oauthProviders.map(p => `
-                <a class="provider-btn" href="/login/challenge/${p.id}">
+                <a class="btn" href="/login/challenge/${p.id}">
                     <span>Continue with ${p.name}</span>
                 </a>
             `).join("");

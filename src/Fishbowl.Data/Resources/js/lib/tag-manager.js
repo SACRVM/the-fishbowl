@@ -3,8 +3,9 @@
  *
  * Built from kit parts, no component of its own: a <sac-window> whose
  * light-DOM body lists every tag with an inline rename field, the palette
- * swatches, its usage count and a delete button (sac.dialog confirms when
- * the tag is in use). Styles live in app.css under .fb-tags-*.
+ * as a <sac-swatch-grid>, its usage count and a delete button (sac.dialog
+ * confirms when the tag is in use); a system tag carries a <sac-chip>.
+ * Row layout lives in app.css under .fb-tags-*.
  *
  * System tags (source:mcp, review:pending) keep their name — workflows key
  * on it and the server refuses the rename — and can't be deleted; their
@@ -60,15 +61,10 @@
         const row = document.createElement("div");
         row.className = "fb-tags-row";
         row.innerHTML = `
-            ${system ? `<span class="fb-tags-badge" title="System tag">system</span>` : ""}
+            ${system ? `<sac-chip class="fb-tags-badge" label="system" title="System tag"></sac-chip>` : ""}
             <input class="fb-tags-name" type="text" aria-label="Tag name"
                    ${system ? `readonly title="System tag — the name is protected"` : ""}>
-            <div class="fb-tags-swatches">
-                ${fb.tags.SLOTS.map(c => `
-                    <button type="button" class="fb-tags-swatch${c === tag.color ? " active" : ""}"
-                            data-color="${c}" title="${c}" aria-label="${c}"
-                            style="background: var(--palette-${c})"></button>`).join("")}
-            </div>
+            <sac-swatch-grid selectable columns="${fb.tags.SLOTS.length}" aria-label="Tag colour"></sac-swatch-grid>
             <span class="fb-tags-count" title="Notes using this tag"></span>
             ${system ? "" : `<button type="button" class="icon-btn fb-tags-delete" title="Delete tag" aria-label="Delete tag">
                                  <sac-icon name="trash"></sac-icon></button>`}`;
@@ -103,16 +99,29 @@
             });
         }
 
-        const swatches = row.querySelectorAll(".fb-tags-swatch");
-        swatches.forEach((btn) => btn.addEventListener("click", async () => {
+        // The palette slots, the tag's own selected. A failed save puts the
+        // old selection back.
+        const grid = row.querySelector("sac-swatch-grid");
+        customElements.upgrade(grid); // the row isn't in the document yet
+        let currentColor = tag.color;
+        const paint = () => {
+            grid.colors = fb.tags.SLOTS.map(slot => ({
+                value: fb.accents.cssVar(slot), label: slot, selected: slot === currentColor,
+            }));
+        };
+        paint();
+        grid.addEventListener("sac:change", async (e) => {
+            const slot = fb.accents.slotOf(e.detail.value);
+            if (!slot) return;
             try {
-                await fb.api.tags.upsertColor(currentName, btn.dataset.color);
-                swatches.forEach(b => b.classList.toggle("active", b === btn));
+                await fb.api.tags.upsertColor(currentName, slot);
+                currentColor = slot;
                 dirty = true;
             } catch (err) {
                 console.warn("[fb.tagManager] recolour failed:", err);
+                paint();
             }
-        }));
+        });
 
         row.querySelector(".fb-tags-delete")?.addEventListener("click", async () => {
             // Unused tags go silently — nothing to lose. A tag in use comes

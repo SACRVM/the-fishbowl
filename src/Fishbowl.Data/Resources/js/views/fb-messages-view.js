@@ -20,55 +20,23 @@ class FbMessagesView extends HTMLElement {
     }
 
     render() {
+        this.classList.add("fb-page");
         this.innerHTML = `
             <style>
-                fb-messages-view { display: block; padding: clamp(1.25rem, 5vw, 40px) clamp(1rem, 5vw, 48px); max-width: 780px; }
-                fb-messages-view header { margin-bottom: 24px; }
-                fb-messages-view h1 {
-                    font-family: 'Outfit', 'Inter', sans-serif;
-                    font-size: 28px;
-                    font-weight: 700;
-                    margin: 0 0 6px;
-                    color: var(--text);
-                }
-                fb-messages-view .subtitle { color: var(--text-muted); font-size: 14px; margin: 0; }
-                fb-messages-view .panel {
-                    padding: 6px 20px;
-                    background: var(--panel);
-                    border: 1px solid var(--border);
-                    border-radius: var(--radius-l);
-                }
-                fb-messages-view .empty { padding: 14px 0; color: var(--text-muted); font-size: 14px; margin: 0; }
-                fb-messages-view .msg-row {
-                    display: flex;
-                    align-items: flex-start;
-                    gap: 14px;
-                    padding: 14px 0;
-                }
-                fb-messages-view .msg-row + .msg-row { border-top: 1px solid var(--border); }
-                fb-messages-view .msg-row > sac-icon { --icon-size: 20px; color: var(--text-muted); flex-shrink: 0; margin-top: 1px; }
+                /* Page frame, card, rows and buttons are the kit's (app.css
+                   .fb-page / .fb-row); only this page's own bits. */
+                fb-messages-view .msg-row { align-items: flex-start; }
+                fb-messages-view .msg-row > sac-icon { color: var(--text-muted); margin-top: 1px; }
                 fb-messages-view .msg-row.unread > sac-icon { color: var(--accent); }
-                fb-messages-view .msg-body { flex: 1; min-width: 0; }
-                fb-messages-view .msg-text { font-size: 14px; color: var(--text); margin: 0 0 2px; overflow-wrap: anywhere; }
                 fb-messages-view .msg-row.unread .msg-text { font-weight: 600; }
-                fb-messages-view .msg-meta { font-size: 12px; color: var(--text-muted); }
-                fb-messages-view .msg-actions {
-                    display: flex;
-                    align-items: center;
-                    flex-wrap: wrap;
-                    gap: 8px;
-                    margin-top: 10px;
-                }
-                fb-messages-view .msg-actions .btn { width: auto; }
-                fb-messages-view .fb-quota-field { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--text-muted); }
-                fb-messages-view .fb-quota-field input { width: 6em; }
-                fb-messages-view .msg-read { flex-shrink: 0; }
+                fb-messages-view .msg-text { font-weight: 400; }
+                fb-messages-view .msg-actions { flex-wrap: wrap; margin-top: 10px; }
             </style>
-            <header>
+            <header><div>
                 <h1>Messages</h1>
                 <p class="subtitle">What this Fishbowl has to tell you.</p>
-            </header>
-            <div class="panel" id="messages-body"><p class="empty">Loading…</p></div>
+            </div></header>
+            <div class="card" id="messages-body"><p class="muted">Loading…</p></div>
         `;
     }
 
@@ -80,12 +48,16 @@ class FbMessagesView extends HTMLElement {
             data = await fb.api.messages.list();
         } catch (err) {
             console.warn("[fb-messages-view] load failed:", err?.status);
-            mount.innerHTML = `<p class="empty">Messages can't be loaded right now.</p>`;
+            mount.innerHTML = `<p class="muted">Messages can't be loaded right now.</p>`;
             return;
         }
         const items = data?.items || [];
         if (!items.length) {
-            mount.innerHTML = `<p class="empty">No messages.</p>`;
+            mount.innerHTML = `
+                <div class="empty-state">
+                    <sac-icon name="mail"></sac-icon>
+                    <h3>No messages</h3>
+                </div>`;
             return;
         }
 
@@ -101,14 +73,14 @@ class FbMessagesView extends HTMLElement {
 
     _row(m, defaultQuota) {
         const row = document.createElement("div");
-        row.className = "msg-row" + (m.readAt ? "" : " unread");
+        row.className = "fb-row msg-row" + (m.readAt ? "" : " unread");
         row.dataset.kind = m.kind;
         row.dataset.id = m.id;
         row.innerHTML = `
             <sac-icon></sac-icon>
-            <div class="msg-body">
-                <p class="msg-text"></p>
-                <div class="msg-meta"></div>
+            <div class="fb-row-info msg-body">
+                <p class="fb-row-name msg-text"></p>
+                <div class="fb-row-meta msg-meta"></div>
             </div>`;
         const icon = row.querySelector("sac-icon");
         const text = row.querySelector(".msg-text");
@@ -167,7 +139,7 @@ class FbMessagesView extends HTMLElement {
 
     _pendingActions(user, defaultQuota) {
         const actions = document.createElement("div");
-        actions.className = "msg-actions";
+        actions.className = "toolbar msg-actions";
         const quota = fb.accounts.quotaField(defaultQuota);
         const approve = button("Approve", "btn primary");
         const reject = button("Reject", "btn");

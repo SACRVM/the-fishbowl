@@ -240,30 +240,15 @@
                         padding: 8px 12px 0;
                     }
                     fb-files-view .fv-filter input { flex: 1; }
-                    fb-files-view .fv-ws-btn {
-                        display: inline-flex;
-                        align-items: center;
-                        gap: 6px;
-                        box-sizing: border-box;
-                        height: 28px;
-                        max-width: 16rem;
-                        padding: 0 8px;
-                        line-height: 1;
-                        border: 1px solid var(--border);
-                        border-radius: var(--radius-m);
-                        background: var(--field);
-                        color: inherit;
-                        font: inherit;
-                        cursor: pointer;
-                    }
-                    fb-files-view .fv-pane[data-space] .fv-ws-btn { border-color: var(--accent-warm); }
-                    fb-files-view .fv-ws-btn sac-icon { --icon-size: 14px; flex: none; }
-                    /* One pane on a phone: it is the app's workspace, which the
-                       nav's switcher already names — the icon is enough here. */
+                    /* The workspace trigger is the kit's .btn in a .toolbar
+                       (32px, in the bar). One pane on a phone: it is the
+                       app's workspace, which the nav's switcher already
+                       names — the icon is enough there. */
                     @media (max-width: 768px) {
                         fb-files-view .fv-ws-btn span { display: none; }
                     }
                     fb-files-view .fv-ws-btn span {
+                        max-width: 12rem;
                         overflow: hidden;
                         text-overflow: ellipsis;
                         white-space: nowrap;
@@ -301,19 +286,23 @@
                     fb-files-view .fv-bottom sac-shortcut-bar { flex: 1; min-width: 0; }
                     fb-files-view .fv-bottom sac-progress { width: 12rem; }
                     .fv-all { display: flex; align-items: center; gap: 6px; margin-top: 12px; }
-                    .fv-trash-body { display: flex; flex-direction: column; gap: 12px; padding: 12px; }
+                    /* The trash window: the kit's list-detail rows (flat, a
+                       divider, --hover) and its .empty-state. */
+                    .fv-trash-body { display: flex; flex-direction: column; gap: 12px; }
                     .fv-trash-list { list-style: none; margin: 0; padding: 0; }
                     .fv-trash-row {
                         display: flex;
                         align-items: center;
-                        gap: 12px;
-                        padding: 8px 12px;
-                        border-radius: var(--radius-m);
+                        gap: 0.75rem;
+                        min-height: 56px;
+                        padding: 0.6rem 1rem;
+                        border-bottom: 1px solid var(--border);
                     }
                     .fv-trash-row:hover { background: var(--hover); }
-                    .fv-trash-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-                    .fv-trash-meta { color: var(--text-muted); white-space: nowrap; }
-                    .fv-trash-empty { color: var(--text-muted); padding: 24px 12px; text-align: center; }
+                    .fv-trash-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+                    .fv-trash-name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+                    .fv-trash-meta { color: var(--text-muted); font-size: 0.85rem; white-space: nowrap; }
+                    .fv-trash-body > .toolbar[hidden] { display: none; }
                     .fv-pick { display: flex; flex-direction: column; gap: 12px; }
                     .fv-pick sac-file-browser { height: 50dvh; }
                 </style>
@@ -370,8 +359,8 @@
                     <input type="search" placeholder="Filter this folder" aria-label="Filter this folder">
                 </div>
                 <sac-file-browser multiple no-thumbnails delete-button="hover" columns="size date">
-                    <sac-menu slot="title" class="fv-ws">
-                        <button slot="trigger" class="fv-ws-btn" type="button" aria-label="Workspace">
+                    <sac-menu slot="title" class="fv-ws toolbar">
+                        <button slot="trigger" class="btn fv-ws-btn" type="button" aria-label="Workspace">
                             <sac-icon name="user"></sac-icon><span>Personal</span>
                             <sac-icon name="chevron-down"></sac-icon>
                         </button>
@@ -1268,7 +1257,7 @@
             win.setAttribute("height", "520px");
             win.innerHTML = `<div class="fv-trash-body">
                 <ul class="fv-trash-list"></ul>
-                <div><button class="btn fv-trash-emptyall" type="button" hidden>Empty trash</button></div>
+                <div class="toolbar" hidden><button class="btn danger fv-trash-emptyall" type="button">Empty trash</button></div>
             </div>`;
             document.body.appendChild(win);
             this._trashWin = win;
@@ -1281,18 +1270,20 @@
                 let entries = [];
                 try { entries = await api.trashList(); }
                 catch (err) { sac.toast(explain(err, "Couldn't read the trash."), { kind: "error" }); }
-                list.innerHTML = entries.length ? "" : `<li class="fv-trash-empty">The trash is empty.</li>`;
-                emptyAll.hidden = !entries.length || !writable;
+                list.innerHTML = entries.length ? "" : `<li class="empty-state"><sac-icon name="trash"></sac-icon><h3>The trash is empty</h3><p>Deleted files wait here until you restore them or they expire.</p></li>`;
+                emptyAll.parentElement.hidden = !entries.length || !writable;
                 for (const e of entries) {
                     const li = document.createElement("li");
                     li.className = "fv-trash-row";
                     li.dataset.id = e.id;
                     li.innerHTML = `
                         <sac-icon name="${e.kind === "folder" ? "folder" : "document"}"></sac-icon>
-                        <span class="fv-trash-name" title="${escapeHtml(e.originalPath)}">${escapeHtml(e.originalPath)}</span>
-                        <span class="fv-trash-meta">${escapeHtml(sizeText(e.size))} · ${escapeHtml(fb.format.dateTime(new Date(e.deletedAt)))}</span>
-                        ${writable ? `<button class="btn fv-restore" type="button">Restore</button>
-                        <button class="icon-btn fv-purge" type="button" title="Delete permanently" aria-label="Delete permanently"><sac-icon name="trash"></sac-icon></button>` : ""}`;
+                        <span class="fv-trash-main">
+                            <span class="fv-trash-name" title="${escapeHtml(e.originalPath)}">${escapeHtml(e.originalPath)}</span>
+                            <span class="fv-trash-meta">${escapeHtml(sizeText(e.size))} · ${escapeHtml(fb.format.dateTime(new Date(e.deletedAt)))}</span>
+                        </span>
+                        ${writable ? `<span class="toolbar"><button class="btn fv-restore" type="button">Restore</button>
+                        <button class="icon-btn danger fv-purge" type="button" title="Delete permanently" aria-label="Delete permanently"><sac-icon name="trash"></sac-icon></button></span>` : ""}`;
                     list.appendChild(li);
                 }
             };

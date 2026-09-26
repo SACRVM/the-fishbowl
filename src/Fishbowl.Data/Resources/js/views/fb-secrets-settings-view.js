@@ -25,92 +25,32 @@ class FbSecretsSettingsView extends HTMLElement {
     }
 
     render() {
+        this.classList.add("fb-page");
         this.innerHTML = `
             <style>
-                fb-secrets-settings-view { display: block; padding: clamp(1.25rem, 5vw, 40px) clamp(1rem, 5vw, 48px); max-width: 780px; }
-                fb-secrets-settings-view header { margin-bottom: 24px; }
-                fb-secrets-settings-view h1 {
-                    font-family: 'Outfit', 'Inter', sans-serif;
-                    font-size: 28px;
-                    font-weight: 700;
-                    margin: 0 0 6px;
-                    color: var(--text);
-                }
-                fb-secrets-settings-view .subtitle { color: var(--text-muted); font-size: 14px; margin: 0; }
-                fb-secrets-settings-view .panel {
-                    padding: 18px 20px;
-                    background: var(--panel);
-                    border: 1px solid var(--border);
-                    border-radius: var(--radius-l);
-                    margin-bottom: 20px;
-                }
-                fb-secrets-settings-view .panel h2 {
-                    font-size: 12px;
-                    font-weight: 600;
-                    text-transform: uppercase;
-                    letter-spacing: 0.06em;
-                    color: var(--text-muted);
-                    margin: 0 0 12px;
-                }
-                fb-secrets-settings-view .panel p { margin: 0 0 12px; color: var(--text); font-size: 14px; }
-                fb-secrets-settings-view .panel p.muted { color: var(--text-muted); font-size: 13px; }
-                fb-secrets-settings-view .status-row {
-                    display: flex;
-                    align-items: center;
-                    gap: 12px;
-                }
-                fb-secrets-settings-view .status-row .btn { width: auto; flex-shrink: 0; }
-                fb-secrets-settings-view .status-text { flex: 1; min-width: 12em; font-size: 14px; }
+                /* Page frame, cards, rows and buttons are the kit's (app.css
+                   .fb-page / .fb-row); only this page's own bits. */
+                fb-secrets-settings-view .status-row { display: flex; align-items: center; gap: 12px; }
+                fb-secrets-settings-view .status-text { flex: 1; min-width: 12em; }
                 fb-secrets-settings-view .status-text sac-icon { --icon-size: 16px; vertical-align: -3px; margin-right: 6px; }
-                fb-secrets-settings-view .autolock {
-                    display: flex;
-                    align-items: center;
-                    gap: 10px;
-                    margin-top: 14px;
-                    font-size: 14px;
-                }
-                fb-secrets-settings-view .autolock { flex-wrap: wrap; color: var(--text); }
+                fb-secrets-settings-view .autolock { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 14px; }
                 fb-secrets-settings-view .autolock .select { width: auto; }
-                fb-secrets-settings-view .autolock select { width: auto; }
-                fb-secrets-settings-view .slot-actions .btn { width: auto; }
-                fb-secrets-settings-view .slot-row {
-                    display: flex;
-                    align-items: center;
-                    gap: 14px;
-                    padding: 12px 0;
-                }
-                fb-secrets-settings-view .slot-row + .slot-row { border-top: 1px solid var(--border); }
-                fb-secrets-settings-view .slot-row > sac-icon { --icon-size: 20px; color: var(--accent); flex-shrink: 0; }
-                fb-secrets-settings-view .slot-info { flex: 1; min-width: 0; }
-                fb-secrets-settings-view .slot-name { font-size: 14px; font-weight: 600; color: var(--text); margin: 0 0 2px; }
-                fb-secrets-settings-view .slot-name input { font: inherit; padding: 2px 6px; width: min(100%, 22em); }
-                fb-secrets-settings-view .slot-meta {
-                    display: flex;
-                    flex-wrap: wrap;
-                    column-gap: 20px;
-                    font-size: 12px;
-                    color: var(--text-muted);
-                }
-                fb-secrets-settings-view .slot-actions { display: flex; align-items: center; gap: 4px; flex-shrink: 0; }
+                fb-secrets-settings-view .slot-name input { padding: 2px 6px; width: min(100%, 22em); }
                 fb-secrets-settings-view .panel-foot {
-                    display: flex;
-                    align-items: center;
-                    gap: 12px;
                     flex-wrap: wrap;
                     margin-top: 14px;
                     padding-top: 14px;
                     border-top: 1px solid var(--border);
                 }
                 fb-secrets-settings-view .panel-foot .muted { margin: 0; flex-basis: 100%; }
-                fb-secrets-settings-view .panel-foot .btn { width: auto; }
             </style>
-            <header>
+            <header><div>
                 <h1>Secrets</h1>
                 <p class="subtitle">
                     Secret blocks in your notes are encrypted in this browser. These are the ways
                     to unlock them — any one of them opens your secrets on any device.
                 </p>
-            </header>
+            </div></header>
             <div id="secrets-body"></div>
         `;
     }
@@ -122,25 +62,24 @@ class FbSecretsSettingsView extends HTMLElement {
 
         if (sac.scope.get().type === "scoped") {
             mount.innerHTML = `
-                <div class="panel">
+                <div class="card">
                     <p>Secrets are personal for now — a space has no vault.</p>
-                    <button type="button" class="btn" id="to-personal">Open in Personal</button>
+                    <div class="toolbar"><button type="button" class="btn" id="to-personal">Open in Personal</button></div>
                 </div>`;
             mount.querySelector("#to-personal").addEventListener("click", () => sac.router.navigate("#/secrets"));
             return;
         }
         if (!status.available) {
-            mount.innerHTML = `<div class="panel"><p class="muted">The vault can't be reached right now.</p></div>`;
+            mount.innerHTML = `<div class="card"><p class="muted">The vault can't be reached right now.</p></div>`;
             return;
         }
         if (!status.initialized) {
             mount.innerHTML = `
-                <div class="panel">
-                    <h2>Not set up yet</h2>
+                <div class="card"><sac-section title="Not set up yet">
                     <p>Write <code>:::secret</code> … <code>:::end</code> in a note, or set up now: you choose a
                        passphrase and get a recovery key to keep somewhere safe.</p>
-                    <button type="button" class="btn primary" id="setup">Set up secrets</button>
-                </div>`;
+                    <div class="toolbar"><button type="button" class="btn primary" id="setup">Set up secrets</button></div>
+                </sac-section></div>`;
             mount.querySelector("#setup").addEventListener("click", () => this._run(() => fb.vault.ensureUnlocked({ setup: true })));
             return;
         }
@@ -152,13 +91,12 @@ class FbSecretsSettingsView extends HTMLElement {
         slots.sort((a, b) => order[a.kind] - order[b.kind] || String(a.createdAt).localeCompare(String(b.createdAt)));
 
         mount.innerHTML = `
-            <div class="panel">
-                <h2>Status</h2>
+            <div class="card"><sac-section title="Status">
                 <div class="status-row">
                     <span class="status-text">${status.unlocked
                         ? `<sac-icon name="unlock"></sac-icon>Unlocked in this tab`
                         : `<sac-icon name="lock"></sac-icon>Locked`}</span>
-                    <button type="button" class="btn" id="lock-toggle">${status.unlocked ? "Lock now" : "Unlock"}</button>
+                    <div class="toolbar"><button type="button" class="btn" id="lock-toggle">${status.unlocked ? "Lock now" : "Unlock"}</button></div>
                 </div>
                 <div class="autolock"><span>Lock automatically after</span>
                     <span class="select"><select id="autolock" aria-label="Lock automatically after">
@@ -166,11 +104,10 @@ class FbSecretsSettingsView extends HTMLElement {
                     </select></span>
                     <span>without using a secret</span>
                 </div>
-            </div>
-            <div class="panel">
-                <h2>Ways to unlock</h2>
+            </sac-section></div>
+            <div class="card"><sac-section title="Ways to unlock">
                 <div id="slot-list"></div>
-                <div class="panel-foot">
+                <div class="toolbar panel-foot">
                     ${slots.some(s => s.kind === "passphrase") ? "" : `<button type="button" class="btn" id="add-passphrase"><sac-icon name="key"></sac-icon> Set a passphrase</button>`}
                     ${slots.some(s => s.kind === "recovery") ? "" : `<button type="button" class="btn" id="add-recovery"><sac-icon name="document"></sac-icon> Create a recovery key</button>`}
                     ${passkeys
@@ -178,7 +115,7 @@ class FbSecretsSettingsView extends HTMLElement {
                            <p class="muted">Fingerprint, face or device PIN — Windows Hello, Touch ID, your phone.</p>`
                         : `<p class="muted">Passkeys aren't available in this browser or on this device (they need WebAuthn PRF support).</p>`}
                 </div>
-            </div>
+            </sac-section></div>
         `;
 
         const list = mount.querySelector("#slot-list");
@@ -198,7 +135,7 @@ class FbSecretsSettingsView extends HTMLElement {
 
     _slotRow(s) {
         const row = document.createElement("div");
-        row.className = "slot-row";
+        row.className = "fb-row slot-row";
         row.dataset.id = s.id;
         row.dataset.kind = s.kind;
         const icon = { passphrase: "key", recovery: "document", passkey: "user" }[s.kind] || "key";
@@ -207,11 +144,11 @@ class FbSecretsSettingsView extends HTMLElement {
         const used = s.lastUsedAt ? `Last used ${fb.format.dateTime(s.lastUsedAt)}` : "Never used";
         row.innerHTML = `
             <sac-icon name="${icon}"></sac-icon>
-            <div class="slot-info">
-                <p class="slot-name"></p>
-                <div class="slot-meta"><span class="slot-kind"></span><span>${added}</span><span>${used}</span></div>
+            <div class="fb-row-info">
+                <p class="fb-row-name slot-name"></p>
+                <div class="fb-row-meta"><span class="slot-kind"></span><span>${added}</span><span>${used}</span></div>
             </div>
-            <div class="slot-actions"></div>`;
+            <div class="toolbar slot-actions"></div>`;
         row.querySelector(".slot-name").textContent = s.label || kindText;
         row.querySelector(".slot-kind").textContent = kindText;
 

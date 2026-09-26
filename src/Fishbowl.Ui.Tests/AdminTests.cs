@@ -98,7 +98,8 @@ public class AdminTests
             await Assertions.Expect(pending.GetByRole(AriaRole.Button, new() { Name = "Approve" })).ToBeVisibleAsync();
 
             var me = view.Locator("[data-section='accounts'] .user-row").Filter(new() { HasText = "Playwright" });
-            await Assertions.Expect(me.Locator(".tag")).ToContainTextAsync(new[] { "Admin", "You" });
+            await Assertions.Expect(me.Locator(".tag[label='Admin']")).ToHaveCountAsync(1);
+            await Assertions.Expect(me.Locator(".tag[label='You']")).ToHaveCountAsync(1);
             // Nothing in your own menu locks you out.
             await Assertions.Expect(me.Locator("button[data-action='block'], button[data-action='disable']")).ToHaveCountAsync(0);
 
@@ -212,7 +213,7 @@ public class AdminTests
 
             await ChooseAsync(page, row, "admin-on");
             await page.Locator("sac-dialog[open]").GetByRole(AriaRole.Button, new() { Name = "Make admin" }).ClickAsync();
-            await Assertions.Expect(row.Locator(".tag")).ToContainTextAsync(new[] { "Admin" }, new() { Timeout = 5000 });
+            await Assertions.Expect(row.Locator(".tag[label='Admin']")).ToHaveCountAsync(1, new() { Timeout = 5000 });
             Assert.True((await system.GetUserAsync(id, Ct))!.IsAdmin);
 
             await ChooseAsync(page, row, "admin-off");
@@ -221,7 +222,7 @@ public class AdminTests
 
             await ChooseAsync(page, row, "disable");
             await page.Locator("sac-dialog[open]").GetByRole(AriaRole.Button, new() { Name = "Disable" }).ClickAsync();
-            await Assertions.Expect(row.Locator(".tag")).ToContainTextAsync(new[] { "Disabled" }, new() { Timeout = 5000 });
+            await Assertions.Expect(row.Locator(".tag[label='Disabled']")).ToHaveCountAsync(1, new() { Timeout = 5000 });
             Assert.Equal(UserStates.Disabled, (await system.GetUserAsync(id, Ct))!.State);
             await page.ScreenshotAsync(new PageScreenshotOptions { Path = Path.Combine(Path.GetTempPath(), "fishbowl_ui_admin_users.png"), FullPage = true });
 
@@ -248,7 +249,7 @@ public class AdminTests
             var view = page.Locator("fb-system-settings-view");
             var hour = view.Locator(".cfg-row[data-key='Digest:Hour']");
             await Assertions.Expect(hour).ToBeVisibleAsync(new() { Timeout = 5000 });
-            await Assertions.Expect(view.Locator("section[data-section='Daily digest']")).ToContainTextAsync("Digest hour");
+            await Assertions.Expect(view.Locator("[data-section='Daily digest']")).ToContainTextAsync("Digest hour");
 
             // A bad value is refused under its row; a good one saves.
             await hour.Locator("input").FillAsync("30");

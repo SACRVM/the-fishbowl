@@ -265,9 +265,14 @@ public class UiSmokeTests
         Assert.True(titleBox.X + titleBox.Width <= actionsBox.X,
             $"title ends at {titleBox.X + titleBox.Width}, actions start at {actionsBox.X}");
 
-        // One gutter: the search field and the rows share both edges — in
-        // the notes and the todos list.
-        foreach (var (hash, search, item) in new[] { ("#/notes", ".nv-search input", ".nv-item"), ("#/todos", ".tv-search input", ".tv-item") })
+        // One gutter: the search field and the list share both edges. Todos
+        // run rows edge to edge (the kit's list-detail recipe), so there it
+        // is a row's content that starts and ends where the search field does.
+        foreach (var (hash, search, item, first) in new (string, string, string, string?)[]
+        {
+            ("#/notes", ".nv-search input", ".nv-item", null),
+            ("#/todos", ".tv-search input", ".tv-item", ".tv-check"),
+        })
         {
             if (hash == "#/todos")
             {
@@ -275,9 +280,19 @@ public class UiSmokeTests
                 await page.GotoAsync(_fixture.BaseUrl + "/" + hash);
             }
             var s = (await page.Locator(search).BoundingBoxAsync())!;
-            var r = (await page.Locator(item).First.BoundingBoxAsync())!;
-            Assert.InRange(r.X, s.X - 0.5, s.X + 0.5);
-            Assert.InRange(r.X + r.Width, s.X + s.Width - 0.5, s.X + s.Width + 0.5);
+            if (first is null)
+            {
+                // Notes still draw rows as boxes inside the gutter.
+                var box = (await page.Locator(item).First.BoundingBoxAsync())!;
+                Assert.InRange(box.X, s.X - 0.5, s.X + 0.5);
+                Assert.InRange(box.X + box.Width, s.X + s.Width - 0.5, s.X + s.Width + 0.5);
+                continue;
+            }
+            var r = page.Locator(item).First;
+            var start = (await r.Locator(first).BoundingBoxAsync())!;
+            var end = (await r.Locator(".tv-item-actions").BoundingBoxAsync())!;
+            Assert.InRange(start.X, s.X - 0.5, s.X + 0.5);
+            Assert.InRange(end.X + end.Width, s.X + s.Width - 0.5, s.X + s.Width + 0.5);
         }
 
         await context.CloseAsync();
@@ -455,7 +470,7 @@ public class UiSmokeTests
         await Assertions.Expect(page.Locator("#key-context")).ToHaveValueAsync($"space::{slug}");
         var firstGroup = page.Locator("#key-list .key-group").First;
         await Assertions.Expect(firstGroup).ToHaveAttributeAsync("data-context", $"space:{slug}");
-        await Assertions.Expect(firstGroup).ToContainTextAsync(name);
+        await Assertions.Expect(firstGroup).ToHaveAttributeAsync("title", name);
         // Each row names its context too, not only the group heading.
         await Assertions.Expect(page.Locator(".key-row", new PageLocatorOptions { HasText = "space key" }).Locator(".key-ctx"))
             .ToHaveTextAsync(name);
@@ -485,7 +500,7 @@ public class UiSmokeTests
             "() => [...document.querySelectorAll('#fb-tag-manager .fb-tags-name')].some(i => i.value === 'manage-smoke')");
         await page.EvaluateAsync(@"() => [...document.querySelectorAll('#fb-tag-manager .fb-tags-row')]
             .find(r => r.querySelector('.fb-tags-name').value === 'manage-smoke')
-            .querySelector("".fb-tags-swatch[data-color='green']"").click()");
+            .querySelector(""sac-swatch[label='green']"").shadowRoot.querySelector('button').click()");
 
         string? color = null;
         for (var i = 0; i < 30 && color != "green"; i++)

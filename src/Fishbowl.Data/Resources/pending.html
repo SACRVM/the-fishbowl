@@ -5,14 +5,15 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Waiting for approval · The Fishbowl</title>
     <link rel="stylesheet" href="/css/app.css">
+    <link rel="stylesheet" href="/kit/css/ui.css">
 </head>
 <body>
     <div class="orb"></div>
 
     <!-- The one page a pending account can reach (AccountStateMiddleware).
          Server-rendered like /login: no SPA, no API beyond /api/v1/me. -->
-    <div class="auth-shell">
-        <div class="auth-card">
+    <div class="center-shell">
+        <div class="center-card">
             <h1>THE FISHBOWL</h1>
             <p class="tagline">Your account is waiting for approval.</p>
             <p class="auth-note" id="pending-who"></p>

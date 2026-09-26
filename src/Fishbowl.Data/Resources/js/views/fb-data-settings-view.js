@@ -27,65 +27,21 @@ class FbDataSettingsView extends HTMLElement {
     }
 
     render() {
+        this.classList.add("fb-page");
         this.innerHTML = `
             <style>
-                fb-data-settings-view { display: block; padding: clamp(1.25rem, 5vw, 40px) clamp(1rem, 5vw, 48px); max-width: 780px; }
-                fb-data-settings-view header { margin-bottom: 24px; }
-                fb-data-settings-view h1 {
-                    font-family: 'Outfit', 'Inter', sans-serif;
-                    font-size: 28px;
-                    font-weight: 700;
-                    margin: 0 0 6px;
-                    color: var(--text);
-                }
-                fb-data-settings-view .subtitle { color: var(--text-muted); font-size: 14px; margin: 0; }
-                fb-data-settings-view .panel {
-                    padding: 18px 20px;
-                    background: var(--panel);
-                    border: 1px solid var(--border);
-                    border-radius: var(--radius-l);
-                    margin-bottom: 20px;
-                }
-                fb-data-settings-view .panel h2 {
-                    font-size: 12px;
-                    font-weight: 600;
-                    text-transform: uppercase;
-                    letter-spacing: 0.06em;
-                    color: var(--text-muted);
-                    margin: 0 0 12px;
-                }
-                fb-data-settings-view .panel p { margin: 0 0 12px; color: var(--text); font-size: 14px; }
-                fb-data-settings-view .panel p.muted { color: var(--text-muted); font-size: 13px; margin: 12px 0 0; }
-                fb-data-settings-view .export-row {
-                    display: flex;
-                    align-items: center;
-                    gap: 14px;
-                    padding: 12px 0;
-                }
-                fb-data-settings-view .export-row + .export-row { border-top: 1px solid var(--border); }
-                fb-data-settings-view .export-row > sac-icon { --icon-size: 20px; color: var(--accent); flex-shrink: 0; }
-                fb-data-settings-view .export-info { flex: 1; min-width: 0; }
-                fb-data-settings-view .export-name { font-size: 14px; font-weight: 600; color: var(--text); margin: 0 0 2px; }
-                fb-data-settings-view .export-meta { font-size: 12px; color: var(--text-muted); }
-                fb-data-settings-view .export-row .btn { width: auto; flex-shrink: 0; }
-                fb-data-settings-view .storage-bar {
-                    height: 6px;
-                    border-radius: var(--radius-s);
-                    background: var(--field);
-                    overflow: hidden;
-                    margin: 4px 0 8px;
-                }
-                fb-data-settings-view .storage-bar > span { display: block; height: 100%; background: var(--accent); }
-                fb-data-settings-view .storage-bar.high > span { background: var(--danger); }
-                fb-data-settings-view .storage-text { font-size: 14px; color: var(--text); margin: 0; }
+                /* Page frame, cards, rows, buttons and the meter are the
+                   kit's (app.css .fb-page / .fb-row, <sac-progress>). */
+                fb-data-settings-view .storage sac-progress { margin: 4px 0 8px; }
+                fb-data-settings-view .storage .muted { margin: 12px 0 0; }
             </style>
-            <header>
+            <header><div>
                 <h1>Your data</h1>
                 <p class="subtitle">
                     Download everything in this workspace — it's yours. Each download is a ZIP
                     you can open anywhere; the database is a plain SQLite file.
                 </p>
-            </header>
+            </div></header>
             <div id="data-body"></div>
         `;
     }
@@ -104,9 +60,7 @@ class FbDataSettingsView extends HTMLElement {
         mount.replaceChildren();
         if (usage) mount.appendChild(this._storagePanel(usage, inSpace));
 
-        const panel = document.createElement("div");
-        panel.className = "panel";
-        panel.innerHTML = `<h2>Export</h2>`;
+        const { card, panel } = section("Export");
         if (denied) {
             const p = document.createElement("p");
             p.textContent = "Only the space's owner can export it.";
@@ -131,13 +85,12 @@ class FbDataSettingsView extends HTMLElement {
                 panel.appendChild(p);
             }
         }
-        mount.appendChild(panel);
+        mount.appendChild(card);
     }
 
     _storagePanel(usage, inSpace) {
-        const panel = document.createElement("div");
-        panel.className = "panel storage";
-        panel.innerHTML = `<h2>Storage</h2>`;
+        const { card, panel } = section("Storage");
+        card.classList.add("storage");
         const text = document.createElement("p");
         text.className = "storage-text";
         const quota = usage.ownerQuotaBytes || 0;
@@ -149,13 +102,10 @@ class FbDataSettingsView extends HTMLElement {
         panel.appendChild(text);
         if (quota > 0) {
             const ratio = Math.min(1, used / quota);
-            const bar = document.createElement("div");
-            bar.className = "storage-bar" + (ratio >= 0.9 ? " high" : "");
-            bar.setAttribute("role", "meter");
-            bar.setAttribute("aria-valuemin", "0");
-            bar.setAttribute("aria-valuemax", String(quota));
-            bar.setAttribute("aria-valuenow", String(used));
-            bar.innerHTML = `<span style="width: ${(ratio * 100).toFixed(1)}%"></span>`;
+            const bar = document.createElement("sac-progress");
+            bar.setAttribute("max", "1000");
+            bar.setAttribute("value", String(Math.round(ratio * 1000)));
+            bar.setAttribute("aria-label", "Storage used");
             panel.appendChild(bar);
         }
         const note = document.createElement("p");
@@ -164,27 +114,39 @@ class FbDataSettingsView extends HTMLElement {
             ? `This space's files: ${fmtBytes(usage.bytes)}. A space counts toward its owner's quota.`
             : `One quota covers your personal workspace and every space you own.`;
         panel.appendChild(note);
-        return panel;
+        return card;
     }
 
     _row(icon, name, meta, kind) {
         const row = document.createElement("div");
-        row.className = "export-row";
+        row.className = "fb-row export-row";
         row.dataset.kind = kind;
         row.innerHTML = `
             <sac-icon name="${icon}"></sac-icon>
-            <div class="export-info">
-                <p class="export-name"></p>
-                <div class="export-meta"></div>
+            <div class="fb-row-info">
+                <p class="fb-row-name export-name"></p>
+                <div class="fb-row-meta export-meta"></div>
             </div>
-            <a class="btn" download>
-                <sac-icon name="download"></sac-icon><span>Download</span>
-            </a>`;
+            <div class="toolbar">
+                <a class="btn" download>
+                    <sac-icon name="download"></sac-icon><span>Download</span>
+                </a>
+            </div>`;
         row.querySelector(".export-name").textContent = name;
         row.querySelector(".export-meta").textContent = meta;
         row.querySelector("a").href = fb.api.export.url(kind);
         return row;
     }
+}
+
+// A kit card headed by a <sac-section>; content goes into the section.
+function section(title) {
+    const card = document.createElement("div");
+    card.className = "card";
+    const panel = document.createElement("sac-section");
+    panel.setAttribute("title", title);
+    card.appendChild(panel);
+    return { card, panel };
 }
 
 function fmtBytes(n) {

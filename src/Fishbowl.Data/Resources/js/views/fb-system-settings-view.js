@@ -79,63 +79,33 @@
         }
 
         render() {
+            this.classList.add("fb-page");
             this.innerHTML = `
                 <style>
-                    fb-system-settings-view { display: block; padding: clamp(1.25rem, 5vw, 40px) clamp(1rem, 5vw, 48px); max-width: 860px; }
-                    fb-system-settings-view header { margin-bottom: 24px; }
-                    fb-system-settings-view h1 {
-                        font-family: 'Outfit', 'Inter', sans-serif;
-                        font-size: 28px;
-                        font-weight: 700;
-                        margin: 0 0 6px;
-                        color: var(--text);
-                    }
-                    fb-system-settings-view .subtitle { color: var(--text-muted); font-size: 14px; margin: 0; }
-                    fb-system-settings-view .restart-note {
-                        margin: 0 0 20px;
-                        padding: 10px 14px;
-                        border: 1px solid var(--border);
-                        border-radius: var(--radius-l);
-                        background: var(--panel);
-                        color: var(--accent-warm);
-                        font-size: 13px;
-                    }
-                    fb-system-settings-view .panel {
-                        padding: 18px 20px 6px;
-                        background: var(--panel);
-                        border: 1px solid var(--border);
-                        border-radius: var(--radius-l);
-                        margin-bottom: 20px;
-                    }
-                    fb-system-settings-view .panel h2 {
-                        font-size: 12px;
-                        font-weight: 600;
-                        text-transform: uppercase;
-                        letter-spacing: 0.06em;
-                        color: var(--text-muted);
-                        margin: 0 0 4px;
-                    }
-                    fb-system-settings-view .panel p { margin: 0 0 12px; color: var(--text); font-size: 14px; }
+                    /* Page frame, cards, rows, buttons and the banner are the
+                       kit's (app.css .fb-page); only this page's own bits. */
+                    fb-system-settings-view .restart-note { margin-bottom: 20px; }
                     fb-system-settings-view .cfg-row { padding: 14px 0; }
                     fb-system-settings-view .cfg-row + .cfg-row { border-top: 1px solid var(--border); }
                     fb-system-settings-view .cfg-head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
-                    fb-system-settings-view .cfg-label { font-size: 14px; font-weight: 600; color: var(--text); }
+                    fb-system-settings-view .cfg-label { font-weight: 600; }
                     fb-system-settings-view .cfg-key { font-family: var(--font-mono); font-size: 12px; color: var(--text-muted); }
                     fb-system-settings-view .cfg-desc { margin: 4px 0 10px; font-size: 13px; color: var(--text-muted); }
-                    fb-system-settings-view .cfg-edit { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+                    fb-system-settings-view .cfg-edit { flex-wrap: wrap; }
                     fb-system-settings-view .cfg-edit input { flex: 1; min-width: 12rem; }
                     fb-system-settings-view .cfg-edit input.cfg-num { flex: 0 0 8rem; min-width: 0; }
-                    fb-system-settings-view .cfg-edit .btn { width: auto; }
-                    fb-system-settings-view .cfg-unit { font-size: 13px; color: var(--text-muted); }
+                    fb-system-settings-view .cfg-edit .select { width: auto; }
+                    fb-system-settings-view .cfg-unit,
                     fb-system-settings-view .cfg-state { font-size: 13px; color: var(--text-muted); }
                     fb-system-settings-view .cfg-state.set { color: var(--ok); }
-                    fb-system-settings-view .cfg-error { margin: 8px 0 0; font-size: 13px; color: var(--danger); }
+                    fb-system-settings-view .cfg-error { margin: 8px 0 0; font-size: 13px; color: var(--danger-text); }
                 </style>
-                <header>
+                <header><div>
                     <h1>System settings</h1>
                     <p class="subtitle">How this Fishbowl runs, for everyone on it. Each setting saves on its own.</p>
-                </header>
-                <p class="restart-note" hidden>Some saved changes take effect after the next restart of Fishbowl.</p>
+                </div></header>
+                <sac-status-banner class="restart-note" kind="warn"
+                    message="Some saved changes take effect after the next restart of Fishbowl."></sac-status-banner>
                 <div id="settings-body"></div>
             `;
         }
@@ -146,9 +116,9 @@
 
             if (sac.scope.get().type === "scoped") {
                 mount.innerHTML = `
-                    <div class="panel">
+                    <div class="card">
                         <p>System settings belong to the whole Fishbowl — open them from your personal workspace.</p>
-                        <button type="button" class="btn" id="to-personal">Open in Personal</button>
+                        <div class="toolbar"><button type="button" class="btn" id="to-personal">Open in Personal</button></div>
                     </div>`;
                 mount.querySelector("#to-personal").addEventListener("click", () => sac.router.navigate("#/admin/settings"));
                 return;
@@ -159,7 +129,7 @@
                 rows = await fb.api.admin.config();
             } catch (err) {
                 console.warn("[fb-system-settings-view] load failed:", err?.status);
-                mount.innerHTML = `<div class="panel"><p>The settings can't be loaded right now.</p></div>`;
+                mount.innerHTML = `<div class="card"><p>The settings can't be loaded right now.</p></div>`;
                 return;
             }
 
@@ -172,14 +142,14 @@
             const panels = [];
             for (const s of [...sections, other]) {
                 if (!s.rows.length) continue;
-                const panel = document.createElement("section");
-                panel.className = "panel";
-                panel.dataset.section = s.title;
-                const h = document.createElement("h2");
-                h.textContent = s.title;
-                panel.appendChild(h);
+                const card = document.createElement("div");
+                card.className = "card";
+                card.dataset.section = s.title;
+                const panel = document.createElement("sac-section");
+                panel.setAttribute("title", s.title);
                 for (const r of s.rows) panel.appendChild(this._row(r));
-                panels.push(panel);
+                card.appendChild(panel);
+                panels.push(card);
             }
             mount.replaceChildren(...panels);
         }
@@ -191,7 +161,7 @@
             row.innerHTML = `
                 <div class="cfg-head"><span class="cfg-label"></span><span class="cfg-key"></span></div>
                 <p class="cfg-desc"></p>
-                <div class="cfg-edit"></div>
+                <div class="toolbar cfg-edit"></div>
                 <p class="cfg-error" role="alert" hidden></p>`;
             row.querySelector(".cfg-label").textContent = labelOf(r.key);
             row.querySelector(".cfg-key").textContent = r.key;
@@ -334,7 +304,7 @@
         }
 
         _saved(res, label, cleared) {
-            if (res?.restartRequired) this.querySelector(".restart-note").hidden = false;
+            if (res?.restartRequired) this.querySelector(".restart-note").setAttribute("open", "");
             window.sac?.toast?.(cleared ? `${label}: back to the default.` : `${label} saved.`, { kind: "success" });
         }
 

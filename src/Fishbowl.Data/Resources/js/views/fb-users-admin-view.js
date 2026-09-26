@@ -10,7 +10,7 @@
  * store — the admin runs the instance, not the people on it. Each account
  * has a "…" menu (A2): Storage…, Reset password (local sign-in only),
  * Make / Remove admin, Disable / Enable, Block / Unblock. "Add local user"
- * sits in the header.
+ * is the page's action in the nav toolbar.
  *
  * Personal only: in a space the page says so and points back to Personal.
  */
@@ -27,81 +27,19 @@ class FbUsersAdminView extends HTMLElement {
     }
 
     render() {
+        this.classList.add("fb-page");
         this.innerHTML = `
             <style>
-                fb-users-admin-view { display: block; padding: clamp(1.25rem, 5vw, 40px) clamp(1rem, 5vw, 48px); max-width: 860px; }
-                fb-users-admin-view header { margin-bottom: 24px; display: flex; align-items: flex-start; gap: 16px; }
-                fb-users-admin-view header .head-text { flex: 1; min-width: 0; }
-                fb-users-admin-view header .btn { width: auto; flex-shrink: 0; }
-                fb-users-admin-view h1 {
-                    font-family: 'Outfit', 'Inter', sans-serif;
-                    font-size: 28px;
-                    font-weight: 700;
-                    margin: 0 0 6px;
-                    color: var(--text);
-                }
-                fb-users-admin-view .subtitle { color: var(--text-muted); font-size: 14px; margin: 0; }
-                fb-users-admin-view .panel {
-                    padding: 18px 20px 6px;
-                    background: var(--panel);
-                    border: 1px solid var(--border);
-                    border-radius: var(--radius-l);
-                    margin-bottom: 20px;
-                }
-                fb-users-admin-view .panel h2 {
-                    font-size: 12px;
-                    font-weight: 600;
-                    text-transform: uppercase;
-                    letter-spacing: 0.06em;
-                    color: var(--text-muted);
-                    margin: 0 0 4px;
-                }
-                fb-users-admin-view .panel p { margin: 0 0 12px; color: var(--text); font-size: 14px; }
-                fb-users-admin-view .panel p.muted { color: var(--text-muted); font-size: 13px; }
-                fb-users-admin-view .user-row {
-                    display: flex;
-                    align-items: flex-start;
-                    gap: 14px;
-                    padding: 14px 0;
-                }
-                fb-users-admin-view .user-row + .user-row { border-top: 1px solid var(--border); }
+                /* Page frame, cards, buttons and chips are the kit's (app.css
+                   .fb-page / .fb-row); only this page's own bits. */
+                fb-users-admin-view .user-row { align-items: flex-start; }
                 fb-users-admin-view .user-row sac-avatar { --avatar-size: 32px; flex-shrink: 0; }
-                fb-users-admin-view .user-info { flex: 1; min-width: 0; }
-                fb-users-admin-view .user-name { font-size: 14px; font-weight: 600; color: var(--text); margin: 0 0 2px; overflow-wrap: anywhere; }
                 fb-users-admin-view .user-email { font-weight: 400; color: var(--text-muted); }
-                fb-users-admin-view .user-meta {
-                    display: flex;
-                    flex-wrap: wrap;
-                    column-gap: 20px;
-                    font-size: 12px;
-                    color: var(--text-muted);
-                }
-                fb-users-admin-view .tag {
-                    display: inline-block;
-                    font-size: 11px;
-                    font-weight: 600;
-                    padding: 1px 6px;
-                    margin-left: 6px;
-                    border-radius: var(--radius-m);
-                    background: var(--accent-tint);
-                    color: var(--text);
-                    vertical-align: 1px;
-                }
-                fb-users-admin-view .tag.warn { background: var(--hover); color: var(--danger); }
-                fb-users-admin-view .user-actions {
-                    display: flex;
-                    align-items: center;
-                    flex-wrap: wrap;
-                    gap: 8px;
-                    margin-top: 10px;
-                }
-                fb-users-admin-view .user-actions .btn { width: auto; }
-                fb-users-admin-view .fb-quota-field { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--text-muted); }
-                fb-users-admin-view .fb-quota-field input { width: 6em; }
-                fb-users-admin-view .user-row sac-menu { flex-shrink: 0; }
+                fb-users-admin-view .user-name sac-chip { margin-left: 6px; vertical-align: 1px; }
+                fb-users-admin-view .user-actions { flex-wrap: wrap; margin-top: 10px; }
 
                 /* Dialogs this view opens (light DOM, appended to <body>). */
-                .fb-temp-pw-note, .fb-add-user-note { margin: 0 0 12px; font-size: 14px; }
+                .fb-temp-pw-note, .fb-add-user-note { margin: 0 0 12px; }
                 .fb-temp-pw-hint { margin: 12px 0 0; font-size: 13px; color: var(--text-muted); }
                 .fb-temp-pw-row { display: flex; align-items: center; gap: 8px; }
                 .fb-temp-pw-row sac-copy-button { --icon-btn-size: 36px; --icon-btn-icon: 18px; }
@@ -114,23 +52,19 @@ class FbUsersAdminView extends HTMLElement {
                     border: 1px solid var(--border);
                     border-radius: var(--radius-m);
                     padding: 10px 12px;
-                    color: var(--text);
                     user-select: all;
                 }
                 .fb-add-optional { color: var(--text-muted); font-weight: 400; }
                 .fb-add-quota { margin-top: 12px; }
-                .fb-add-error { margin: 10px 0 0; color: var(--danger); font-size: 13px; }
+                .fb-add-error { margin: 10px 0 0; color: var(--danger-text); font-size: 13px; }
             </style>
-            <header>
-                <div class="head-text">
-                    <h1>Users</h1>
-                    <p class="subtitle">
-                        Who can use this Fishbowl. You see who people are and how much room they have —
-                        never what they keep here.
-                    </p>
-                </div>
-                <button type="button" class="btn" id="add-user" hidden>Add local user</button>
-            </header>
+            <header><div>
+                <h1>Users</h1>
+                <p class="subtitle">
+                    Who can use this Fishbowl. You see who people are and how much room they have —
+                    never what they keep here.
+                </p>
+            </div></header>
             <div id="users-body"></div>
         `;
     }
@@ -139,13 +73,12 @@ class FbUsersAdminView extends HTMLElement {
         const mount = this.querySelector("#users-body");
         if (!mount) return;
 
-        const add = this.querySelector("#add-user");
         if (sac.scope.get().type === "scoped") {
-            add.hidden = true;
+            fb.toolbar.set([]);
             mount.innerHTML = `
-                <div class="panel">
+                <div class="card">
                     <p>Users are managed for the whole Fishbowl, from your personal workspace.</p>
-                    <button type="button" class="btn" id="to-personal">Open in Personal</button>
+                    <div class="toolbar"><button type="button" class="btn" id="to-personal">Open in Personal</button></div>
                 </div>`;
             mount.querySelector("#to-personal").addEventListener("click", () => sac.router.navigate("#/admin/users"));
             return;
@@ -156,12 +89,17 @@ class FbUsersAdminView extends HTMLElement {
             data = await fb.api.admin.users();
         } catch (err) {
             console.warn("[fb-users-admin-view] load failed:", err?.status);
-            mount.innerHTML = `<div class="panel"><p class="muted">The user list can't be loaded right now.</p></div>`;
+            mount.innerHTML = `<div class="card"><p class="muted">The user list can't be loaded right now.</p></div>`;
             return;
         }
+        if (!this.isConnected) return; // navigated away while loading: the toolbar is another view's now
         this._defaultQuota = data?.defaultQuotaBytes ?? null;
-        add.hidden = false;
-        add.onclick = async () => { if (await fb.accounts.addLocalUser(this._defaultQuota)) this.refresh(); };
+        // The page's action sits in the nav toolbar, as every view's does.
+        fb.toolbar.set([{
+            icon: "plus",
+            title: "Add local user",
+            onClick: async () => { if (await fb.accounts.addLocalUser(this._defaultQuota)) this.refresh(); },
+        }]);
         const users = data?.users || [];
         const pending = users.filter(u => u.state === "pending");
         const others = users.filter(u => u.state !== "pending");
@@ -173,13 +111,13 @@ class FbUsersAdminView extends HTMLElement {
 
         const parts = [];
         if (pending.length) {
-            const panel = this._panel(`Waiting for approval · ${pending.length}`);
-            panel.dataset.section = "pending";
+            const { card, panel } = this._panel(`Waiting for approval · ${pending.length}`);
+            card.dataset.section = "pending";
             for (const u of pending) panel.appendChild(this._pendingRow(u, data.defaultQuotaBytes));
-            parts.push(panel);
+            parts.push(card);
         }
-        const all = this._panel(`Accounts · ${others.length}`);
-        all.dataset.section = "accounts";
+        const { card: allCard, panel: all } = this._panel(`Accounts · ${others.length}`);
+        allCard.dataset.section = "accounts";
         if (policy) {
             const p = document.createElement("p");
             p.className = "muted";
@@ -187,29 +125,30 @@ class FbUsersAdminView extends HTMLElement {
             all.appendChild(p);
         }
         for (const u of others) all.appendChild(this._userRow(u));
-        parts.push(all);
+        parts.push(allCard);
         mount.replaceChildren(...parts);
     }
 
+    // A kit card headed by a <sac-section>; rows go into the section.
     _panel(title) {
-        const panel = document.createElement("div");
-        panel.className = "panel";
-        const h = document.createElement("h2");
-        h.textContent = title;
-        panel.appendChild(h);
-        return panel;
+        const card = document.createElement("div");
+        card.className = "card";
+        const panel = document.createElement("sac-section");
+        panel.setAttribute("title", title);
+        card.appendChild(panel);
+        return { card, panel };
     }
 
     _head(u) {
         const row = document.createElement("div");
-        row.className = "user-row";
+        row.className = "fb-row user-row";
         row.dataset.userId = u.id;
         row.dataset.state = u.state;
         row.innerHTML = `
             <sac-avatar></sac-avatar>
-            <div class="user-info">
-                <p class="user-name"><span class="n"></span> <span class="user-email"></span></p>
-                <div class="user-meta"></div>
+            <div class="fb-row-info user-info">
+                <p class="fb-row-name user-name"><span class="n"></span> <span class="user-email"></span></p>
+                <div class="fb-row-meta user-meta"></div>
             </div>`;
         const avatar = row.querySelector("sac-avatar");
         avatar.setAttribute("name", u.name || u.email || "?");
@@ -228,9 +167,10 @@ class FbUsersAdminView extends HTMLElement {
     }
 
     _tag(row, text, warn) {
-        const tag = document.createElement("span");
-        tag.className = "tag" + (warn ? " warn" : "");
-        tag.textContent = text;
+        const tag = document.createElement("sac-chip");
+        tag.className = "tag";
+        tag.setAttribute("label", text);
+        if (warn) tag.setAttribute("color", "red");
         row.querySelector(".user-name").appendChild(tag);
     }
 
@@ -243,7 +183,7 @@ class FbUsersAdminView extends HTMLElement {
         const row = this._head(u);
         this._meta(row, [`Asked ${fb.format.dateTime(u.createdAt)}`, this._providers(u)]);
         const actions = document.createElement("div");
-        actions.className = "user-actions";
+        actions.className = "toolbar user-actions";
         const quota = fb.accounts.quotaField(defaultQuota);
         const approve = this._button("Approve", "btn primary");
         const reject = this._button("Reject", "btn");

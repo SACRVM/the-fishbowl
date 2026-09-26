@@ -5,12 +5,13 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Setup · The Fishbowl</title>
     <link rel="stylesheet" href="/css/app.css">
+    <link rel="stylesheet" href="/kit/css/ui.css">
 </head>
 <body>
     <div class="orb"></div>
 
-    <div class="auth-shell">
-        <div class="auth-card">
+    <div class="center-shell">
+        <div class="center-card">
             <div class="fb-logo-mark">
                 <div class="top"></div>
                 <div class="bottom"></div>
@@ -20,10 +21,10 @@
 
             <form id="setup-form">
                 <details open>
-                    <summary style="cursor: pointer; color: var(--text-muted); font-size: 0.9rem;">
+                    <summary>
                         Google sign-in — optional (needs internet)
                     </summary>
-                    <p style="color: var(--text-muted); font-size: 0.85rem; margin: 0.75rem 0;">
+                    <p>
                         Use Google OAuth for sign-in. Skip this section if you're running
                         on a LAN without internet — set up a local account below instead.
                     </p>
@@ -43,11 +44,11 @@
                     </div>
                 </details>
 
-                <details open style="margin-top: 1rem;">
-                    <summary style="cursor: pointer; color: var(--text-muted); font-size: 0.9rem;">
+                <details open>
+                    <summary>
                         Local admin account — optional (works offline)
                     </summary>
-                    <p style="color: var(--text-muted); font-size: 0.85rem; margin: 0.75rem 0;">
+                    <p>
                         Create a username + password admin. Works with no internet,
                         and can register new local users later. Pick a strong
                         password — there's no email reset flow.
@@ -70,11 +71,11 @@
                     </div>
                 </details>
 
-                <details style="margin-top: 1rem;">
-                    <summary style="cursor: pointer; color: var(--text-muted); font-size: 0.9rem;">
+                <details>
+                    <summary>
                         Automatic TLS (Let's Encrypt) — optional
                     </summary>
-                    <p style="color: var(--text-muted); font-size: 0.85rem; margin: 0.75rem 0;">
+                    <p>
                         Fishbowl can issue and renew its own certificate. Requires a public
                         domain pointing at this server and inbound ports 80 + 443. Takes
                         effect after a restart.
@@ -93,9 +94,8 @@
                                name="acmeEmail"
                                placeholder="you@example.com">
                     </div>
-                    <label style="display: flex; gap: 0.5rem; align-items: flex-start;
-                                  font-size: 0.85rem; color: var(--text-muted);">
-                        <input type="checkbox" id="acmeAcceptTos" style="margin-top: 0.2rem;">
+                    <label class="fb-check">
+                        <input type="checkbox" id="acmeAcceptTos">
                         <span>
                             I accept the
                             <a href="https://letsencrypt.org/repository/"
@@ -104,11 +104,11 @@
                     </label>
                 </details>
 
-                <details style="margin-top: 1rem;">
-                    <summary style="cursor: pointer; color: var(--text-muted); font-size: 0.9rem;">
+                <details>
+                    <summary>
                         Discord bot — optional
                     </summary>
-                    <p style="color: var(--text-muted); font-size: 0.85rem; margin: 0.75rem 0;">
+                    <p>
                         Connect a Discord bot so you can capture notes, search, and receive
                         reminders from a DM. Create a bot at the
                         <a href="https://discord.com/developers/applications"
@@ -126,7 +126,7 @@
                     </div>
                 </details>
 
-                <button type="submit" class="btn primary" style="width:100%; margin-top:1rem;">
+                <button type="submit" class="btn primary">
                     Save &amp; Continue
                 </button>
                 <p id="error" class="error" style="display:none;"></p>
@@ -249,17 +249,17 @@
                     const restartFor = result?.discordConfigured
                         ? "TLS and the Discord bot are configured"
                         : "TLS is configured";
-                    document.querySelector(".auth-card").innerHTML = `
+                    document.querySelector(".center-card").innerHTML = `
                         <h1>ALMOST THERE</h1>
                         <p class="tagline">${restartFor}. Restart Fishbowl, then
                         visit <strong>https://${acmeDomains.split(",")[0].trim()}</strong>
                         to finish signing in.</p>`;
                 } else if (result?.discordConfigured) {
-                    document.querySelector(".auth-card").innerHTML = `
+                    document.querySelector(".center-card").innerHTML = `
                         <h1>ALMOST THERE</h1>
                         <p class="tagline">The Discord bot is configured. Restart Fishbowl,
                         then continue to sign in.</p>
-                        <a href="/" class="btn primary" style="display:inline-block; margin-top:1rem;">
+                        <a href="/" class="btn primary">
                             Continue
                         </a>`;
                 } else {

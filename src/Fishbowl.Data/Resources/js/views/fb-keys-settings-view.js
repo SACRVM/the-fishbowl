@@ -39,224 +39,52 @@ class FbKeysSettingsView extends HTMLElement {
     }
 
     render() {
+        this.classList.add("fb-page");
         this.innerHTML = `
             <style>
-                fb-keys-settings-view { display: block; padding: clamp(1.25rem, 5vw, 40px) clamp(1rem, 5vw, 48px); max-width: 820px; }
-                fb-keys-settings-view header { margin-bottom: 28px; }
-                fb-keys-settings-view h1 {
-                    font-family: 'Outfit', 'Inter', sans-serif;
-                    font-size: 28px;
-                    font-weight: 700;
-                    margin: 0 0 6px;
-                    color: var(--text);
-                }
-                fb-keys-settings-view .subtitle {
-                    color: var(--text-muted);
-                    font-size: 14px;
-                    margin: 0;
-                }
-                fb-keys-settings-view .panel {
-                    background: var(--panel);
-                    border: 1px solid var(--border);
-                    border-radius: var(--radius-l);
-                    padding: 20px;
-                    margin-bottom: 28px;
-                }
-                fb-keys-settings-view .panel h2 {
-                    font-size: 13px;
-                    font-weight: 600;
-                    text-transform: uppercase;
-                    letter-spacing: 0.06em;
-                    color: var(--text-muted);
-                    margin: 0 0 14px;
-                }
-                fb-keys-settings-view .field { margin-bottom: 14px; }
-                fb-keys-settings-view label {
-                    display: block;
-                    font-size: 12px;
-                    font-weight: 600;
-                    color: var(--text-muted);
-                    margin-bottom: 4px;
-                }
-                fb-keys-settings-view input[type="text"],
-                fb-keys-settings-view select {
-                    width: 100%;
-                    background: rgba(0, 0, 0, 0.3);
-                    border: 1px solid var(--border);
-                    border-radius: var(--radius-m);
-                    padding: 8px 12px;
-                    color: var(--text);
-                    font: inherit;
-                    font-size: 14px;
-                    outline: none;
-                    box-sizing: border-box;
-                }
-                fb-keys-settings-view select { padding-right: 32px; }   /* room for the kit's chevron */
-                fb-keys-settings-view input:focus,
-                fb-keys-settings-view select:focus { border-color: var(--accent); }
+                /* Page frame, cards, rows, buttons and chips are the kit's
+                   (app.css .fb-page / .fb-row); only this page's own bits. */
                 fb-keys-settings-view .scopes {
                     display: grid;
-                    grid-template-columns: repeat(2, 1fr);
+                    grid-template-columns: repeat(auto-fill, minmax(10rem, 1fr));
                     gap: 6px 16px;
-                    padding: 10px 12px;
-                    background: rgba(0, 0, 0, 0.2);
-                    border: 1px solid var(--border);
-                    border-radius: var(--radius-m);
                 }
-                fb-keys-settings-view .scopes label {
-                    display: flex;
-                    align-items: center;
-                    gap: 6px;
-                    font-size: 13px;
-                    color: var(--text);
-                    margin: 0;
-                    font-weight: 400;
-                    text-transform: none;
-                    letter-spacing: 0;
-                    cursor: pointer;
-                }
-                fb-keys-settings-view .primary-btn {
-                    background: var(--accent);
-                    border: none;
-                    border-radius: var(--radius-m);
-                    color: #fff;
-                    padding: 8px 18px;
-                    font: inherit;
-                    font-weight: 600;
-                    cursor: pointer;
-                    transition: filter 120ms;
-                }
-                fb-keys-settings-view .primary-btn:disabled { opacity: 0.5; cursor: not-allowed; }
-                fb-keys-settings-view .primary-btn:not(:disabled):hover { filter: brightness(1.1); }
-
-                fb-keys-settings-view .key-row {
-                    display: flex;
-                    align-items: center;
-                    gap: 14px;
-                    padding: 14px 16px;
-                    background: var(--panel);
-                    border: 1px solid var(--border);
-                    border-radius: var(--radius-l);
-                    margin-bottom: 8px;
-                }
-                fb-keys-settings-view .key-row sac-icon { --icon-size: 18px; color: var(--accent); flex-shrink: 0; }
-                fb-keys-settings-view .key-info { flex: 1; min-width: 0; }
-                fb-keys-settings-view .key-name {
-                    font-size: 14px;
-                    font-weight: 600;
-                    color: var(--text);
-                    margin: 0 0 4px;
-                    word-break: break-word;
-                }
-                fb-keys-settings-view .key-meta {
-                    display: flex;
-                    flex-wrap: wrap;
-                    gap: 8px;
-                    font-size: 12px;
-                    color: var(--text-muted);
-                }
-                fb-keys-settings-view .key-facts { column-gap: 20px; }
-                fb-keys-settings-view .key-prefix {
-                    font-family: 'SFMono-Regular', Consolas, monospace;
-                    color: var(--text);
-                    background: rgba(0, 0, 0, 0.3);
-                    padding: 1px 6px;
-                    border-radius: var(--radius-m);
-                }
-                fb-keys-settings-view .key-scope {
-                    font-family: 'SFMono-Regular', Consolas, monospace;
-                    font-size: 11px;
-                    padding: 1px 6px;
-                    border-radius: var(--radius-m);
-                    background: rgba(59, 130, 246, 0.15);
-                    color: var(--accent);
-                }
-                fb-keys-settings-view .revoke-btn {
-                    background: transparent;
-                    border: none;
-                    color: var(--text-muted);
-                    cursor: pointer;
-                    padding: 6px 8px;
-                    border-radius: var(--radius-m);
-                    transition: color 100ms, background 100ms;
-                }
-                fb-keys-settings-view .revoke-btn sac-icon { --icon-size: 16px; }
-                fb-keys-settings-view .revoke-btn:hover {
-                    color: var(--danger, #ef4444);
-                    background: rgba(239, 68, 68, 0.12);
-                }
-                fb-keys-settings-view .key-ctx {
-                    display: inline-flex;
-                    align-items: center;
-                    gap: 4px;
-                    color: var(--text);
-                }
+                fb-keys-settings-view .key-ctx { display: inline-flex; align-items: center; gap: 4px; color: var(--text); }
                 fb-keys-settings-view .key-ctx sac-icon { --icon-size: 12px; }
                 fb-keys-settings-view .key-ctx.space { color: var(--accent-warm); }
-                fb-keys-settings-view .key-group {
-                    display: flex;
-                    align-items: center;
-                    gap: 6px;
-                    font-size: 12px;
-                    font-weight: 600;
-                    text-transform: uppercase;
-                    letter-spacing: 0.06em;
-                    color: var(--text-muted);
-                    margin: 20px 0 10px;
-                }
-                fb-keys-settings-view .key-group:first-child { margin-top: 0; }
-                fb-keys-settings-view .key-group sac-icon { --icon-size: 14px; }
-                fb-keys-settings-view .key-group.current { color: var(--text); }
-                fb-keys-settings-view .empty {
-                    text-align: center;
-                    color: var(--text-muted);
-                    padding: 32px 0;
-                    font-size: 13px;
-                }
+                fb-keys-settings-view .key-scopes { margin-top: 8px; gap: 6px; }
 
                 /* Raw-token reveal (sac-dialog body, light DOM). */
-                .fb-token-warn {
-                    color: var(--accent-warm);
-                    font-size: 13px;
-                }
-                .fb-token-row {
-                    display: flex;
-                    align-items: center;
-                    gap: 8px;
-                    margin-top: 12px;
-                }
+                .fb-token-warn { color: var(--accent-warm); }
+                .fb-token-row { display: flex; align-items: center; gap: 8px; margin-top: 12px; }
                 /* The kit's ghost copy button, a size up (it inherits
                    --icon-btn-* into its shadow root). */
-                .fb-token-row sac-copy-button {
-                    --icon-btn-size: 36px;
-                    --icon-btn-icon: 18px;
-                }
+                .fb-token-row sac-copy-button { --icon-btn-size: 36px; --icon-btn-icon: 18px; }
                 .fb-token-block {
                     flex: 1;
-                    font-family: ui-monospace, 'SFMono-Regular', Consolas, monospace;
-                    font-size: 13px;
-                    background: color-mix(in srgb, var(--bg) 60%, transparent);
+                    font-family: var(--font-mono);
+                    background: var(--field);
                     border: 1px solid var(--border);
-                    border-radius: var(--radius-l);
+                    border-radius: var(--radius-m);
                     padding: 12px 14px;
-                    color: var(--text);
                     word-break: break-all;
                     user-select: all;
                 }
             </style>
 
-            <header>
+            <header><div>
                 <h1>API keys</h1>
                 <p class="subtitle">
                     Bearer tokens for MCP and programmatic clients. The raw token is
                     shown exactly once when you create it — copy it immediately.
                 </p>
-            </header>
+            </div></header>
 
-            <div class="panel">
-                <h2>New key</h2>
-                <sac-status-banner id="form-status"></sac-status-banner>
-                <div id="form-mount"></div>
+            <div class="card">
+                <sac-section title="New key">
+                    <sac-status-banner id="form-status"></sac-status-banner>
+                    <div id="form-mount"></div>
+                </sac-section>
             </div>
 
             <div id="key-list"></div>
@@ -292,7 +120,7 @@ class FbKeysSettingsView extends HTMLElement {
                     ${["read:notes","write:notes","read:tags","write:tags",
                        "read:tasks","write:tasks","read:events","write:events",
                        "read:files","write:files"].map(s => `
-                        <label>
+                        <label class="fb-check">
                             <input type="checkbox" value="${s}"
                                 ${s === "read:notes" || s === "write:notes" ? "checked" : ""}/>
                             ${s}
@@ -300,7 +128,9 @@ class FbKeysSettingsView extends HTMLElement {
                     `).join("")}
                 </div>
             </div>
-            <button type="button" class="primary-btn" id="create-btn">Create key</button>
+            <div class="toolbar">
+                <button type="button" class="btn primary" id="create-btn">Create key</button>
+            </div>
         `;
 
         this.querySelector("#create-btn").addEventListener("click", () => this._create());
@@ -324,7 +154,12 @@ class FbKeysSettingsView extends HTMLElement {
         if (!list) return;
 
         if (this.keys.length === 0) {
-            list.innerHTML = `<div class="empty">no keys yet — create one above</div>`;
+            list.innerHTML = `
+                <div class="card"><div class="empty-state">
+                    <sac-icon name="key"></sac-icon>
+                    <h3>No keys yet</h3>
+                    <p>Create one above.</p>
+                </div></div>`;
             return;
         }
 
@@ -352,33 +187,35 @@ class FbKeysSettingsView extends HTMLElement {
         const row = (k) => {
             const d = describe(k);
             const scopes = (k.scopes || []).map(s =>
-                `<span class="key-scope">${escapeHtml(s)}</span>`).join(" ");
+                `<sac-chip label="${escapeAttr(s)}"></sac-chip>`).join("");
             const lastUsed = k.lastUsedAt
                 ? `last used ${formatRelative(k.lastUsedAt)}`
                 : "never used";
             return `
-                <div class="key-row" data-id="${escapeAttr(k.id)}">
+                <div class="fb-row key-row" data-id="${escapeAttr(k.id)}">
                     <sac-icon name="key"></sac-icon>
-                    <div class="key-info">
-                        <p class="key-name">${escapeHtml(k.name)}</p>
-                        <div class="key-meta key-facts">
-                            <span class="key-prefix">${escapeHtml(k.keyPrefix)}…</span>
+                    <div class="fb-row-info">
+                        <p class="fb-row-name">${escapeHtml(k.name)}</p>
+                        <div class="fb-row-meta">
+                            <code>${escapeHtml(k.keyPrefix)}…</code>
                             <span class="key-ctx${k.contextType === "space" ? " space" : ""}"><sac-icon name="${d.icon}"></sac-icon>${escapeHtml(d.label)}</span>
                             <span>${lastUsed}</span>
                         </div>
-                        <div class="key-meta" style="margin-top: 10px;">${scopes}</div>
+                        <div class="fb-row-meta key-scopes">${scopes}</div>
                     </div>
-                    <button type="button" class="revoke-btn" title="Revoke" aria-label="Revoke">
+                    <button type="button" class="icon-btn danger revoke-btn" title="Revoke" aria-label="Revoke">
                         <sac-icon name="trash"></sac-icon>
                     </button>
                 </div>
             `;
         };
+        // One card per workspace, headed by its name.
         list.innerHTML = ordered.map(g => `
-            <h2 class="key-group${g.key === activeKey ? " current" : ""}" data-context="${escapeAttr(g.key)}">
-                <sac-icon name="${g.icon}"></sac-icon><span>${escapeHtml(g.label)}</span>
-            </h2>
-            ${g.keys.map(row).join("")}
+            <div class="card">
+                <sac-section class="key-group" data-context="${escapeAttr(g.key)}" title="${escapeAttr(g.label)}">
+                    ${g.keys.map(row).join("")}
+                </sac-section>
+            </div>
         `).join("");
 
         list.querySelectorAll(".revoke-btn").forEach(btn => {
