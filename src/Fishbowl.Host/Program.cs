@@ -178,6 +178,7 @@ builder.Services.AddScoped<IDesktopRepository, DesktopRepository>();
 // Every sign-in (Google, local) goes through the account rules here.
 builder.Services.AddScoped<AccountGate>();
 builder.Services.AddScoped<Fishbowl.Core.Files.IFileService, Fishbowl.Data.Files.FileService>();
+builder.Services.AddScoped<Fishbowl.Core.Files.ISpaceArchiveService, Fishbowl.Data.Files.SpaceArchiver>();
 
 // Apps platform — the per-app .db registry + DDL generator + row CRUD.
 // All three repos sit at the same scope as the rest of the data-plane.
@@ -815,6 +816,7 @@ app.MapAuthApi();
 app.MapNotificationsApi();
 app.MapSearchApi();
 app.MapExportApi();
+app.MapArchiveApi();
 app.MapVaultApi();
 app.MapFilesApi();
 app.MapDesktopApi();

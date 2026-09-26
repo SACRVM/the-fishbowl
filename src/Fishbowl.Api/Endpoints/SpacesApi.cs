@@ -1,5 +1,7 @@
 using System.Security.Claims;
+using Dapper;
 using Fishbowl.Core;
+using Fishbowl.Core.Files;
 using Fishbowl.Core.Mcp;
 using Fishbowl.Core.Models;
 using Fishbowl.Core.Repositories;
@@ -117,19 +119,44 @@ public static class SpacesApi
         .Produces(StatusCodes.Status403Forbidden)
         .Produces(StatusCodes.Status404NotFound);
 
-        group.MapDelete("/{slug}", async (string slug, ClaimsPrincipal user, ISpaceRepository repo, CancellationToken ct) =>
+        // Files phase 3 (spec § Space delete and archived spaces): `archive`
+        // (default true — the dialog's checkbox is checked by default) ZIPs
+        // the whole space folder into archive/spaces/ first and deletes only
+        // once that ZIP reads back complete. Either way the system rows, the
+        // space's API keys (app keys included) and the folder go. Cookie-only:
+        // deleting a workspace isn't an agent action.
+        group.MapDelete("/{slug}", async (string slug, bool? archive, ClaimsPrincipal user, ISpaceRepository repo,
+            ISpaceArchiveService archiver, DatabaseFactory dbFactory, CancellationToken ct) =>
         {
+            if (user.Identity?.AuthenticationType == McpContextClaims.BearerScheme) return Results.Forbid();
             var userId = user.FindFirst("fishbowl_user_id")?.Value;
             if (string.IsNullOrEmpty(userId)) return Results.Unauthorized();
 
             var space = await repo.GetBySlugAsync(slug, ct);
             if (space is null) return Results.NotFound();
+            if (await repo.GetMembershipAsync(space.Id, userId, ct) is not SpaceRole.Owner) return Results.Forbid();
+
+            ArchivedSpace? archived = null;
+            if (archive ?? true)
+            {
+                try { archived = await archiver.ArchiveAsync(space, userId, ct); }
+                catch (FileStoreException ex) { return FilesApi.Fail(ex); }
+            }
 
             var ok = await repo.DeleteAsync(space.Id, userId, ct);
-            return ok ? Results.NoContent() : Results.Forbid();
+            if (!ok) return Results.Forbid();
+            using (var sys = dbFactory.CreateSystemConnection())
+                await sys.ExecuteAsync(new CommandDefinition(@"
+                    DELETE FROM api_keys
+                    WHERE (context_type = 'space' AND context_id IN (@id, @slug))
+                       OR (owner_type = 'space' AND owner_id IN (@id, @slug))",
+                    new { id = space.Id, slug = space.Slug }, cancellationToken: ct));
+            await archiver.DeleteSpaceFolderAsync(space.Id, ct);
+            return archived is null ? Results.NoContent() : Results.Ok(archived);
         })
         .WithName("DeleteSpace")
-        .WithSummary("Deletes a space. Owner only. Leaves the .db file in place.")
+        .WithSummary("Deletes a space, its keys and its folder. Owner only. ?archive=true (default) keeps a restorable ZIP.")
+        .Produces(StatusCodes.Status200OK)
         .Produces(StatusCodes.Status204NoContent)
         .Produces(StatusCodes.Status401Unauthorized)
         .Produces(StatusCodes.Status403Forbidden)
@@ -668,25 +695,48 @@ public static class SpacesApi
         // only, same rule as space deletion. Members already have read access
         // through the API; this endpoint is about walking off with the whole
         // database file.
-        group.MapGet("/{slug}/export/db", async (
+        // Files phase 3: the same three ZIP choices as the personal export
+        // (ExportApi), plus /info for the dialog.
+        group.MapGet("/{slug}/export/info", async (
             string slug,
-            ClaimsPrincipal user, ISpaceRepository spaces, DatabaseFactory dbFactory, CancellationToken ct) =>
+            ClaimsPrincipal user, ISpaceRepository spaces, DatabaseFactory dbFactory, ISystemRepository system, CancellationToken ct) =>
         {
-            if (user.Identity?.AuthenticationType == McpContextClaims.BearerScheme)
-                return Results.Forbid();
-
-            var resolved = await ResolveSpaceAsync(slug, user, spaces, ct);
-            if (resolved.Error is not null) return resolved.Error;
-            if (!resolved.Role!.Value.CanDeleteSpace()) return Results.Forbid();
-
-            var spaceCtx = ContextRef.Space(resolved.Space!.Id);
-            var bytes = await ExportApi.BackupContextAsync(dbFactory, spaceCtx, ct);
-            var filename = $"fishbowl-space-{resolved.Space.Slug}-{DateTime.UtcNow:yyyyMMdd}.db";
-            return Results.File(bytes, "application/vnd.sqlite3", filename);
+            var (space, error) = await ResolveExportAsync(slug, user, spaces, ct);
+            return error ?? Results.Ok(await ExportApi.InfoAsync(dbFactory, system, ContextRef.Space(space!.Id), ct));
         })
-        .WithName("ExportSpaceDatabase");
+        .WithName("ExportSpaceInfo");
+
+        foreach (var kind in new[] { ExportApi.KindDb, ExportApi.KindFiles, ExportApi.KindAll })
+        {
+            group.MapGet("/{slug}/export/" + kind, async (
+                string slug, HttpContext http,
+                ClaimsPrincipal user, ISpaceRepository spaces, DatabaseFactory dbFactory, ISystemRepository system, CancellationToken ct) =>
+            {
+                var (space, error) = await ResolveExportAsync(slug, user, spaces, ct);
+                if (error is not null) return error;
+                return await ExportApi.ZipAsync(http, dbFactory, system, ContextRef.Space(space!.Id), kind,
+                    $"fishbowl-space-{space.Slug}", ct);
+            })
+            .WithName(kind switch
+            {
+                ExportApi.KindDb => "ExportSpaceDatabase",
+                ExportApi.KindFiles => "ExportSpaceFiles",
+                _ => "ExportSpaceAll",
+            });
+        }
 
         return group.RequireAuthorization();
+    }
+
+    // Cookie-only, owner-only — the export and the delete/archive rule.
+    private static async Task<(Space? Space, IResult? Error)> ResolveExportAsync(
+        string slug, ClaimsPrincipal user, ISpaceRepository spaces, CancellationToken ct)
+    {
+        if (user.Identity?.AuthenticationType == McpContextClaims.BearerScheme) return (null, Results.Forbid());
+        var resolved = await ResolveSpaceAsync(slug, user, spaces, ct);
+        if (resolved.Error is not null) return (null, resolved.Error);
+        if (!resolved.Role!.Value.CanDeleteSpace()) return (null, Results.Forbid());
+        return (resolved.Space, null);
     }
 
     internal record SpaceResolution(Space? Space, SpaceRole? Role, IResult? Error);

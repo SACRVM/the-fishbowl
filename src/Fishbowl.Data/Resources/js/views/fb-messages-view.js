@@ -135,6 +135,17 @@ class FbMessagesView extends HTMLElement {
             icon.setAttribute("name", "success");
             text.textContent = "Your account was approved. Welcome to this Fishbowl.";
             meta.textContent = when;
+        } else if (m.kind === "quota.warning") {
+            const d = m.data || {};
+            const gb = (n) => `${((Number(n) || 0) / 1073741824).toFixed(1)} GB`;
+            icon.setAttribute("name", "warn");
+            text.textContent = `Your storage is almost full: ${gb(d.usedBytes)} of ${gb(d.quotaBytes)}.`;
+            meta.textContent = when;
+            const link = document.createElement("a");
+            link.href = "#/data";   // personal: the quota is the user's own
+            link.textContent = "See your data";
+            link.className = "msg-link";
+            body.appendChild(link);
         } else {
             icon.setAttribute("name", "info");
             text.textContent = "A message this version can't show yet.";

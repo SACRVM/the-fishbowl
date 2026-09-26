@@ -90,6 +90,7 @@ if (Directory.Exists(usersRoot))
         var destDir = Path.Combine(snapshotDir, "users", name);
         Directory.CreateDirectory(destDir);
         TryBackup(src, Path.Combine(destDir, "personal.db"), $"users/{name}/personal.db");
+        CopyContextExtras(dir, destDir, $"users/{name}");
     }
 }
 
@@ -110,7 +111,16 @@ if (Directory.Exists(spacesRoot))
         var destDir = Path.Combine(snapshotDir, "spaces", name);
         Directory.CreateDirectory(destDir);
         TryBackup(src, Path.Combine(destDir, "space.db"), $"spaces/{name}/space.db");
+        CopyContextExtras(dir, destDir, $"spaces/{name}");
     }
+}
+
+// 3b. archive/ — archived spaces (self-contained ZIPs), file copy
+var archiveRoot = Path.Combine(dataPath, "archive");
+if (Directory.Exists(archiveRoot))
+{
+    TryCopyTree(archiveRoot, Path.Combine(snapshotDir, "archive"), "archive/",
+        rel => !Path.GetFileName(rel).StartsWith('.'));   // half-written .zip.part files
 }
 
 // 4. acme/ — file copy (cert state, not a SQLite DB)
@@ -182,7 +192,29 @@ void TryBackup(string src, string dest, string label)
     }
 }
 
-void TryCopyTree(string srcRoot, string destRoot, string label)
+// Beside the context DB: every apps/*/app.db (online backup) and the files/
+// tree (plain copy, trash included, upload temps not). The DB goes first,
+// then the files — a best-effort copy of a mutable tree; whatever drifted is
+// what the reconcile after a restore journals.
+void CopyContextExtras(string contextDir, string destDir, string label)
+{
+    var apps = Path.Combine(contextDir, "apps");
+    if (Directory.Exists(apps))
+        foreach (var appDir in Directory.EnumerateDirectories(apps))
+        {
+            var appDb = Path.Combine(appDir, "app.db");
+            if (!File.Exists(appDb)) continue;
+            var appDest = Path.Combine(destDir, "apps", Path.GetFileName(appDir));
+            Directory.CreateDirectory(appDest);
+            TryBackup(appDb, Path.Combine(appDest, "app.db"), $"{label}/apps/{Path.GetFileName(appDir)}/app.db");
+        }
+    var files = Path.Combine(contextDir, "files");
+    if (Directory.Exists(files))
+        TryCopyTree(files, Path.Combine(destDir, "files"), $"{label}/files/",
+            rel => !Path.GetFileName(rel).StartsWith(".~fb-", StringComparison.OrdinalIgnoreCase));
+}
+
+void TryCopyTree(string srcRoot, string destRoot, string label, Func<string, bool>? include = null)
 {
     try
     {
@@ -191,6 +223,7 @@ void TryCopyTree(string srcRoot, string destRoot, string label)
         foreach (var src in Directory.EnumerateFiles(srcRoot, "*", SearchOption.AllDirectories))
         {
             var rel = Path.GetRelativePath(srcRoot, src);
+            if (include is not null && !include(rel)) continue;
             var dest = Path.Combine(destRoot, rel);
             var destDir = Path.GetDirectoryName(dest);
             if (!string.IsNullOrEmpty(destDir)) Directory.CreateDirectory(destDir);

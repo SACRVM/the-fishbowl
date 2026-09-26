@@ -80,7 +80,7 @@ public static class FilesApi
 
     private static bool IsBearer(ClaimsPrincipal user) => user.Identity?.AuthenticationType == McpContextClaims.BearerScheme;
 
-    private static IResult Fail(FileStoreException ex) => Results.Json(new
+    internal static IResult Fail(FileStoreException ex) => Results.Json(new
     {
         error = ex.Code,
         rule = ex.Rule,

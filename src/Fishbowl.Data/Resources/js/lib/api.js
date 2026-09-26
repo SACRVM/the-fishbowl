@@ -395,16 +395,23 @@
             },
             reindex: () => request(ctx("/search/reindex"), { method: "POST" })
         },
-        // Export the current context's SQLite DB file. Returns a Blob the
-        // caller can turn into a download (e.g. via URL.createObjectURL).
-        // Cookie-only — Bearer gets 403.
-        exportDb: () => fetch(base + ctx("/export/db"), {
-            headers: { "Accept": "application/vnd.sqlite3" },
-        }).then(async (res) => {
-            if (res.status === 401) { window.location.href = "/login"; throw new ApiError(401, "Unauthenticated"); }
-            if (!res.ok) throw new ApiError(res.status, await res.text().catch(() => ""));
-            return res.blob();
-        }),
+        // ── Data lifecycle (Files phase 3) ──
+        // Export of the current workspace as streamed ZIPs: "db", "files" or
+        // "all". `info()` gives the sizes (and whether "all" is offered);
+        // `url(kind)` is a same-origin link the browser downloads directly —
+        // never buffered into a Blob. Cookie-only; a space is owner-only.
+        export: {
+            info: () => request(ctx("/export/info")),
+            url:  (kind) => base + ctx(`/export/${encodeURIComponent(kind)}`),
+        },
+        // Archived spaces — what "Archive before deleting" left behind.
+        archive: {
+            list:        ()   => request("/archive/spaces"),
+            downloadUrl: (id) => `${base}/archive/spaces/${encodeURIComponent(id)}/download`,
+            restore:     (id) => request(`/archive/spaces/${encodeURIComponent(id)}/restore`, { method: "POST" })
+                .then(spacesChanged),
+            remove:      (id) => request(`/archive/spaces/${encodeURIComponent(id)}`, { method: "DELETE" }),
+        },
         // create/update/delete fire `fb:spaces-changed` so the shell's workspace
         // switcher reloads its list — whoever made the change.
         spaces: {
@@ -412,7 +419,10 @@
             get:    (slug)   => request(`/spaces/${encodeURIComponent(slug)}`),
             create: ({ name }) => request("/spaces", { method: "POST", body: JSON.stringify({ name }) })
                 .then(spacesChanged),
-            delete: (slug)   => request(`/spaces/${encodeURIComponent(slug)}`, { method: "DELETE" })
+            // `archive` (default true) keeps a restorable ZIP; resolves to the
+            // archive entry, or undefined when deleted outright.
+            delete: (slug, { archive = true } = {}) =>
+                request(`/spaces/${encodeURIComponent(slug)}?archive=${archive ? "true" : "false"}`, { method: "DELETE" })
                 .then(spacesChanged),
             // Owner-only. `color` is a palette slot name or null (default).
             update: (slug, { color }) => request(`/spaces/${encodeURIComponent(slug)}`, { method: "PATCH", body: JSON.stringify({ color }) })

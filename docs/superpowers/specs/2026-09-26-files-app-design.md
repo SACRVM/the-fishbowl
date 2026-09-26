@@ -918,6 +918,22 @@ days**, `0` keeps them forever.
    space delete with "archive before deleting", archived spaces (download,
    restore, delete, purge). Should land before Files is announced to users,
    since a space delete otherwise orphans their files.
+   **Done** (2026-09-26), plus the per-user quota from the admin spec
+   (§ Quotas: personal + owned spaces, `quota.warning` once per crossing of
+   90%, latched in `system_config` like the digest). As built:
+   - Export lives on **Settings → Your data** (`#/data`, both workspaces;
+     a space is owner-only) with the sizes first and the storage used
+     against the owner's quota. `/export/db` is now a ZIP too (`personal.db`
+     / `space.db` inside); `/export/info` feeds the dialog.
+   - `DELETE /spaces/<slug>?archive=` defaults to **true** — the API keeps
+     data unless told otherwise, like the dialog. Space deletion became
+     cookie-only, and deletes the space's API keys (app keys included) and
+     its folder either way (locked → `spaces/.deleted-<id>`, swept daily).
+   - Archived spaces are served at `/api/v1/archive/spaces` (list, download,
+     restore, delete), not under `/spaces/…` — "archived" could be a slug.
+     Listed to the owner of record and to whoever archived it.
+   - No system-schema change: the archive folder is the truth, as planned.
+   - `tools/snapshot-data` copies `files/`, `apps/*/app.db` and `archive/`.
 4. **Polish** — batch endpoint, folder/selection ZIP download, folder upload,
    `sac.files` provider for SPA apps.
 5. **Platform** — app subtrees + `app:files`, MCP tools, `changes?wait=`

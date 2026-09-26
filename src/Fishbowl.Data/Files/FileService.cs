@@ -6,6 +6,7 @@ using System.Text;
 using Dapper;
 using Fishbowl.Core;
 using Fishbowl.Core.Files;
+using Fishbowl.Core.Models;
 using Fishbowl.Core.Repositories;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -33,12 +34,15 @@ public sealed class FileService : IFileService
     private readonly DatabaseFactory _dbFactory;
     private readonly ISystemRepository _system;
     private readonly ILogger<FileService> _logger;
+    private readonly IMessageRepository? _messages;
 
-    public FileService(DatabaseFactory dbFactory, ISystemRepository system, ILogger<FileService>? logger = null)
+    public FileService(DatabaseFactory dbFactory, ISystemRepository system, ILogger<FileService>? logger = null,
+        IMessageRepository? messages = null)
     {
         _dbFactory = dbFactory;
         _system = system;
         _logger = logger ?? NullLogger<FileService>.Instance;
+        _messages = messages;
     }
 
     // ───────────────────────────── plumbing ─────────────────────────────
@@ -336,6 +340,105 @@ public sealed class FileService : IFileService
     private static void AdjustUsage(FilePathResolver r, long delta)
     {
         if (UsageCache.TryGetValue(LockKey(r), out var v)) UsageCache[LockKey(r)] = Math.Max(0, v + delta);
+        // Shrinking: re-measure the owner next time (cheaper than knowing whose it was).
+        if (delta < 0) OwnerUsageCache.Clear();
+    }
+
+    // ───────────────────────────── the owner's quota ─────────────────────────────
+    //
+    // Admin spec § Quotas: one quota per user (users.quota_bytes, null = the
+    // Files:DefaultUserQuotaBytes default, 0 = unlimited) covering their
+    // personal workspace (DB + files, the whole folder) and every space they
+    // own — a space bills its owner, so sharing doesn't multiply anyone's
+    // allowance. Checked next to the per-workspace Files:QuotaBytes.
+
+    private static readonly ConcurrentDictionary<string, (DateTime At, long Bytes)> OwnerUsageCache = new(StringComparer.Ordinal);
+    private static readonly TimeSpan OwnerUsageTtl = TimeSpan.FromSeconds(30);
+    private const string QuotaWarnedKeyPrefix = "Files:QuotaWarned:";
+
+    private sealed record OwnerQuota(string OwnerId, long QuotaBytes, bool ViaSpace);
+
+    private async Task<OwnerQuota?> OwnerQuotaAsync(ContextRef ctx, CancellationToken ct)
+    {
+        string? ownerId = ctx.Id;
+        if (ctx.Type == ContextType.Space)
+        {
+            using var sys = _dbFactory.CreateSystemConnection();
+            ownerId = await sys.QueryFirstOrDefaultAsync<string?>(new CommandDefinition(@"
+                SELECT m.user_id FROM space_members m JOIN spaces s ON s.id = m.space_id
+                WHERE (s.id = @x OR s.slug = @x) AND m.role = @owner LIMIT 1",
+                new { x = ctx.Id, owner = SpaceRole.Owner.ToDbValue() }, cancellationToken: ct));
+        }
+        if (string.IsNullOrEmpty(ownerId)) return null;
+        var user = await _system.GetUserAsync(ownerId, ct);
+        if (user is null) return null;
+        var quota = user.QuotaBytes;
+        if (quota is null)
+        {
+            var v = await _system.GetConfigAsync(FileLimits.DefaultUserQuotaBytesKey, ct);
+            quota = long.TryParse(v, NumberStyles.Integer, CultureInfo.InvariantCulture, out var x) && x >= 0
+                ? x : FileLimits.DefaultUserQuotaBytes;
+        }
+        return new OwnerQuota(ownerId, quota.Value, ctx.Type == ContextType.Space);
+    }
+
+    // Everything the owner stores: users/<id>/ plus spaces/<id>/ of each owned space.
+    private long OwnerUsage(string ownerId)
+    {
+        if (OwnerUsageCache.TryGetValue(ownerId, out var hit) && DateTime.UtcNow - hit.At < OwnerUsageTtl) return hit.Bytes;
+        long total = DiskFileStore.Measure(_dbFactory.ResolveContextFolder(ContextRef.User(ownerId))).Bytes;
+        using (var sys = _dbFactory.CreateSystemConnection())
+            foreach (var spaceId in sys.Query<string>(
+                         "SELECT space_id FROM space_members WHERE user_id = @ownerId AND role = @owner",
+                         new { ownerId, owner = SpaceRole.Owner.ToDbValue() }))
+                total += DiskFileStore.Measure(_dbFactory.ResolveContextFolder(ContextRef.Space(spaceId))).Bytes;
+        OwnerUsageCache[ownerId] = (DateTime.UtcNow, total);
+        return total;
+    }
+
+    private long OwnerRoom(OwnerQuota? q)
+        => q is null || q.QuotaBytes <= 0 ? long.MaxValue : q.QuotaBytes - OwnerUsage(q.OwnerId);
+
+    private static FileStoreException OwnerQuotaExceeded(OwnerQuota q)
+        => FileStoreException.TooLarge("user_quota", q.ViaSpace
+            ? "That would go over the space owner's storage quota."
+            : "That would go over your storage quota.");
+
+    private void CheckOwnerRoom(OwnerQuota? q, long delta)
+    {
+        if (q is null || q.QuotaBytes <= 0 || delta <= 0) return;
+        if (OwnerUsage(q.OwnerId) + delta > q.QuotaBytes) throw OwnerQuotaExceeded(q);
+    }
+
+    // After a write that grew the owner's data: book it, and tell the owner
+    // once when they cross 90% (latched in system_config until they drop
+    // back below, like the digest's per-user latch).
+    private async Task OwnerGrewAsync(OwnerQuota? q, long delta, CancellationToken ct)
+    {
+        if (q is null || delta <= 0) return;
+        if (OwnerUsageCache.TryGetValue(q.OwnerId, out var v)) OwnerUsageCache[q.OwnerId] = (v.At, v.Bytes + delta);
+        await CheckQuotaWarningAsync(q, ct);
+    }
+
+    private async Task CheckQuotaWarningAsync(OwnerQuota q, CancellationToken ct)
+    {
+        if (q.QuotaBytes <= 0) return;
+        var used = OwnerUsage(q.OwnerId);
+        var key = QuotaWarnedKeyPrefix + q.OwnerId;
+        var latched = !string.IsNullOrEmpty(await _system.GetConfigAsync(key, ct));
+        var over = used >= q.QuotaBytes * DataLifecycleLimits.QuotaWarningRatio;
+        if (over && !latched)
+        {
+            await _system.SetConfigAsync(key, "1", ct);
+            if (_messages is not null)
+                await _messages.CreateAsync(new[] { q.OwnerId }, MessageKinds.QuotaWarning, "user", q.OwnerId,
+                    System.Text.Json.JsonSerializer.Serialize(new { usedBytes = used, quotaBytes = q.QuotaBytes }), ct);
+            _logger.LogInformation("Quota warning for user {UserId}", q.OwnerId);
+        }
+        else if (!over && latched)
+        {
+            await _system.SetConfigAsync(key, "", ct);
+        }
     }
 
     private long InstanceUsage()
@@ -463,7 +566,16 @@ public sealed class FileService : IFileService
         var trash = DiskFileStore.Measure(trashFull);
         UsageCache[LockKey(r)] = all.Bytes;
         var trashFolders = Directory.Exists(trashFull) ? trash.Folders + 1 : 0;
-        return new FileUsage(all.Bytes, s.QuotaBytes, all.Files - trash.Files, all.Folders - trashFolders, trash.Bytes);
+        var q = await OwnerQuotaAsync(ctx, ct);
+        long ownerBytes = 0;
+        if (q is not null)
+        {
+            OwnerUsageCache.TryRemove(q.OwnerId, out _);
+            ownerBytes = OwnerUsage(q.OwnerId);
+            await CheckQuotaWarningAsync(q, ct);   // also clears the latch once back below
+        }
+        return new FileUsage(all.Bytes, s.QuotaBytes, all.Files - trash.Files, all.Folders - trashFolders, trash.Bytes,
+            ownerBytes, q?.QuotaBytes ?? 0);
     }
 
     // ───────────────────────────── writes ─────────────────────────────
@@ -521,6 +633,8 @@ public sealed class FileService : IFileService
         if (!Directory.Exists(parentFull) && !parents)
             throw new FileStoreException(404, "not_found", "The folder doesn't exist.");
         CheckRoom(r, s, (contentLength ?? 0) - (existing?.Size ?? 0), contentLength ?? 0);
+        var owner = await OwnerQuotaAsync(ctx, ct);
+        CheckOwnerRoom(owner, (contentLength ?? 0) - (existing?.Size ?? 0));
 
         if (!Directory.Exists(parentFull))
         {
@@ -538,6 +652,8 @@ public sealed class FileService : IFileService
         var headLen = 0;
         long total = 0;
         var roomLeft = s.QuotaBytes > 0 ? s.QuotaBytes - Usage(r) + (existing?.Size ?? 0) : long.MaxValue;
+        var ownerRoom = OwnerRoom(owner);
+        var ownerRoomLeft = ownerRoom == long.MaxValue ? long.MaxValue : ownerRoom + (existing?.Size ?? 0);
         try
         {
             string sha;
@@ -555,6 +671,7 @@ public sealed class FileService : IFileService
                             throw FileStoreException.TooLarge("size", $"Files can be at most {s.MaxFileBytes:N0} bytes on this server.");
                         if (total > roomLeft)
                             throw FileStoreException.TooLarge("quota", "That would go over this workspace's storage quota.");
+                        if (total > ownerRoomLeft) throw OwnerQuotaExceeded(owner!);
                         if (headLen < head.Length)
                         {
                             var take = Math.Min(n, head.Length - headLen);
@@ -586,6 +703,7 @@ public sealed class FileService : IFileService
                     return Task.CompletedTask;
                 }, ct);
                 AdjustUsage(r, total - (now?.Size ?? 0));
+                await OwnerGrewAsync(owner, total - (now?.Size ?? 0), ct);
                 _logger.LogInformation("Uploaded file {PathHash} ({Bytes} bytes, {Mime}) in {CtxType}:{CtxId}",
                     Hash(item.Rel), total, mime, ctx.Type, ctx.Id);
                 return new FileUploadResult(ToEntry(item, new IndexRow
@@ -762,6 +880,8 @@ public sealed class FileService : IFileService
             var (bytes, nodes) = CountTree(r, item);
             CheckNodes(nodes);
             CheckRoom(r, s, bytes, bytes);
+            var owner = await OwnerQuotaAsync(ctx, ct);
+            CheckOwnerRoom(owner, bytes);
 
             var created = await CopyTreeAsync(r, item, r, dst, ct);
             await _dbFactory.WithContextTransactionAsync(ctx, (db, tx, _) =>
@@ -771,6 +891,7 @@ public sealed class FileService : IFileService
                 return Task.CompletedTask;
             }, ct);
             AdjustUsage(r, bytes);
+            await OwnerGrewAsync(owner, bytes, ct);
             return ToEntry(created[0], null) with { CreatedBy = actor };
         }
     }
@@ -1046,6 +1167,10 @@ public sealed class FileService : IFileService
         if (!targetFolder.IsRoot && !Directory.Exists(targetFolder.Full)) throw new FileStoreException(404, "not_found", "The target folder doesn't exist.");
         var sameContext = LockKey(rs) == LockKey(rt);
         var results = new List<FileTransferItemResult>();
+        var targetOwner = await OwnerQuotaAsync(to, ct);
+        var sourceOwner = move && !sameContext ? await OwnerQuotaAsync(from, ct) : null;
+        // Moving between two workspaces of the same owner doesn't grow them.
+        var ownerGrows = !(move && (sameContext || sourceOwner?.OwnerId == targetOwner?.OwnerId));
 
         using (await LockBothAsync(rs, rt, ct))
         {
@@ -1072,6 +1197,7 @@ public sealed class FileService : IFileService
                     var (bytes, nodes) = CountTree(rs, item);
                     CheckNodes(nodes);
                     CheckRoom(rt, s, sameContext && move ? 0 : bytes, sameContext && move ? 0 : bytes);
+                    if (ownerGrows) CheckOwnerRoom(targetOwner, bytes);
 
                     List<DiskItem> created;
                     var moved = false;
@@ -1114,6 +1240,7 @@ public sealed class FileService : IFileService
                         return Task.CompletedTask;
                     }, ct);
                     if (!(sameContext && move)) AdjustUsage(rt, bytes);
+                    if (ownerGrows) await OwnerGrewAsync(targetOwner, bytes, ct);
                     results.Add(new FileTransferItemResult(p, dst.Rel, null, null));
                 }
                 catch (FileStoreException ex)

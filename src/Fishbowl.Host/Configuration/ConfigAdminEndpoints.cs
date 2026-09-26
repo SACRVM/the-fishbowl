@@ -197,6 +197,12 @@ internal static class ConfigSchema
         new(FileLimits.DefaultUserQuotaBytesKey, false, false,
             "The storage quota (bytes, 0 = unlimited) an approval pre-fills for a new account. Hot.",
             ValidateQuotaBytes),
+        new(DataLifecycleLimits.ArchiveRetentionDaysKey, false, false,
+            "Days an archived space is kept before the daily tick deletes it (default 30, 0 = keep forever). Hot.",
+            ValidateArchiveDays),
+        new(DataLifecycleLimits.ExportCombinedMaxBytesKey, false, false,
+            "Files size (bytes) up to which the export offers database + files in one ZIP (default 4 GiB, 0 = always). Hot.",
+            ValidateQuotaBytes),
         new(DesktopPolicy.InstallKey, false, false,
             "Who may install apps into their personal desktop: everyone (default), admins, or off. A space's owner installs into the space unless this is off. Hot.",
             ValidateAppsLevel),
@@ -282,6 +288,11 @@ internal static class ConfigSchema
         }
         return null;
     }
+
+    private static string? ValidateArchiveDays(string v) =>
+        int.TryParse(v, out var n) && n >= 0
+            ? null
+            : "Retention must be a whole number of days, 0 or more (0 = keep forever).";
 
     private static string? ValidateQuotaBytes(string v) =>
         long.TryParse(v, out var n) && n >= 0

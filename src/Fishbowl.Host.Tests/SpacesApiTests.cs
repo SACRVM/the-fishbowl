@@ -151,7 +151,9 @@ public class SpacesApiTests : IClassFixture<WebApplicationFactory<Program>>, IDi
         await client.SendAsync(Req(HttpMethod.Post, "/api/v1/spaces", UserA, new { name = "Doomed" }),
             TestContext.Current.CancellationToken);
 
-        var del = await client.SendAsync(Req(HttpMethod.Delete, "/api/v1/spaces/doomed", UserA),
+        // archive=false deletes outright (204); the default archives first
+        // and answers 200 with the archive (SpaceArchiveApiTests).
+        var del = await client.SendAsync(Req(HttpMethod.Delete, "/api/v1/spaces/doomed?archive=false", UserA),
             TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.NoContent, del.StatusCode);
     }

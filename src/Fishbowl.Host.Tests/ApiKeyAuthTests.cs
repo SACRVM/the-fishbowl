@@ -355,6 +355,23 @@ public class ApiKeyAuthTests : IClassFixture<WebApplicationFactory<Program>>, ID
         Assert.Equal(HttpStatusCode.Forbidden, resp.StatusCode);
     }
 
+    // Files phase 3: every export ZIP and the archived-spaces surface are
+    // cookie-only, whatever the token's scopes.
+    [Fact]
+    public async Task ExportZips_And_Archive_BearerToken_Returns403_Test()
+    {
+        var issued = await _keys.IssueAsync(AliceId, ContextRef.User(AliceId), "export-zips-bearer",
+            new[] { "read:notes", "read:files", "write:files" }, TestContext.Current.CancellationToken);
+        var client = ClientWithToken(issued.RawToken);
+        foreach (var path in new[] { "/api/v1/export/files", "/api/v1/export/all", "/api/v1/export/info", "/api/v1/archive/spaces" })
+        {
+            var resp = await client.GetAsync(path, TestContext.Current.CancellationToken);
+            Assert.True(resp.StatusCode == HttpStatusCode.Forbidden, $"{path}: {resp.StatusCode}");
+        }
+        var restore = await client.PostAsync("/api/v1/archive/spaces/x/restore", null, TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.Forbidden, restore.StatusCode);
+    }
+
     // Vault endpoint is cookie-only too (docs/superpowers/specs/
     // 2026-09-25-secret-vault-design.md) — agents never touch the vault,
     // same rule as export and reindex. VaultApi.Gate() checks the

@@ -12,7 +12,8 @@ namespace Fishbowl.Scheduler;
 // for every context folder that has a files/ tree — sweep uploads killed
 // mid-flight, purge trash past Files:TrashRetentionDays, compact the journal
 // past Files:JournalRetentionDays, reconcile the whole tree so out-of-band
-// changes reach the feed without a client asking. Contexts are found on
+// changes reach the feed without a client asking; then purge archived
+// spaces past Archive:RetentionDays. Contexts are found on
 // disk (users/*/files, spaces/*/files), so a cold-imported folder is picked
 // up too.
 public class FilesMaintenanceService : BackgroundService
@@ -57,7 +58,8 @@ public class FilesMaintenanceService : BackgroundService
         {
             if (!Directory.Exists(root)) continue;
             foreach (var dir in Directory.EnumerateDirectories(root))
-                if (Directory.Exists(Path.Combine(dir, "files")))
+                // .deleted-/.restoring- folders aren't workspaces (the archiver sweeps them).
+                if (!Path.GetFileName(dir).StartsWith('.') && Directory.Exists(Path.Combine(dir, "files")))
                     contexts.Add(make(Path.GetFileName(dir)));
         }
 
@@ -78,6 +80,15 @@ public class FilesMaintenanceService : BackgroundService
             }
         }
         if (done > 0) _logger.LogInformation("Files maintenance ran for {Count} workspaces", done);
+
+        // Archived spaces past Archive:RetentionDays, and leftover folders.
+        try
+        {
+            using var scope = _scopes.CreateScope();
+            await scope.ServiceProvider.GetRequiredService<ISpaceArchiveService>().PurgeAsync(ct);
+        }
+        catch (OperationCanceledException) { throw; }
+        catch (Exception ex) { _logger.LogWarning(ex, "Archive purge failed — will retry next interval"); }
         return done;
     }
 }

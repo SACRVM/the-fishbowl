@@ -4,6 +4,13 @@ Hot-snapshot of `fishbowl-data/` to a timestamped folder. Safe to run against
 a live host — SQLite's online backup API handles concurrent writes without
 locking.
 
+What it takes: `system.db`, every `personal.db` / `space.db` and
+`apps/*/app.db` (online backup), each workspace's `files/` tree (plain copy,
+trash included, upload temps not), the `archive/` of archived spaces, and
+`acme/`. The DBs are backed up before the files; files are mutable, so a
+snapshot is a best-effort copy — the reconcile after a restore journals any
+drift.
+
 ## Usage
 
 ```bash

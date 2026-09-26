@@ -55,7 +55,10 @@ public sealed record FileCapabilities(
     long MaxFileBytes,
     long QuotaBytes);
 
-public sealed record FileUsage(long Bytes, long QuotaBytes, long Files, long Folders, long TrashBytes);
+// OwnerBytes / OwnerQuotaBytes: the owner's whole storage (personal + owned spaces)
+// against their quota (0 = unlimited) — admin spec § Quotas.
+public sealed record FileUsage(long Bytes, long QuotaBytes, long Files, long Folders, long TrashBytes,
+    long OwnerBytes = 0, long OwnerQuotaBytes = 0);
 
 public sealed record FileListPage(string Path, IReadOnlyList<FileEntry> Entries, string? Next);
 

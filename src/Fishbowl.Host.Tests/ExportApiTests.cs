@@ -1,3 +1,4 @@
+using System.IO.Compression;
 using System.Net;
 using System.Net.Http.Json;
 using System.Text;
@@ -70,6 +71,47 @@ public class ExportApiTests : IClassFixture<WebApplicationFactory<Program>>, IDi
         return req;
     }
 
+    // Export ZIPs (Files phase 3): the DB rides inside as personal.db / space.db.
+    private static async Task<ZipArchive> ZipOf(HttpResponseMessage resp)
+    {
+        Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
+        Assert.Equal("application/zip", resp.Content.Headers.ContentType?.MediaType);
+        var bytes = await resp.Content.ReadAsByteArrayAsync(TestContext.Current.CancellationToken);
+        return new ZipArchive(new MemoryStream(bytes), ZipArchiveMode.Read);
+    }
+
+    private async Task<List<string>> TitlesIn(ZipArchive zip, string entryName)
+    {
+        var entry = zip.GetEntry(entryName);
+        Assert.NotNull(entry);
+        var restorePath = Path.Combine(_dataDir, "restored-" + Path.GetRandomFileName() + ".db");
+        entry!.ExtractToFile(restorePath);
+        try
+        {
+            var head = new byte[16];
+            await using (var fs = File.OpenRead(restorePath))
+                await fs.ReadExactlyAsync(head, TestContext.Current.CancellationToken);
+            Assert.Equal("SQLite format 3", Encoding.ASCII.GetString(head, 0, 15));
+            using var restored = new SqliteConnection($"Data Source={restorePath};Pooling=False");
+            restored.Open();
+            return (await restored.QueryAsync<string>("SELECT title FROM notes")).ToList();
+        }
+        finally
+        {
+            try { File.Delete(restorePath); } catch { }
+        }
+    }
+
+    private async Task PutFileAsync(HttpClient client, string user, string root, string path, string content)
+    {
+        var req = Req(HttpMethod.Put, $"{root}/content?path={Uri.EscapeDataString(path)}&parents=1", user);
+        req.Headers.Add("X-Fishbowl-Upload", "1");
+        req.Headers.Add("If-None-Match", "*");
+        req.Content = new StringContent(content);
+        var resp = await client.SendAsync(req, TestContext.Current.CancellationToken);
+        Assert.True(resp.IsSuccessStatusCode, $"PUT {path}: {resp.StatusCode}");
+    }
+
     [Fact]
     public async Task Export_Unauthenticated_Returns401()
     {
@@ -92,37 +134,79 @@ public class ExportApiTests : IClassFixture<WebApplicationFactory<Program>>, IDi
 
         var resp = await client.SendAsync(Req(HttpMethod.Get, "/api/v1/export/db", UserA),
             TestContext.Current.CancellationToken);
-        Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
-        Assert.Equal("application/vnd.sqlite3", resp.Content.Headers.ContentType?.MediaType);
-
         var filename = resp.Content.Headers.ContentDisposition?.FileName?.Trim('"');
         Assert.NotNull(filename);
         Assert.StartsWith("fishbowl-", filename);
-        Assert.EndsWith(".db", filename);
+        Assert.EndsWith("-db.zip", filename);
+        Assert.Equal("no-store", resp.Headers.CacheControl?.ToString());
 
-        var bytes = await resp.Content.ReadAsByteArrayAsync(TestContext.Current.CancellationToken);
+        // The DB inside opens and the note is readable: the online backup is
+        // a consistent snapshot, not a truncated in-flight file.
+        using var zip = await ZipOf(resp);
+        Assert.Single(zip.Entries);
+        Assert.Contains("hello from export", await TitlesIn(zip, "personal.db"));
+    }
 
-        // SQLite file format magic header — 16 bytes "SQLite format 3\0".
-        Assert.True(bytes.Length >= 16, "Response too short to be a SQLite DB");
-        var header = Encoding.ASCII.GetString(bytes, 0, 15);
-        Assert.Equal("SQLite format 3", header);
-        Assert.Equal(0, bytes[15]);
+    [Fact]
+    public async Task Export_Files_And_All_Zips_Test()
+    {
+        var client = _factory.CreateClient();
+        await client.SendAsync(Req(HttpMethod.Post, "/api/v1/notes", UserA, new Note { Title = "note in all" }),
+            TestContext.Current.CancellationToken);
+        await PutFileAsync(client, UserA, "/api/v1/files", "Docs/readme.md", "# hello");
+        await PutFileAsync(client, UserA, "/api/v1/files", "gone.txt", "bye");
+        var trash = await client.SendAsync(Req(HttpMethod.Delete, "/api/v1/files?path=gone.txt", UserA),
+            TestContext.Current.CancellationToken);
+        Assert.True(trash.IsSuccessStatusCode);
 
-        // And the DB actually opens + the note we created is readable. This
-        // round-trips the BackupDatabase call: proves the download is a
-        // consistent snapshot, not a truncated in-flight file.
-        var restorePath = Path.Combine(_dataDir, "restored-" + Path.GetRandomFileName() + ".db");
-        await File.WriteAllBytesAsync(restorePath, bytes, TestContext.Current.CancellationToken);
+        // Files only: the tree at the ZIP's root, no trash.
+        using (var zip = await ZipOf(await client.SendAsync(Req(HttpMethod.Get, "/api/v1/export/files", UserA),
+                   TestContext.Current.CancellationToken)))
+        {
+            var names = zip.Entries.Select(e => e.FullName).ToList();
+            Assert.Contains("Docs/readme.md", names);
+            Assert.DoesNotContain(names, n => n.Contains("gone.txt") || n.StartsWith(".trash"));
+            using var r = new StreamReader(zip.GetEntry("Docs/readme.md")!.Open());
+            Assert.Equal("# hello", await r.ReadToEndAsync(TestContext.Current.CancellationToken));
+        }
+
+        // Both: the DB plus files/.
+        using (var zip = await ZipOf(await client.SendAsync(Req(HttpMethod.Get, "/api/v1/export/all", UserA),
+                   TestContext.Current.CancellationToken)))
+        {
+            Assert.NotNull(zip.GetEntry("files/Docs/readme.md"));
+            Assert.Contains("note in all", await TitlesIn(zip, "personal.db"));
+        }
+
+        var info = await (await client.SendAsync(Req(HttpMethod.Get, "/api/v1/export/info", UserA),
+            TestContext.Current.CancellationToken)).Content.ReadFromJsonAsync<System.Text.Json.JsonElement>(TestContext.Current.CancellationToken);
+        Assert.True(info.GetProperty("dbBytes").GetInt64() > 0);
+        Assert.Equal(7, info.GetProperty("filesBytes").GetInt64());   // "# hello" — the trash doesn't count
+        Assert.True(info.GetProperty("combinedAllowed").GetBoolean());
+    }
+
+    [Fact]
+    public async Task Export_All_AboveCombinedMax_413_AndInfoSaysSo_Test()
+    {
+        var client = _factory.CreateClient();
+        await PutFileAsync(client, UserB, "/api/v1/files", "big.txt", new string('x', 64));
+        var config = new Fishbowl.Data.Repositories.SystemRepository(new DatabaseFactory(_dataDir));
+        await config.SetConfigAsync("Export:CombinedMaxBytes", "10", TestContext.Current.CancellationToken);
         try
         {
-            using var restored = new SqliteConnection($"Data Source={restorePath}");
-            restored.Open();
-            var titles = (await restored.QueryAsync<string>("SELECT title FROM notes")).ToList();
-            Assert.Contains("hello from export", titles);
+            var resp = await client.SendAsync(Req(HttpMethod.Get, "/api/v1/export/all", UserB),
+                TestContext.Current.CancellationToken);
+            Assert.Equal(HttpStatusCode.RequestEntityTooLarge, resp.StatusCode);
+            var info = await (await client.SendAsync(Req(HttpMethod.Get, "/api/v1/export/info", UserB),
+                TestContext.Current.CancellationToken)).Content.ReadFromJsonAsync<System.Text.Json.JsonElement>(TestContext.Current.CancellationToken);
+            Assert.False(info.GetProperty("combinedAllowed").GetBoolean());
+            // The separate downloads stay.
+            Assert.Equal(HttpStatusCode.OK, (await client.SendAsync(Req(HttpMethod.Get, "/api/v1/export/files", UserB),
+                TestContext.Current.CancellationToken)).StatusCode);
         }
         finally
         {
-            try { File.Delete(restorePath); } catch { }
+            await config.SetConfigAsync("Export:CombinedMaxBytes", "", TestContext.Current.CancellationToken);
         }
     }
 
@@ -140,23 +224,10 @@ public class ExportApiTests : IClassFixture<WebApplicationFactory<Program>>, IDi
 
         var respA = await client.SendAsync(Req(HttpMethod.Get, "/api/v1/export/db", UserA),
             TestContext.Current.CancellationToken);
-        respA.EnsureSuccessStatusCode();
-        var bytesA = await respA.Content.ReadAsByteArrayAsync(TestContext.Current.CancellationToken);
-
-        var restorePath = Path.Combine(_dataDir, "iso-" + Path.GetRandomFileName() + ".db");
-        await File.WriteAllBytesAsync(restorePath, bytesA, TestContext.Current.CancellationToken);
-        try
-        {
-            using var restored = new SqliteConnection($"Data Source={restorePath}");
-            restored.Open();
-            var titles = (await restored.QueryAsync<string>("SELECT title FROM notes")).ToList();
-            Assert.Contains("a-only", titles);
-            Assert.DoesNotContain("b-only", titles);
-        }
-        finally
-        {
-            try { File.Delete(restorePath); } catch { }
-        }
+        using var zip = await ZipOf(respA);
+        var titles = await TitlesIn(zip, "personal.db");
+        Assert.Contains("a-only", titles);
+        Assert.DoesNotContain("b-only", titles);
     }
 
     [Fact]
@@ -177,15 +248,18 @@ public class ExportApiTests : IClassFixture<WebApplicationFactory<Program>>, IDi
         var resp = await client.SendAsync(
             Req(HttpMethod.Get, "/api/v1/spaces/export-team/export/db", UserA),
             TestContext.Current.CancellationToken);
-        Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
-        var bytes = await resp.Content.ReadAsByteArrayAsync(TestContext.Current.CancellationToken);
-        var header = Encoding.ASCII.GetString(bytes, 0, 15);
-        Assert.Equal("SQLite format 3", header);
-
         var filename = resp.Content.Headers.ContentDisposition?.FileName?.Trim('"');
         Assert.NotNull(filename);
         Assert.Contains("space", filename!);
         Assert.Contains("export-team", filename);
+        using var zip = await ZipOf(resp);
+        Assert.Contains("space-note", await TitlesIn(zip, "space.db"));
+
+        // The files and combined variants are owner-reachable too.
+        await PutFileAsync(client, UserA, "/api/v1/spaces/export-team/files", "shared.txt", "hi");
+        using var files = await ZipOf(await client.SendAsync(
+            Req(HttpMethod.Get, "/api/v1/spaces/export-team/export/files", UserA), TestContext.Current.CancellationToken));
+        Assert.NotNull(files.GetEntry("shared.txt"));
     }
 
     [Fact]
@@ -209,10 +283,13 @@ public class ExportApiTests : IClassFixture<WebApplicationFactory<Program>>, IDi
                 new { t = spaceId, u = UserB, j = now });
         }
 
-        var resp = await client.SendAsync(
-            Req(HttpMethod.Get, "/api/v1/spaces/member-team/export/db", UserB),
-            TestContext.Current.CancellationToken);
-        Assert.Equal(HttpStatusCode.Forbidden, resp.StatusCode);
+        foreach (var kind in new[] { "db", "files", "all", "info" })
+        {
+            var resp = await client.SendAsync(
+                Req(HttpMethod.Get, $"/api/v1/spaces/member-team/export/{kind}", UserB),
+                TestContext.Current.CancellationToken);
+            Assert.Equal(HttpStatusCode.Forbidden, resp.StatusCode);
+        }
     }
 
     [Fact]

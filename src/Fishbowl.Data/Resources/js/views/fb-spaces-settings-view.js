@@ -1,7 +1,10 @@
 /**
  * <fb-spaces-settings-view>  (mounted at #/spaces)
  *
- * Minimal management surface for space workspaces — list, create, delete.
+ * Minimal management surface for space workspaces — list, create, delete,
+ * and the archived spaces a delete left behind (Files phase 3): deleting asks
+ * "Archive before deleting" (checked by default); archives are listed with
+ * Download / Restore / Delete and the days left before the purge.
  * Each space is a shared data context backed by its own SQLite file under
  * fishbowl-data/spaces/{spaceId}/space.db (keyed by ULID, not slug — so renames
  * don't move the file). Notes live inside via /api/v1/spaces/{slug}/notes; the API
@@ -15,6 +18,7 @@ class FbSpacesSettingsView extends HTMLElement {
     constructor() {
         super();
         this.spaces = [];
+        this.archives = [];
         this.me = null;
         this.busy = false;
     }
@@ -26,19 +30,23 @@ class FbSpacesSettingsView extends HTMLElement {
 
     async refresh() {
         try {
-            const [spaces, me] = await Promise.all([
+            const [spaces, me, archives] = await Promise.all([
                 fb.api.spaces.list(),
                 fb.api.me.get().catch(() => null),
+                fb.api.archive.list().catch(() => []),
             ]);
             this.spaces = spaces || [];
             this.me = me;
+            this.archives = archives || [];
         } catch (err) {
             console.error("[fb-spaces-settings-view] list failed:", err);
             this.spaces = [];
+            this.archives = [];
             this.me = null;
         }
         this.renderPersonal();
         this.renderList();
+        this.renderArchives();
     }
 
     render() {
@@ -177,6 +185,12 @@ class FbSpacesSettingsView extends HTMLElement {
                     color: var(--danger, #ef4444);
                     background: rgba(239, 68, 68, 0.12);
                 }
+                fb-spaces-settings-view a.open-btn { display: inline-flex; align-items: center; }
+                fb-spaces-settings-view .archive-row .space-meta { flex-wrap: wrap; column-gap: 16px; }
+                /* The delete dialog's body lives in the dialog, outside the view. */
+                .fb-space-delete p { margin: 0 0 12px; color: var(--text); font-size: 14px; }
+                .fb-space-delete .fb-space-delete-hint { color: var(--text-muted); font-size: 13px; margin: 8px 0 0; }
+                .fb-space-archive { display: inline-flex; align-items: center; gap: 8px; font-size: 14px; cursor: pointer; }
                 fb-spaces-settings-view .empty {
                     text-align: center;
                     color: var(--text-muted);
@@ -205,6 +219,11 @@ class FbSpacesSettingsView extends HTMLElement {
 
             <h2 class="list-title">Your spaces</h2>
             <div id="space-list"></div>
+
+            <section id="archive-section" hidden>
+                <h2 class="list-title">Archived spaces</h2>
+                <div id="archive-list"></div>
+            </section>
         `;
 
         const input  = this.querySelector("#name-input");
@@ -377,28 +396,134 @@ class FbSpacesSettingsView extends HTMLElement {
         }
     }
 
+    // The delete dialog: "Archive before deleting" is checked by default —
+    // a ZIP of the whole space you can download or restore until the purge.
+    _askDelete(space) {
+        return new Promise((resolve) => {
+            const dlg = document.createElement("sac-dialog");
+            dlg.setAttribute("title", `Delete space "${space.name}"?`);
+            dlg.style.setProperty("--dialog-width", "440px");
+            dlg.buttons = [
+                { action: "cancel", label: "Cancel", kind: "default" },
+                { action: "delete", label: "Delete", kind: "destructive", armAfterMs: 1500 },
+            ];
+            dlg.innerHTML = `
+                <div class="fb-space-delete">
+                    <p>Its notes, todos, events and files are removed for every member, and its API keys stop working.</p>
+                    <label class="fb-space-archive">
+                        <input type="checkbox" name="archive" checked>
+                        <span>Archive before deleting</span>
+                    </label>
+                    <p class="fb-space-delete-hint"></p>
+                </div>`;
+            const box = dlg.querySelector("input[name=archive]");
+            const hint = dlg.querySelector(".fb-space-delete-hint");
+            const paint = () => {
+                hint.textContent = box.checked
+                    ? "A ZIP of the whole space is kept under Archived spaces — download it or restore it as a new space."
+                    : "Nothing is kept. This can't be undone.";
+            };
+            box.addEventListener("change", paint);
+            paint();
+            dlg.addEventListener("sac:action", (e) => {
+                const action = e.detail?.action;
+                setTimeout(() => dlg.remove(), 120);
+                resolve(action === "delete" ? { archive: box.checked } : null);
+            }, { once: true });
+            document.body.appendChild(dlg);
+            setTimeout(() => dlg.open(), 0);
+        });
+    }
+
     async _delete(slug) {
         const space = this.spaces.find(t => t.slug === slug);
         if (!space) return;
 
-        const result = await sac.dialog.confirm({
-            title: `Delete space "${space.name}"?`,
-            message: `The space's notes stay on disk (recoverable) but the space is removed. Undo requires manual DB surgery.`,
-            buttons: [
-                { action: "cancel", label: "Cancel", kind: "default" },
-                { action: "delete", label: "Delete",  kind: "destructive", armAfterMs: 1500 },
-            ],
-        });
-        if (result !== "delete") return;
+        const choice = await this._askDelete(space);
+        if (!choice) return;
 
         try {
-            await fb.api.spaces.delete(slug);
+            await fb.api.spaces.delete(slug, { archive: choice.archive });
             await this.refresh();
+            if (choice.archive) window.sac?.toast?.(`"${space.name}" was archived and deleted.`, { kind: "success" });
         } catch (err) {
             console.warn("[fb-spaces-settings-view] delete failed:", err);
             const status = err?.status;
-            if (status === 403) this._showStatus("Only the owner can delete this space.");
-            else                this._showStatus("Failed to delete space.");
+            if (status === 403)      this._showStatus("Only the owner can delete this space.");
+            else if (status === 507) this._showStatus("Not enough disk space to archive it — nothing was deleted.");
+            else                     this._showStatus("Failed to delete space.");
+        }
+    }
+
+    // Archived spaces — only while there are any (no empty section).
+    renderArchives() {
+        const section = this.querySelector("#archive-section");
+        const list = this.querySelector("#archive-list");
+        if (!section || !list) return;
+        section.hidden = this.archives.length === 0;
+        list.replaceChildren(...this.archives.map(a => {
+            const row = document.createElement("div");
+            row.className = "space-row archive-row";
+            row.dataset.archive = a.id;
+            row.innerHTML = `
+                <span class="space-color" style="--space-color: ${this._colorVar(a.color)}"></span>
+                <div class="space-info">
+                    <p class="space-name"></p>
+                    <div class="space-meta"><span class="archived-at"></span><span class="expires"></span></div>
+                </div>
+                <a class="open-btn" title="Download the archive" aria-label="Download" download>
+                    <sac-icon name="download"></sac-icon>
+                </a>
+                <button type="button" class="open-btn restore-btn" title="Restore as a new space" aria-label="Restore">
+                    <sac-icon name="undo"></sac-icon>
+                </button>
+                <button type="button" class="delete-btn" title="Delete the archive" aria-label="Delete archive">
+                    <sac-icon name="trash"></sac-icon>
+                </button>`;
+            row.querySelector(".space-name").textContent = a.name;
+            row.querySelector(".archived-at").textContent = `Archived ${fb.format.dateTime(a.archivedAt)} · ${fmtSize(a.sizeBytes)}`;
+            row.querySelector(".expires").textContent = a.expiresAt
+                ? daysLeft(a.expiresAt)
+                : "Kept until you delete it";
+            row.querySelector("a").href = fb.api.archive.downloadUrl(a.id);
+            row.querySelector(".restore-btn").addEventListener("click", () => this._restore(a));
+            row.querySelector(".delete-btn").addEventListener("click", () => this._deleteArchive(a));
+            return row;
+        }));
+
+        function daysLeft(iso) {
+            const days = Math.ceil((new Date(iso).getTime() - Date.now()) / 86400000);
+            return days <= 0 ? "Deleted at the next cleanup" : days === 1 ? "Deleted in 1 day" : `Deleted in ${days} days`;
+        }
+    }
+
+    async _restore(a) {
+        try {
+            const space = await fb.api.archive.restore(a.id);
+            window.sac?.toast?.(`Restored as "${space.name}" (${space.slug}) — you're its only member.`, { kind: "success" });
+            await this.refresh();
+        } catch (err) {
+            console.warn("[fb-spaces-settings-view] restore failed:", err);
+            window.sac?.toast?.(err?.status === 507 ? "Not enough disk space to restore it." : "Failed to restore the space.", { kind: "error" });
+        }
+    }
+
+    async _deleteArchive(a) {
+        const result = await sac.dialog.confirm({
+            title: `Delete the archive of "${a.name}"?`,
+            message: "The archive is removed for good — it can't be restored afterwards.",
+            buttons: [
+                { action: "cancel", label: "Cancel", kind: "default" },
+                { action: "delete", label: "Delete", kind: "destructive", armAfterMs: 1500 },
+            ],
+        });
+        if (result !== "delete") return;
+        try {
+            await fb.api.archive.remove(a.id);
+            await this.refresh();
+        } catch (err) {
+            console.warn("[fb-spaces-settings-view] archive delete failed:", err);
+            window.sac?.toast?.("Failed to delete the archive.", { kind: "error" });
         }
     }
 
@@ -412,6 +537,14 @@ function escapeHtml(s) {
     return String(s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));
 }
 function escapeAttr(s) { return escapeHtml(s); }
+function fmtSize(n) {
+    n = Number(n) || 0;
+    if (n < 1024) return `${n} B`;
+    const units = ["KB", "MB", "GB", "TB"];
+    let v = n / 1024, i = 0;
+    while (v >= 1024 && i < units.length - 1) { v /= 1024; i++; }
+    return `${v.toFixed(v < 10 ? 1 : 0)} ${units[i]}`;
+}
 
 customElements.define("fb-spaces-settings-view", FbSpacesSettingsView);
 sac.router.register("#/spaces", "fb-spaces-settings-view", { label: "Spaces", icon: "users", palette: false });
