@@ -168,6 +168,11 @@ Recorded so they stop being re-litigated.
    the dev overlay is a separate matter.
 7. **Extension is by addition, not substitution.** No plugin loader, no file
    overrides. Add a class, register it, or write an app.
+8. **Files are an accepted addition (2026-09-26), not drift.** A commander-style
+   file app over real files in each context folder, with a change feed for a
+   future sync client — the shared store for Fishbowl's apps. Spec:
+   `docs/superpowers/specs/2026-09-26-files-app-design.md`. WebDAV is ruled
+   out; a sync client takes its place.
 
 ---
 
