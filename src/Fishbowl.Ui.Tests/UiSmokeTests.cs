@@ -57,6 +57,7 @@ public class UiSmokeTests
     [InlineData("#/notes")]
     [InlineData("#/todos")]
     [InlineData("#/calendar")]
+    [InlineData("#/files")]
     public async Task Phone_ViewHasNoHorizontalScroll_Test(string hash)
     {
         var context = await _fixture.Browser!.NewContextAsync(Phone());

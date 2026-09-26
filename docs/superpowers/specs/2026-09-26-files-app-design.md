@@ -608,19 +608,33 @@ and a hub tile. **Always the commander layout** — there is no plain-list mode.
 
 ```
 ┌ nav ribbon ───────────────────────────────────────── toolbar: ⬆ upload  ⌫ trash ┐
-│ ╔═ Personal ▾ › Photos › 2026 ══════╗ ┌─ Family ▾ › Documents ──────────────┐ │
-│ ║ ..                                ║ │ ..                                  │ │
-│ ║ ▸ Summer                          ║ │ ▸ Taxes                             │ │
-│ ║▐ IMG_0412.jpg   2.3 MB  Sep 21  ▌║ │   lease.pdf        412 KB  Mar 02   │ │
-│ ║ ★IMG_0413.jpg   2.1 MB  Sep 21   ║ │   notes.md           3 KB  today    │ │
-│ ╚═ 2 of 48 marked · 4.4 MB ═════════╝ └─ 12 files · 18.0 MB ────────────────┘ │
-│ Alt+N New  Alt+R Rename  Alt+C Copy→  Alt+M Move→  Del Trash  Alt+P Preview  ▓▓▓▓░ 38% │
+│ ^ Personal ▾  Files / Photos / 2026   ⊞ │ ^ Family ▾  Files / Documents      ⊞ │
+│ ═══════════════════════════════════════ │ ────────────────────────────────────│
+│ ▸ Summer                                │ ▸ Taxes                             │
+│   IMG_0412.jpg   2.3 MB  Sep 21     🗑  │   lease.pdf        412 KB  Mar 02   │
+│   IMG_0413.jpg   2.1 MB  Sep 21         │   notes.md           3 KB  today    │
+│─────────────────────────────────────────│─────────────────────────────────────│
+│ Browse  2 of 48 marked · 4.4 MB         │ Browse Preview Properties 12 files… │
+│ Alt+N New  Alt+R Rename  Alt+C Copy→  Alt+M Move→  Del Trash  Alt+P Preview  ▓▓▓░ │
 └──────────────────────────────────────────────────────────────────────────────┘
 ```
 
-- `<sac-split direction="horizontal" position="50%" collapse>` with one
-  `<sac-file-browser multiple>` per slot. Each pane has its own **workspace
+- **Flat, like the notes editor** (revised 2026-09-26 after review): two
+  fixed equal columns (CSS grid, 50/50 — no splitter, a commander doesn't
+  resize), one hairline between them, no frames, no rounded corners. One
+  `<sac-file-browser multiple>` per column. Each pane has its own **workspace
   and folder**; the **active pane** is the one with focus.
+- **Header and footer share one height** (`--fv-bar-h`). The header is the
+  kit browser's bar (Up, workspace menu, breadcrumb, New folder) as one
+  centred row; the active side shows only there — an `--accent` hairline under
+  its header, the other header muted. Selection is quiet: a `--hover` row,
+  no ring, no solid bar.
+- **Footer per column: tabs, then the status as plain text.** Left: one tab,
+  *Browse*. Right: *Browse*, *Preview*, *Properties* (`<sac-tab-group>` with
+  tabs only; the panes are the view's own sections). Preview and Properties
+  describe the **left** pane's cursor item and follow it live; the right
+  footer's text then names that item. On a phone there is one column and only
+  *Browse* — preview stays the quick-look window.
 - **Workspace per pane:** the pane title starts with a `<sac-menu>` listing
   Personal and every space the user is a member of — NC's drive letter.
   Alt+1 / Alt+2 open it for the left / right pane. A space pane's frame is
@@ -628,13 +642,9 @@ and a hub tile. **Always the commander layout** — there is no plain-list mode.
   are unmissable. The left pane starts in the current `sac.scope` workspace.
   Alt+C/Alt+M between panes in different workspaces use `POST /files/transfer`;
   a readonly space pane accepts no drops and offers no Alt+C/Alt+M target.
-- **The retro touch, tokens only:** the active pane gets a
-  `border-style: double` frame in `--accent` and a caption-type title; the
-  inactive pane a single `--border` hairline. The cursor bar is the kit's
-  selected row (a solid NC-style bar is a kit ask, not a Fishbowl override).
-  Marked entries use `--accent-warm-text`. Names and sizes in monospace (kit
-  gap: `--font-mono`). The frame's bottom edge is a status line: counts,
-  marked size, free quota. No scanlines, no CRT glow.
+- Marked entries use `--accent-warm-text`; names and sizes in monospace
+  (`--font-mono`). The status text: counts, marked size, free quota. No
+  scanlines, no CRT glow, no double frames (the first cut had them — too loud).
 - **Shortcut bar** at the bottom, commander look, modern chords: one light-DOM
   row of kit buttons, each a `<kbd>` showing the chord plus a label
   ("Alt+N New folder", "Del Trash", "Alt+P Preview" …), clickable, wired to
@@ -648,12 +658,17 @@ and a hub tile. **Always the commander layout** — there is no plain-list mode.
   hovers the view (and via the toolbar's upload button / Alt+U), targeting
   the active pane's folder.
 
-### Preview pane
+### Preview and Properties (the right column's tabs)
 
 **Alt+P** (Windows Explorer's own shortcut for its preview pane; also the
-`Alt+P Preview` shortcut-bar button) switches the **right pane** into a
-preview of the left pane's cursor file, following the cursor live; focus moves
-to the left pane; Alt+P again brings the browser back. What it shows:
+*Preview* tab and the `Alt+P Preview` shortcut-bar button) switches the
+**right column** to a preview of the left pane's cursor file, following the
+cursor live; focus moves to the left pane; Alt+P again brings the browser
+back. **Alt+I** (or the *Properties* tab) shows the cursor item's properties
+instead: name, kind, size (with exact bytes), modified (`fb.format`), the
+workspace and full path, a folder's item count (one listing, fetched lazily),
+plus *Open in new tab* (`?inline=1`) and *Download* for files. What the
+preview shows:
 
 | Type | Rendering |
 |---|---|
@@ -682,7 +697,8 @@ No F-keys — see decision 13 for the full mapping and why. Files-view bindings:
 | Alt+1 / Alt+2 | workspace menu of left / right pane | |
 | Shift+↑/↓ (range), mod+A, mod+click (toggle), Esc (clear) | select | needs kit marks (gap) |
 | Space | quick look (maximised viewer) | |
-| Alt+P | preview pane on/off | Windows Explorer's own shortcut |
+| Alt+P | right column: Preview ↔ Browse | Windows Explorer's own shortcut; also the *Preview* tab |
+| Alt+I | right column: Properties ↔ Browse | also the *Properties* tab; not reserved by Chrome, Edge or Firefox |
 | mod+C / mod+X / mod+V | copy / cut / paste, into the active pane's folder | across panes and workspaces |
 | Alt+C / Alt+M | copy / move selection → other pane's folder | progress modal; commander spirit |
 | Alt+R | rename | inline; F2 kept as an optional alias where the keyboard has one |
@@ -879,8 +895,8 @@ days**, `0` keeps them forever.
 ## Phases
 
 0. **Upstream asks** filed against sacrvm-appkit (list above), in parallel
-   with phase 1.
-1. **Backend MVP** — v9 schema, `FilePathResolver` + host name rules + probe,
+   with phase 1. **Done** — shipped in kit 2.15.0.
+1. **Backend MVP** (**done**) — v9 schema, `FilePathResolver` + host name rules + probe,
    `DiskFileStore`, `FileService` with per-context lock, reconcile (list +
    throttled full scan + daily), journal with `changes` / `snapshot` /
    compaction, trash with restore and auto-purge, sweeper, limits as config,
@@ -893,6 +909,11 @@ days**, `0` keeps them forever.
    Alt+P preview pane and Space quick-look viewer (image, text, Markdown,
    audio, video, info card), PDF "Open in new tab", Replace / Keep both /
    Skip, phone single column with destination picker, hub tile.
+   **Done**, with two gaps left to the kit — Delete's toast has no Undo
+   (toasts carry no action) and marking on touch (no Select toggle / long
+   press) — and one open item: the preview doesn't yet keep audio playing
+   while the cursor moves on. The left pane's folder is in the URL already
+   (the kit's prefix routes).
 3. **Data lifecycle** — export choices (DB / files / both, streamed ZIPs),
    space delete with "archive before deleting", archived spaces (download,
    restore, delete, purge). Should land before Files is announced to users,
@@ -1026,6 +1047,7 @@ CI runs Linux and Windows; host-dependent tests assert per OS
     | select | Shift+arrows (range), Ctrl+A, Ctrl+click (toggle), Esc clears |
     | quick look (maximised viewer, was F3) | Space |
     | preview pane on/off (was Ctrl+Q) | Alt+P (Windows Explorer's own shortcut) |
+    | properties of the cursor item | Alt+I |
     | copy / cut / paste (into the active pane's folder; works across panes and workspaces) | Ctrl+C / Ctrl+X / Ctrl+V |
     | copy / move selection to the other pane (commander spirit, was F5/F6) | Alt+C / Alt+M |
     | rename (was F4/F2) | Alt+R; F2 kept as an optional alias where the keyboard has it |

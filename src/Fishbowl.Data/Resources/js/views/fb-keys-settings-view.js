@@ -290,7 +290,8 @@ class FbKeysSettingsView extends HTMLElement {
                 <label>Scopes</label>
                 <div class="scopes">
                     ${["read:notes","write:notes","read:tags","write:tags",
-                       "read:tasks","write:tasks","read:events","write:events"].map(s => `
+                       "read:tasks","write:tasks","read:events","write:events",
+                       "read:files","write:files"].map(s => `
                         <label>
                             <input type="checkbox" value="${s}"
                                 ${s === "read:notes" || s === "write:notes" ? "checked" : ""}/>

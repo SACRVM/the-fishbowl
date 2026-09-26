@@ -265,7 +265,111 @@
         return listEvents({ from, to });
     };
 
+    // ── Files ──────────────────────────────────────────────────────────────
+    //
+    // Unlike the other resources, a Files pane names its workspace itself
+    // (two panes, two workspaces): `files.in("personal" | "space:<slug>")`
+    // binds one; `files.*` without it follows sac.scope like everything else.
+
+    /** The server's error code from a files refusal ({ error, message }). */
+    function errorInfo(err) {
+        try {
+            const body = JSON.parse(err?.body || "");
+            return { status: err.status, code: body.error || null, message: body.message || null };
+        } catch {
+            return { status: err?.status ?? 0, code: null, message: null };
+        }
+    }
+
+    function currentWorkspace() {
+        const s = window.sac?.scope?.get?.();
+        return s?.type === "scoped" ? `space:${s.slug}` : "personal";
+    }
+
+    function filesBase(ws) {
+        return ws === "personal" ? "/files" : `/spaces/${encodeURIComponent(ws.slice("space:".length))}/files`;
+    }
+
+    // Raw-body upload through XHR — fetch has no upload progress. `mode`
+    // "create" sends If-None-Match: * (412 when the name is taken),
+    // "replace" If-Match: * (the old one is overwritten).
+    function upload(path, blob, { mode = "create", onProgress, signal } = {}) {
+        return new Promise((resolve, reject) => {
+            const xhr = new XMLHttpRequest();
+            xhr.open("PUT", `${base}${path}`);
+            xhr.setRequestHeader("X-Fishbowl-Upload", "1");
+            if (mode === "replace") xhr.setRequestHeader("If-Match", "*");
+            else xhr.setRequestHeader("If-None-Match", "*");
+            if (blob.type) xhr.setRequestHeader("Content-Type", blob.type);
+            if (onProgress) xhr.upload.onprogress = (e) => onProgress(e.loaded, e.lengthComputable ? e.total : blob.size);
+            xhr.onload = () => {
+                if (xhr.status === 401) { window.location.href = "/login"; reject(new ApiError(401, "Unauthenticated")); return; }
+                if (xhr.status < 200 || xhr.status >= 300) { reject(new ApiError(xhr.status, xhr.responseText)); return; }
+                try { resolve(JSON.parse(xhr.responseText)); } catch { resolve(null); }
+            };
+            xhr.onerror = () => reject(new ApiError(0, "Network error"));
+            xhr.onabort = () => reject(new ApiError(0, "Aborted"));
+            if (signal) signal.addEventListener("abort", () => xhr.abort(), { once: true });
+            xhr.send(blob);
+        });
+    }
+
+    function filesIn(workspace) {
+        const b = () => filesBase(workspace ?? currentWorkspace());
+        const q = (p) => `?path=${encodeURIComponent(p ?? "")}`;
+        const json = (body) => ({ method: "POST", body: JSON.stringify(body) });
+        return {
+            get workspace() { return workspace ?? currentWorkspace(); },
+            capabilities: () => request(`${b()}/capabilities`),
+            // Every page of one folder: { path, entries }.
+            list: async (path) => {
+                const entries = [];
+                let cursor = null;
+                do {
+                    const page = await request(`${b()}/list${q(path)}${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`);
+                    entries.push(...(page.entries || []));
+                    cursor = page.next;
+                } while (cursor);
+                return { path: path || "", entries };
+            },
+            stat:    (path) => request(`${b()}/stat${q(path)}`),
+            // A URL an <img>/<audio>/<a download> can stream from; `inline`
+            // opens a PDF (or a safe type) in its own tab.
+            contentUrl: (path, { inline = false } = {}) => `${base}${b()}/content${q(path)}${inline ? "&inline=1" : ""}`,
+            read: async (path) => {
+                const res = await fetch(`${base}${b()}/content${q(path)}`);
+                if (res.status === 401) { window.location.href = "/login"; throw new ApiError(401, "Unauthenticated"); }
+                if (!res.ok) throw new ApiError(res.status, await res.text().catch(() => ""));
+                return res.blob();
+            },
+            upload:  (path, blob, opts) => upload(`${b()}/content${q(path)}&parents=1`, blob, opts),
+            createFolder: (path) => request(`${b()}/folders`, json({ path })),
+            move:    (from, to) => request(`${b()}/move`, json({ from, to })),
+            copy:    (from, to) => request(`${b()}/copy`, json({ from, to })),
+            trash:   (path) => request(`${b()}${q(path)}`, { method: "DELETE" }),
+            destroy: (path) => request(`${b()}${q(path)}&permanent=1`, { method: "DELETE" }),
+            trashList: () => request(`${b()}/trash`),
+            restore: (id, onConflict) => request(`${b()}/trash/${encodeURIComponent(id)}/restore`,
+                onConflict ? json({ onConflict }) : { method: "POST" }),
+            purge:   (id) => request(`${b()}/trash/${encodeURIComponent(id)}`, { method: "DELETE" }),
+            emptyTrash: () => request(`${b()}/trash`, { method: "DELETE" }),
+            usage:   () => request(`${b()}/usage`),
+        };
+    }
+
+    const files = filesIn(null);
+    files.in = filesIn;
+    files.errorInfo = errorInfo;
+    // Copy or move between (or within) workspaces. `from`/`to` workspaces
+    // are "personal" | "space:<slug>"; onConflict fail | rename | replace.
+    // Resolves { results: [{ from, to, error, message }] } — per item.
+    files.transfer = ({ op, from, paths, to, folder, onConflict = "fail" }) => request("/files/transfer", {
+        method: "POST",
+        body: JSON.stringify({ op, from: { workspace: from, paths }, to: { workspace: to, folder: folder || "" }, onConflict }),
+    });
+
     fb.api = {
+        files,
         notes,
         todos: crud("todos"),
         contacts,

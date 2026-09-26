@@ -17,6 +17,25 @@ public class DatabaseFactoryTests : IDisposable
         Directory.CreateDirectory(_tempDbDir);
     }
 
+    // Two requests opening a brand-new context DB at once must not both run
+    // the lazy migrations ("duplicate column name").
+    [Fact]
+    public async Task CreateContextConnection_ParallelFirstOpens_MigrateOnce_Test()
+    {
+        var factory = new DatabaseFactory(_tempDbDir);
+        for (var round = 0; round < 5; round++)
+        {
+            var ctx = Fishbowl.Core.ContextRef.User("parallel_" + round);
+            await Task.WhenAll(Enumerable.Range(0, 8).Select(_ => Task.Run(() =>
+            {
+                using var c = factory.CreateContextConnection(ctx);
+            }, TestContext.Current.CancellationToken)));
+            using var check = factory.CreateContextConnection(ctx);
+            Assert.True(check.ExecuteScalar<long>("PRAGMA user_version") >= 9);
+        }
+        SqliteConnection.ClearAllPools();
+    }
+
     [Fact]
     public void CreateConnection_CreatesPhysicalFile_Test()
     {

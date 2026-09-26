@@ -15,6 +15,11 @@ public class DatabaseFactory
     private readonly string _spacesPath;
     private readonly string _systemDbPath;
     private readonly ILogger<DatabaseFactory> _logger;
+    // One lock per DB file: the lazy migrations must not run twice at once.
+    // A fresh space opened by two parallel requests (a Files pane lists and
+    // reads its usage together) would otherwise both see user_version 7 and
+    // both ALTER TABLE — "duplicate column name".
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, object> _initLocks = new(StringComparer.OrdinalIgnoreCase);
 
     static DatabaseFactory()
     {
@@ -336,7 +341,10 @@ public class DatabaseFactory
 
         if (loadVec) SqliteVecLoader.LoadInto(connection);
 
-        initializer(connection);
+        lock (_initLocks.GetOrAdd(Path.GetFullPath(dbPath), _ => new object()))
+        {
+            initializer(connection);
+        }
 
         return connection;
     }

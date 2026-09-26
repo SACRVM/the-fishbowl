@@ -66,6 +66,13 @@ class FbHubView extends HTMLElement {
                             <p>Events and reminders, yours.</p>
                         </div>
                     </a>
+                    <a class="tile" href="${hrefFor("#/files")}">
+                        <sac-icon name="folder"></sac-icon>
+                        <div>
+                            <h2>Files</h2>
+                            <p>Real files, two panes, every workspace.</p>
+                        </div>
+                    </a>
                 </main>
             </div>
             <sac-footer brand="THE FISHBOWL"></sac-footer>
