@@ -261,7 +261,7 @@ class SacTimeField extends HTMLElement {
                     display: inline-flex;
                     align-items: center;
                     padding: 0.35rem 0.5rem;
-                    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+                    font-family: var(--font-mono);
                     font-size: 0.78rem;
                     line-height: normal;
                     color: var(--text);

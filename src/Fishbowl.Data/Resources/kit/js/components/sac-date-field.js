@@ -436,7 +436,7 @@ class SacDateField extends HTMLElement {
                     min-width: 0;
                     width: 13ch;
                     padding: 0.35rem 0.5rem;
-                    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+                    font-family: var(--font-mono);
                     font-size: 0.78rem;
                     color: var(--text);
                     background: var(--field);
