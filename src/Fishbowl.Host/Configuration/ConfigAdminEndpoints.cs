@@ -207,7 +207,7 @@ internal static class ConfigSchema
             "Who may install apps into their personal desktop: everyone (default), admins, or off. A space's owner installs into the space unless this is off. Hot.",
             ValidateAppsLevel),
         new(DesktopPolicy.TrustedKey, false, false,
-            "Who may install an app in trusted mode (no sandbox, runs as the user; personal desktops only): everyone (default), admins, or off. Hot.",
+            "Who may install an app in trusted mode (no sandbox, runs as the user; personal desktops only): admins (default), everyone, or off. Hot.",
             ValidateAppsLevel),
         new(DesktopPolicy.AllowedOriginsKey, false, false,
             "Comma-separated origins apps may be installed from (e.g. https://owner.github.io); empty = any. Hot.",

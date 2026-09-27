@@ -469,12 +469,21 @@
         auth: {
             logout: () => request("/auth/logout", { method: "POST" })
         },
-        // The workspace's desktop: its tile arrangement (and, later, its
-        // installed apps). Scope-aware; cookie-only; in a space only the
-        // owner writes (the GET says so in canArrange). A PUT replaces the
-        // whole tile row — send every field.
+        // The workspace's desktop: its tile arrangement and its installed
+        // apps. Scope-aware; cookie-only; in a space only the owner writes
+        // (the GET says so in canArrange / canInstall). A PUT replaces the
+        // whole tile row — send every field. The server never fetches an
+        // app: install/update post the manifest and entry hash this browser
+        // read (sac.apps.inspect).
         desktop: {
             get:     ()          => request(ctx("/desktop")),
+            // { manifestUrl, manifest, integrity, mode, granted: ["files", "identity" | "identity:pseudonymous"] }
+            install: (body)      => request(ctx("/desktop/apps"), { method: "POST", body: JSON.stringify(body) }),
+            // Partial: { manifestUrl?, manifest?, integrity?, mode?, granted? } — new code needs its new hash.
+            updateApp: (id, body) => request(ctx(`/desktop/apps/${encodeURIComponent(id)}`), { method: "PATCH", body: JSON.stringify(body) }),
+            // purgeData moves the app's folder (Apps/<name>) to the trash; kept otherwise.
+            removeApp: (id, { purgeData = false } = {}) =>
+                request(ctx(`/desktop/apps/${encodeURIComponent(id)}${purgeData ? "?purgeData=true" : ""}`), { method: "DELETE" }),
             putTile: (key, tile) => request(ctx(`/desktop/tiles/${encodeURIComponent(key)}`), {
                 method: "PUT",
                 body: JSON.stringify({

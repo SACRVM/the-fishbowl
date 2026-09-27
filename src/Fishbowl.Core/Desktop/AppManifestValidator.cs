@@ -93,7 +93,7 @@ public static partial class AppManifestValidator
         OptionalString(manifest, "icon", 64);
         OptionalString(manifest, "description", 500);
 
-        var permissions = StringList(manifest, "permissions");
+        var permissions = PermissionList(manifest);
         foreach (var p in permissions)
         {
             if (!AppPermissions.All.Contains(p))
@@ -119,16 +119,40 @@ public static partial class AppManifestValidator
             version, permissions.Distinct().ToArray(), connect, opens.Distinct().ToArray(), json);
     }
 
-    // The capabilities the owner granted must be ones the manifest asked for.
+    // The capabilities the owner granted must be ones the manifest asked for;
+    // identity as the full profile or pseudonymous, not both.
     public static IReadOnlyList<string> ValidateGrants(IEnumerable<string>? granted, IReadOnlyList<string> permissions)
     {
         var list = (granted ?? Array.Empty<string>()).Distinct().ToArray();
         foreach (var g in list)
         {
-            if (!permissions.Contains(g))
+            var asked = g == AppPermissions.IdentityPseudonymous ? AppPermissions.Identity : g;
+            if (!permissions.Contains(asked))
                 throw Invalid("invalid_grant", $"\"{g}\" wasn't asked for by the manifest.", "granted");
         }
+        if (list.Contains(AppPermissions.Identity) && list.Contains(AppPermissions.IdentityPseudonymous))
+            throw Invalid("invalid_grant", "Grant identity or identity:pseudonymous, not both.", "granted");
         return list;
+    }
+
+    // The kit's shape is an object — { "files": true, "identity": false };
+    // a plain list of names is accepted too (and checked strictly).
+    private static string[] PermissionList(JsonElement manifest)
+    {
+        if (manifest.TryGetProperty("permissions", out var p) && p.ValueKind == JsonValueKind.Object)
+        {
+            var names = new List<string>();
+            foreach (var prop in p.EnumerateObject())
+            {
+                if (prop.Value.ValueKind is not (JsonValueKind.True or JsonValueKind.False))
+                    throw Invalid("invalid_manifest", $"permissions.{prop.Name} must be true or false.", "permissions");
+                // Asks this Fishbowl doesn't know are never granted, so they
+                // don't stop an install either (the kit passes them through).
+                if (prop.Value.ValueKind == JsonValueKind.True && AppPermissions.All.Contains(prop.Name)) names.Add(prop.Name);
+            }
+            return names.ToArray();
+        }
+        return StringList(manifest, "permissions").ToArray();
     }
 
     private static DesktopValidationException Invalid(string code, string message, string field) => new(code, message, field);

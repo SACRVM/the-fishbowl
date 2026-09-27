@@ -20,6 +20,12 @@ public static class AppPermissions
     public const string Identity = "identity";
 
     public static readonly string[] All = { Files, Identity };
+
+    // Grants are what the owner handed over, a subset of what the manifest
+    // asked for. Identity comes in two strengths: "identity" (the user's
+    // name) or "identity:pseudonymous" (a stable per-app id, nothing else) —
+    // either needs the manifest's "identity" ask, never both.
+    public const string IdentityPseudonymous = "identity:pseudonymous";
 }
 
 public static partial class DesktopTiles

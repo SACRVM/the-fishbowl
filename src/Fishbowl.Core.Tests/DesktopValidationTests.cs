@@ -94,7 +94,38 @@ public class DesktopValidationTests
         Assert.Contains("form-action 'none'", csp);
         Assert.Contains("base-uri 'none'", csp);
 
-        Assert.Contains("connect-src 'none'", FrameCsp.Build("https://owner.github.io", null));
+        // Nothing declared: only the bytes the guest itself builds.
+        Assert.Contains("connect-src blob: data:", FrameCsp.Build("https://owner.github.io", null));
+    }
+
+    [Fact]
+    public void FrameCsp_KitFromTheHost_AppFilesFromTheEntryFolder()
+    {
+        var csp = FrameCsp.Build("https://owner.github.io", new[] { "https://api.example.com" },
+            "https://fish.example", "https://owner.github.io/kanban/js/app.js");
+        Assert.Contains("script-src https://fish.example/kit/js/ https://owner.github.io/kanban/js/", csp);
+        Assert.Contains("style-src https://fish.example/kit/css/ https://owner.github.io/kanban/js/ 'unsafe-inline'", csp);
+        Assert.Contains("font-src https://fish.example/kit/fonts/ https://owner.github.io/kanban/js/", csp);
+        Assert.Contains("connect-src https://api.example.com blob: data:", csp);
+        Assert.Contains("frame-ancestors https://fish.example", csp);
+
+        Assert.Throws<ArgumentException>(() => FrameCsp.Build("https://owner.github.io", null, "https://fish.example", "https://other.github.io/app.js"));
+        Assert.Throws<ArgumentException>(() => FrameCsp.Build("https://owner.github.io", null, "https://fish.example", "https://owner.github.io/a'b/app.js"));
+        Assert.Throws<ArgumentException>(() => FrameCsp.Build("https://owner.github.io", null, "https://fish.example; script-src *"));
+    }
+
+    [Fact]
+    public void Manifest_PermissionsAsTheKitsObject_AndIdentityGrants()
+    {
+        var m = AppManifestValidator.Validate("https://owner.github.io/app.json", JsonDocument.Parse(
+            "{\"id\":\"k\",\"name\":\"K\",\"kind\":\"view\",\"tag\":\"app-k\",\"entry\":\"app.js\",\"permissions\":{\"files\":true,\"identity\":true,\"extra\":false}}").RootElement);
+        Assert.Equal(new[] { "files", "identity" }, m.Permissions);
+        Assert.Throws<DesktopValidationException>(() => AppManifestValidator.Validate("https://owner.github.io/app.json", JsonDocument.Parse(
+            "{\"id\":\"k\",\"name\":\"K\",\"kind\":\"view\",\"tag\":\"app-k\",\"entry\":\"app.js\",\"permissions\":{\"files\":\"yes\"}}").RootElement));
+
+        Assert.Equal(new[] { "identity:pseudonymous" }, AppManifestValidator.ValidateGrants(new[] { "identity:pseudonymous" }, m.Permissions));
+        Assert.Throws<DesktopValidationException>(() => AppManifestValidator.ValidateGrants(new[] { "identity", "identity:pseudonymous" }, m.Permissions));
+        Assert.Throws<DesktopValidationException>(() => AppManifestValidator.ValidateGrants(new[] { "identity:pseudonymous" }, new[] { "files" }));
     }
 
     [Theory]
@@ -113,6 +144,8 @@ public class DesktopValidationTests
     public void Policy_Levels()
     {
         Assert.Equal(DesktopPolicy.Everyone, DesktopPolicy.ParseLevel(null));
+        Assert.Equal(DesktopPolicy.Admins, DesktopPolicy.ParseLevel(null, DesktopPolicy.DefaultTrusted));
+        Assert.Equal(DesktopPolicy.Everyone, DesktopPolicy.ParseLevel("everyone", DesktopPolicy.DefaultTrusted));
         Assert.Equal(DesktopPolicy.Admins, DesktopPolicy.ParseLevel(" Admins "));
         Assert.Equal(DesktopPolicy.Off, DesktopPolicy.ParseLevel("off"));
         Assert.True(DesktopPolicy.Allows(DesktopPolicy.Everyone, false));

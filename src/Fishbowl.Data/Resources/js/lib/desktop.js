@@ -12,14 +12,19 @@
  * Tiles keep their stored position (the desktop has no reordering UI);
  * a tile never arranged sorts by its registry index.
  *
- * Palette groups (sac.commands; routes register with palette: false, since
- * the palette would navigate them out of a space):
+ * Palette groups (sac.commands). Routes still register with palette: false
+ * — not because the palette would leave a space (it scopes route hashes
+ * since kit 2.18) but because Apps and Go below already list them with the
+ * workspace's rules: hidden tiles, admin apps only in the personal
+ * workspace, Secrets never in a space. A "Views" group would repeat them
+ * and offer pages that don't work where you are.
  *   Apps      every visible tile, in desktop order
  *   Create    new note / todo / event — fb.desktop.go() into the view
  *   Go        the settings pages
  *   Workspace Personal and every space
- *   Notes     note titles of the active workspace (the palette filters
- *             labels; it has no async provider for full-text search)
+ *   Notes     full-text search in the active workspace's notes (a
+ *             sac.commands source over the hybrid search), title + the
+ *             matching words; picking one opens the note
  */
 (function () {
     const BUILTINS = [
@@ -36,6 +41,7 @@
     const SETTINGS = [
         { hash: "#/",        label: "Desktop",  icon: "home" },
         { hash: "#/spaces",  label: "Spaces",   icon: "users" },
+        { hash: "#/apps",    label: "Apps",     icon: "grid" },
         { hash: "#/keys",    label: "API keys", icon: "key" },
         { hash: "#/secrets", label: "Secrets",  icon: "lock", personal: true },
     ];
@@ -59,29 +65,46 @@
     }
 
     /**
-     * The workspace's desktop: every built-in merged with its stored tile,
-     * sorted by position. Hidden tiles are included (flagged) so the
-     * desktop can offer them back. { entries, canArrange }.
+     * The workspace's desktop: every built-in and every installed app
+     * (fb.desktopApps; key "app:<id>", `app` = the install record) merged
+     * with its stored tile, sorted by position. Hidden tiles are included
+     * (flagged) so the desktop can offer them back.
+     * { entries, canArrange, canInstall, canTrust }.
      */
     async function load() {
         const [apps, stored] = await Promise.all([
             builtins(),
-            fb.api.desktop.get().catch(() => ({ tiles: [], canArrange: false })),
+            fb.api.desktop.get().catch(() => ({ tiles: [], apps: [], canArrange: false })),
         ]);
         const byKey = new Map((stored.tiles || []).map((t) => [t.key, t]));
-        const entries = apps.map((app, i) => {
-            const t = byKey.get(app.key) || {};
+        const arranged = (entry, i) => {
+            const t = byKey.get(entry.key) || {};
             return {
-                ...app,
-                href: hrefOf(app),
+                ...entry,
                 position: typeof t.position === "number" ? t.position : i + 1,
                 size: SIZES.includes(t.size) ? t.size : "medium",
                 color: t.color && fb.tags.SLOTS.includes(t.color) ? t.color : null,
                 hidden: !!t.hidden,
             };
-        });
+        };
+        const entries = apps.map((app, i) => arranged({ ...app, href: hrefOf(app) }, i));
+        // Installed apps follow the built-ins until arranged.
+        fb.desktopApps?.sync(stored);
+        (stored.apps || []).forEach((a, j) => entries.push(arranged({
+            key: `app:${a.id}`,
+            app: a,
+            name: a.manifest?.name || a.id,
+            icon: a.manifest?.icon || "cube",
+            desc: a.manifest?.description || "",
+            href: null,
+        }, apps.length + j)));
         entries.sort((a, b) => a.position - b.position);
-        return { entries, canArrange: !!stored.canArrange };
+        return {
+            entries,
+            canArrange: !!stored.canArrange,
+            canInstall: !!stored.canInstall,
+            canTrust: !!stored.canTrust,
+        };
     }
 
     /** Store one tile's arrangement (the whole row) and resync the palette. */
@@ -121,7 +144,6 @@
     const PREFIX = "fb:desk:";
     let wanted = new Map();
     let spaces = [];
-    let noteTitles = [];
 
     function register(id, cmd) { wanted.set(PREFIX + id, { id: PREFIX + id, ...cmd }); }
 
@@ -135,7 +157,7 @@
         for (const e of entries.filter((x) => !x.hidden)) {
             register(`app:${e.key}`, {
                 label: e.name, icon: e.icon, group: "Apps",
-                run: () => sac.router.navigate(e.href),
+                run: e.app ? () => fb.desktopApps.open(e.app.id) : () => sac.router.navigate(e.href),
             });
         }
         if (entries.some((e) => e.key === "builtin:notes")) {
@@ -165,35 +187,61 @@
                 run: () => sac.scope.set({ type: "scoped", slug: s.slug }),
             });
         }
-        noteTitles.forEach((n) => register(`note:${n.id}`, {
-            label: n.title, icon: "note", group: "Notes",
-            run: () => go("notes", "open", n.id),
-        }));
-
         for (const c of sac.commands.list()) {
             if (c.id.startsWith(PREFIX) && !wanted.has(c.id)) sac.commands.unregister(c.id);
         }
         wanted.forEach((c) => sac.commands.register(c));
     }
 
-    // Note titles of the active workspace, newest first. Refreshed on a
-    // workspace switch and — throttled — on navigation, so a note written a
-    // minute ago is findable by the time the palette opens again.
-    let notesAt = 0;
-    async function refreshNotes(force) {
-        if (!force && Date.now() - notesAt < 15_000) return;
-        notesAt = Date.now();
-        try {
-            const notes = await fb.api.notes.list();
-            noteTitles = (notes || [])
-                .slice()
-                .sort((a, b) => String(b.updatedAt || "").localeCompare(String(a.updatedAt || "")))
-                .slice(0, 300)
-                .map((n) => ({ id: n.id, title: (n.title || "").trim() || "Untitled note" }));
-        } catch {
-            noteTitles = [];
-        }
-        syncCommands();
+    // Notes: full-text over the active workspace's hybrid search (same
+    // endpoint as the MCP search_memory tool), asked as you type. The
+    // server never holds secret plaintext; markers become a lock here.
+    function registerNoteSearch() {
+        if (!window.sac?.commands?.registerSource) return;
+        sac.commands.registerSource({
+            id: "fb-notes",
+            group: "Notes",
+            minLength: 2,
+            debounce: 200,
+            async search(q, { signal }) {
+                const res = await fb.api.search.query(q, { limit: 8 });
+                if (signal?.aborted) return [];
+                return (res?.notes || []).map((n) => ({
+                    id: `fb-note:${n.id}`,
+                    label: (n.title || "").trim() || "Untitled note",
+                    icon: n.archived ? "archive" : "note",
+                    hint: hintFor(n, q),
+                    run: () => go("notes", "open", n.id),
+                }));
+            },
+        });
+    }
+
+    /** A few plain words from the note around the first query term —
+     *  what makes a full-text hit recognisable. Never secret content:
+     *  markers (the only form the server has) show as a lock. */
+    function hintFor(note, q) {
+        const title = (note.title || "").trim();
+        let text = String(note.content || "")
+            .replace(/:{2,3}secret#\d+:{2,3}end/gi, "🔒")
+            .replace(/\[secret content hidden\]/g, "🔒")   // SecretStripper's placeholder
+            .replace(/^[ \t]*(```|~~~)[^\n]*$/gm, " ")
+            .replace(/^[ \t]{0,3}#{1,6}[ \t]+/gm, "")
+            .replace(/^[ \t]*(?:>|[-*+]|\d+[.)])[ \t]+(?:\[[ xX]\][ \t]+)?/gm, "")
+            .replace(/!?\[([^\]]*)\]\([^)]*\)/g, "$1")
+            .replace(/[`*_~|]+/g, " ")
+            .replace(/\s+/g, " ")
+            .trim();
+        if (title && text.startsWith(title)) text = text.slice(title.length).trim();
+        if (!text) return "";
+        const words = q.toLowerCase().split(/[^\p{L}\p{N}]+/u).filter(Boolean);
+        const lower = text.toLowerCase();
+        const at = words.map((w) => lower.indexOf(w)).filter((i) => i >= 0).sort((a, b) => a - b)[0] ?? 0;
+        // Start a few words before the match, on a word boundary.
+        let from = Math.max(0, at - 30);
+        if (from > 0) from = text.indexOf(" ", from) + 1 || from;
+        const cut = text.slice(from, from + 70);
+        return (from > 0 ? "…" : "") + cut + (from + 70 < text.length ? "…" : "");
     }
 
     async function loadSpaces() {
@@ -201,13 +249,12 @@
         syncCommands();
     }
 
-    window.addEventListener("sac:scope-changed", () => { refreshNotes(true); });
+    window.addEventListener("sac:scope-changed", () => syncCommands());
     window.addEventListener("fb:spaces-changed", loadSpaces);
-    window.addEventListener("hashchange", () => refreshNotes(false));
     window.addEventListener("DOMContentLoaded", () => {
+        registerNoteSearch();
         loadSpaces();
-        refreshNotes(true);
     });
 
-    fb.desktop = { SIZES, builtins, load, save, go, takeIntent, syncCommands, refreshNotes };
+    fb.desktop = { SIZES, builtins, load, save, go, takeIntent, syncCommands };
 })();

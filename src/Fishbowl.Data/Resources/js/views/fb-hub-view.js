@@ -15,6 +15,13 @@
  * their stored position, unarranged ones sort by registry index. Hidden
  * tiles come back from the toolbar ("Show hidden tiles"). A space member
  * who may not arrange gets no menus and no toolbar item.
+ *
+ * Installed apps (fb.desktopApps) are tiles like the built-ins, with
+ * SACRVM Desktop's origin line under the description and three more menu
+ * items: "Update to v…" (only when a newer version was found), "Permissions…"
+ * (sandboxed apps) and "Remove from this desktop". A tile opens its app in
+ * a kit window. The dashed "Install app" tile closes the grid, like SACRVM
+ * Desktop's — only for whoever may install here (policy, space owner).
  */
 class FbHubView extends HTMLElement {
     connectedCallback() {
@@ -23,12 +30,18 @@ class FbHubView extends HTMLElement {
         this.render();
         this.refresh();
         this._onContext = () => this.refresh();
+        this._onApps = () => this.refresh();
+        this._onUpdates = () => this._renderTiles();
         window.addEventListener("sac:scope-changed", this._onContext);
+        window.addEventListener("fb:apps-changed", this._onApps);
+        window.addEventListener("fb:app-updates", this._onUpdates);
         this._loadVersion();
     }
 
     disconnectedCallback() {
         window.removeEventListener("sac:scope-changed", this._onContext);
+        window.removeEventListener("fb:apps-changed", this._onApps);
+        window.removeEventListener("fb:app-updates", this._onUpdates);
     }
 
     async _loadVersion() {
@@ -85,6 +98,30 @@ class FbHubView extends HTMLElement {
                     width: 13rem;
                 }
 
+                /* SACRVM Desktop's install tile (.tile-add) and origin line
+                   (.tile-meta), desktop.css. */
+                fb-hub-view .tile-add {
+                    align-items: center;
+                    justify-content: center;
+                    gap: 0.6rem;
+                    background: transparent;
+                    border: 1px dashed var(--border-strong);
+                    color: var(--text-muted);
+                    font: inherit;
+                    font-weight: 600;
+                    font-size: 0.95rem;
+                    cursor: pointer;
+                }
+                fb-hub-view .tile-add > sac-icon { --icon-size: 32px; margin-bottom: 0; color: var(--text-muted); }
+                fb-hub-view .tile-add:hover { border-color: var(--accent); color: var(--text); }
+                fb-hub-view .tile-meta {
+                    color: var(--text-dim);
+                    font-size: 0.75rem;
+                    font-family: var(--font-mono);
+                    margin-top: 0.4rem;
+                    overflow-wrap: anywhere;
+                }
+
                 /* SACRVM Desktop's footprints, collapsed on narrow screens. */
                 fb-hub-view .grid .tile.size-wide  { grid-column: span 2; }
                 fb-hub-view .grid .tile.size-large { grid-column: span 2; grid-row: span 2; }
@@ -117,17 +154,28 @@ class FbHubView extends HTMLElement {
         if (!this.isConnected) return;
         this._entries = loaded.entries;
         this._canArrange = loaded.canArrange;
+        this._canInstall = loaded.canInstall;
         this._renderTiles();
     }
 
     /* -------------------------------------------------------- tiles -- */
 
     _renderTiles() {
-        this._grid.replaceChildren(...this._entries.filter((e) => !e.hidden).map((e) => {
+        const tiles = this._entries.filter((e) => !e.hidden).map((e) => {
             const tile = document.createElement("a");
             tile.className = "tile";
-            tile.href = e.href;
             tile.dataset.key = e.key;
+            if (e.app) {
+                // An installed app opens in a kit window, not by address.
+                tile.href = "#";
+                tile.classList.add("tile-window");
+                tile.addEventListener("click", (ev) => {
+                    ev.preventDefault();
+                    fb.desktopApps.open(e.app.id);
+                });
+            } else {
+                tile.href = e.href;
+            }
 
             const icon = document.createElement("sac-icon");
             icon.setAttribute("name", e.icon || "cube");
@@ -138,6 +186,13 @@ class FbHubView extends HTMLElement {
             const desc = document.createElement("p");
             desc.textContent = e.desc || "";
             body.append(h2, desc);
+            if (e.app) {
+                const meta = document.createElement("p");
+                meta.className = "tile-meta";
+                const version = e.app.version ? ` · v${e.app.version}` : "";
+                meta.textContent = `${hostOf(e.app.origin)}${version} · ${e.app.mode}`;
+                body.appendChild(meta);
+            }
 
             tile.append(icon, body);
             if (this._canArrange) tile.appendChild(this._menu(e));
@@ -145,8 +200,25 @@ class FbHubView extends HTMLElement {
             // Tile colour = the app's highlight, the SACRVM Desktop move.
             if (e.color) tile.style.setProperty("--accent", fb.accents.cssVar(e.color));
             return tile;
-        }));
+        });
+        if (this._canInstall) tiles.push(this._installTile());
+        this._grid.replaceChildren(...tiles);
         this._toolbar();
+    }
+
+    /** SACRVM Desktop's dashed tile that closes the grid. */
+    _installTile() {
+        const add = document.createElement("button");
+        add.type = "button";
+        add.className = "tile tile-add";
+        add.id = "fb-install-tile";
+        const icon = document.createElement("sac-icon");
+        icon.setAttribute("name", "plus");
+        const label = document.createElement("span");
+        label.textContent = this._entries.some((e) => e.app) ? "Install app" : "Install your first app";
+        add.append(icon, label);
+        add.addEventListener("click", () => fb.desktopApps.install());
+        return add;
     }
 
     /** "Show hidden tiles" — only when there are some and you may arrange. */
@@ -236,11 +308,24 @@ class FbHubView extends HTMLElement {
             document.createElement("hr"),
             item("hide", "Hide from this desktop"),
         );
+        if (e.app) {
+            // Items are added only when they apply — no dead entries.
+            const fresh = fb.desktopApps.updateFor(e.app.id);
+            const extra = [];
+            if (fresh) extra.push(item("app:update", `Update to v${fresh.version || "?"}…`));
+            if (e.app.mode === "sandboxed") extra.push(item("app:perms", "Permissions…"));
+            const remove = item("app:remove", "Remove from this desktop");
+            remove.dataset.danger = "";
+            menu.append(document.createElement("hr"), ...extra, remove);
+        }
 
         menu.addEventListener("sac:select", (ev) => {
             const action = ev.detail.action;
             if (action === "hide") this._update(e, { hidden: true });
             else if (action?.startsWith("size:")) this._update(e, { size: action.slice(5) });
+            else if (action === "app:update") fb.desktopApps.update(e.app.id);
+            else if (action === "app:perms") fb.desktopApps.permissions(e.app.id);
+            else if (action === "app:remove") fb.desktopApps.remove(e.app.id);
         });
 
         // The tile is a link: a click inside its menu must not follow it.
@@ -261,6 +346,10 @@ class FbHubView extends HTMLElement {
         }
     }
 
+}
+
+function hostOf(url) {
+    try { return new URL(url).host; } catch { return url || ""; }
 }
 
 customElements.define("fb-hub-view", FbHubView);

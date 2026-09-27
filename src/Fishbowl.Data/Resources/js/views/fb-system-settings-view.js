@@ -34,7 +34,7 @@
     const CHOICES = {
         "Auth:SignUp":     ["approval", "open", "closed"],
         "Apps:Install":    ["everyone", "admins", "off"],
-        "Apps:Trusted":    ["everyone", "admins", "off"],
+        "Apps:Trusted":    ["admins", "everyone", "off"],
         "Logging:Format":  ["plain", "json"],
         "Digest:Enabled":  ["false", "true"],
         "Acme:AcceptTos":  ["false", "true"],

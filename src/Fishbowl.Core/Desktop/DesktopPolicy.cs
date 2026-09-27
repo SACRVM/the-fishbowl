@@ -7,7 +7,7 @@ namespace Fishbowl.Core.Desktop;
 //                       (everyone | admins | off). A space desktop is always
 //                       its owner's call, and only `off` stops it.
 //   Apps:Trusted        who may pick the trusted mode (everyone | admins |
-//                       off) — personal desktops only, always.
+//                       off; default admins) — personal desktops only.
 //   Apps:AllowedOrigins optional comma-separated origin allow-list (empty =
 //                       any origin).
 //   Apps:StoreOwners    GitHub owners the App Store tab lists.
@@ -29,13 +29,18 @@ public static class DesktopPolicy
     public const string DefaultStoreOwners = "SACRVM";
     public const string DefaultStoreTopic = "sacrvm-app";
 
-    public static string ParseLevel(string? value) =>
+    // Unset or unknown falls back to `fallback`: everyone for Apps:Install,
+    // admins for Apps:Trusted (trusted code runs as the user, unsandboxed).
+    public static string ParseLevel(string? value, string fallback = Everyone) =>
         value?.Trim().ToLowerInvariant() switch
         {
+            Everyone => Everyone,
             Admins => Admins,
             Off => Off,
-            _ => Everyone,
+            _ => fallback,
         };
+
+    public const string DefaultTrusted = Admins;
 
     public static bool Allows(string level, bool isAdmin) => level switch
     {

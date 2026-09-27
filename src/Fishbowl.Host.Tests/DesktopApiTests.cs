@@ -130,7 +130,7 @@ public class DesktopApiTests : IClassFixture<WebApplicationFactory<Program>>, ID
         var desk = await Json(await c.GetAsync("/api/v1/desktop", Ct));
         Assert.Single(desk.GetProperty("apps").EnumerateArray());
         Assert.True(desk.GetProperty("canInstall").GetBoolean());
-        Assert.True(desk.GetProperty("canTrust").GetBoolean());
+        Assert.False(desk.GetProperty("canTrust").GetBoolean());   // trusted: admins by default
 
         // Another user never sees it.
         Assert.Empty((await Json(await As(Bob).GetAsync("/api/v1/desktop", Ct))).GetProperty("apps").EnumerateArray());
@@ -152,6 +152,8 @@ public class DesktopApiTests : IClassFixture<WebApplicationFactory<Program>>, ID
         Assert.Equal(2, (await Json(grants)).GetProperty("granted").GetArrayLength());
 
         // Sandboxed → trusted drops pin and grants; back needs a pin again.
+        // (Trusted is admins-only by default; this instance lets everyone.)
+        await Config(DesktopPolicy.TrustedKey, "everyone");
         var trusted = await Json(await c.PatchAsJsonAsync("/api/v1/desktop/apps/color-bucket", new { mode = "trusted" }, Ct));
         Assert.Equal("trusted", trusted.GetProperty("mode").GetString());
         Assert.Equal(JsonValueKind.Null, trusted.GetProperty("entryIntegrity").ValueKind);
@@ -173,6 +175,35 @@ public class DesktopApiTests : IClassFixture<WebApplicationFactory<Program>>, ID
         Assert.Equal("invalid_mode", await ErrorOf(await c.PostAsJsonAsync("/api/v1/desktop/apps", Install(mode: "root"), Ct)));
         var badConnect = await c.PostAsJsonAsync("/api/v1/desktop/apps", Install(extra: ",\"connect\":[\"https://x.example; script-src *\"]"), Ct);
         Assert.Equal(HttpStatusCode.BadRequest, badConnect.StatusCode);
+    }
+
+    [Fact]
+    public async Task Trusted_DefaultsToAdmins()
+    {
+        Assert.False((await Json(await As(Alice).GetAsync("/api/v1/desktop", Ct))).GetProperty("canTrust").GetBoolean());
+        Assert.True((await Json(await As(Admin).GetAsync("/api/v1/desktop", Ct))).GetProperty("canTrust").GetBoolean());
+        Assert.Equal(HttpStatusCode.Forbidden,
+            (await As(Alice).PostAsJsonAsync("/api/v1/desktop/apps", Install("t", integrity: null, mode: "trusted"), Ct)).StatusCode);
+    }
+
+    [Fact]
+    public async Task Install_AcceptsTheKitsManifestShape_AndIdentityLevels()
+    {
+        var c = As(Alice);
+        var kitShape = new
+        {
+            manifestUrl = "https://owner.github.io/kanban/app.json",
+            manifest = JsonDocument.Parse(
+                "{\"id\":\"kanban\",\"name\":\"Kanban\",\"kind\":\"window\",\"tag\":\"app-kanban\",\"entry\":\"app.js\",\"permissions\":{\"files\":true,\"identity\":true},\"src\":\"https://owner.github.io/kanban/app.js\",\"entryIntegrity\":\"" + Pin + "\"}").RootElement,
+            integrity = Pin,
+            mode = "sandboxed",
+            granted = new[] { "identity:pseudonymous" },
+        };
+        var created = await c.PostAsJsonAsync("/api/v1/desktop/apps", kitShape, Ct);
+        Assert.Equal(HttpStatusCode.Created, created.StatusCode);
+        Assert.Equal("identity:pseudonymous", (await Json(created)).GetProperty("granted")[0].GetString());
+        var both = await c.PatchAsJsonAsync("/api/v1/desktop/apps/kanban", new { granted = new[] { "identity", "identity:pseudonymous" } }, Ct);
+        Assert.Equal("invalid_grant", await ErrorOf(both));
     }
 
     [Theory]
@@ -285,18 +316,24 @@ public class DesktopApiTests : IClassFixture<WebApplicationFactory<Program>>, ID
     {
         var c = As(Alice);
         await c.PostAsJsonAsync("/api/v1/desktop/apps", Install(extra: ",\"connect\":[\"https://api.example.com\"]"), Ct);
+        await Config(DesktopPolicy.TrustedKey, "everyone");
         await c.PostAsJsonAsync("/api/v1/desktop/apps", Install("mine", integrity: null, mode: "trusted"), Ct);
 
         var frame = await c.GetAsync($"/apps/frame/user/{Alice}/color-bucket", Ct);
         Assert.Equal(HttpStatusCode.OK, frame.StatusCode);
         var csp = string.Join(" ", frame.Headers.GetValues("Content-Security-Policy"));
-        Assert.Equal(FrameCsp.Build("https://owner.github.io", new[] { "https://api.example.com" }), csp);
+        Assert.Equal(FrameCsp.Build("https://owner.github.io", new[] { "https://api.example.com" },
+            "http://localhost", "https://owner.github.io/color-bucket/app.js"), csp);
         Assert.Equal("nosniff", frame.Headers.GetValues("X-Content-Type-Options").Single());
         Assert.Equal("no-referrer", frame.Headers.GetValues("Referrer-Policy").Single());
         var html = await frame.Content.ReadAsStringAsync(Ct);
-        Assert.Contains($"src=\"https://owner.github.io/color-bucket/app.js\" integrity=\"{Pin}\" crossorigin=\"anonymous\"", html);
+        // The kit's harness: the kit and its guest runtime, never the entry
+        // (the bridge hands the pinned entry over at boot).
+        Assert.Contains("data-sac-guest", html);
         Assert.Contains("data-app-tag=\"app-color-bucket\"", html);
+        Assert.Contains("/kit/js/all.js", html);
         Assert.Contains(Fishbowl.Api.Endpoints.DesktopApi.GuestScript, html);
+        Assert.DoesNotContain("app.js\"", html);
 
         Assert.Equal(HttpStatusCode.NotFound, (await c.GetAsync($"/apps/frame/user/{Alice}/nope", Ct)).StatusCode);
         Assert.Equal(HttpStatusCode.NotFound, (await c.GetAsync($"/apps/frame/user/{Alice}/mine", Ct)).StatusCode);   // trusted: no frame
@@ -313,7 +350,7 @@ public class DesktopApiTests : IClassFixture<WebApplicationFactory<Program>>, ID
         var spaceHtml = await spaceFrame.Content.ReadAsStringAsync(Ct);
         Assert.DoesNotContain("<script>alert(1)</script>", spaceHtml);
         Assert.Contains("&lt;script&gt;", spaceHtml);
-        Assert.Contains("connect-src 'none'", string.Join(" ", spaceFrame.Headers.GetValues("Content-Security-Policy")));
+        Assert.Contains("connect-src blob: data:", string.Join(" ", spaceFrame.Headers.GetValues("Content-Security-Policy")));
         Assert.Equal(HttpStatusCode.NotFound, (await As(Bob).GetAsync($"/apps/frame/space/{space.Slug}/color-bucket", Ct)).StatusCode);
     }
 

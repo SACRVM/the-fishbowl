@@ -286,6 +286,74 @@ public class DesktopTests
         }
     }
 
+    // Full text: the palette's Notes group searches note bodies of the active
+    // workspace (hybrid search), shows the matching words and opens the note;
+    // inside a space it finds only that space's notes and stays in the space.
+    [Fact]
+    public async Task Palette_FullTextNotes_PerWorkspace_Test()
+    {
+        var (context, page, errors) = await OpenAsync();
+        try
+        {
+            var word = "zq" + Guid.NewGuid().ToString("N")[..8];
+            var personalTitle = "Personal ft " + word[..6];
+            var created = await page.APIRequest.PostAsync(_fixture.BaseUrl + "/api/v1/notes", new APIRequestContextOptions
+            {
+                DataObject = new { title = personalTitle, content = $"# {personalTitle}\n\nThe ferry leaves at noon, bring {word} along." },
+            });
+            Assert.True(created.Ok);
+            var slug = await CreateSpaceAsync(page, "FullText");
+            var spaceTitle = "Space ft " + word[..6];
+            var spaced = await page.APIRequest.PostAsync($"{_fixture.BaseUrl}/api/v1/spaces/{slug}/notes", new APIRequestContextOptions
+            {
+                DataObject = new { title = spaceTitle, content = $"# {spaceTitle}\n\nShared {word} checklist." },
+            });
+            Assert.True(spaced.Ok);
+
+            var palette = page.Locator("sac-command-palette");
+            var input = palette.Locator("input");
+            var options = palette.Locator("[role='option']");
+
+            // Personal: the body word finds the personal note only, with the words around it.
+            await page.GotoAsync(_fixture.BaseUrl + "/#/");
+            await Assertions.Expect(Cell(page, "builtin:notes")).ToBeVisibleAsync(new() { Timeout = 5000 });
+            await page.Keyboard.PressAsync("Control+k");
+            await input.FillAsync(word);
+            var hit = options.Filter(new() { HasText = personalTitle });
+            await Assertions.Expect(hit).ToHaveCountAsync(1, new() { Timeout = 8000 });
+            await Assertions.Expect(hit).ToContainTextAsync("bring " + word);
+            await Assertions.Expect(options.Filter(new() { HasText = spaceTitle })).ToHaveCountAsync(0);
+            await page.ScreenshotAsync(new PageScreenshotOptions { Path = Path.Combine(Path.GetTempPath(), "fishbowl_ui_palette_fulltext.png") });
+            await hit.ClickAsync();
+            await page.WaitForURLAsync(u => u.EndsWith("#/notes"));
+            await page.WaitForFunctionAsync("t => (document.querySelector('fb-notes-view #content')?.value || '').includes(t)", word,
+                new() { Timeout = 5000 });
+
+            // In the space: only the space's note, and it opens in the space.
+            await page.GotoAsync($"{_fixture.BaseUrl}/#/space/{slug}/");
+            await Assertions.Expect(Cell(page, "builtin:notes")).ToBeVisibleAsync(new() { Timeout = 5000 });
+            await page.Keyboard.PressAsync("Control+k");
+            await input.FillAsync(word);
+            var spaceHit = options.Filter(new() { HasText = spaceTitle });
+            await Assertions.Expect(spaceHit).ToHaveCountAsync(1, new() { Timeout = 8000 });
+            await Assertions.Expect(options.Filter(new() { HasText = personalTitle })).ToHaveCountAsync(0);
+            await spaceHit.ClickAsync();
+            await page.WaitForURLAsync(u => u.EndsWith($"#/space/{slug}/notes"));
+
+            // An app picked from the palette stays in the space.
+            await page.Keyboard.PressAsync("Control+k");
+            await input.FillAsync("Todos");
+            await Assertions.Expect(options.First).ToContainTextAsync("Todos");
+            await page.Keyboard.PressAsync("Enter");
+            await page.WaitForURLAsync(u => u.EndsWith($"#/space/{slug}/todos"));
+            Assert.Empty(errors);
+        }
+        finally
+        {
+            await context.CloseAsync();
+        }
+    }
+
     [Fact]
     public async Task Desktop_Phone_OneColumn_Test()
     {

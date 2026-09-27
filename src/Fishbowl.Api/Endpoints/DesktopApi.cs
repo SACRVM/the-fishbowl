@@ -30,15 +30,19 @@ namespace Fishbowl.Api.Endpoints;
 //   trusted    personal desktops only, when Apps:Trusted allows; no pin
 //
 // GET /apps/frame/{ctxType}/{ctxId}/{appId} serves a sandboxed app's frame
-// document: the kit, the guest bridge and the pinned entry, under a per-app
-// CSP (FrameCsp). Anything it can't serve is a 404, never a hint.
+// document — the kit's harness (sac.apps.frameUrl points here): the kit and
+// its guest runtime, never the entry itself (the host hands the pinned entry
+// over in the bridge's boot message), under a per-app CSP (FrameCsp).
+// Anything it can't serve is a 404, never a hint.
 public static class DesktopApi
 {
     public sealed record TileRequest(double? Position, string? Size, string? Color, bool? Hidden);
     public sealed record InstallRequest(string? ManifestUrl, JsonElement Manifest, string? Integrity, string? Mode, string[]? Granted);
     public sealed record UpdateRequest(string? ManifestUrl, JsonElement? Manifest, string? Integrity, string? Mode, string[]? Granted);
 
-    public const string GuestScript = "/js/lib/app-guest.js";
+    // The kit's guest runtime; the frame document loads it after the kit
+    // (the harness contract in kit/js/lib/app-bridge.js).
+    public const string GuestScript = "/kit/js/lib/app-guest.js";
 
     public static IEndpointRouteBuilder MapDesktopApi(this IEndpointRouteBuilder routes)
     {
@@ -82,7 +86,7 @@ public static class DesktopApi
     {
         var system = http.RequestServices.GetRequiredService<ISystemRepository>();
         var install = DesktopPolicy.ParseLevel(await system.GetConfigAsync(DesktopPolicy.InstallKey, ct));
-        var trusted = DesktopPolicy.ParseLevel(await system.GetConfigAsync(DesktopPolicy.TrustedKey, ct));
+        var trusted = DesktopPolicy.ParseLevel(await system.GetConfigAsync(DesktopPolicy.TrustedKey, ct), DesktopPolicy.DefaultTrusted);
         var origins = DesktopPolicy.ParseOrigins(await system.GetConfigAsync(DesktopPolicy.AllowedOriginsKey, ct));
         var isAdmin = (await system.GetUserAsync(t.UserId, ct))?.IsAdmin == true;
 
@@ -337,7 +341,8 @@ public static class DesktopApi
         catch (DesktopValidationException) { return Results.NotFound(); }
 
         string csp;
-        try { csp = FrameCsp.Build(app.Origin, m.Connect); }
+        var hostOrigin = AppOrigins.TryNormalize($"{http.Request.Scheme}://{http.Request.Host}", out var self) ? self : null;
+        try { csp = FrameCsp.Build(app.Origin, m.Connect, hostOrigin, app.EntryUrl); }
         catch (ArgumentException) { return Results.NotFound(); }
 
         var headers = http.Response.Headers;
@@ -346,25 +351,27 @@ public static class DesktopApi
         headers["Referrer-Policy"] = "no-referrer";
         headers.XFrameOptions = "SAMEORIGIN";
         headers.CacheControl = "no-store";
-        return Results.Content(FrameHtml(app, m), "text/html; charset=utf-8", Encoding.UTF8);
+        return Results.Content(FrameHtml(m), "text/html; charset=utf-8", Encoding.UTF8);
     }
 
-    private static string FrameHtml(DesktopApp app, ValidatedManifest m)
+    // The kit's harness shape: <html data-sac-guest>, ui.css, all.js, then
+    // the guest runtime. No entry script — the guest injects it from the
+    // boot message, with the pin, once the kit is ready.
+    private static string FrameHtml(ValidatedManifest m)
     {
         static string E(string? s) => WebUtility.HtmlEncode(s ?? "");
         return $"""
             <!DOCTYPE html>
-            <html lang="en" data-app-id="{E(app.Id)}" data-app-tag="{E(m.Tag)}" data-app-kind="{E(m.Kind)}">
+            <html lang="en" data-sac-guest data-app-tag="{E(m.Tag)}">
             <head>
             <meta charset="utf-8">
             <meta name="viewport" content="width=device-width, initial-scale=1">
             <title>{E(m.Name)}</title>
             <link rel="stylesheet" href="/kit/css/ui.css">
-            <script defer src="/kit/js/all.js"></script>
-            <script defer src="{GuestScript}"></script>
-            <script defer src="{E(app.EntryUrl)}" integrity="{E(app.EntryIntegrity)}" crossorigin="anonymous"></script>
+            <script src="/kit/js/all.js"></script>
+            <script src="{GuestScript}"></script>
             </head>
-            <body class="app-page"></body>
+            <body></body>
             </html>
             """;
     }

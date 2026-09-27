@@ -882,6 +882,13 @@ app.MapFallback("{*path}", async (HttpContext context, IResourceProvider resourc
         context.Response.Headers["Cache-Control"] = "no-cache, no-store, must-revalidate";
     }
 
+    // A sandboxed app's frame has an opaque origin: its font loads are CORS
+    // requests. The kit's fonts are public, so they say so.
+    if (path.StartsWith("kit/fonts/", StringComparison.OrdinalIgnoreCase))
+    {
+        context.Response.Headers.AccessControlAllowOrigin = "*";
+    }
+
     var contentType = GetContentType(path);
     return Results.Bytes(resource.Data, contentType);
 });
