@@ -204,6 +204,95 @@ public class VaultTests
     }
 
     /// <summary>
+    /// An archived note is read-only, but its secrets still decrypt: opening
+    /// it from the archive view after a reload shows the secret once the
+    /// vault is unlocked.
+    /// </summary>
+    [Fact]
+    public async Task Vault_ArchivedNote_StillDecrypts_Test()
+    {
+        var context = await _fixture.Browser!.NewContextAsync(new BrowserNewContextOptions { IgnoreHTTPSErrors = true });
+        var page = await context.NewPageAsync();
+        var api = page.APIRequest;
+        var baseUrl = _fixture.BaseUrl;
+        await ResetVaultAsync(api, baseUrl);
+        string? noteId = null;
+        try
+        {
+            var created = await api.PostAsync($"{baseUrl}/api/v1/notes", new APIRequestContextOptions
+            {
+                DataObject = new { title = "Vault archived", content = "" },
+            });
+            noteId = (await created.JsonAsync())!.Value.GetProperty("id").GetString()!;
+
+            await OpenNoteAsync(page, baseUrl, "Vault archived");
+            await page.Locator("fb-notes-view #content").EvaluateAsync(
+                $"e => {{ e.value = '# Vault archived\\n\\n:::secret\\n{Secret}\\n:::end\\n'; e.dispatchEvent(new Event('change')); }}");
+            var setup = page.Locator("sac-dialog[title='Set up secrets']");
+            await setup.WaitForAsync(new LocatorWaitForOptions { Timeout = 5000 });
+            await setup.Locator("input[name='pass']").FillAsync(Passphrase);
+            await setup.Locator("input[name='confirm']").FillAsync(Passphrase);
+            await setup.GetByRole(AriaRole.Button, new() { Name = "Next" }).ClickAsync();
+            var recovery = page.Locator("sac-dialog[title='Your recovery key']");
+            await recovery.WaitForAsync(new LocatorWaitForOptions { Timeout = 10000 });
+            var words = (await recovery.Locator(".fb-vault-words li").AllTextContentsAsync()).Select(w => w.Trim()).ToArray();
+            foreach (var name in new[] { "a", "b" })
+            {
+                var label = await recovery.Locator($"input[name='{name}']").EvaluateAsync<string>("i => i.closest('label').textContent");
+                var position = int.Parse(Regex.Match(label, @"\d+").Value);
+                await recovery.Locator($"input[name='{name}']").FillAsync(words[position - 1]);
+            }
+            await recovery.GetByRole(AriaRole.Button, new() { Name = "I wrote them down" }).ClickAsync();
+            var offer = page.Locator("sac-dialog[title='Unlock with a passkey too?']");
+            try
+            {
+                await offer.WaitForAsync(new LocatorWaitForOptions { Timeout = 3000 });
+                await offer.GetByRole(AriaRole.Button, new() { Name = "Not now" }).ClickAsync();
+            }
+            catch (TimeoutException) { /* no passkey offer here */ }
+            await WaitForAsync(async () =>
+            {
+                var n = await GetNoteAsync(api, baseUrl, noteId);
+                return n.GetProperty("content").GetString()!.Contains(":::secret#0:::end") ? n : (JsonElement?)null;
+            });
+
+            // Archive it from its row.
+            var row = page.Locator(".nv-item", new PageLocatorOptions { HasText = "Vault archived" }).First;
+            await row.HoverAsync();
+            await row.Locator("[data-action='archive']").ClickAsync();
+            await WaitForAsync(async () =>
+            {
+                var n = await GetNoteAsync(api, baseUrl, noteId);
+                return n.GetProperty("archived").GetBoolean() ? n : (JsonElement?)null;
+            });
+
+            // Reload: locked. Show the archive, open the note, unlock.
+            await page.ReloadAsync();
+            var unlock = page.Locator("sac-dialog[title='Unlock secrets']");
+            try
+            {
+                await unlock.WaitForAsync(new LocatorWaitForOptions { Timeout = 3000 });
+                await unlock.GetByRole(AriaRole.Button, new() { Name = "Cancel" }).ClickAsync();
+            }
+            catch (TimeoutException) { /* nothing asked on load */ }
+            await page.Locator("#toggle-archived-btn").ClickAsync();
+            await page.Locator(".nv-item", new PageLocatorOptions { HasText = "Vault archived" }).First.ClickAsync();
+            await unlock.WaitForAsync(new LocatorWaitForOptions { Timeout = 5000 });
+            await unlock.Locator("input[name='pass']").FillAsync(Passphrase);
+            await unlock.GetByRole(AriaRole.Button, new() { Name = "Unlock" }).ClickAsync();
+            await page.WaitForFunctionAsync(
+                "() => document.querySelector('fb-notes-view #content').value.includes('" + Secret + "')",
+                null, new PageWaitForFunctionOptions { Timeout = 5000 });
+        }
+        finally
+        {
+            if (noteId is not null) await api.DeleteAsync($"{baseUrl}/api/v1/notes/{noteId}");
+            await ResetVaultAsync(api, baseUrl);
+            await context.CloseAsync();
+        }
+    }
+
+    /// <summary>
     /// Phases 2 + 3: set up from Settings → Secrets with a passkey (Chromium's
     /// virtual authenticator with PRF), unlock with it after a reload, use it
     /// to confirm a passphrase change, the last-recoverable-slot guard, and
