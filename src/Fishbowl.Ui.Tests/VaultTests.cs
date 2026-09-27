@@ -131,6 +131,8 @@ public class VaultTests
             var pill = page.Locator("#locked-pill");
             Assert.True(await pill.IsVisibleAsync());
             Assert.Equal("", await page.Locator("fb-notes-view #content").GetAttributeAsync("readonly"));
+            // Read-only because locked, not archived: no "Archived" label.
+            Assert.False(await page.Locator("#archived-pill").IsVisibleAsync());
 
             // Locked, the block reads as an ordinary secret block — never the
             // raw storage marker.

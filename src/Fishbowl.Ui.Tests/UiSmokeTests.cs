@@ -259,11 +259,51 @@ public class UiSmokeTests
 
         await page.GotoAsync(_fixture.BaseUrl + "/#/notes");
         var row = page.Locator(".nv-item", new PageLocatorOptions { HasText = title[..40] }).First;
-        await row.HoverAsync();
+
+        // Mouse: nothing is reserved for the actions — at rest the title runs
+        // to the row's inner edge…
+        await page.Mouse.MoveAsync(0, 0);
+        var rowBox = (await row.BoundingBoxAsync())!;
         var titleBox = (await row.Locator(".nv-item-title").BoundingBoxAsync())!;
-        var actionsBox = (await row.Locator(".nv-item-actions").BoundingBoxAsync())!;
-        Assert.True(titleBox.X + titleBox.Width <= actionsBox.X,
-            $"title ends at {titleBox.X + titleBox.Width}, actions start at {actionsBox.X}");
+        Assert.True(titleBox.X + titleBox.Width >= rowBox.X + rowBox.Width - 14,
+            $"title ends at {titleBox.X + titleBox.Width}, row at {rowBox.X + rowBox.Width}");
+        // …and on hover the buttons lay over its end behind a fade, inside the row.
+        await row.HoverAsync();
+        var actions = row.Locator(".nv-item-actions");
+        var actionsBox = (await actions.BoundingBoxAsync())!;
+        var firstBtn = (await row.Locator(".nv-item-action").First.BoundingBoxAsync())!;
+        Assert.True(firstBtn.X >= actionsBox.X + 20, $"fade {actionsBox.X}, first button {firstBtn.X}");
+        Assert.True(actionsBox.X + actionsBox.Width <= rowBox.X + rowBox.Width);
+        Assert.NotEqual("none", await actions.EvaluateAsync<string>("e => getComputedStyle(e).backgroundImage"));
+
+        // Touch: the actions are always shown, so the title row reserves them.
+        var phone = await _fixture.Browser!.NewContextAsync(new BrowserNewContextOptions
+        {
+            IgnoreHTTPSErrors = true,
+            ViewportSize = new ViewportSize { Width = 390, Height = 800 },
+            IsMobile = true,
+            HasTouch = true,
+        });
+        var pp = await phone.NewPageAsync();
+        await pp.GotoAsync(_fixture.BaseUrl + "/#/notes");
+        var prow = pp.Locator(".nv-item", new PageLocatorOptions { HasText = title[..40] }).First;
+        var pTitle = (await prow.Locator(".nv-item-title").BoundingBoxAsync())!;
+        var pActions = (await prow.Locator(".nv-item-actions").BoundingBoxAsync())!;
+        Assert.True(pTitle.X + pTitle.Width <= pActions.X,
+            $"phone: title ends at {pTitle.X + pTitle.Width}, actions start at {pActions.X}");
+        // Phone: the tag strip is one line that scrolls sideways — never clamped.
+        var strip = pp.Locator("#tag-filter");
+        if (await strip.IsVisibleAsync())
+            Assert.Equal("nowrap", await strip.EvaluateAsync<string>("e => getComputedStyle(e).flexWrap"));
+        await phone.CloseAsync();
+
+        // Nothing open: the kit's empty state, and its button starts a note.
+        await page.GotoAsync(_fixture.BaseUrl + "/#/notes");
+        var empty = page.Locator("fb-notes-view #editor-empty");
+        await Assertions.Expect(empty).ToBeVisibleAsync();
+        await Assertions.Expect(empty.Locator("h3")).ToHaveTextAsync("No note open");
+        await empty.Locator("#empty-new-btn").ClickAsync();
+        await Assertions.Expect(page.Locator("fb-notes-view #editor")).ToBeVisibleAsync();
 
         // One gutter: the search field and the rows share both edges — in
         // the notes and the todos list.

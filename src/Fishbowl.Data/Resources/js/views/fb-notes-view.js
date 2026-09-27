@@ -326,13 +326,42 @@ class FbNotesView extends HTMLElement {
                     align-items: center;
                     gap: 6px;
                     margin-bottom: 4px;
-                    /* Always reserve the whole action row (3 × 22px + gaps), so
-                       the icons that fade in on hover never sit on the title —
-                       and the title doesn't re-truncate when they appear. */
+                    /* Touch: the actions are always shown, so reserve their
+                       row (3 × 22px + gaps) and they never sit on the title. */
                     padding-right: 72px;
                 }
                 /* A note awaiting review has a fourth button (approve). */
                 fb-notes-view .nv-item.pending .nv-item-title-row { padding-right: 96px; }
+                /* Mouse: nothing is reserved — the title runs the full width,
+                   and on hover / focus the actions lay over the row's right
+                   end on a fade of the row's own colour. At rest only a
+                   persistent indicator (active pin / archive, approve) shows,
+                   on the same fade. */
+                @media (hover: hover) and (pointer: fine) {
+                    fb-notes-view .nv-item-title-row,
+                    fb-notes-view .nv-item.pending .nv-item-title-row { padding-right: 0; }
+                    fb-notes-view .nv-item {
+                        --nv-row-bg: var(--panel);
+                    }
+                    fb-notes-view .nv-item:hover { --nv-row-bg: var(--hover); }
+                    fb-notes-view .nv-item.selected { --nv-row-bg: var(--accent-tint); }
+                    fb-notes-view .nv-item-action { --icon-btn-size: 26px; --icon-btn-icon: 14px; }
+                    fb-notes-view .nv-item-actions {
+                        /* The backing reaches below the title's descenders. */
+                        top: 2px;
+                        right: 4px;
+                        gap: 0;
+                        padding: 2px 0 6px 24px;
+                        border-radius: var(--radius-m);
+                        /* A tint (hover / selection) is translucent: lay it
+                           over the pane colour so the fade hides the title. */
+                        background:
+                            linear-gradient(to right, transparent, var(--nv-row-bg) 20px),
+                            linear-gradient(to right, transparent, var(--panel) 20px);
+                    }
+                    fb-notes-view .nv-item:not(:hover):not(:focus-within) .nv-item-action:not(.active):not(.approve) { display: none; }
+                    fb-notes-view .nv-item:not(:hover):not(:focus-within) .nv-item-actions:not(:has(.active, .approve)) { background: none; }
+                }
                 fb-notes-view .nv-item-title {
                     font-weight: 600;
                     font-size: 14px;
@@ -517,6 +546,17 @@ class FbNotesView extends HTMLElement {
                     padding: 10px 12px 8px;
                 }
                 fb-notes-view .nv-tag-collapsible[hidden] { display: none !important; }
+                /* Phone: one line that scrolls sideways — the collapsible then
+                   never overflows, so no "more" tab. */
+                @media (max-width: 768px) {
+                    fb-notes-view .nv-tag-filter {
+                        flex-wrap: nowrap;
+                        overflow-x: auto;
+                        scrollbar-width: none;
+                    }
+                    fb-notes-view .nv-tag-filter::-webkit-scrollbar { display: none; }
+                    fb-notes-view .nv-tag-filter > * { flex: none; }
+                }
                 fb-notes-view .nv-editor-body {
                     flex: 1;
                     overflow: auto;
@@ -525,23 +565,9 @@ class FbNotesView extends HTMLElement {
                     display: flex;
                     flex-direction: column;
                 }
-                fb-notes-view .nv-empty-state {
-                    flex: 1;
-                    display: flex;
-                    flex-direction: column;
-                    align-items: center;
-                    justify-content: center;
-                    color: var(--text-muted);
-                    gap: 12px;
-                }
-                fb-notes-view .nv-empty-state sac-icon {
-                    --icon-size: 72px;
-                    opacity: 0.2;
-                }
-                fb-notes-view .nv-empty-state p {
-                    margin: 0;
-                    font-size: 14px;
-                }
+                /* Nothing open: the kit's .empty-state, centred in the pane. */
+                fb-notes-view .nv-empty { flex: 1; justify-content: center; }
+                fb-notes-view .nv-empty[hidden] { display: none; }
                 /* The editor IS the pane: no card, no rounded corners, no
                    focus ring — a sheet of paper, not a form field. These
                    beat the component's own :host frame (outer-document
@@ -618,9 +644,11 @@ class FbNotesView extends HTMLElement {
 
                 <main class="nv-editor-pane" slot="end">
                     <div class="nv-editor-body">
-                        <div class="nv-empty-state" id="editor-empty">
+                        <div class="empty-state nv-empty" id="editor-empty">
                             <sac-icon name="note"></sac-icon>
-                            <p>Select a note to start writing</p>
+                            <h3>No note open</h3>
+                            <p>Pick one from the list, or start a new one.</p>
+                            <button type="button" class="btn primary" id="empty-new-btn"><sac-icon name="plus"></sac-icon> New note</button>
                         </div>
                         <div id="editor" class="nv-editor" hidden>
                             <sac-md-editor id="content" class="nv-content-input" placeholder="Start writing — the first line is the title"></sac-md-editor>
@@ -665,6 +693,7 @@ class FbNotesView extends HTMLElement {
         split.addEventListener("sac:split-back", () => this.flushSave());
 
         this.querySelector("#new-btn").addEventListener("click", () => this.createNote());
+        this.querySelector("#empty-new-btn").addEventListener("click", () => this.createNote());
         this.querySelector("#toggle-archived-btn").addEventListener("click", () => {
             this.showArchived = !this.showArchived;
             this.querySelector("#toggle-archived-btn").classList.toggle("active", this.showArchived);
@@ -1055,7 +1084,7 @@ class FbNotesView extends HTMLElement {
         const editor = this.querySelector("#editor");
         editor.classList.toggle("readonly", ro);
         this.querySelector("#content").toggleAttribute("readonly", ro);
-        this.querySelector("#archived-pill").hidden = !ro;
+        this.querySelector("#archived-pill").hidden = !note.archived;
     }
 
     clearSelection() {
