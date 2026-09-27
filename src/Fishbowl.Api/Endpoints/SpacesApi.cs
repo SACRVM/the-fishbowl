@@ -103,7 +103,7 @@ public static class SpacesApi
             var userId = user.FindFirst("fishbowl_user_id")?.Value;
             if (string.IsNullOrEmpty(userId)) return Results.Unauthorized();
             if (body.Color is not null && !TagPalette.IsSlot(body.Color))
-                return Results.BadRequest(new { error = "color must be a palette slot or null" });
+                return ApiErrors.BadRequest("invalid_value", "color must be a palette slot or null", new { field = "color" });
 
             var space = await repo.GetBySlugAsync(slug, ct);
             if (space is null) return Results.NotFound();
@@ -472,7 +472,7 @@ public static class SpacesApi
             if (resolved.Error is not null) return resolved.Error;
             if (!resolved.Role!.Value.CanWrite()) return Results.Forbid();
             if (string.IsNullOrWhiteSpace(contact.Name))
-                return Results.BadRequest(new { error = "name is required" });
+                return ApiErrors.BadRequest("required", "name is required", new { field = "name" });
 
             var actorId = user.FindFirst(McpContextClaims.UserId)!.Value;
             try
@@ -498,7 +498,7 @@ public static class SpacesApi
             if (resolved.Error is not null) return resolved.Error;
             if (!resolved.Role!.Value.CanWrite()) return Results.Forbid();
             if (string.IsNullOrWhiteSpace(contact.Name))
-                return Results.BadRequest(new { error = "name is required" });
+                return ApiErrors.BadRequest("required", "name is required", new { field = "name" });
 
             contact.Id = id;
             try
@@ -597,7 +597,7 @@ public static class SpacesApi
             if (resolved.Error is not null) return resolved.Error;
 
             if ((from is null) != (to is null))
-                return Results.BadRequest(new { error = "from and to must both be provided or both omitted" });
+                return ApiErrors.BadRequest("range_incomplete", "from and to must both be provided or both omitted");
 
             var spaceCtx = ContextRef.Space(resolved.Space!.Id);
             if (from is not null)

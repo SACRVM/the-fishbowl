@@ -50,10 +50,10 @@
             ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
     }
 
-    /** The server's message for a refused files call, else a fallback. */
+    /** A refused files call in the page's language (fb.errors: code and
+     *  rule → text, else the server's message), else a fallback. */
     function explain(err, fallback) {
-        const info = fb.api.files.errorInfo(err);
-        return info.message || fallback;
+        return fb.errors.text(err, fallback);
     }
 
     /** A sac-dialog with custom content; resolves { action, all }. */

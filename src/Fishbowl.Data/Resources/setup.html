@@ -159,6 +159,25 @@
         if (vars) s = s.replace(/\{(\w+)\}/g, (m, k) => (k in vars ? String(vars[k]) : m));
         return s;
     }
+    // The server's refusal code (ApiErrors: { error, message, field… }) →
+    // the same wording the checks above use; unknown codes return null.
+    function serverError(body) {
+        const c = body?.error, f = body?.field;
+        const map = {
+            setup_no_sign_in: ["err-pick", "Pick at least one sign-in method: Google or local admin."],
+            google_client_id: ["err-client-id", "Client ID must end with .apps.googleusercontent.com"],
+            length_range: ["err-username-length", "Local username must be 3–64 characters."],
+            username_chars: ["err-username-chars", "Local username may only contain letters, digits, _, . or -."],
+            invalid_email: ["err-email", "Enter a valid contact email for Let's Encrypt."],
+            tos_required: ["err-tos", "You must accept the Let's Encrypt subscriber agreement."],
+            discord_token_short: ["err-token-short", "Discord bot token looks too short — they're ~70 characters."],
+            discord_token_dots: ["err-token-dots", "Discord bot token should contain two '.' separators."],
+        };
+        if (c === "min_length" && f === "clientSecret") return T("err-client-secret", "Client Secret must be at least 20 characters.");
+        if (c === "min_length" && f === "localPassword") return T("err-password-length", "Local password must be at least 12 characters.");
+        if (c === "required" && f === "acmeDomains") return T("err-domain", "Enter at least one domain for TLS.");
+        return map[c] ? T(map[c][0], map[c][1]) : null;
+    }
     document.documentElement.lang = LANG;
     if (LANG === "de") {
         document.title = DE.title;
@@ -273,7 +292,9 @@
                 });
                 if (!res.ok) {
                     const text = await res.text();
-                    showError(T("err-rejected", "Server rejected: {text}", { text }));
+                    let body = null;
+                    try { body = JSON.parse(text); } catch { /* not JSON */ }
+                    showError(serverError(body) || T("err-rejected", "Server rejected: {text}", { text: body?.message || text }));
                     return;
                 }
                 const result = await res.json().catch(() => ({}));

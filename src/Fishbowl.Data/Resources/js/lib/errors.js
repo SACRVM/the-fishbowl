@@ -1,19 +1,22 @@
 /**
  * fb.errors — a server error in the page's language.
  *
- * The API answers with a machine-readable code (`{ error: "last-admin" }`,
- * `{ error: "name_exists" }`…) or, for validation, an English sentence. The
- * client turns a known code into text through the i18n table
- * ("fb.errors.<code>", German in js/i18n/de-settings.js, English here as
- * the fallback). A sentence the server wrote is shown as it is — English
- * stays the fallback for anything without a key. Agents and logs never see
- * these texts; they read the code.
+ * The API answers with a machine-readable code, the English `message`
+ * agents and logs read, and named arguments (ApiErrors on the server):
+ * `{ error: "whole_number_range", message: "Hour must be…", field:
+ * "Digest:Hour", min: 0, max: 23 }`. The client turns a known code into
+ * text through the i18n table ("fb.errors.<code>", German in
+ * js/i18n/de-settings.js), filling {min}, {max}, {value}… from the body.
+ * A file-name refusal also carries its `rule` ("fb.errors.invalid_name.<rule>").
+ * Without a translation for the page's language the server's English
+ * `message` shows as it is; the English below is only the last resort for
+ * a code that came without one.
  *
  *   fb.errors.text(err, fallback)  err = what fb.api threw (status + body)
  *   fb.errors.code(err)            the code, or null
  */
 (function () {
-    // Code → English. Keys are "fb.errors.<code>".
+    // Code → English (with {placeholders}). Keys are "fb.errors.<code>".
     const EN = {
         // Accounts and admin
         "pending": "Your account is waiting for an admin's approval.",
@@ -26,11 +29,68 @@
         "not-disabled": "This account isn't disabled.",
         "not-blocked": "This account isn't blocked.",
         "owns-spaces": "They still own spaces alone — hand them over or delete them first.",
+        "username_taken": "Username is already taken.",
+        "no_such_user": "No such user.",
+        "no_local_login": "This account doesn't sign in with a password here.",
+        "self_delete": "You can't delete yourself.",
+        "self_disable": "You can't disable yourself.",
+        "self_block": "You can't block yourself.",
+        "nothing_to_change": "Nothing to change.",
+        "user_exists": "A user with this id is already registered.",
+        "invalid_folder_name": "That folder name isn't a single folder.",
+        "no_personal_db": "There's no personal database in that folder.",
+        "not_a_personal_db": "That folder doesn't look like a Fishbowl personal database.",
+        "db_unreadable": "The database is unreadable or damaged.",
+        "password_unchanged": "The new password must differ from the current one.",
+        "username_chars": "A username may only contain letters, digits, _, . or -.",
+        // Generic validation
+        "invalid_body": "The request wasn't understood.",
+        "invalid_value": "That value isn't allowed.",
+        "required": "Please fill in: {field}.",
+        "min_length": "Must be at least {min} characters.",
+        "max_length": "Must be {max} characters or fewer.",
+        "length_range": "Must be {min}–{max} characters.",
+        "range_incomplete": "Give both a start and an end, or neither.",
+        "resource_invalid": "The server refused that ({field}).",
+        "resource_too_large": "That's too large ({field}).",
+        // System settings and setup
+        "unknown_config_key": "That setting doesn't exist.",
+        "value_required": "Enter a value — or remove the setting to use the default.",
+        "one_of": "Must be one of: {allowed}.",
+        "list_empty": "Enter at least one entry.",
+        "whole_number_min": "Enter a whole number, {min} or more.",
+        "whole_number_range": "Enter a whole number from {min} to {max}.",
+        "invalid_hostname": "Not a valid host name: {value}",
+        "invalid_email": "Enter a valid e-mail address.",
+        "invalid_email_domain": "Not a valid e-mail domain: {value}",
+        "invalid_origin": "Not an https origin (scheme and host only): {value}",
+        "invalid_github_owner": "Not a GitHub owner name: {value}",
+        "invalid_topic": "A topic is lower-case letters, digits and hyphens (max {max}).",
+        "google_client_id": "The client ID must end with .apps.googleusercontent.com",
+        "discord_token_short": "That Discord bot token looks too short — they're about 70 characters.",
+        "discord_token_dots": "A Discord bot token contains two '.' separators.",
+        "tos_required": "You have to accept the Let's Encrypt subscriber agreement.",
+        "setup_no_sign_in": "Pick at least one sign-in method: Google or a local admin account.",
+        // API keys and spaces
+        "scopes_required": "Pick at least one permission.",
+        "unknown_scopes": "Unknown permission requested.",
+        "unknown_space": "That space doesn't exist.",
         // Secrets vault
         "already-initialized": "Secrets are already set up — unlock them instead.",
         "last-recoverable-slot": "Keep at least a passphrase or a recovery key — a passkey alone can't be the only way in.",
         // Files
         "invalid_name": "That name isn't allowed here.",
+        "invalid_name.empty": "A name can't be empty.",
+        "invalid_name.dot_name": "“{segment}” isn't a usable name.",
+        "invalid_name.separator": "Names can't contain / or \\.",
+        "invalid_name.reserved_fishbowl": "“{segment}” is reserved by Fishbowl.",
+        "invalid_name.control_char": "Names can't contain control characters.",
+        "invalid_name.bidi_override": "Names can't contain text-direction override characters.",
+        "invalid_name.forbidden_char": "That character isn't allowed in names on this server.",
+        "invalid_name.reserved_device": "“{segment}” is a reserved name on this server.",
+        "invalid_name.trailing_dot_space": "Names can't end with a dot or a space on this server.",
+        "invalid_name.short_name_alias": "“{segment}” looks like a short-name alias on this server.",
+        "invalid_name.segment_too_long": "That name is too long for this server.",
         "invalid_path": "That path isn't valid.",
         "name_exists": "Something with that name is already there.",
         "not_found": "It isn't there any more.",
@@ -56,22 +116,8 @@
         "discord_not_configured": "Discord isn't set up on this Fishbowl.",
     };
 
-    // Sentences the server writes that people see often. Matched exactly;
-    // anything else stays English.
-    const SENTENCES = {
-        "Username is already taken.": "username-taken",
-        "No such user.": "no-such-user",
-        "You can't delete yourself.": "self-delete",
-        "You can't disable yourself.": "self-disable",
-        "You can't block yourself.": "self-block",
-    };
-    const SENTENCE_EN = {
-        "username-taken": "Username is already taken.",
-        "no-such-user": "No such user.",
-        "self-delete": "You can't delete yourself.",
-        "self-disable": "You can't disable yourself.",
-        "self-block": "You can't block yourself.",
-    };
+    // Returned by sac.t when the page's language has no entry for a key.
+    const MISSING = "\u0000";
 
     function body(err) {
         if (!err) return null;
@@ -85,18 +131,34 @@
         return typeof c === "string" && !c.includes(" ") ? c : null;
     }
 
+    // The page language's text for a key, or null when it has none.
+    function translated(key, vars) {
+        const t = window.fb?.t;
+        if (!t) return null;
+        const s = t(key, MISSING, vars);
+        return s === MISSING ? null : s;
+    }
+
+    function fill(s, vars) {
+        return s.replace(/\{(\w+)\}/g, (m, k) => (vars && vars[k] != null ? String(vars[k]) : m));
+    }
+
     function text(err, fallback) {
-        const t = window.fb?.t || ((k, en) => en);
+        const b = body(err) || {};
         const c = code(err);
-        if (c && Object.prototype.hasOwnProperty.call(EN, c)) return t(`fb.errors.${c}`, EN[c]);
-        const b = body(err);
-        const sentence = typeof b?.error === "string" && b.error.includes(" ") ? b.error
-            : typeof b?.message === "string" ? b.message : null;
-        if (sentence) {
-            const k = SENTENCES[sentence];
-            return k ? t(`fb.errors.${k}`, SENTENCE_EN[k]) : sentence;
+        if (c) {
+            const vars = { ...b };
+            const ruleKey = b.rule ? `${c}.${b.rule}` : null;
+            const own = (ruleKey && translated(`fb.errors.${ruleKey}`, vars)) || translated(`fb.errors.${c}`, vars);
+            if (own) return own;
+            if (typeof b.message === "string" && b.message) return b.message;
+            if (ruleKey && EN[ruleKey]) return fill(EN[ruleKey], vars);
+            if (EN[c]) return fill(EN[c], vars);
         }
-        return fallback;
+        // An older server's sentence in `error` (or a bare message).
+        const sentence = typeof b.error === "string" && b.error.includes(" ") ? b.error
+            : typeof b.message === "string" ? b.message : null;
+        return sentence || fallback;
     }
 
     window.fb = window.fb || {};

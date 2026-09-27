@@ -39,7 +39,7 @@ public static class AuthApi
             CancellationToken ct) =>
         {
             if (string.IsNullOrWhiteSpace(request?.Username) || string.IsNullOrEmpty(request.Password))
-                return Results.BadRequest(new { error = "Username and password are required." });
+                return ApiErrors.BadRequest("required", "Username and password are required.", new { field = "username, password" });
 
             var user = await system.GetUserByLocalUsernameAsync(request.Username, ct);
             if (!VerifyOrSpendDummyTime(hasher, user, request.Password))
@@ -95,14 +95,14 @@ public static class AuthApi
                 || string.IsNullOrEmpty(request.CurrentPassword)
                 || string.IsNullOrEmpty(request.NewPassword))
             {
-                return Results.BadRequest(new { error = "Username, current password, and new password are all required." });
+                return ApiErrors.BadRequest("required", "Username, current password, and new password are all required.", new { field = "username, currentPassword, newPassword" });
             }
 
             if (request.NewPassword.Length < 12)
-                return Results.BadRequest(new { error = "New password must be at least 12 characters." });
+                return ApiErrors.BadRequest("min_length", "New password must be at least 12 characters.", new { field = "newPassword", min = 12 });
 
             if (string.Equals(request.NewPassword, request.CurrentPassword, StringComparison.Ordinal))
-                return Results.BadRequest(new { error = "New password must differ from the current password." });
+                return ApiErrors.BadRequest("password_unchanged", "New password must differ from the current password.");
 
             var user = await system.GetUserByLocalUsernameAsync(request.Username, ct);
             if (!VerifyOrSpendDummyTime(hasher, user, request.CurrentPassword))

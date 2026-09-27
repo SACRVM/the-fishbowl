@@ -293,7 +293,12 @@
                     return;
                 }
                 const text = await res.text().catch(() => "");
-                showError(T("change-failed", "Couldn't change password: {message}", { message: text || res.status }));
+                let body = null;
+                try { body = JSON.parse(text); } catch { /* not JSON */ }
+                // The server's refusal codes (ApiErrors) in the page's language.
+                if (body?.error === "min_length") { showError(T("new-too-short", "New password must be at least 12 characters.")); return; }
+                if (body?.error === "password_unchanged") { showError(T("new-same", "New password must differ from the temporary one.")); return; }
+                showError(T("change-failed", "Couldn't change password: {message}", { message: body?.message || text || res.status }));
             } catch (err) {
                 showError(T("request-failed", "Request failed: {message}", { message: err.message }));
             }

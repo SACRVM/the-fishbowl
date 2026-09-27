@@ -252,9 +252,11 @@ public class TodosApiTests : IClassFixture<WebApplicationFactory<Program>>, IDis
             TestContext.Current.CancellationToken);
 
         Assert.Equal(HttpStatusCode.RequestEntityTooLarge, resp.StatusCode);
-        var body = await resp.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
-        Assert.Contains("title", body);
-        Assert.Contains("todo", body);
+        var body = await resp.Content.ReadFromJsonAsync<System.Text.Json.JsonElement>(TestContext.Current.CancellationToken);
+        Assert.Equal("resource_too_large", body.GetProperty("error").GetString());
+        Assert.Equal("todo exceeds size limits", body.GetProperty("message").GetString());
+        Assert.Equal("todo", body.GetProperty("resource").GetString());
+        Assert.Equal("title", body.GetProperty("field").GetString());
     }
 
     public void Dispose()

@@ -59,7 +59,7 @@ public static class AccountApi
             if (user.Identity?.AuthenticationType == McpContextClaims.BearerScheme) return Results.Forbid();
             var userId = user.FindFirst("fishbowl_user_id")?.Value;
             if (string.IsNullOrEmpty(userId)) return Results.Unauthorized();
-            if (body.ValueKind != JsonValueKind.Object) return Results.BadRequest(new { error = "expected a JSON object" });
+            if (body.ValueKind != JsonValueKind.Object) return ApiErrors.BadRequest("invalid_body", "expected a JSON object");
 
             // Present → (true, value-or-null); a non-string, non-null value is invalid.
             static (bool present, bool valid, string? value) Field(JsonElement obj, string name) =>
@@ -70,13 +70,13 @@ public static class AccountApi
 
             var accent = Field(body, "accent");
             if (!accent.valid || (accent.value is not null && !TagPalette.IsSlot(accent.value)))
-                return Results.BadRequest(new { error = "accent must be a palette slot or null" });
+                return ApiErrors.BadRequest("invalid_value", "accent must be a palette slot or null", new { field = "accent" });
             var dateFormat = Field(body, "dateFormat");
             if (!dateFormat.valid || (dateFormat.value is not null && !DateFormats.IsKnown(dateFormat.value)))
-                return Results.BadRequest(new { error = "dateFormat must be one of iso, de, uk, us or null" });
+                return ApiErrors.BadRequest("invalid_value", "dateFormat must be one of iso, de, uk, us or null", new { field = "dateFormat" });
             var language = Field(body, "language");
             if (!language.valid || (language.value is not null && !Languages.IsKnown(language.value)))
-                return Results.BadRequest(new { error = $"language must be one of {string.Join(", ", Languages.Codes)} or null" });
+                return ApiErrors.BadRequest("invalid_value", $"language must be one of {string.Join(", ", Languages.Codes)} or null", new { field = "language" });
 
             // vaultAutoLockMinutes: one of the offered choices, or null for the default.
             int? autoLock = null;
@@ -84,7 +84,7 @@ public static class AccountApi
             if (hasAutoLock && al.ValueKind != JsonValueKind.Null)
             {
                 if (al.ValueKind != JsonValueKind.Number || !al.TryGetInt32(out var minutes) || !VaultSettings.IsAutoLockChoice(minutes))
-                    return Results.BadRequest(new { error = $"vaultAutoLockMinutes must be one of {string.Join(", ", VaultSettings.AutoLockChoices)} or null" });
+                    return ApiErrors.BadRequest("invalid_value", $"vaultAutoLockMinutes must be one of {string.Join(", ", VaultSettings.AutoLockChoices)} or null", new { field = "vaultAutoLockMinutes" });
                 autoLock = minutes;
             }
 

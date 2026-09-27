@@ -72,7 +72,7 @@ public static class ContactsApi
             var userId = user.FindFirst("fishbowl_user_id")?.Value;
             if (string.IsNullOrEmpty(userId)) return Results.Unauthorized();
             if (string.IsNullOrWhiteSpace(contact.Name))
-                return Results.BadRequest(new { error = "name is required" });
+                return ApiErrors.BadRequest("required", "name is required", new { field = "name" });
 
             try
             {
@@ -98,7 +98,7 @@ public static class ContactsApi
             var userId = user.FindFirst("fishbowl_user_id")?.Value;
             if (string.IsNullOrEmpty(userId)) return Results.Unauthorized();
             if (string.IsNullOrWhiteSpace(contact.Name))
-                return Results.BadRequest(new { error = "name is required" });
+                return ApiErrors.BadRequest("required", "name is required", new { field = "name" });
 
             contact.Id = id;
             try

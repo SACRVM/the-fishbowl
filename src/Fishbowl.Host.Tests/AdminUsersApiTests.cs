@@ -233,7 +233,12 @@ public class AdminUsersApiTests : IClassFixture<WebApplicationFactory<Program>>,
     {
         await SeedAdminAsync("boss");
         await SeedPendingAsync("spam");
-        Assert.Equal(HttpStatusCode.BadRequest, (await As("boss").PostAsync("/api/v1/admin/users/boss/block", null, Ct)).StatusCode);
+        var self = await As("boss").PostAsync("/api/v1/admin/users/boss/block", null, Ct);
+        Assert.Equal(HttpStatusCode.BadRequest, self.StatusCode);
+        // A code for the client's i18n table, the English sentence for everyone else.
+        var refused = await self.Content.ReadFromJsonAsync<JsonElement>(Ct);
+        Assert.Equal("self_block", refused.GetProperty("error").GetString());
+        Assert.Equal("You can't block yourself.", refused.GetProperty("message").GetString());
 
         Assert.Equal(HttpStatusCode.NoContent, (await As("boss").PostAsync("/api/v1/admin/users/spam/block", null, Ct)).StatusCode);
         Assert.Equal(UserStates.Blocked, (await _system.GetUserAsync("spam", Ct))!.State);

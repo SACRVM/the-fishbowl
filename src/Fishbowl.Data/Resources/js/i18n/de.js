@@ -204,8 +204,4 @@ window.sac?.i18n?.add?.("de", {
     "fb.accounts.block-message": "Die Person kann sich nicht mehr anmelden und nicht erneut fragen. Eine gerade offene Sitzung endet mit dem nächsten Klick.",
     "fb.accounts.blocked": "{who} ist gesperrt.",
     "fb.accounts.block-failed": "Das Konto konnte nicht gesperrt werden.",
-    "fb.accounts.err-last-admin": "Das ist der letzte Admin — mach zuerst jemand anderen zum Admin.",
-    "fb.accounts.err-owns-spaces": "Die Person besitzt noch allein Spaces — übergib oder lösche sie zuerst.",
-    "fb.accounts.err-not-pending": "Jemand hat diese Anfrage schon bearbeitet.",
-    "fb.accounts.err-not-active": "Das geht nur mit einem aktiven Konto.",
 });

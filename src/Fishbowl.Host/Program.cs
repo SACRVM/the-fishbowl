@@ -7,6 +7,7 @@ using Fishbowl.Core;
 using Fishbowl.Data;
 using Fishbowl.Core.Repositories;
 using Fishbowl.Data.Repositories;
+using Fishbowl.Api;
 using Fishbowl.Api.Accounts;
 using Fishbowl.Api.Endpoints;
 using Microsoft.Extensions.Caching.Memory;
@@ -647,10 +648,7 @@ app.MapPost("/api/setup", async (
 
     if (!hasGoogle && !hasLocal)
     {
-        return Results.BadRequest(new
-        {
-            error = "Pick at least one sign-in method: Google OAuth or a local username/password admin account."
-        });
+        return ApiErrors.BadRequest("setup_no_sign_in", "Pick at least one sign-in method: Google OAuth or a local username/password admin account.");
     }
 
     if (hasGoogle)
@@ -658,11 +656,11 @@ app.MapPost("/api/setup", async (
         if (string.IsNullOrWhiteSpace(request.ClientId)
             || !request.ClientId.EndsWith(".apps.googleusercontent.com", StringComparison.Ordinal))
         {
-            return Results.BadRequest(new { error = "ClientId must be a Google OAuth client ID ending in .apps.googleusercontent.com" });
+            return ApiErrors.BadRequest("google_client_id", "ClientId must be a Google OAuth client ID ending in .apps.googleusercontent.com");
         }
         if (string.IsNullOrWhiteSpace(request.ClientSecret) || request.ClientSecret.Length < 20)
         {
-            return Results.BadRequest(new { error = "ClientSecret must be at least 20 characters." });
+            return ApiErrors.BadRequest("min_length", "ClientSecret must be at least 20 characters.", new { field = "clientSecret", min = 20 });
         }
     }
 
@@ -670,16 +668,16 @@ app.MapPost("/api/setup", async (
     {
         var username = request.LocalUsername?.Trim() ?? string.Empty;
         if (username.Length < 3 || username.Length > 64)
-            return Results.BadRequest(new { error = "Local username must be 3–64 characters." });
+            return ApiErrors.BadRequest("length_range", "Local username must be 3–64 characters.", new { field = "localUsername", min = 3, max = 64 });
         // Lowercase letters, digits, underscore, dot, hyphen — keeps the
         // username URL-safe and stops sneaky-character spoofing.
         foreach (var ch in username)
         {
             if (!(char.IsLetterOrDigit(ch) || ch is '_' or '.' or '-'))
-                return Results.BadRequest(new { error = "Local username may only contain letters, digits, _, . or -." });
+                return ApiErrors.BadRequest("username_chars", "Local username may only contain letters, digits, _, . or -.");
         }
         if (string.IsNullOrEmpty(request.LocalPassword) || request.LocalPassword.Length < 12)
-            return Results.BadRequest(new { error = "Local password must be at least 12 characters." });
+            return ApiErrors.BadRequest("min_length", "Local password must be at least 12 characters.", new { field = "localPassword", min = 12 });
     }
 
     // Optional ACME fields. All-or-nothing: if any is set, all must be valid.
@@ -689,11 +687,11 @@ app.MapPost("/api/setup", async (
     if (anyAcme)
     {
         if (string.IsNullOrWhiteSpace(request.AcmeDomains))
-            return Results.BadRequest(new { error = "AcmeDomains required when enabling TLS (comma-separated hostnames)." });
+            return ApiErrors.BadRequest("required", "AcmeDomains required when enabling TLS (comma-separated hostnames).", new { field = "acmeDomains" });
         if (string.IsNullOrWhiteSpace(request.AcmeEmail) || !request.AcmeEmail.Contains('@'))
-            return Results.BadRequest(new { error = "AcmeEmail must be a valid email address." });
+            return ApiErrors.BadRequest("invalid_email", "AcmeEmail must be a valid email address.", new { field = "acmeEmail" });
         if (!request.AcmeAcceptTos)
-            return Results.BadRequest(new { error = "You must accept the Let's Encrypt subscriber agreement." });
+            return ApiErrors.BadRequest("tos_required", "You must accept the Let's Encrypt subscriber agreement.");
     }
 
     // Optional Discord bot token. Validate length only — Discord's token shape
@@ -706,9 +704,9 @@ app.MapPost("/api/setup", async (
     {
         var token = request.DiscordBotToken!.Trim();
         if (token.Length < 50)
-            return Results.BadRequest(new { error = "DiscordBotToken looks too short — Discord bot tokens are ~70 characters." });
+            return ApiErrors.BadRequest("discord_token_short", "DiscordBotToken looks too short — Discord bot tokens are ~70 characters.");
         if (token.Count(c => c == '.') < 2)
-            return Results.BadRequest(new { error = "DiscordBotToken should contain two '.' separators (id.timestamp.secret)." });
+            return ApiErrors.BadRequest("discord_token_dots", "DiscordBotToken should contain two '.' separators (id.timestamp.secret).");
     }
 
     if (hasGoogle)

@@ -28,7 +28,7 @@ public static class EventsApi
             // Either both from+to or neither. A half-range would silently
             // return weird results — fail fast instead.
             if ((from is null) != (to is null))
-                return Results.BadRequest(new { error = "from and to must both be provided or both omitted" });
+                return ApiErrors.BadRequest("range_incomplete", "from and to must both be provided or both omitted");
 
             if (from is not null)
                 return Results.Ok(await repo.GetRangeAsync(userId, from.Value, to!.Value, ct));

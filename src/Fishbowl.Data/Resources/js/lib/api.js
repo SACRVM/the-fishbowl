@@ -271,16 +271,6 @@
     // (two panes, two workspaces): `files.in("personal" | "space:<slug>")`
     // binds one; `files.*` without it follows sac.scope like everything else.
 
-    /** The server's error code from a files refusal ({ error, message }). */
-    function errorInfo(err) {
-        try {
-            const body = JSON.parse(err?.body || "");
-            return { status: err.status, code: body.error || null, message: body.message || null };
-        } catch {
-            return { status: err?.status ?? 0, code: null, message: null };
-        }
-    }
-
     function currentWorkspace() {
         const s = window.sac?.scope?.get?.();
         return s?.type === "scoped" ? `space:${s.slug}` : "personal";
@@ -359,7 +349,6 @@
 
     const files = filesIn(null);
     files.in = filesIn;
-    files.errorInfo = errorInfo;
     // Copy or move between (or within) workspaces. `from`/`to` workspaces
     // are "personal" | "space:<slug>"; onConflict fail | rename | replace.
     // Resolves { results: [{ from, to, error, message }] } — per item.

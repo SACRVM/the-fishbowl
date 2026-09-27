@@ -195,8 +195,26 @@ public class I18nKeyTableTests
         var table = Regex.Matches(de, "^\\s*\"([^\"]+)\"\\s*:", RegexOptions.Multiline).Select(m => m.Groups[1].Value).ToHashSet();
 
         var errors = File.ReadAllText(Path.Combine(root, "js", "lib", "errors.js"));
-        var codes = Regex.Matches(errors, "^\\s*\"([\\w-]+)\":\\s*\"", RegexOptions.Multiline).Select(m => m.Groups[1].Value).ToList();
+        var codes = Regex.Matches(errors, "^\\s*\"([\\w.-]+)\":\\s*\"", RegexOptions.Multiline).Select(m => m.Groups[1].Value).ToList();
         Assert.Contains("last-admin", codes);
+        Assert.Contains("invalid_name.separator", codes);
+
+        // Every code the server sends through ApiErrors (and the config
+        // validators) is one fb.errors knows — so it needs a German entry below.
+        var src = Directory.GetParent(root)!.Parent!.FullName;
+        var sep = Path.DirectorySeparatorChar;
+        var server = Directory.GetFiles(src, "*.cs", SearchOption.AllDirectories)
+            .Where(f => !f.Contains($"{sep}bin{sep}") && !f.Contains($"{sep}obj{sep}") && !f.Contains(".Tests"))
+            .Select(File.ReadAllText).ToList();
+        var sent = server
+            .SelectMany(t => Regex.Matches(t, "ApiErrors\\.(?:BadRequest|Conflict|NotFound)\\(\"([\\w-]+)\"").Select(m => m.Groups[1].Value))
+            .Concat(server.SelectMany(t => Regex.Matches(t, "ApiErrors\\.Json\\([^,]+,\\s*\"([\\w-]+)\"").Select(m => m.Groups[1].Value)))
+            .Concat(server.Where(t => t.Contains("ConfigError")).SelectMany(t => Regex.Matches(t, "new\\(\"([a-z_]+)\", ").Select(m => m.Groups[1].Value)))
+            .Distinct().ToList();
+        Assert.Contains("whole_number_range", sent);
+        Assert.Contains("resource_too_large", sent);
+        var unknown = sent.Where(c => !codes.Contains(c)).ToList();
+        Assert.True(unknown.Count == 0, "Server codes fb.errors doesn't know: " + string.Join(", ", unknown));
         var need = codes.Select(c => $"fb.errors.{c}").ToList();
         foreach (var n in new[] { "account", "space", "archive", "day" })
         {

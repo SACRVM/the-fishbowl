@@ -69,15 +69,14 @@ public static class ApiKeysApi
             if (string.IsNullOrEmpty(userId)) return Results.Unauthorized();
 
             if (string.IsNullOrWhiteSpace(body.Name))
-                return Results.BadRequest(new { error = "name is required" });
+                return ApiErrors.BadRequest("required", "name is required", new { field = "name" });
             if (body.Scopes is null || body.Scopes.Count == 0)
-                return Results.BadRequest(new { error = "at least one scope is required" });
+                return ApiErrors.BadRequest("scopes_required", "at least one scope is required");
 
             var unknownScopes = ScopeCatalog.UnknownScopes(body.Scopes);
             if (unknownScopes.Count > 0)
-                return Results.BadRequest(new
+                return ApiErrors.BadRequest("unknown_scopes", "unknown scope(s) requested", new
                 {
-                    error = "unknown scope(s) requested",
                     unknown = unknownScopes,
                     valid = ScopeCatalog.All,
                 });
@@ -92,9 +91,9 @@ public static class ApiKeysApi
             else if (body.ContextType == "space")
             {
                 if (string.IsNullOrWhiteSpace(body.ContextId))
-                    return Results.BadRequest(new { error = "contextId is required for space keys" });
+                    return ApiErrors.BadRequest("required", "contextId is required for space keys", new { field = "contextId" });
                 var space = await spaces.GetBySlugAsync(body.ContextId, ct);
-                if (space is null) return Results.NotFound(new { error = "unknown space" });
+                if (space is null) return ApiErrors.NotFound("unknown_space", "unknown space");
                 var role = await spaces.GetMembershipAsync(space.Id, userId, ct);
                 if (role is null) return Results.Forbid();
                 // Bind to slug (URL-identifier) not id — tokens are issued
@@ -104,7 +103,7 @@ public static class ApiKeysApi
             }
             else
             {
-                return Results.BadRequest(new { error = "contextType must be 'user' or 'space'" });
+                return ApiErrors.BadRequest("invalid_value", "contextType must be 'user' or 'space'", new { field = "contextType" });
             }
 
             var issued = await keys.IssueAsync(userId, context, body.Name, body.Scopes, ct);

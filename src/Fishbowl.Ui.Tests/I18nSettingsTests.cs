@@ -27,6 +27,45 @@ public class I18nSettingsTests
             DataObject = new Dictionary<string, object?> { ["language"] = language },
         })).Ok);
 
+    // A validation refusal from the server (code + arguments) reads German
+    // under its row: "0 to 23" comes back as "von 0 bis 23".
+    [Fact]
+    public async Task SystemSettings_ValidationError_InGerman_Test()
+    {
+        var context = await _fixture.Browser!.NewContextAsync(new BrowserNewContextOptions
+        {
+            IgnoreHTTPSErrors = true,
+            ViewportSize = new ViewportSize { Width = 1400, Height = 900 },
+        });
+        var page = await context.NewPageAsync();
+        try
+        {
+            await SetLanguageAsync(page, "de");
+            await page.GotoAsync(_fixture.BaseUrl + "/#/admin/settings");
+            var hour = page.Locator("fb-system-settings-view .cfg-row[data-key='Digest:Hour']");
+            await Assertions.Expect(hour).ToBeVisibleAsync(new() { Timeout = 5000 });
+            await hour.Locator("input").FillAsync("30");
+            await hour.GetByRole(AriaRole.Button, new() { Name = "Speichern" }).ClickAsync();
+            await Assertions.Expect(hour.Locator(".cfg-error"))
+                .ToHaveTextAsync("Gib eine ganze Zahl von 0 bis 23 ein.", new() { Timeout = 5000 });
+
+            var origins = page.Locator("fb-system-settings-view .cfg-row[data-key='Apps:AllowedOrigins']");
+            await origins.Locator("input").FillAsync("ftp://nope");
+            await origins.GetByRole(AriaRole.Button, new() { Name = "Speichern" }).ClickAsync();
+            await Assertions.Expect(origins.Locator(".cfg-error"))
+                .ToHaveTextAsync("Kein https-Ursprung (nur Schema und Host): ftp://nope", new() { Timeout = 5000 });
+            var dir = Path.Combine(Path.GetTempPath(), "err-final");
+            Directory.CreateDirectory(dir);
+            await hour.ScrollIntoViewIfNeededAsync();
+            await page.ScreenshotAsync(new() { Path = Path.Combine(dir, "desk-system-settings-error.png") });
+        }
+        finally
+        {
+            await SetLanguageAsync(page, null);
+            await context.CloseAsync();
+        }
+    }
+
     [Fact]
     public async Task SettingsAndAdminPages_InGerman_Test()
     {

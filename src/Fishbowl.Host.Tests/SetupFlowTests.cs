@@ -87,6 +87,11 @@ public class SetupFlowTests : IClassFixture<WebApplicationFactory<Program>>, IDi
             TestContext.Current.CancellationToken);
 
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        var body = await response.Content.ReadFromJsonAsync<System.Text.Json.JsonElement>(TestContext.Current.CancellationToken);
+        Assert.Equal("min_length", body.GetProperty("error").GetString());
+        Assert.Equal("clientSecret", body.GetProperty("field").GetString());
+        Assert.Equal(20, body.GetProperty("min").GetInt32());
+        Assert.Equal("ClientSecret must be at least 20 characters.", body.GetProperty("message").GetString());
     }
 
     [Fact]

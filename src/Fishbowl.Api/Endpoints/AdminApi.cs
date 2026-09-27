@@ -86,16 +86,16 @@ public static class AdminApi
             // no nulls. Folder names are typically GUIDs or local usernames.
             var folder = request?.FolderName?.Trim() ?? string.Empty;
             if (!IsSafePathComponent(folder))
-                return Results.BadRequest(new { error = "folderName must be a single path component (no '/', '\\', '..')." });
+                return ApiErrors.BadRequest("invalid_folder_name", "folderName must be a single path component (no '/', '\\', '..').");
 
             var existing = await system.GetUserAsync(folder, ct);
             if (existing is not null)
-                return Results.Conflict(new { error = "A user with this id is already registered." });
+                return ApiErrors.Conflict("user_exists", "A user with this id is already registered.");
 
             var userFolder = Path.Combine(dbFactory.UsersRoot, folder);
             var dbPath = Path.Combine(userFolder, DatabaseFactory.PersonalDbFileName);
             if (!Directory.Exists(userFolder) || !File.Exists(dbPath))
-                return Results.NotFound(new { error = "No personal.db found at users/" + folder + "/." });
+                return ApiErrors.NotFound("no_personal_db", "No personal.db found at users/" + folder + "/.", new { folder });
 
             // Sanity-open the SQLite to make sure it's not corrupt before we
             // commit a system.db row pointing at it.
@@ -112,15 +112,12 @@ public static class AdminApi
                     "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'notes'");
                 if (tableCount == 0)
                 {
-                    return Results.BadRequest(new
-                    {
-                        error = "Folder doesn't look like a Fishbowl personal DB — no `notes` table."
-                    });
+                    return ApiErrors.BadRequest("not_a_personal_db", "Folder doesn't look like a Fishbowl personal DB — no `notes` table.");
                 }
             }
             catch (SqliteException)
             {
-                return Results.BadRequest(new { error = "personal.db is unreadable or corrupt." });
+                return ApiErrors.BadRequest("db_unreadable", "personal.db is unreadable or corrupt.");
             }
 
             // Validate the local credentials before we write anything to
@@ -129,11 +126,11 @@ public static class AdminApi
             var usernameError = ValidateUsername(username);
             if (usernameError is not null) return Results.BadRequest(new { error = usernameError });
             if (string.IsNullOrEmpty(request.Password) || request.Password.Length < 12)
-                return Results.BadRequest(new { error = "Password must be at least 12 characters." });
+                return ApiErrors.BadRequest("min_length", "Password must be at least 12 characters.", new { field = "password", min = 12 });
 
             var existingByUsername = await system.GetUserByLocalUsernameAsync(username, ct);
             if (existingByUsername is not null)
-                return Results.Conflict(new { error = "Username is already taken." });
+                return ApiErrors.Conflict("username_taken", "Username is already taken.");
 
             // Belt + braces: opening the context connection through the
             // factory triggers any pending schema migration on the imported
@@ -177,7 +174,7 @@ public static class AdminApi
 
             var target = await system.GetUserAsync(userId, ct);
             if (target is null)
-                return Results.NotFound(new { error = "No such user." });
+                return ApiErrors.NotFound("no_such_user", "No such user.");
 
             // Refuse on OAuth-only users — there's nowhere to put a local
             // password, and we shouldn't quietly bolt one on (the human
@@ -185,10 +182,7 @@ public static class AdminApi
             // on /login would be confusing). Operator should run /import or
             // a future "add local password" flow if they really want both.
             if (string.IsNullOrEmpty(target.PasswordHash))
-                return Results.BadRequest(new
-                {
-                    error = "User has no local-auth mapping. Reset only applies to local-password users."
-                });
+                return ApiErrors.BadRequest("no_local_login", "User has no local-auth mapping. Reset only applies to local-password users.");
 
             var tempPassword = GenerateTempPassword();
             var hash = hasher.Hash(tempPassword);
@@ -275,15 +269,15 @@ public static class AdminApi
             {
                 ApproveUserRequest? body;
                 try { body = await request.ReadFromJsonAsync<ApproveUserRequest>(ct); }
-                catch (System.Text.Json.JsonException) { return Results.BadRequest(new { error = "Body must be JSON: { quotaBytes?, makeAdmin? }." }); }
-                catch (InvalidOperationException) { return Results.BadRequest(new { error = "Body must be JSON: { quotaBytes?, makeAdmin? }." }); }
-                if (body?.QuotaBytes is < 0) return Results.BadRequest(new { error = "quotaBytes must be 0 (unlimited) or more." });
+                catch (System.Text.Json.JsonException) { return ApiErrors.BadRequest("invalid_body", "Body must be JSON: { quotaBytes?, makeAdmin? }."); }
+                catch (InvalidOperationException) { return ApiErrors.BadRequest("invalid_body", "Body must be JSON: { quotaBytes?, makeAdmin? }."); }
+                if (body?.QuotaBytes is < 0) return ApiErrors.BadRequest("invalid_value", "quotaBytes must be 0 (unlimited) or more.", new { field = "quotaBytes" });
                 quota = body?.QuotaBytes;
                 makeAdmin = body?.MakeAdmin == true;
             }
 
             var target = await system.GetUserAsync(userId, ct);
-            if (target is null) return Results.NotFound(new { error = "No such user." });
+            if (target is null) return ApiErrors.NotFound("no_such_user", "No such user.");
             if (target.State != UserStates.Pending)
                 return Results.Conflict(new { error = "not-pending", state = target.State });
 
@@ -312,7 +306,7 @@ public static class AdminApi
         {
             if (!await IsCookieAdminAsync(caller, system, ct)) return Results.Forbid();
             var target = await system.GetUserAsync(userId, ct);
-            if (target is null) return Results.NotFound(new { error = "No such user." });
+            if (target is null) return ApiErrors.NotFound("no_such_user", "No such user.");
             if (target.State != UserStates.Pending)
                 return Results.Conflict(new { error = "not-pending", state = target.State });
 
@@ -338,9 +332,9 @@ public static class AdminApi
         {
             if (!await IsCookieAdminAsync(caller, system, ct)) return Results.Forbid();
             if (userId == ActorId(caller))
-                return Results.BadRequest(new { error = "You can't block yourself." });
+                return ApiErrors.BadRequest("self_block", "You can't block yourself.");
             var target = await system.GetUserAsync(userId, ct);
-            if (target is null) return Results.NotFound(new { error = "No such user." });
+            if (target is null) return ApiErrors.NotFound("no_such_user", "No such user.");
             if (target.State == UserStates.Blocked) return Results.NoContent();
             if (target.IsAdmin && target.State == UserStates.Active && await admin.CountActiveAdminsAsync(ct) <= 1)
                 return Results.Conflict(new { error = "last-admin" });
@@ -365,7 +359,7 @@ public static class AdminApi
         {
             if (!await IsCookieAdminAsync(caller, system, ct)) return Results.Forbid();
             var target = await system.GetUserAsync(userId, ct);
-            if (target is null) return Results.NotFound(new { error = "No such user." });
+            if (target is null) return ApiErrors.NotFound("no_such_user", "No such user.");
             if (target.State != UserStates.Blocked)
                 return Results.Conflict(new { error = "not-blocked", state = target.State });
 
@@ -405,16 +399,16 @@ public static class AdminApi
             try { body = await request.ReadFromJsonAsync<CreateLocalUserRequest>(ct); }
             catch (JsonException) { body = null; }
             catch (InvalidOperationException) { body = null; }
-            if (body is null) return Results.BadRequest(new { error = "Body must be JSON: { username, displayName?, quotaBytes? }." });
+            if (body is null) return ApiErrors.BadRequest("invalid_body", "Body must be JSON: { username, displayName?, quotaBytes? }.");
 
             var username = body.Username?.Trim().ToLowerInvariant() ?? string.Empty;
             var usernameError = ValidateUsername(username);
             if (usernameError is not null) return Results.BadRequest(new { error = usernameError });
-            if (body.QuotaBytes is < 0) return Results.BadRequest(new { error = "quotaBytes must be 0 (unlimited) or more." });
+            if (body.QuotaBytes is < 0) return ApiErrors.BadRequest("invalid_value", "quotaBytes must be 0 (unlimited) or more.", new { field = "quotaBytes" });
             var displayName = string.IsNullOrWhiteSpace(body.DisplayName) ? username : body.DisplayName.Trim();
-            if (displayName.Length > 100) return Results.BadRequest(new { error = "Display name must be 100 characters or fewer." });
+            if (displayName.Length > 100) return ApiErrors.BadRequest("max_length", "Display name must be 100 characters or fewer.", new { field = "displayName", max = 100 });
             if (await system.GetUserByLocalUsernameAsync(username, ct) is not null)
-                return Results.Conflict(new { error = "Username is already taken." });
+                return ApiErrors.Conflict("username_taken", "Username is already taken.");
 
             // Created by an admin = approved by that admin: the row goes
             // through pending -> approve so approved_by/approved_at say who,
@@ -459,10 +453,10 @@ public static class AdminApi
 
             JsonElement body;
             try { body = await request.ReadFromJsonAsync<JsonElement>(ct); }
-            catch (JsonException) { return Results.BadRequest(new { error = "Body must be a JSON object." }); }
-            catch (InvalidOperationException) { return Results.BadRequest(new { error = "Body must be a JSON object." }); }
+            catch (JsonException) { return ApiErrors.BadRequest("invalid_body", "Body must be a JSON object."); }
+            catch (InvalidOperationException) { return ApiErrors.BadRequest("invalid_body", "Body must be a JSON object."); }
             if (body.ValueKind != JsonValueKind.Object)
-                return Results.BadRequest(new { error = "Body must be a JSON object." });
+                return ApiErrors.BadRequest("invalid_body", "Body must be a JSON object.");
 
             var setQuota = body.TryGetProperty("quotaBytes", out var quotaEl);
             long? quota = null;
@@ -470,26 +464,26 @@ public static class AdminApi
             {
                 if (quotaEl.ValueKind == JsonValueKind.Number && quotaEl.TryGetInt64(out var q) && q >= 0) quota = q;
                 else if (quotaEl.ValueKind != JsonValueKind.Null)
-                    return Results.BadRequest(new { error = "quotaBytes must be null (default), 0 (unlimited) or more." });
+                    return ApiErrors.BadRequest("invalid_value", "quotaBytes must be null (default), 0 (unlimited) or more.", new { field = "quotaBytes" });
             }
             bool? isAdmin = null, disabled = null;
             if (body.TryGetProperty("isAdmin", out var adminEl))
             {
                 if (adminEl.ValueKind is not (JsonValueKind.True or JsonValueKind.False))
-                    return Results.BadRequest(new { error = "isAdmin must be true or false." });
+                    return ApiErrors.BadRequest("invalid_value", "isAdmin must be true or false.", new { field = "isAdmin" });
                 isAdmin = adminEl.GetBoolean();
             }
             if (body.TryGetProperty("disabled", out var disEl))
             {
                 if (disEl.ValueKind is not (JsonValueKind.True or JsonValueKind.False))
-                    return Results.BadRequest(new { error = "disabled must be true or false." });
+                    return ApiErrors.BadRequest("invalid_value", "disabled must be true or false.", new { field = "disabled" });
                 disabled = disEl.GetBoolean();
             }
             if (!setQuota && isAdmin is null && disabled is null)
-                return Results.BadRequest(new { error = "Nothing to change: send quotaBytes, isAdmin or disabled." });
+                return ApiErrors.BadRequest("nothing_to_change", "Nothing to change: send quotaBytes, isAdmin or disabled.");
 
             var target = await system.GetUserAsync(userId, ct);
-            if (target is null) return Results.NotFound(new { error = "No such user." });
+            if (target is null) return ApiErrors.NotFound("no_such_user", "No such user.");
             var self = userId == ActorId(caller);
             var lastAdmin = target.IsAdmin && target.State == UserStates.Active
                 && await admin.CountActiveAdminsAsync(ct) <= 1;
@@ -505,7 +499,7 @@ public static class AdminApi
                 return Results.Conflict(new { error = "last-admin" });
             if (disable)
             {
-                if (self) return Results.BadRequest(new { error = "You can't disable yourself." });
+                if (self) return ApiErrors.BadRequest("self_disable", "You can't disable yourself.");
                 if (target.State != UserStates.Active)
                     return Results.Conflict(new { error = "not-active", state = target.State });
                 if (lastAdmin) return Results.Conflict(new { error = "last-admin" });
@@ -575,7 +569,7 @@ public static class AdminApi
         {
             if (!await IsCookieAdminAsync(caller, system, ct)) return Results.Forbid();
             var target = await system.GetUserAsync(userId, ct);
-            if (target is null) return Results.NotFound(new { error = "No such user." });
+            if (target is null) return ApiErrors.NotFound("no_such_user", "No such user.");
             var owned = await admin.ListSolelyOwnedSpacesAsync(userId, ct);
             var lastAdmin = target.IsAdmin && target.State == UserStates.Active
                 && await admin.CountActiveAdminsAsync(ct) <= 1;
@@ -605,9 +599,9 @@ public static class AdminApi
         {
             if (!await IsCookieAdminAsync(caller, system, ct)) return Results.Forbid();
             var actor = ActorId(caller);
-            if (userId == actor) return Results.BadRequest(new { error = "You can't delete yourself." });
+            if (userId == actor) return ApiErrors.BadRequest("self_delete", "You can't delete yourself.");
             var target = await system.GetUserAsync(userId, ct);
-            if (target is null) return Results.NotFound(new { error = "No such user." });
+            if (target is null) return ApiErrors.NotFound("no_such_user", "No such user.");
             if (target.IsAdmin && target.State == UserStates.Active && await admin.CountActiveAdminsAsync(ct) <= 1)
                 return Results.Conflict(new { error = "last-admin" });
             var owned = await admin.ListSolelyOwnedSpacesAsync(userId, ct);
@@ -628,7 +622,7 @@ public static class AdminApi
 
             await messages.ResolveAsync(MessageKinds.UserPending, "user", userId, ct);
             if (!await admin.DeleteUserAsync(userId, ct))
-                return Results.NotFound(new { error = "No such user." });
+                return ApiErrors.NotFound("no_such_user", "No such user.");
             await archiver.DeleteUserFolderAsync(userId, ct);
             await admin.RecordAdminActionAsync(actor, AdminActions.Delete, "user", userId, ct);
 

@@ -1,4 +1,5 @@
 using System.Security.Claims;
+using Fishbowl.Api;
 using Fishbowl.Api.Endpoints;
 using Fishbowl.Core.Auth;
 using Fishbowl.Core.Desktop;
@@ -75,14 +76,14 @@ public static class ConfigAdminEndpoints
 
             var spec = ConfigSchema.Find(key);
             if (spec is null)
-                return Results.NotFound(new { error = "Unknown or non-editable config key." });
+                return ApiErrors.NotFound("unknown_config_key", "Unknown or non-editable config key.", new { field = key });
 
             var value = request?.Value?.Trim() ?? string.Empty;
             if (string.IsNullOrEmpty(value))
-                return Results.BadRequest(new { error = "Value required (use DELETE to clear)." });
+                return ApiErrors.BadRequest("value_required", "Value required (use DELETE to clear).", new { field = spec.Key });
 
             var err = spec.Validate(value);
-            if (err is not null) return Results.BadRequest(new { error = err });
+            if (err is not null) return err.ToResult(spec.Key);
 
             await system.SetConfigAsync(spec.Key, value, ct);
             cache.Set(spec.Key, value);
@@ -118,7 +119,7 @@ public static class ConfigAdminEndpoints
 
             var spec = ConfigSchema.Find(key);
             if (spec is null)
-                return Results.NotFound(new { error = "Unknown or non-editable config key." });
+                return ApiErrors.NotFound("unknown_config_key", "Unknown or non-editable config key.", new { field = key });
 
             // Empty-string clear, not row delete: lookups go through the cache,
             // which treats empty-string the same as null (`placeholder`). Keeps
@@ -159,6 +160,15 @@ public static class ConfigAdminEndpoints
 
 public sealed record SetConfigRequest(string Value);
 
+/// <summary>A refused config value: a code + arguments for the client's
+/// i18n table, and the English message agents and logs read.</summary>
+internal sealed record ConfigError(string Code, string Message, object? Args = null)
+{
+    public IResult ToResult(string key) =>
+        ApiErrors.BadRequest(Code, Message,
+            ApiErrors.Args(Args).Prepend(new KeyValuePair<string, object?>("field", key)).ToList());
+}
+
 internal static class ConfigSchema
 {
     public sealed record KeySpec(
@@ -166,7 +176,7 @@ internal static class ConfigSchema
         bool Secret,
         bool RestartRequired,
         string Description,
-        Func<string, string?> Validate);
+        Func<string, ConfigError?> Validate);
 
     public static readonly KeySpec[] Editable =
     {
@@ -242,113 +252,120 @@ internal static class ConfigSchema
         return $"{value[..3]}…****{value[^4..]}";
     }
 
-    private static string? ValidateGoogleClientId(string v) =>
+    // Shared refusals: one code each, the English sentence as before.
+    private static ConfigError OneOf(params string[] allowed) =>
+        new("one_of", $"Must be one of: {string.Join(", ", allowed)}.", new { allowed = string.Join(", ", allowed) });
+    private static ConfigError ListEmpty(string message) => new("list_empty", message);
+
+    private static ConfigError? ValidateGoogleClientId(string v) =>
         v.EndsWith(".apps.googleusercontent.com", StringComparison.Ordinal)
             ? null
-            : "ClientId must end with .apps.googleusercontent.com";
+            : new("google_client_id", "ClientId must end with .apps.googleusercontent.com");
 
-    private static string? ValidateGoogleClientSecret(string v) =>
-        v.Length >= 20 ? null : "ClientSecret must be at least 20 characters.";
+    private static ConfigError? ValidateGoogleClientSecret(string v) =>
+        v.Length >= 20 ? null : new("min_length", "ClientSecret must be at least 20 characters.", new { min = 20 });
 
-    private static string? ValidateAcmeDomains(string v)
+    private static ConfigError? ValidateAcmeDomains(string v)
     {
         var domains = v.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-        if (domains.Length == 0) return "Provide at least one comma-separated domain.";
+        if (domains.Length == 0) return ListEmpty("Provide at least one comma-separated domain.");
         foreach (var d in domains)
         {
             if (Uri.CheckHostName(d) != UriHostNameType.Dns)
-                return $"Not a valid DNS hostname: {d}";
+                return new("invalid_hostname", $"Not a valid DNS hostname: {d}", new { value = d });
         }
         return null;
     }
 
-    private static string? ValidateAcmeEmail(string v) =>
+    private static ConfigError? ValidateAcmeEmail(string v) =>
         v.Contains('@') && v.IndexOf('@') > 0 && v.IndexOf('@') < v.Length - 1
             ? null
-            : "Email must be a valid address (contains @ with text on both sides).";
+            : new("invalid_email", "Email must be a valid address (contains @ with text on both sides).");
 
-    private static string? ValidateAcmeTos(string v) =>
+    private static ConfigError? ValidateAcmeTos(string v) =>
         v is "true" or "false"
             ? null
-            : "Acme:AcceptTos must be exactly the string \"true\" or \"false\".";
+            : new("one_of", "Acme:AcceptTos must be exactly the string \"true\" or \"false\".", new { allowed = "true, false" });
 
-    private static string? ValidateSignUpMode(string v) =>
+    private static ConfigError? ValidateSignUpMode(string v) =>
         SignUpPolicy.Modes.Contains(v)
             ? null
-            : "Auth:SignUp must be one of: approval, open, closed.";
+            : new("one_of", "Auth:SignUp must be one of: approval, open, closed.", new { allowed = "approval, open, closed" });
 
-    private static string? ValidateEmailDomains(string v)
+    private static ConfigError? ValidateEmailDomains(string v)
     {
         var domains = SignUpPolicy.ParseDomains(v);
-        if (domains.Count == 0) return "Provide at least one comma-separated domain (use DELETE to allow any).";
+        if (domains.Count == 0) return ListEmpty("Provide at least one comma-separated domain (use DELETE to allow any).");
         foreach (var d in domains)
         {
             if (Uri.CheckHostName(d) != UriHostNameType.Dns || !d.Contains('.'))
-                return $"Not a valid e-mail domain: {d}";
+                return new("invalid_email_domain", $"Not a valid e-mail domain: {d}", new { value = d });
         }
         return null;
     }
 
-    private static string? ValidateArchiveDays(string v) =>
+    private static ConfigError? ValidateArchiveDays(string v) =>
         int.TryParse(v, out var n) && n >= 0
             ? null
-            : "Retention must be a whole number of days, 0 or more (0 = keep forever).";
+            : new("whole_number_min", "Retention must be a whole number of days, 0 or more (0 = keep forever).", new { min = 0 });
 
-    private static string? ValidateQuotaBytes(string v) =>
+    private static ConfigError? ValidateQuotaBytes(string v) =>
         long.TryParse(v, out var n) && n >= 0
             ? null
-            : "Quota must be a whole number of bytes, 0 or more (0 = unlimited).";
+            : new("whole_number_min", "Quota must be a whole number of bytes, 0 or more (0 = unlimited).", new { min = 0 });
 
-    private static string? ValidateAppsLevel(string v) =>
-        DesktopPolicy.Levels.Contains(v)
-            ? null
-            : "Must be one of: everyone, admins, off.";
+    private static ConfigError? ValidateAppsLevel(string v) =>
+        DesktopPolicy.Levels.Contains(v) ? null : OneOf("everyone", "admins", "off");
 
-    private static string? ValidateAppOrigins(string v)
+    private static ConfigError? ValidateAppOrigins(string v)
     {
         var entries = v.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-        if (entries.Length == 0) return "Provide at least one comma-separated origin (use DELETE to allow any).";
+        if (entries.Length == 0) return ListEmpty("Provide at least one comma-separated origin (use DELETE to allow any).");
         foreach (var e in entries)
         {
             if (!AppOrigins.TryParseExact(e, out _))
-                return $"Not an https origin (scheme and host only): {e}";
+                return new("invalid_origin", $"Not an https origin (scheme and host only): {e}", new { value = e });
         }
         return null;
     }
 
-    private static string? ValidateStoreOwners(string v)
+    private static ConfigError? ValidateStoreOwners(string v)
     {
         var owners = DesktopPolicy.ParseList(v);
-        if (owners.Count == 0) return "Provide at least one GitHub owner.";
+        if (owners.Count == 0) return ListEmpty("Provide at least one GitHub owner.");
         foreach (var o in owners)
         {
             if (o.Length > 39 || !o.All(c => char.IsAsciiLetterOrDigit(c) || c == '-') || o.StartsWith('-'))
-                return $"Not a GitHub owner name: {o}";
+                return new("invalid_github_owner", $"Not a GitHub owner name: {o}", new { value = o });
         }
         return null;
     }
 
-    private static string? ValidateStoreTopic(string v) =>
+    private static ConfigError? ValidateStoreTopic(string v) =>
         v.Length is > 0 and <= 50 && v.All(c => char.IsAsciiLetterLower(c) || char.IsAsciiDigit(c) || c == '-')
             ? null
-            : "A topic is lower-case letters, digits and hyphens (max 50).";
+            : new("invalid_topic", "A topic is lower-case letters, digits and hyphens (max 50).", new { max = 50 });
 
-    private static string? ValidateBool(string v) =>
-        v is "true" or "false" ? null : "Must be exactly \"true\" or \"false\".";
+    private static ConfigError? ValidateBool(string v) =>
+        v is "true" or "false" ? null : new("one_of", "Must be exactly \"true\" or \"false\".", new { allowed = "true, false" });
 
-    private static string? ValidateHour(string v) =>
-        int.TryParse(v, out var h) && h is >= 0 and <= 23 ? null : "Hour must be a whole number from 0 to 23.";
+    private static ConfigError? ValidateHour(string v) =>
+        int.TryParse(v, out var h) && h is >= 0 and <= 23
+            ? null
+            : new("whole_number_range", "Hour must be a whole number from 0 to 23.", new { min = 0, max = 23 });
 
-    private static string? ValidateLogRetentionDays(string v) =>
-        int.TryParse(v, out var d) && d is >= 1 and <= 365 ? null : "Retention must be a whole number of days from 1 to 365.";
+    private static ConfigError? ValidateLogRetentionDays(string v) =>
+        int.TryParse(v, out var d) && d is >= 1 and <= 365
+            ? null
+            : new("whole_number_range", "Retention must be a whole number of days from 1 to 365.", new { min = 1, max = 365 });
 
-    private static string? ValidateLogFormat(string v) =>
-        v is "plain" or "json" ? null : "Format must be plain or json.";
+    private static ConfigError? ValidateLogFormat(string v) =>
+        v is "plain" or "json" ? null : new("one_of", "Format must be plain or json.", new { allowed = "plain, json" });
 
-    private static string? ValidateDiscordToken(string v)
+    private static ConfigError? ValidateDiscordToken(string v)
     {
-        if (v.Length < 50) return "Discord bot token looks too short — they're ~70 characters.";
-        if (v.Count(c => c == '.') < 2) return "Discord bot token should contain two '.' separators.";
+        if (v.Length < 50) return new("discord_token_short", "Discord bot token looks too short — they're ~70 characters.");
+        if (v.Count(c => c == '.') < 2) return new("discord_token_dots", "Discord bot token should contain two '.' separators.");
         return null;
     }
 }

@@ -162,6 +162,36 @@ public class AdminConfigTests : IClassFixture<WebApplicationFactory<Program>>, I
         Assert.Equal(HttpStatusCode.BadRequest, resp.StatusCode);
     }
 
+    // A refused value carries a code + arguments for the client's i18n
+    // table; the English sentence stays as `message` for agents and logs.
+    [Theory]
+    [InlineData("Digest:Hour", "99", "whole_number_range", "Hour must be a whole number from 0 to 23.")]
+    [InlineData("Auth:SignUp", "maybe", "one_of", "Auth:SignUp must be one of: approval, open, closed.")]
+    [InlineData("Acme:Domains", "bad_host!", "invalid_hostname", "Not a valid DNS hostname: bad_host!")]
+    [InlineData("Discord:BotToken", "short", "discord_token_short", "Discord bot token looks too short — they're ~70 characters.")]
+    [InlineData("Google:ClientSecret", "tooshort", "min_length", "ClientSecret must be at least 20 characters.")]
+    public async Task Admin_Put_Invalid_CarriesCodeArgsAndEnglishMessage(string key, string value, string code, string message)
+    {
+        var ct = TestContext.Current.CancellationToken;
+        await SeedAdminAsync("admin", ct);
+
+        var resp = await ClientAs("admin").PutAsJsonAsync($"/api/v1/admin/config/{key}", new { Value = value }, ct);
+
+        Assert.Equal(HttpStatusCode.BadRequest, resp.StatusCode);
+        var body = await resp.Content.ReadFromJsonAsync<JsonElement>(ct);
+        Assert.Equal(code, body.GetProperty("error").GetString());
+        Assert.Equal(message, body.GetProperty("message").GetString());
+        Assert.Equal(key, body.GetProperty("field").GetString());
+        if (code == "whole_number_range")
+        {
+            Assert.Equal(0, body.GetProperty("min").GetInt32());
+            Assert.Equal(23, body.GetProperty("max").GetInt32());
+        }
+        if (code == "one_of") Assert.Equal("approval, open, closed", body.GetProperty("allowed").GetString());
+        if (code == "invalid_hostname") Assert.Equal("bad_host!", body.GetProperty("value").GetString());
+        if (code == "min_length") Assert.Equal(20, body.GetProperty("min").GetInt32());
+    }
+
     [Fact]
     public async Task Admin_Put_UnknownKey_NotFound()
     {

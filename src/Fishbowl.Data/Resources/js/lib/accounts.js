@@ -388,15 +388,7 @@
     }
 
     function failed(err, fallback) {
-        let msg = fallback;
-        try {
-            const body = JSON.parse(err?.body || "{}");
-            if (body.error === "last-admin") msg = fb.t("fb.accounts.err-last-admin", "That's the last admin — make someone else an admin first.");
-            else if (body.error === "owns-spaces") msg = fb.t("fb.accounts.err-owns-spaces", "They still own spaces alone — hand them over or delete them first.");
-            else if (body.error === "not-pending") msg = fb.t("fb.accounts.err-not-pending", "Someone already handled this request.");
-            else if (body.error === "not-active") msg = fb.t("fb.accounts.err-not-active", "Only an active account can do that.");
-            else if (typeof body.error === "string" && body.error.includes(" ")) msg = body.error;
-        } catch { /* not JSON */ }
+        const msg = errorText(err, fallback);
         console.warn("[fb.accounts]", fallback, err?.status);
         window.sac?.toast?.(msg, { kind: "error" });
         return false;
