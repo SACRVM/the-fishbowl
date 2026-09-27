@@ -335,6 +335,13 @@ public class DesktopApiTests : IClassFixture<WebApplicationFactory<Program>>, ID
         Assert.Contains(Fishbowl.Api.Endpoints.DesktopApi.GuestScript, html);
         Assert.DoesNotContain("app.js\"", html);
 
+        // Fishbowl's own pages carry PageCsp: only its own scripts, plus the
+        // viewer's trusted apps (same realm) — nobody else's.
+        static string ScriptSrc(HttpResponseMessage r) => string.Join(" ", r.Headers.GetValues("Content-Security-Policy"))
+            .Split("; ").Single(d => d.StartsWith("script-src "));
+        Assert.Equal("script-src 'self' https://owner.github.io", ScriptSrc(await c.GetAsync("/csp-probe", Ct)));
+        Assert.Equal("script-src 'self'", ScriptSrc(await As(Bob).GetAsync("/csp-probe", Ct)));
+
         Assert.Equal(HttpStatusCode.NotFound, (await c.GetAsync($"/apps/frame/user/{Alice}/nope", Ct)).StatusCode);
         Assert.Equal(HttpStatusCode.NotFound, (await c.GetAsync($"/apps/frame/user/{Alice}/mine", Ct)).StatusCode);   // trusted: no frame
         Assert.Equal(HttpStatusCode.NotFound, (await As(Bob).GetAsync($"/apps/frame/user/{Alice}/color-bucket", Ct)).StatusCode);

@@ -29,6 +29,7 @@ public class DesktopTests
         var context = await _fixture.Browser!.NewContextAsync(options ?? new BrowserNewContextOptions
         {
             IgnoreHTTPSErrors = true,
+            BypassCSP = true,
             ViewportSize = new ViewportSize { Width = 1400, Height = 900 },
         });
         var page = await context.NewPageAsync();
@@ -160,7 +161,7 @@ public class DesktopTests
                 && Tile(t, "builtin:calendar")?.GetProperty("color").ValueKind == System.Text.Json.JsonValueKind.String);
 
             // All of it on the server: a reload, and another browser.
-            foreach (var p in new[] { page, await (await _fixture.Browser!.NewContextAsync(new() { IgnoreHTTPSErrors = true })).NewPageAsync() })
+            foreach (var p in new[] { page, await (await _fixture.Browser!.NewContextAsync(new() { IgnoreHTTPSErrors = true, BypassCSP = true })).NewPageAsync() })
             {
                 await p.GotoAsync(_fixture.BaseUrl + "/#/");
                 await Assertions.Expect(Cell(p, "builtin:todos")).ToHaveClassAsync(new System.Text.RegularExpressions.Regex("size-wide"), new() { Timeout = 5000 });
@@ -360,6 +361,7 @@ public class DesktopTests
         var (context, page, errors) = await OpenAsync(new BrowserNewContextOptions
         {
             IgnoreHTTPSErrors = true,
+            BypassCSP = true,
             ViewportSize = new ViewportSize { Width = 375, Height = 740 },
             IsMobile = true,
             HasTouch = true,

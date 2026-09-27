@@ -158,7 +158,14 @@ public class AppsTests : IAsyncLifetime
             await MenuAsync(page, "Permissions…");
             await review.Locator("#fb-app-files").UncheckAsync();
             await review.Locator("button[data-action='ok']").ClickAsync();
-            await page.WaitForFunctionAsync("async () => { const r = await fetch('/api/v1/desktop'); const d = await r.json(); return d.apps.some(a => a.id === 'fixture-kanban' && a.granted.length === 0); }");
+            // Polled from here: WaitForFunctionAsync evaluates a string, which
+            // the page's CSP refuses (and this file keeps the CSP on — the
+            // frame's policy is what it tests).
+            for (var i = 0; !await page.EvaluateAsync<bool>("async () => { const r = await fetch('/api/v1/desktop'); const d = await r.json(); return d.apps.some(a => a.id === 'fixture-kanban' && a.granted.length === 0); }"); i++)
+            {
+                Assert.True(i < 50, "the grant change never reached the server");
+                await page.WaitForTimeoutAsync(100);
+            }
 
             // ── Settings → Apps lists it. ──
             await page.GotoAsync(_fixture.BaseUrl + "/#/apps");

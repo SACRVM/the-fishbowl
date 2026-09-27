@@ -25,7 +25,7 @@ public class VaultTests
     [Fact]
     public async Task Vault_SetupEncryptUnlockRecover_Test()
     {
-        var context = await _fixture.Browser!.NewContextAsync(new BrowserNewContextOptions { IgnoreHTTPSErrors = true });
+        var context = await _fixture.Browser!.NewContextAsync(new BrowserNewContextOptions { IgnoreHTTPSErrors = true, BypassCSP = true });
         var page = await context.NewPageAsync();
         var api = page.APIRequest;
         var baseUrl = _fixture.BaseUrl;
@@ -211,7 +211,7 @@ public class VaultTests
     [Fact]
     public async Task Vault_ArchivedNote_StillDecrypts_Test()
     {
-        var context = await _fixture.Browser!.NewContextAsync(new BrowserNewContextOptions { IgnoreHTTPSErrors = true });
+        var context = await _fixture.Browser!.NewContextAsync(new BrowserNewContextOptions { IgnoreHTTPSErrors = true, BypassCSP = true });
         var page = await context.NewPageAsync();
         var api = page.APIRequest;
         var baseUrl = _fixture.BaseUrl;
@@ -301,7 +301,7 @@ public class VaultTests
     [Fact]
     public async Task Vault_PasskeyAndSecretsSettings_Test()
     {
-        var context = await _fixture.Browser!.NewContextAsync(new BrowserNewContextOptions { IgnoreHTTPSErrors = true });
+        var context = await _fixture.Browser!.NewContextAsync(new BrowserNewContextOptions { IgnoreHTTPSErrors = true, BypassCSP = true });
         var page = await context.NewPageAsync();
         var api = page.APIRequest;
         // WebAuthn refuses an IP address as its domain; localhost is fine.
@@ -433,7 +433,7 @@ public class VaultTests
     [Fact]
     public async Task Vault_SlotManagementEdges_Test()
     {
-        var context = await _fixture.Browser!.NewContextAsync(new BrowserNewContextOptions { IgnoreHTTPSErrors = true });
+        var context = await _fixture.Browser!.NewContextAsync(new BrowserNewContextOptions { IgnoreHTTPSErrors = true, BypassCSP = true });
         await context.Clock.InstallAsync(new ClockInstallOptions());
         var page = await context.NewPageAsync();
         var api = page.APIRequest;

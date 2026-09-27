@@ -14,7 +14,8 @@ public class UiSmokeTests
     {
         var context = await _fixture.Browser!.NewContextAsync(new BrowserNewContextOptions
         {
-            IgnoreHTTPSErrors = true
+            IgnoreHTTPSErrors = true,
+            BypassCSP = true
         });
         var page = await context.NewPageAsync();
 
@@ -47,6 +48,7 @@ public class UiSmokeTests
     private static BrowserNewContextOptions Phone() => new()
     {
         IgnoreHTTPSErrors = true,
+        BypassCSP = true,
         ViewportSize = new ViewportSize { Width = 375, Height = 740 },
         IsMobile = true,
         HasTouch = true,
@@ -116,7 +118,7 @@ public class UiSmokeTests
     [InlineData("#/spaces", "fb-spaces-settings-view")]
     public async Task SettingsView_LoadsOnKitComponents_Test(string hash, string view)
     {
-        var context = await _fixture.Browser!.NewContextAsync(new BrowserNewContextOptions { IgnoreHTTPSErrors = true });
+        var context = await _fixture.Browser!.NewContextAsync(new BrowserNewContextOptions { IgnoreHTTPSErrors = true, BypassCSP = true });
         var page = await context.NewPageAsync();
         var errors = new List<string>();
         page.PageError += (_, e) => errors.Add(e);
@@ -138,7 +140,7 @@ public class UiSmokeTests
     [Fact]
     public async Task DateFormat_ProfileSetting_DrivesDisplayAndInput_Test()
     {
-        var context = await _fixture.Browser!.NewContextAsync(new BrowserNewContextOptions { IgnoreHTTPSErrors = true });
+        var context = await _fixture.Browser!.NewContextAsync(new BrowserNewContextOptions { IgnoreHTTPSErrors = true, BypassCSP = true });
         var page = await context.NewPageAsync();
         var title = "Format smoke " + Guid.NewGuid().ToString("N")[..6];
         var created = await page.APIRequest.PostAsync(_fixture.BaseUrl + "/api/v1/todos", new APIRequestContextOptions
@@ -196,7 +198,7 @@ public class UiSmokeTests
     [Fact]
     public async Task Todos_KeepCreationOrder_ThroughDoneAndUndone_Test()
     {
-        var context = await _fixture.Browser!.NewContextAsync(new BrowserNewContextOptions { IgnoreHTTPSErrors = true });
+        var context = await _fixture.Browser!.NewContextAsync(new BrowserNewContextOptions { IgnoreHTTPSErrors = true, BypassCSP = true });
         var page = await context.NewPageAsync();
         var tag = "ord" + Guid.NewGuid().ToString("N")[..6];
         var ids = new Dictionary<string, string>();
@@ -250,7 +252,7 @@ public class UiSmokeTests
     [Fact]
     public async Task Notes_Snippet_IsPlainText_Test()
     {
-        var context = await _fixture.Browser!.NewContextAsync(new BrowserNewContextOptions { IgnoreHTTPSErrors = true });
+        var context = await _fixture.Browser!.NewContextAsync(new BrowserNewContextOptions { IgnoreHTTPSErrors = true, BypassCSP = true });
         var page = await context.NewPageAsync();
         var title = "Snippet " + Guid.NewGuid().ToString("N")[..8];
         var res = await page.APIRequest.PostAsync(_fixture.BaseUrl + "/api/v1/notes", new APIRequestContextOptions
@@ -274,7 +276,7 @@ public class UiSmokeTests
     [Fact]
     public async Task Notes_LongTitle_NeverRunsUnderRowActions_Test()
     {
-        var context = await _fixture.Browser!.NewContextAsync(new BrowserNewContextOptions { IgnoreHTTPSErrors = true });
+        var context = await _fixture.Browser!.NewContextAsync(new BrowserNewContextOptions { IgnoreHTTPSErrors = true, BypassCSP = true });
         var page = await context.NewPageAsync();
         var title = "Overlong title " + Guid.NewGuid().ToString("N") + " that keeps going well past the list column";
         await page.APIRequest.PostAsync(_fixture.BaseUrl + "/api/v1/notes", new APIRequestContextOptions
@@ -305,6 +307,7 @@ public class UiSmokeTests
         var phone = await _fixture.Browser!.NewContextAsync(new BrowserNewContextOptions
         {
             IgnoreHTTPSErrors = true,
+            BypassCSP = true,
             ViewportSize = new ViewportSize { Width = 390, Height = 800 },
             IsMobile = true,
             HasTouch = true,
@@ -354,6 +357,7 @@ public class UiSmokeTests
         var context = await _fixture.Browser!.NewContextAsync(new BrowserNewContextOptions
         {
             IgnoreHTTPSErrors = true,
+            BypassCSP = true,
             ViewportSize = new ViewportSize { Width = 1400, Height = 900 },
         });
         var page = await context.NewPageAsync();
@@ -422,6 +426,7 @@ public class UiSmokeTests
             var phone = await _fixture.Browser!.NewContextAsync(new BrowserNewContextOptions
             {
                 IgnoreHTTPSErrors = true,
+                BypassCSP = true,
                 ViewportSize = new ViewportSize { Width = 390, Height = 800 },
                 IsMobile = true,
                 HasTouch = true,
@@ -454,7 +459,7 @@ public class UiSmokeTests
     [Fact]
     public async Task Notes_TagInput_CreatesAndSavesTag_Test()
     {
-        var context = await _fixture.Browser!.NewContextAsync(new BrowserNewContextOptions { IgnoreHTTPSErrors = true });
+        var context = await _fixture.Browser!.NewContextAsync(new BrowserNewContextOptions { IgnoreHTTPSErrors = true, BypassCSP = true });
         var page = await context.NewPageAsync();
         var created = await page.APIRequest.PostAsync(_fixture.BaseUrl + "/api/v1/notes", new APIRequestContextOptions
         {
@@ -496,7 +501,7 @@ public class UiSmokeTests
     [Fact]
     public async Task WorkspaceSwitcher_SwitchesIntoSpaceAndBack_Test()
     {
-        var context = await _fixture.Browser!.NewContextAsync(new BrowserNewContextOptions { IgnoreHTTPSErrors = true });
+        var context = await _fixture.Browser!.NewContextAsync(new BrowserNewContextOptions { IgnoreHTTPSErrors = true, BypassCSP = true });
         var page = await context.NewPageAsync();
         var name = "Switch smoke " + Guid.NewGuid().ToString("N")[..6];
         var space = await page.APIRequest.PostAsync(_fixture.BaseUrl + "/api/v1/spaces", new APIRequestContextOptions
@@ -538,7 +543,7 @@ public class UiSmokeTests
     [Fact]
     public async Task Accents_PersonalAndSpaceColours_ApplyAndPersist_Test()
     {
-        var context = await _fixture.Browser!.NewContextAsync(new BrowserNewContextOptions { IgnoreHTTPSErrors = true });
+        var context = await _fixture.Browser!.NewContextAsync(new BrowserNewContextOptions { IgnoreHTTPSErrors = true, BypassCSP = true });
         var page = await context.NewPageAsync();
         var rootVar = (string name) => page.EvaluateAsync<string>(
             $"() => document.documentElement.style.getPropertyValue('{name}')");
@@ -589,7 +594,7 @@ public class UiSmokeTests
     [Fact]
     public async Task Spaces_CreatedSpaceIsInSwitcherAndOpens_WithoutReload_Test()
     {
-        var context = await _fixture.Browser!.NewContextAsync(new BrowserNewContextOptions { IgnoreHTTPSErrors = true });
+        var context = await _fixture.Browser!.NewContextAsync(new BrowserNewContextOptions { IgnoreHTTPSErrors = true, BypassCSP = true });
         var page = await context.NewPageAsync();
         var name = "Live space " + Guid.NewGuid().ToString("N")[..6];
 
@@ -634,7 +639,7 @@ public class UiSmokeTests
     [Fact]
     public async Task TagManager_RecoloursAndProtectsSystemTags_Test()
     {
-        var context = await _fixture.Browser!.NewContextAsync(new BrowserNewContextOptions { IgnoreHTTPSErrors = true });
+        var context = await _fixture.Browser!.NewContextAsync(new BrowserNewContextOptions { IgnoreHTTPSErrors = true, BypassCSP = true });
         var page = await context.NewPageAsync();
         await page.APIRequest.PutAsync(_fixture.BaseUrl + "/api/v1/tags/manage-smoke", new APIRequestContextOptions
         {
@@ -676,7 +681,7 @@ public class UiSmokeTests
     [Fact]
     public async Task Keys_TokenRevealSurvivesEscape_Test()
     {
-        var context = await _fixture.Browser!.NewContextAsync(new BrowserNewContextOptions { IgnoreHTTPSErrors = true });
+        var context = await _fixture.Browser!.NewContextAsync(new BrowserNewContextOptions { IgnoreHTTPSErrors = true, BypassCSP = true });
         var page = await context.NewPageAsync();
         await page.GotoAsync(_fixture.BaseUrl + "/#/keys");
         await page.Locator("#key-name").FillAsync("reveal smoke");
@@ -714,7 +719,7 @@ public class UiSmokeTests
     [Fact]
     public async Task Notes_TitleIsFirstLine_NeverASecret_Test()
     {
-        var context = await _fixture.Browser!.NewContextAsync(new BrowserNewContextOptions { IgnoreHTTPSErrors = true });
+        var context = await _fixture.Browser!.NewContextAsync(new BrowserNewContextOptions { IgnoreHTTPSErrors = true, BypassCSP = true });
         var page = await context.NewPageAsync();
 
         var created = await page.APIRequest.PostAsync(_fixture.BaseUrl + "/api/v1/notes", new APIRequestContextOptions

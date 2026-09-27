@@ -29,6 +29,7 @@ public class CalendarTests
         var context = await _fixture.Browser!.NewContextAsync(new BrowserNewContextOptions
         {
             IgnoreHTTPSErrors = true,
+            BypassCSP = true,
             ViewportSize = new ViewportSize { Width = 1400, Height = 900 },
         });
         var page = await context.NewPageAsync();
@@ -76,6 +77,7 @@ public class CalendarTests
         var context = await _fixture.Browser!.NewContextAsync(new BrowserNewContextOptions
         {
             IgnoreHTTPSErrors = true,
+            BypassCSP = true,
             ViewportSize = new ViewportSize { Width = 1400, Height = 900 },
         });
         var page = await context.NewPageAsync();
@@ -118,6 +120,7 @@ public class CalendarTests
         var context = await _fixture.Browser!.NewContextAsync(new BrowserNewContextOptions
         {
             IgnoreHTTPSErrors = true,
+            BypassCSP = true,
             ViewportSize = new ViewportSize { Width = 1400, Height = 900 },
         });
         var page = await context.NewPageAsync();
@@ -189,6 +192,7 @@ public class CalendarTests
         var context = await _fixture.Browser!.NewContextAsync(new BrowserNewContextOptions
         {
             IgnoreHTTPSErrors = true,
+            BypassCSP = true,
             ViewportSize = new ViewportSize { Width = 1400, Height = 900 },
         });
         var page = await context.NewPageAsync();
@@ -253,6 +257,7 @@ public class CalendarTests
         var tokyo = await _fixture.Browser!.NewContextAsync(new BrowserNewContextOptions
         {
             IgnoreHTTPSErrors = true,
+            BypassCSP = true,
             TimezoneId = "Asia/Tokyo",
             ViewportSize = new ViewportSize { Width = 1400, Height = 900 },
         });
@@ -284,6 +289,7 @@ public class CalendarTests
                 var ctx = await _fixture.Browser!.NewContextAsync(new BrowserNewContextOptions
                 {
                     IgnoreHTTPSErrors = true,
+                    BypassCSP = true,
                     TimezoneId = zone,
                     ViewportSize = new ViewportSize { Width = 1400, Height = 900 },
                 });
@@ -318,6 +324,7 @@ public class CalendarTests
         var context = await _fixture.Browser!.NewContextAsync(new BrowserNewContextOptions
         {
             IgnoreHTTPSErrors = true,
+            BypassCSP = true,
             ViewportSize = new ViewportSize { Width = 1400, Height = 900 },
         });
         var page = await context.NewPageAsync();

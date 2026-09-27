@@ -505,6 +505,8 @@ app.UseAuthentication();
 // Account state after authentication: a pending account is kept to /pending,
 // a disabled or blocked one loses its session on the next request.
 app.UseAccountState();
+// Every HTML page gets a Content-Security-Policy (PageCsp) unless it sets its own.
+app.UsePageCsp();
 app.UseAuthorization();
 
 app.MapOpenApi("/api/openapi.json");

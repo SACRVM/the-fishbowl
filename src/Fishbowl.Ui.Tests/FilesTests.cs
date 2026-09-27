@@ -23,6 +23,7 @@ public class FilesTests
         var context = await _fixture.Browser!.NewContextAsync(options ?? new BrowserNewContextOptions
         {
             IgnoreHTTPSErrors = true,
+            BypassCSP = true,
             ViewportSize = new ViewportSize { Width = 1400, Height = 900 },
         });
         var page = await context.NewPageAsync();
@@ -388,7 +389,7 @@ public class FilesTests
         // The headless shell has no PDF viewer (it downloads instead); full
         // Chromium in new-headless mode has the real one.
         await using var browser = await _fixture.Playwright!.Chromium.LaunchAsync(new BrowserTypeLaunchOptions { Headless = true, Channel = "chromium" });
-        var context = await browser.NewContextAsync(new BrowserNewContextOptions { IgnoreHTTPSErrors = true });
+        var context = await browser.NewContextAsync(new BrowserNewContextOptions { IgnoreHTTPSErrors = true, BypassCSP = true });
         var page = await context.NewPageAsync();
         try
         {
@@ -451,6 +452,7 @@ public class FilesTests
         var (context, page, errors) = await OpenAsync(new BrowserNewContextOptions
         {
             IgnoreHTTPSErrors = true,
+            BypassCSP = true,
             ViewportSize = new ViewportSize { Width = 375, Height = 740 },
             IsMobile = true,
             HasTouch = true,
@@ -610,6 +612,7 @@ public class FilesTests
         var (context, page, errors) = await OpenAsync(new BrowserNewContextOptions
         {
             IgnoreHTTPSErrors = true,
+            BypassCSP = true,
             ViewportSize = new ViewportSize { Width = 375, Height = 740 },
             IsMobile = true,
             HasTouch = true,
