@@ -446,6 +446,14 @@ public class DatabaseFactory
             ApplyUserV11(connection);
             connection.Execute("PRAGMA user_version = 11");
             _logger.LogInformation("Applied user schema v11 to {DbPath}", ((SqliteConnection)connection).DataSource);
+            version = 11;
+        }
+
+        if (version < 12)
+        {
+            ApplyUserV12(connection);
+            connection.Execute("PRAGMA user_version = 12");
+            _logger.LogInformation("Applied user schema v12 to {DbPath}", ((SqliteConnection)connection).DataSource);
         }
     }
 
@@ -1391,6 +1399,52 @@ public class DatabaseFactory
         var cols = connection.Query<string>("SELECT name FROM pragma_table_info('events')").ToList();
         if (cols.Count > 0 && !cols.Contains("time_zone"))
             connection.Execute("ALTER TABLE events ADD COLUMN time_zone TEXT");
+    }
+
+    // V12: all-day events become dates. `start_date` / `end_date`
+    // (`YYYY-MM-DD`, end exclusive, iCal style) on all_day rows; start_at /
+    // end_at are rewritten to `<date>T00:00:00Z` anchors. Existing rows were
+    // local midnight of their writer, stored as a UTC instant: the date is
+    // that instant's local date in time_zone when the row has one (v11+),
+    // else the +12 h rule (AllDayDates.DateOf); the length is the rounded
+    // day count of end − start, at least one day (a missing or zero-length
+    // end is one day). Idempotent: only rows without a start_date are touched.
+    private void ApplyUserV12(IDbConnection connection)
+    {
+        var cols = connection.Query<string>("SELECT name FROM pragma_table_info('events')").ToList();
+        if (cols.Count == 0) return;
+        if (!cols.Contains("start_date"))
+            connection.Execute("ALTER TABLE events ADD COLUMN start_date TEXT");
+        if (!cols.Contains("end_date"))
+            connection.Execute("ALTER TABLE events ADD COLUMN end_date TEXT");
+        var hasZone = cols.Contains("time_zone");
+
+        using var transaction = connection.BeginTransaction();
+        var rows = connection.Query<(string Id, string StartAt, string? EndAt, string? TimeZone)>(
+            $"SELECT id, start_at, end_at, {(hasZone ? "time_zone" : "NULL")} FROM events WHERE all_day = 1 AND start_date IS NULL",
+            transaction: transaction).ToList();
+        foreach (var r in rows)
+        {
+            if (!DateTime.TryParse(r.StartAt, System.Globalization.CultureInfo.InvariantCulture,
+                    System.Globalization.DateTimeStyles.RoundtripKind, out var start))
+                continue;
+            DateTime? end = DateTime.TryParse(r.EndAt, System.Globalization.CultureInfo.InvariantCulture,
+                System.Globalization.DateTimeStyles.RoundtripKind, out var e) ? e : null;
+            var date = AllDayDates.DateOf(start, RRule.ResolveZone(r.TimeZone));
+            var endDate = date.AddDays(AllDayDates.SpanDays(start, end));
+            connection.Execute(@"
+                UPDATE events SET start_date = @sd, end_date = @ed, start_at = @sa, end_at = @ea
+                WHERE id = @id",
+                new
+                {
+                    sd = AllDayDates.ToText(date),
+                    ed = AllDayDates.ToText(endDate),
+                    sa = AllDayDates.Anchor(date).ToString("o"),
+                    ea = AllDayDates.Anchor(endDate).ToString("o"),
+                    id = r.Id,
+                }, transaction);
+        }
+        transaction.Commit();
     }
 
     // V10: how long the secret vault stays unlocked without a secret

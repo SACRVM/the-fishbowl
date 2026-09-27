@@ -114,6 +114,58 @@ public class EventsApiTests : IClassFixture<WebApplicationFactory<Program>>, IDi
         Assert.Equal(HttpStatusCode.BadRequest, resp.StatusCode);
     }
 
+    // All-day events are dates on the wire: startDate / endDate (end
+    // exclusive) come back on every read, and an older client that only
+    // sends allDay + startAt (local midnight) gets the date derived.
+    [Fact]
+    public async Task AllDay_JsonCarriesDates_AndStartAtOnlyClientsStillWork()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var client = _factory.CreateClient();
+
+        var withDates = await client.SendAsync(Req(HttpMethod.Post, "/api/v1/events", UserA, new
+        {
+            title = "Trip",
+            allDay = true,
+            startAt = "2026-10-01T00:00:00Z",
+            startDate = "2026-10-01",
+            endDate = "2026-10-04",
+        }), ct);
+        Assert.Equal(HttpStatusCode.Created, withDates.StatusCode);
+        var json = await withDates.Content.ReadFromJsonAsync<System.Text.Json.JsonElement>(ct);
+        Assert.Equal("2026-10-01", json.GetProperty("startDate").GetString());
+        Assert.Equal("2026-10-04", json.GetProperty("endDate").GetString());
+
+        // An old client in Tokyo: local midnight Oct 1 = Sep 30 15:00Z.
+        var legacy = await client.SendAsync(Req(HttpMethod.Post, "/api/v1/events", UserA, new
+        {
+            title = "Legacy",
+            allDay = true,
+            startAt = "2026-09-30T15:00:00Z",
+            endAt = "2026-10-01T14:59:00Z",
+        }), ct);
+        Assert.Equal(HttpStatusCode.Created, legacy.StatusCode);
+        var id = (await legacy.Content.ReadFromJsonAsync<System.Text.Json.JsonElement>(ct)).GetProperty("id").GetString();
+        var back = await (await client.SendAsync(Req(HttpMethod.Get, $"/api/v1/events/{id}", UserA), ct))
+            .Content.ReadFromJsonAsync<System.Text.Json.JsonElement>(ct);
+        Assert.Equal("2026-10-01", back.GetProperty("startDate").GetString());
+        Assert.Equal("2026-10-02", back.GetProperty("endDate").GetString());
+        Assert.True(back.GetProperty("allDay").GetBoolean());
+
+        // A timed event has no dates.
+        var timed = await CreateAsync(client, UserA, "Timed", new DateTime(2026, 10, 1, 9, 0, 0, DateTimeKind.Utc));
+        Assert.Null(timed.StartDate);
+
+        var bad = await client.SendAsync(Req(HttpMethod.Post, "/api/v1/events", UserA, new
+        {
+            title = "Bad",
+            allDay = true,
+            startAt = "2026-10-01T00:00:00Z",
+            startDate = "01.10.2026",
+        }), ct);
+        Assert.Equal(HttpStatusCode.BadRequest, bad.StatusCode);
+    }
+
     [Fact]
     public async Task Create_RejectsInvertedWindow_400()
     {

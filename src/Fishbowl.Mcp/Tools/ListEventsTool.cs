@@ -85,6 +85,10 @@ public class ListEventsTool : IMcpTool
             startAt = e.StartAt,
             endAt = e.EndAt,
             allDay = e.AllDay,
+            // All-day events are dates (end exclusive); startAt/endAt then
+            // hold T00:00Z anchors, not moments.
+            startDate = e.StartDate,
+            endDate = e.EndDate,
             rrule = e.RRule,
             location = e.Location,
             reminderMinutes = e.ReminderMinutes,

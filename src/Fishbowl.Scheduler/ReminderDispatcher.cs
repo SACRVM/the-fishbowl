@@ -203,7 +203,8 @@ public class ReminderDispatcher : BackgroundService
     {
         var when = ev.StartAt - now;
         string whenText;
-        if (when.TotalSeconds <= 30) whenText = "now";
+        if (ev.AllDay && ev.StartDate is not null) whenText = $"on {ev.StartDate} (all day)";
+        else if (when.TotalSeconds <= 30) whenText = "now";
         else if (when.TotalMinutes < 1) whenText = "in less than a minute";
         else if (when.TotalMinutes < 60) whenText = $"in {(int)when.TotalMinutes}m";
         else if (when.TotalHours < 24) whenText = $"in {(int)when.TotalHours}h{when.Minutes:D2}m";

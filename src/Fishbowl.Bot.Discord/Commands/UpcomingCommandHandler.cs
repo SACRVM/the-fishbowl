@@ -59,8 +59,12 @@ public class UpcomingCommandHandler : ISlashCommandHandler
             days = Math.Clamp(parsed, 1, MaxDays);
 
         var from = DateTime.UtcNow;
+        // All-day events are dates; the range read pads them a day each side.
+        var fromDay = DateOnly.FromDateTime(from);
         var found = (await _events.GetRangeAsync(
-            ContextRef.User(userId), from, from.AddDays(days), ct)).ToList();
+            ContextRef.User(userId), from, from.AddDays(days), ct))
+            .Where(e => !e.AllDay || AllDayDates.Overlaps(e, fromDay, fromDay.AddDays(days)))
+            .ToList();
 
         if (found.Count == 0)
             return SlashCommandReply.Plain(
@@ -73,7 +77,8 @@ public class UpcomingCommandHandler : ISlashCommandHandler
         foreach (var ev in found.Take(MaxLines))
         {
             var unix = new DateTimeOffset(TimeUtil.AsUtc(ev.StartAt)).ToUnixTimeSeconds();
-            var when = ev.AllDay ? $"<t:{unix}:D>" : $"<t:{unix}:f>";
+            // A date, not a moment: <t:…> would shift it into the viewer's zone.
+            var when = ev.AllDay ? $"{DayText(ev.StartDate)} (all day)" : $"<t:{unix}:f>";
             var repeat = string.IsNullOrEmpty(ev.RRule) ? "" : " ↻";
             var location = string.IsNullOrWhiteSpace(ev.Location) ? "" : $" — {Escape(ev.Location)}";
             lines.Add($"• {when}  **{Escape(ev.Title)}**{repeat}{location}");
@@ -83,6 +88,11 @@ public class UpcomingCommandHandler : ISlashCommandHandler
 
         return SlashCommandReply.Plain(string.Join("\n", lines));
     }
+
+    private static string DayText(string? date)
+        => AllDayDates.TryParse(date, out var d)
+            ? d.ToString("ddd d MMM yyyy", System.Globalization.CultureInfo.InvariantCulture)
+            : date ?? "";
 
     private static string Escape(string s)
         => s.Replace("`", "\\`").Replace("*", "\\*").Replace("_", "\\_");

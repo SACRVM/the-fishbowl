@@ -39,6 +39,20 @@ class FbCalendarView extends HTMLElement {
         return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
     }
 
+    /** A `YYYY-MM-DD` key moved by n days — pure date math (UTC), never
+     *  through the local clock, so an all-day date is the same day everywhere. */
+    static addDays(key, n) {
+        const [y, m, d] = key.split("-").map(Number);
+        const t = new Date(Date.UTC(y, m - 1, d + n));
+        return t.toISOString().slice(0, 10);
+    }
+
+    /** A date key as a local Date at midnight (for the date fields). */
+    static localDate(key) {
+        const [y, m, d] = key.split("-").map(Number);
+        return new Date(y, m - 1, d);
+    }
+
     async connectedCallback() {
         this.render();
         await this.loadEvents();
@@ -306,11 +320,18 @@ class FbCalendarView extends HTMLElement {
                     font-variant-numeric: tabular-nums;
                 }
                 fb-calendar-view .cv-more {
+                    font: inherit;
                     font-size: 10px;
                     color: var(--text-muted);
-                    padding-left: 6px;
+                    padding: 0 0 0 6px;
                     flex-shrink: 0;
+                    align-self: flex-start;
+                    background: none;
+                    border: 0;
+                    cursor: pointer;
                 }
+                fb-calendar-view .cv-more:hover,
+                fb-calendar-view .cv-more:focus-visible { color: var(--text); text-decoration: underline; }
 
                 /* --- MAIN PANE: EDITOR ---------------------------------------- */
                 fb-calendar-view .cv-back-btn {
@@ -570,7 +591,11 @@ class FbCalendarView extends HTMLElement {
         this.querySelector("#cv-reminder").addEventListener("change", () => this.saveEditing());
         this.querySelector("#cv-repeat").addEventListener("change", () => this.saveEditing());
         this.querySelector("#cv-allday").addEventListener("sac:change", (e) => {
-            this._applyAllDayMode(e.detail.value);
+            const allDay = e.detail.value;
+            // All day on, then off again: the times come back, not 09:00.
+            if (allDay) this._rememberTimes();
+            this._applyAllDayMode(allDay);
+            if (!allDay) this._restoreTimes();
             this.saveEditing();
         });
     }
@@ -589,7 +614,20 @@ class FbCalendarView extends HTMLElement {
 
     _eventsByDay() {
         const map = new Map();
+        const put = (key, e) => {
+            if (!map.has(key)) map.set(key, []);
+            map.get(key).push(e);
+        };
         for (const e of this.events) {
+            // All-day events are dates (startDate .. endDate, end exclusive):
+            // placed by the date strings, never through a time zone.
+            if (e.allDay && e.startDate) {
+                const end = e.endDate || FbCalendarView.addDays(e.startDate, 1);
+                let key = e.startDate;
+                for (let i = 0; key < end && i < 62; i++, key = FbCalendarView.addDays(key, 1))
+                    put(key, i === 0 ? e : { ...e, _cont: true });
+                continue;
+            }
             // Every day the event touches: the first carries it as is, the
             // following ones a `_cont` copy (no start time, dimmed).
             const s = new Date(e.startAt);
@@ -597,12 +635,13 @@ class FbCalendarView extends HTMLElement {
             // A timed event ending at midnight doesn't touch that day.
             const last = new Date(end.getTime() - (e.allDay || end.getTime() === s.getTime() ? 0 : 1));
             const d = new Date(s.getFullYear(), s.getMonth(), s.getDate());
-            for (let i = 0; d <= last && i < 62; i++, d.setDate(d.getDate() + 1)) {
-                const key = FbCalendarView.dayKey(d);
-                if (!map.has(key)) map.set(key, []);
-                map.get(key).push(i === 0 ? e : { ...e, _cont: true });
-            }
+            for (let i = 0; d <= last && i < 62; i++, d.setDate(d.getDate() + 1))
+                put(FbCalendarView.dayKey(d), i === 0 ? e : { ...e, _cont: true });
         }
+        // Within a day: all-day and continuing events first, then by time.
+        const rank = (e) => (e.allDay || e._cont ? 0 : 1);
+        for (const list of map.values())
+            list.sort((a, b) => rank(a) - rank(b) || new Date(a.startAt) - new Date(b.startAt));
         return map;
     }
 
@@ -653,7 +692,7 @@ class FbCalendarView extends HTMLElement {
                 <div class="${classes}" data-key="${key}">
                     <div class="cv-day-num">${d.getDate()}</div>
                     ${chips}
-                    ${more > 0 ? `<div class="cv-more">+${more} more</div>` : ""}
+                    ${more > 0 ? `<button type="button" class="cv-more" aria-label="All ${dayEvents.length} events">+${more} more</button>` : ""}
                 </div>
             `);
         }
@@ -678,6 +717,38 @@ class FbCalendarView extends HTMLElement {
                     this.openById(chip.dataset.id);
                 });
             });
+            cell.querySelector(".cv-more")?.addEventListener("click", (e) => {
+                e.stopPropagation();
+                this._moreMenu(cell, e.currentTarget);
+            });
+            cell.querySelector(".cv-more")?.addEventListener("dblclick", (e) => e.stopPropagation());
+        });
+    }
+
+    /** "+N more": a kit menu at the day listing all its events; picking
+     *  one opens it. Escape / a click elsewhere closes it (sac-menu). */
+    _moreMenu(cell, anchor) {
+        this.querySelector("#cv-more-menu")?.remove();
+        const menu = document.createElement("sac-menu");
+        menu.id = "cv-more-menu";
+        for (const ev of this._eventsByDay().get(cell.dataset.key) || []) {
+            const b = document.createElement("button");
+            b.type = "button";
+            b.dataset.action = ev.id;
+            const t = ev.allDay || ev._cont ? "all day" : fb.format.time(ev.startAt);
+            const repeat = ev.rRule ? ` <span class="cv-repeat-mark" title="Repeats">&#8635;</span>` : "";
+            b.innerHTML = `<span class="cv-chip-time">${t}</span> ${escapeHtml(ev.title || "Untitled")}${repeat}`;
+            menu.appendChild(b);
+        }
+        menu.addEventListener("sac:select", (ev) => {
+            menu.remove();
+            this.openById(ev.detail.action);
+        });
+        this.appendChild(menu);
+        const r = anchor.getBoundingClientRect();
+        requestAnimationFrame(() => {
+            menu.openAt({ clientX: r.left, clientY: r.bottom });
+            menu.querySelector("button")?.focus();
         });
     }
 
@@ -798,13 +869,25 @@ class FbCalendarView extends HTMLElement {
     }
 
     _fillEditor(e) {
+        // The times to bring back when All day is switched off: a saved
+        // all-day event keeps its stored time only if it has one (they are
+        // stored at local midnight, which is no time at all).
+        this._timeMemo = null;
         this.querySelector("#cv-title").value = e.title || "";
         this.querySelector("#cv-allday").checked = !!e.allDay;
         this._applyAllDayMode(!!e.allDay);
         const start = this.querySelector("#cv-start");
         const end = this.querySelector("#cv-end");
-        fb.format.writeInput(start, e.startAt ? new Date(e.startAt) : null);
-        fb.format.writeInput(end,   e.endAt   ? new Date(e.endAt)   : null);
+        if (e.allDay && e.startDate) {
+            // Dates, shown as they are: the end field is the last day
+            // (the stored end is exclusive).
+            const last = e.endDate ? FbCalendarView.addDays(e.endDate, -1) : e.startDate;
+            fb.format.writeInput(start, FbCalendarView.localDate(e.startDate));
+            fb.format.writeInput(end,   FbCalendarView.localDate(last < e.startDate ? e.startDate : last));
+        } else {
+            fb.format.writeInput(start, e.startAt ? new Date(e.startAt) : null);
+            fb.format.writeInput(end,   e.endAt   ? new Date(e.endAt)   : null);
+        }
         this.querySelector("#cv-reminder").value = e.reminderMinutes ?? "";
         this._fillRepeat(e.rRule);
         this.querySelector("#cv-location").value = e.location || "";
@@ -826,6 +909,27 @@ class FbCalendarView extends HTMLElement {
             select.appendChild(opt);
         }
         select.value = value;
+    }
+
+    /** Keep the start/end times the editor shows before All day hides them. */
+    _rememberTimes() {
+        const time = (sel) => this.querySelector(sel)?._fbTime?.value || null;
+        const start = time("#cv-start");
+        if (start) this._timeMemo = { start, end: time("#cv-end") };
+    }
+
+    /** All day switched off: put the remembered times back (else the
+     *  default stays). */
+    _restoreTimes() {
+        const memo = this._timeMemo;
+        if (!memo) return;
+        for (const [sel, hhmm] of [["#cv-start", memo.start], ["#cv-end", memo.end]]) {
+            const field = this.querySelector(sel);
+            const day = fb.format.readInput(field);
+            if (!day || !hhmm) continue;
+            const [h, m] = hhmm.split(":").map(Number);
+            fb.format.writeInput(field, new Date(day.getFullYear(), day.getMonth(), day.getDate(), h, m));
+        }
     }
 
     /** Switch start/end between a date and a date + time, keeping the day. */
@@ -891,11 +995,16 @@ class FbCalendarView extends HTMLElement {
         }
         hint.textContent = "";
         const reminderVal = this.querySelector("#cv-reminder").value;
+        // All day: the dates the fields show (end exclusive for the server).
+        const startDate = allDay ? FbCalendarView.dayKey(startAt) : null;
+        const endDate = allDay ? FbCalendarView.addDays(FbCalendarView.dayKey(endAt || startAt), 1) : null;
         return {
             title,
             allDay,
             startAt: startAt.toISOString(),
             endAt: endAt ? endAt.toISOString() : null,
+            startDate,
+            endDate,
             location: this.querySelector("#cv-location").value.trim() || null,
             reminderMinutes: reminderVal === "" ? null : parseInt(reminderVal, 10),
             rRule: this.querySelector("#cv-repeat").value || null,
@@ -935,8 +1044,9 @@ class FbCalendarView extends HTMLElement {
         const unchanged = e.id
             && form.title === e.title
             && form.allDay === !!e.allDay
-            && sameInstant(form.startAt, e.startAt)
-            && sameInstant(form.endAt, e.endAt)
+            && (form.allDay
+                ? form.startDate === (e.startDate || null) && form.endDate === (e.endDate || null)
+                : sameInstant(form.startAt, e.startAt) && sameInstant(form.endAt, e.endAt))
             && form.location === (e.location || null)
             && form.reminderMinutes === (e.reminderMinutes ?? null)
             && form.rRule === (e.rRule || null)

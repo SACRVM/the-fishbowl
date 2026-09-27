@@ -134,7 +134,7 @@ public class TodoRepositoryTests : IDisposable
         using var upgraded = new DatabaseFactory(_tempDbDir).CreateConnection(userId);
         var order = upgraded.Query<string>("SELECT id FROM todos ORDER BY position").ToList();
         Assert.Equal(new[] { "t1", "t2", "t3" }, order);
-        Assert.Equal(11, upgraded.ExecuteScalar<long>("PRAGMA user_version"));   // head; v9-v11 run on top
+        Assert.Equal(12, upgraded.ExecuteScalar<long>("PRAGMA user_version"));   // head; v9-v12 run on top
     }
 
     public void Dispose()

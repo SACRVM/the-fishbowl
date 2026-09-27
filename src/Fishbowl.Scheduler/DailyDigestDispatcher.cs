@@ -141,7 +141,10 @@ public class DailyDigestDispatcher : BackgroundService
         var events = sp.GetRequiredService<IEventRepository>();
         var todos = sp.GetRequiredService<ITodoRepository>();
 
-        var todaysEvents = (await events.GetRangeAsync(ctx, dayStartUtc, dayEndUtc, ct)).ToList();
+        var today = DateOnly.FromDateTime(nowLocal);
+        var todaysEvents = (await events.GetRangeAsync(ctx, dayStartUtc, dayEndUtc, ct))
+            .Where(e => !e.AllDay || AllDayDates.Overlaps(e, today, today.AddDays(1)))
+            .ToList();
         var dueTodos = (await todos.GetAllAsync(ctx, includeCompleted: false, ct))
             .Where(t => t.DueAt is DateTime due && TimeUtil.AsUtc(due) < dayEndUtc)
             .OrderBy(t => t.DueAt)

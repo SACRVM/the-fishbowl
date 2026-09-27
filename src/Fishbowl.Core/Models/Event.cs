@@ -10,6 +10,11 @@ public class Event
     public DateTime StartAt { get; set; }
     public DateTime? EndAt { get; set; }
     public bool AllDay { get; set; }
+    // All-day only (user schema v12): the calendar dates, `YYYY-MM-DD`, end
+    // exclusive. StartAt/EndAt then hold `<date>T00:00:00Z` anchors — see
+    // Fishbowl.Core.Util.AllDayDates. Null on timed events.
+    public string? StartDate { get; set; }
+    public string? EndDate { get; set; }
     public string? RRule { get; set; } // iCal RRULE
     // IANA zone the event was written in (the browser's). A recurring series
     // expands in its wall-clock time; null = expand in UTC.
