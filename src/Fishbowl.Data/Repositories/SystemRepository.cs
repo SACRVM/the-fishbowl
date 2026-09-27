@@ -77,7 +77,8 @@ public class SystemRepository : ISystemRepository
                          created_at AS CreatedAt, password_hash AS PasswordHash,
                          password_salt AS PasswordSalt, is_admin AS IsAdmin,
                          must_change_password AS MustChangePassword, accent AS Accent,
-                         date_format AS DateFormat, vault_auto_lock_minutes AS VaultAutoLockMinutes,
+                         date_format AS DateFormat, language AS Language,
+                         vault_auto_lock_minutes AS VaultAutoLockMinutes,
                          state AS State, quota_bytes AS QuotaBytes, approved_by AS ApprovedBy,
                          approved_at AS ApprovedAt, last_sign_in_at AS LastSignInAt
                   FROM users WHERE id = @userId",
@@ -150,6 +151,17 @@ public class SystemRepository : ISystemRepository
             new CommandDefinition(
                 "UPDATE users SET date_format = @dateFormat WHERE id = @userId",
                 new { userId, dateFormat },
+                cancellationToken: ct));
+        return affected > 0;
+    }
+
+    public async Task<bool> SetLanguageAsync(string userId, string? language, CancellationToken ct = default)
+    {
+        using var db = _dbFactory.CreateSystemConnection();
+        var affected = await db.ExecuteAsync(
+            new CommandDefinition(
+                "UPDATE users SET language = @language WHERE id = @userId",
+                new { userId, language },
                 cancellationToken: ct));
         return affected > 0;
     }

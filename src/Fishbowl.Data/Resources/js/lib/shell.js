@@ -7,6 +7,7 @@
  *     narrow screen
  *   - fills the account menu (avatar → Profile / Log out)
  *   - keeps the phone ribbon's title on the active view's name
+ *   - applies the user's UI language (fb.i18n) and repaints on a switch
  *   - mounts the router into #app-root
  */
 (function () {
@@ -61,13 +62,6 @@
     window.addEventListener("sac:scope-changed", syncHome);
     window.addEventListener("hashchange", syncHome);
     syncHome();
-    // The kit's own "nav.home" string: Home / Start.
-    function labelHome() {
-        const span = homeLink?.querySelector("span");
-        if (span) span.textContent = sac.t ? sac.t("nav.home", "Home") : "Home";
-    }
-    sac.lang?.onChange?.(labelHome);
-    labelHome();
 
     // --- Accent colours -----------------------------------------------------
     // Both are kit palette slot names ("teal"…) or null for the kit default.
@@ -121,7 +115,7 @@
         const pill = switcher.querySelector('[slot="trigger"]');
         pill.classList.toggle("space", inSpace);
         pill.querySelector("sac-icon").setAttribute("name", inSpace ? "users" : "user");
-        pill.querySelector(".fb-context-label").textContent = inSpace ? (space?.name || ctx.slug) : "Personal";
+        pill.querySelector(".fb-context-label").textContent = inSpace ? (space?.name || ctx.slug) : fb.t("fb.shell.personal", "Personal");
 
         const item = (action, icon, label, active, color) => {
             const b = document.createElement("button");
@@ -137,16 +131,16 @@
             }
             return b;
         };
-        const nodes = [item("ctx:user", "user", "Personal", !inSpace), document.createElement("hr")];
+        const nodes = [item("ctx:user", "user", fb.t("fb.shell.personal", "Personal"), !inSpace), document.createElement("hr")];
         if (spaces?.length) {
             for (const s of spaces) nodes.push(item(`ctx:space:${s.slug}`, "users", s.name || s.slug, inSpace && s.slug === ctx.slug, s.color));
         } else if (spaces) {
             const empty = document.createElement("span");
             empty.className = "fb-context-empty";
-            empty.textContent = "No spaces yet";
+            empty.textContent = fb.t("fb.shell.no-spaces", "No spaces yet");
             nodes.push(empty);
         }
-        nodes.push(document.createElement("hr"), item("manage-spaces", "settings", "Manage spaces…", false));
+        nodes.push(document.createElement("hr"), item("manage-spaces", "settings", fb.t("fb.shell.manage-spaces", "Manage spaces…"), false));
 
         for (const el of [...switcher.children]) if (el.getAttribute("slot") !== "trigger") el.remove();
         switcher.append(...nodes);
@@ -187,8 +181,9 @@
         user = me;
         setPersonalAccent(me.accent);
         applyDateFormat(me.dateFormat);
+        applyLanguage(me.language);
         fb.vault?.setAutoLock?.(me.vaultAutoLockMinutes);
-        const display = me.name || me.email || "User";
+        const display = me.name || me.email || fb.t("fb.shell.user", "User");
         avatar.setAttribute("name", display);
         if (me.avatarUrl) avatar.setAttribute("src", me.avatarUrl);
         account.querySelector('[slot="trigger"]').title = display;
@@ -209,8 +204,11 @@
     // it); its tooltip names the key the way this platform spells it.
     const searchBtn = document.getElementById("fb-search-btn");
     const paletteKey = sac.hotkeys?.format ? sac.hotkeys.format("mod+k") : "Ctrl+K";
-    searchBtn.title = `Search and commands (${paletteKey})`;
-    searchBtn.setAttribute("aria-label", searchBtn.title);
+    function labelSearch() {
+        searchBtn.title = fb.t("fb.shell.search", "Search and commands ({key})", { key: paletteKey });
+        searchBtn.setAttribute("aria-label", searchBtn.title);
+    }
+    labelSearch();
     searchBtn.addEventListener("click", () => sac.palette?.open());
 
     // --- Messages ----------------------------------------------------------
@@ -232,10 +230,10 @@
                 messagesBtn.appendChild(badge);
             }
             badge.textContent = n > 99 ? "99+" : String(n);
-            messagesBtn.title = `Messages — ${n} unread`;
+            messagesBtn.title = fb.t("fb.shell.messages-unread", "Messages — {n} unread", { n });
         } else {
             badge?.remove();
-            messagesBtn.title = "Messages";
+            messagesBtn.title = fb.t("fb.shell.messages", "Messages");
         }
         messagesBtn.setAttribute("aria-label", messagesBtn.title);
     }
@@ -247,7 +245,7 @@
         if (e.detail.action === "profile") openProfile();
         if (e.detail.action === "logout")  logout();
         if (e.detail.action === "lock-secrets") {
-            fb.vault?.lock().then(() => window.sac?.toast?.("Secrets locked.", { kind: "success" }));
+            fb.vault?.lock().then(() => window.sac?.toast?.(fb.t("fb.shell.secrets-locked", "Secrets locked."), { kind: "success" }));
         }
         if (e.detail.action === "unlock-secrets") {
             // Cancelling the dialog is a normal answer, not an error.
@@ -259,16 +257,17 @@
     // locked, neither while there is no vault yet (nothing to unlock) or in a
     // space (secrets are personal). Both live right after "Profile", above
     // the separator, and toggle `hidden` (kit >= 2.19 honours it).
-    const vaultItem = (action, icon, label) => {
+    const vaultItem = (action, icon, key, label) => {
         const b = document.createElement("button");
         b.id = "fb-" + action + "-item";
         b.dataset.action = action;
         b.hidden = true;
-        b.innerHTML = `<sac-icon name="${icon}"></sac-icon> ${label}`;
+        b.innerHTML = `<sac-icon name="${icon}"></sac-icon> <span data-t="${key}">${label}</span>`;
+        fb.i18n.apply(b);
         return b;
     };
-    const lockItem = vaultItem("lock-secrets", "lock", "Lock secrets");
-    const unlockItem = vaultItem("unlock-secrets", "unlock", "Unlock secrets");
+    const lockItem = vaultItem("lock-secrets", "lock", "fb.shell.lock-secrets", "Lock secrets");
+    const unlockItem = vaultItem("unlock-secrets", "unlock", "fb.shell.unlock-secrets", "Unlock secrets");
     account.querySelector('[data-action="profile"]')?.after(lockItem, unlockItem);
     async function syncVaultItems() {
         const s = await (fb.vault?.status?.() ?? { available: false });
@@ -284,7 +283,7 @@
         if (!win) {
             win = document.createElement("sac-window");
             win.id = "fb-profile-window";
-            win.setAttribute("title", "Profile");
+            win.setAttribute("title", fb.t("fb.profile.title", "Profile"));
             win.setAttribute("width", "380px");
             win.setAttribute("height", "auto");
             win.setAttribute("top", "70px");
@@ -292,27 +291,61 @@
             win.setAttribute("controls", "close");
             document.body.appendChild(win);
         }
+        renderProfile(win);
+        requestAnimationFrame(() => win.open());
+    }
+
+    // The profile's content; re-rendered in place on a language switch.
+    function renderProfile(win) {
+        win.setAttribute("title", fb.t("fb.profile.title", "Profile"));
         const joined = user?.createdAt ? fb.format.date(user.createdAt) : "—";
+        const mode = sac.lang?.mode?.() || "auto";
+        const languages = [
+            ["auto", fb.t("fb.profile.language-auto", "Automatic ({language})", { language: sac.lang?.name?.(detectLanguage()) || "English" })],
+            // Each language in its own words.
+            ...(sac.lang?.available?.() || ["en"]).map((c) => [c, sac.lang.name(c)]),
+        ];
         win.innerHTML = `
             <div class="fb-profile">
                 <sac-avatar style="--avatar-size: 72px"></sac-avatar>
                 <div class="fb-profile-name"></div>
                 <div class="fb-profile-email"></div>
                 <dl>
-                    <div><dt>Joined</dt><dd>${joined}</dd></div>
-                    <div><dt>User ID</dt><dd class="fb-profile-id"></dd></div>
+                    <div><dt>${fb.t("fb.profile.joined", "Joined")}</dt><dd>${joined}</dd></div>
+                    <div><dt>${fb.t("fb.profile.user-id", "User ID")}</dt><dd class="fb-profile-id"></dd></div>
                 </dl>
                 <div class="fb-profile-accent">
-                    <div class="fb-profile-label">Accent colour</div>
+                    <div class="fb-profile-label">${fb.t("fb.profile.accent", "Accent colour")}</div>
                     <sac-swatch-grid selectable columns="11"></sac-swatch-grid>
                 </div>
                 <div class="fb-profile-accent">
-                    <label class="fb-profile-label" for="fb-date-format">Date &amp; time format</label>
+                    <label class="fb-profile-label" for="fb-language">${fb.t("fb.profile.language", "Language")}</label>
+                    <span class="select"><select id="fb-language" class="fb-profile-select">
+                        ${languages.map(([v]) => `<option value="${v}"${v === mode ? " selected" : ""}></option>`).join("")}
+                    </select></span>
+                </div>
+                <div class="fb-profile-accent">
+                    <label class="fb-profile-label" for="fb-date-format">${fb.t("fb.profile.date-format", "Date &amp; time format")}</label>
                     <span class="select"><select id="fb-date-format" class="fb-profile-select">
                         ${fb.format.NAMES.map((n) => `<option value="${n}"${n === fb.format.name ? " selected" : ""}>${fb.format.example(n)}</option>`).join("")}
                     </select></span>
                 </div>
             </div>`;
+        // Language names come from Intl — set as text, never as markup.
+        win.querySelectorAll("#fb-language option").forEach((o, i) => { o.textContent = languages[i][1]; });
+        win.querySelector("#fb-language").addEventListener("change", async (e) => {
+            const before = user?.language ?? null;
+            const next = e.target.value === "auto" ? null : e.target.value;
+            applyLanguage(next);
+            try {
+                await fb.api.me.update({ language: next });
+                if (user) user.language = next;
+            } catch (err) {
+                console.warn("[fb-shell] language save failed:", err?.message || err);
+                applyLanguage(before);
+                window.sac?.toast?.(fb.t("fb.profile.language-failed", "Couldn't save the language."), { kind: "error" });
+            }
+        });
         win.querySelector("#fb-date-format").addEventListener("change", async (e) => {
             const before = fb.format.name;
             applyDateFormat(e.target.value);
@@ -323,7 +356,7 @@
                 console.warn("[fb-shell] date format save failed:", err?.message || err);
                 applyDateFormat(before);
                 e.target.value = before;
-                window.sac?.toast?.("Couldn't save the date format.", { kind: "error" });
+                window.sac?.toast?.(fb.t("fb.profile.date-format-failed", "Couldn't save the date format."), { kind: "error" });
             }
         });
         const grid = win.querySelector("sac-swatch-grid");
@@ -339,18 +372,51 @@
                 console.warn("[fb-shell] accent save failed:", err?.message || err);
                 setPersonalAccent(before);
                 grid.colors = accentSwatches(before);
-                window.sac?.toast?.("Couldn't save the accent colour.", { kind: "error" });
+                window.sac?.toast?.(fb.t("fb.profile.accent-failed", "Couldn't save the accent colour."), { kind: "error" });
             }
         });
         // User-sourced strings go in via textContent / attributes only.
         const pic = win.querySelector("sac-avatar");
         pic.setAttribute("name", user?.name || user?.email || "");
         if (user?.avatarUrl) pic.setAttribute("src", user.avatarUrl);
-        win.querySelector(".fb-profile-name").textContent  = user?.name || "Unnamed";
+        win.querySelector(".fb-profile-name").textContent  = user?.name || fb.t("fb.profile.unnamed", "Unnamed");
         win.querySelector(".fb-profile-email").textContent = user?.email || "";
         win.querySelector(".fb-profile-id").textContent    = (user?.id || "").slice(0, 8) + "…";
-        requestAnimationFrame(() => win.open());
     }
+
+    // UI language: a code, or null for automatic (the browser's language
+    // when there is a table for it). sac.lang persists the choice in
+    // localStorage too, for pages that load before /me. A real change
+    // repaints through onLanguage below.
+    function applyLanguage(code) {
+        sac.lang?.set?.(code || "auto");
+    }
+    // What "automatic" resolves to here, whatever is chosen now.
+    function detectLanguage() {
+        const tables = sac.lang?.available?.() || ["en"];
+        for (const p of navigator.languages?.length ? navigator.languages : [navigator.language || "en"]) {
+            const c = String(p).toLowerCase().split(/[-_]/)[0];
+            if (tables.includes(c)) return c;
+        }
+        return "en";
+    }
+
+    // A language switch: route labels (burger, phone title), the shell's own
+    // strings, the palette, then the view itself — remounted, like a date
+    // format change, so everything on screen speaks the new language.
+    function onLanguage() {
+        fb.i18n.relabelRoutes();
+        fb.i18n.apply(document);
+        syncTitle();
+        labelSearch();
+        renderSwitcher();
+        refreshUnread();
+        fb.desktop?.syncCommands?.();
+        const win = document.getElementById("fb-profile-window");
+        if (win) renderProfile(win);
+        remountView();
+    }
+    sac.lang?.onChange?.(onLanguage);
 
     // Date & time format: fb.format does the formatting; the setting lives on
     // the user. A change repaints the current view (a fresh element, as a
@@ -393,6 +459,10 @@
     // Deferred scripts have all run by DOMContentLoaded, so every view has
     // registered its route by now.
     window.addEventListener("DOMContentLoaded", () => {
+        // The language this page starts in (the last choice, or automatic):
+        // labels in place before the first view mounts.
+        fb.i18n.relabelRoutes();
+        fb.i18n.apply(document);
         // Registered before sac.router's own hashchange listener (added
         // inside mount), so the toolbar is empty by the time the incoming
         // view's connectedCallback runs — an outgoing view never has to

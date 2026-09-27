@@ -50,6 +50,9 @@ public interface ISystemRepository
     // Date & time format: a DateFormats name or null (ISO). Callers validate.
     Task<bool> SetDateFormatAsync(string userId, string? dateFormat, CancellationToken ct = default);
 
+    // UI language: a Languages code or null (automatic). Callers validate.
+    Task<bool> SetLanguageAsync(string userId, string? language, CancellationToken ct = default);
+
     // Secret vault auto-lock in minutes, or null (default). Callers validate.
     Task<bool> SetVaultAutoLockAsync(string userId, int? minutes, CancellationToken ct = default);
 

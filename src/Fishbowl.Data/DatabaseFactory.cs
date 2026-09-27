@@ -559,7 +559,24 @@ public class DatabaseFactory
             ApplySystemV12(connection);
             connection.Execute("PRAGMA user_version = 12");
             _logger.LogInformation("Applied system schema v12");
+            version = 12;
         }
+
+        if (version < 13)
+        {
+            ApplySystemV13(connection);
+            connection.Execute("PRAGMA user_version = 13");
+            _logger.LogInformation("Applied system schema v13");
+        }
+    }
+
+    // UI language: a Languages code ("en", "de") or NULL = automatic (the
+    // browser's language when there is a table for it, else English).
+    private void ApplySystemV13(IDbConnection connection)
+    {
+        var cols = connection.Query<string>("SELECT name FROM pragma_table_info('users')").ToList();
+        if (!cols.Contains("language"))
+            connection.Execute("ALTER TABLE users ADD COLUMN language TEXT;");
     }
 
     // Admin A3: deleted accounts leave a tombstone (id + when, nothing else).

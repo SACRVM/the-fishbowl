@@ -13,8 +13,8 @@
 
     /** Bytes as people say them: "20 GB", "512 MB", "Unlimited" for 0. */
     function formatBytes(bytes) {
-        if (bytes == null) return "Default";
-        if (bytes === 0) return "Unlimited";
+        if (bytes == null) return fb.t("fb.accounts.default", "Default");
+        if (bytes === 0) return fb.t("fb.accounts.unlimited", "Unlimited");
         if (bytes >= GB) return `${+(bytes / GB).toFixed(1)} GB`;
         if (bytes >= MB) return `${Math.round(bytes / MB)} MB`;
         return `${Math.max(1, Math.round(bytes / 1024))} KB`;
@@ -28,12 +28,12 @@
     function quotaField(defaultBytes, id) {
         const label = document.createElement("label");
         label.className = "fb-quota-field";
-        label.innerHTML = `<span>Storage</span><input type="number" min="0" step="0.5" inputmode="decimal"> <span>GB</span>`;
+        label.innerHTML = `<span>${fb.t("fb.accounts.storage", "Storage")}</span><input type="number" min="0" step="0.5" inputmode="decimal"> <span>GB</span>`;
         const input = label.querySelector("input");
         if (id) input.id = id;
         input.value = defaultBytes == null ? "" : String(+(defaultBytes / GB).toFixed(1));
-        input.title = "0 = unlimited";
-        input.setAttribute("aria-label", "Storage quota in GB, 0 for unlimited");
+        input.title = fb.t("fb.accounts.quota-hint", "0 = unlimited");
+        input.setAttribute("aria-label", fb.t("fb.accounts.quota-aria", "Storage quota in GB, 0 for unlimited"));
         return label;
     }
 
@@ -46,57 +46,57 @@
         return Math.round(n * GB);
     }
 
-    const who = (u) => u?.name || u?.email || "this account";
+    const who = (u) => u?.name || u?.email || fb.t("fb.accounts.this-account", "this account");
 
     async function approve(user, quotaBytes) {
         if (quotaBytes === undefined) {
-            window.sac?.toast?.("The quota must be a number of GB, 0 for unlimited.", { kind: "error" });
+            window.sac?.toast?.(fb.t("fb.accounts.quota-invalid", "The quota must be a number of GB, 0 for unlimited."), { kind: "error" });
             return false;
         }
         try {
             await fb.api.admin.approve(user.id, { quotaBytes });
-            window.sac?.toast?.(`${who(user)} can use this Fishbowl now.`, { kind: "success" });
+            window.sac?.toast?.(fb.t("fb.accounts.approved", "{who} can use this Fishbowl now.", { who: who(user) }), { kind: "success" });
             return true;
         } catch (err) {
-            return failed(err, "Couldn't approve the account.");
+            return failed(err, fb.t("fb.accounts.approve-failed", "Couldn't approve the account."));
         }
     }
 
     async function reject(user) {
         const answer = await sac.dialog.confirm({
-            title: `Reject ${who(user)}?`,
-            message: "The request is deleted. They can sign in again later to ask once more — use Block to stop that.",
+            title: fb.t("fb.accounts.reject-title", "Reject {who}?", { who: who(user) }),
+            message: fb.t("fb.accounts.reject-message", "The request is deleted. They can sign in again later to ask once more — use Block to stop that."),
             buttons: [
-                { action: "cancel", label: "Cancel" },
-                { action: "reject", label: "Reject", kind: "destructive" },
+                { action: "cancel", label: fb.t("fb.common.cancel", "Cancel") },
+                { action: "reject", label: fb.t("fb.accounts.reject", "Reject"), kind: "destructive" },
             ],
         });
         if (answer !== "reject") return false;
         try {
             await fb.api.admin.reject(user.id);
-            window.sac?.toast?.("Request rejected.", { kind: "success" });
+            window.sac?.toast?.(fb.t("fb.accounts.rejected", "Request rejected."), { kind: "success" });
             return true;
         } catch (err) {
-            return failed(err, "Couldn't reject the request.");
+            return failed(err, fb.t("fb.accounts.reject-failed", "Couldn't reject the request."));
         }
     }
 
     async function block(user) {
         const answer = await sac.dialog.confirm({
-            title: `Block ${who(user)}?`,
-            message: "They can't sign in any more, and can't ask again. A session that is open now ends with its next click.",
+            title: fb.t("fb.accounts.block-title", "Block {who}?", { who: who(user) }),
+            message: fb.t("fb.accounts.block-message", "They can't sign in any more, and can't ask again. A session that is open now ends with its next click."),
             buttons: [
-                { action: "cancel", label: "Cancel" },
-                { action: "block", label: "Block", kind: "destructive", armAfterMs: 800 },
+                { action: "cancel", label: fb.t("fb.common.cancel", "Cancel") },
+                { action: "block", label: fb.t("fb.accounts.block", "Block"), kind: "destructive", armAfterMs: 800 },
             ],
         });
         if (answer !== "block") return false;
         try {
             await fb.api.admin.block(user.id);
-            window.sac?.toast?.(`${who(user)} is blocked.`, { kind: "success" });
+            window.sac?.toast?.(fb.t("fb.accounts.blocked", "{who} is blocked.", { who: who(user) }), { kind: "success" });
             return true;
         } catch (err) {
-            return failed(err, "Couldn't block the account.");
+            return failed(err, fb.t("fb.accounts.block-failed", "Couldn't block the account."));
         }
     }
 
@@ -399,10 +399,10 @@
         let msg = fallback;
         try {
             const body = JSON.parse(err?.body || "{}");
-            if (body.error === "last-admin") msg = "That's the last admin — make someone else an admin first.";
-            else if (body.error === "owns-spaces") msg = "They still own spaces alone — hand them over or delete them first.";
-            else if (body.error === "not-pending") msg = "Someone already handled this request.";
-            else if (body.error === "not-active") msg = "Only an active account can do that.";
+            if (body.error === "last-admin") msg = fb.t("fb.accounts.err-last-admin", "That's the last admin — make someone else an admin first.");
+            else if (body.error === "owns-spaces") msg = fb.t("fb.accounts.err-owns-spaces", "They still own spaces alone — hand them over or delete them first.");
+            else if (body.error === "not-pending") msg = fb.t("fb.accounts.err-not-pending", "Someone already handled this request.");
+            else if (body.error === "not-active") msg = fb.t("fb.accounts.err-not-active", "Only an active account can do that.");
             else if (typeof body.error === "string" && body.error.includes(" ")) msg = body.error;
         } catch { /* not JSON */ }
         console.warn("[fb.accounts]", fallback, err?.status);

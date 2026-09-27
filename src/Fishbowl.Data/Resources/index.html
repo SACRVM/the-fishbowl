@@ -18,6 +18,11 @@
          components, then views) -->
     <script defer src="/js/lib/globals.js"></script>
     <script defer src="/kit/js/lib/globals.js"></script>
+    <!-- Languages: the kit's German table, then Fishbowl's strings on top
+         (fb.t / fb.i18n; English stays inline as the fallback). -->
+    <script defer src="/kit/js/i18n/de.js"></script>
+    <script defer src="/js/lib/i18n.js"></script>
+    <script defer src="/js/i18n/de.js"></script>
     <script defer src="/kit/js/lib/icons.js"></script>
     <script defer src="/kit/js/lib/router.js"></script>
     <script defer src="/kit/js/lib/scope.js"></script>
@@ -103,9 +108,9 @@
 
     <sac-nav id="fb-nav" brand="THE FISHBOWL" brand-icon="fish">
         <!-- First line of the burger: the way back to the desktop. -->
-        <a slot="panel" id="fb-home-link" class="fb-home-link" href="#/"><sac-icon name="fish"></sac-icon><span>Home</span></a>
+        <a slot="panel" id="fb-home-link" class="fb-home-link" href="#/"><sac-icon name="fish"></sac-icon><span data-t="nav.home">Home</span></a>
         <sac-menu slot="context" id="fb-context">
-            <button slot="trigger" class="nav-icon-btn labeled fb-context-pill" aria-label="Switch workspace">
+            <button slot="trigger" class="nav-icon-btn labeled fb-context-pill" aria-label="Switch workspace" data-t-aria="fb.shell.switch-workspace">
                 <sac-icon name="user"></sac-icon>
                 <span class="fb-context-label">Personal</span>
                 <sac-icon name="chevron-down"></sac-icon>
@@ -129,12 +134,12 @@
              folds it into the "…" menu as a group; sac:select still fires here. -->
         <sac-menu slot="toolbar" id="fb-account" hidden>
             <button slot="trigger" class="nav-icon-btn avatar"
-                    aria-label="Account" title="Account">
+                    aria-label="Account" title="Account" data-t-aria="fb.shell.account" data-t-title="fb.shell.account">
                 <sac-avatar id="fb-account-avatar"></sac-avatar>
             </button>
-            <button data-action="profile"><sac-icon name="user"></sac-icon> Profile</button>
+            <button data-action="profile"><sac-icon name="user"></sac-icon> <span data-t="fb.shell.profile">Profile</span></button>
             <hr>
-            <button data-action="logout" data-danger><sac-icon name="log-out"></sac-icon> Log out</button>
+            <button data-action="logout" data-danger><sac-icon name="log-out"></sac-icon> <span data-t="fb.shell.logout">Log out</span></button>
         </sac-menu>
     </sac-nav>
     <div id="app-root"></div>

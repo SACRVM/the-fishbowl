@@ -48,6 +48,13 @@
 
     const SIZES = ["medium", "wide", "large"];
 
+    // Names in the current language: "builtin:notes" → fb.app.notes.name /
+    // .desc, a Go entry's hash → fb.go.<path>. English is the registry's.
+    const short = (key) => key.replace(/^builtin:/, "");
+    const nameOf = (a) => fb.t(`fb.app.${short(a.key)}.name`, a.name);
+    const descOf = (a) => fb.t(`fb.app.${short(a.key)}.desc`, a.desc);
+    const goLabel = (s) => fb.t(`fb.go.${s.hash === "#/" ? "desktop" : s.hash.replace(/^#\//, "")}`, s.label);
+
     let mePromise = null;
     const me = () => (mePromise ||= fb.api.me.get().catch(() => null));
 
@@ -56,7 +63,8 @@
     /** The built-ins this user sees in the active workspace, registry order. */
     async function builtins() {
         const user = await me();
-        return BUILTINS.filter((a) => (!a.admin || user?.isAdmin) && (!a.personal || !inSpace()));
+        return BUILTINS.filter((a) => (!a.admin || user?.isAdmin) && (!a.personal || !inSpace()))
+            .map((a) => ({ ...a, name: nameOf(a), desc: descOf(a) }));
     }
 
     /** Where an app lives from the active workspace. */
@@ -156,34 +164,34 @@
         try { entries = (await load()).entries; } catch { entries = []; }
         for (const e of entries.filter((x) => !x.hidden)) {
             register(`app:${e.key}`, {
-                label: e.name, icon: e.icon, group: "Apps",
+                label: e.name, icon: e.icon, group: fb.t("fb.palette.apps", "Apps"),
                 run: e.app ? () => fb.desktopApps.open(e.app.id) : () => sac.router.navigate(e.href),
             });
         }
         if (entries.some((e) => e.key === "builtin:notes")) {
-            register("create:note", { label: "New note", icon: "plus", group: "Create", run: () => go("notes", "create") });
+            register("create:note", { label: fb.t("fb.palette.new-note", "New note"), icon: "plus", group: fb.t("fb.palette.create", "Create"), run: () => go("notes", "create") });
         }
         if (entries.some((e) => e.key === "builtin:todos")) {
-            register("create:todo", { label: "New todo", icon: "plus", group: "Create", run: () => go("todos", "create") });
+            register("create:todo", { label: fb.t("fb.palette.new-todo", "New todo"), icon: "plus", group: fb.t("fb.palette.create", "Create"), run: () => go("todos", "create") });
         }
         if (entries.some((e) => e.key === "builtin:calendar")) {
-            register("create:event", { label: "New event", icon: "plus", group: "Create", run: () => go("calendar", "create") });
+            register("create:event", { label: fb.t("fb.palette.new-event", "New event"), icon: "plus", group: fb.t("fb.palette.create", "Create"), run: () => go("calendar", "create") });
         }
         for (const s of SETTINGS.filter((x) => !x.personal || !space)) {
             register(`go:${s.hash}`, {
-                label: s.label, icon: s.icon, group: "Go",
+                label: goLabel(s), icon: s.icon, group: fb.t("fb.palette.go", "Go"),
                 run: () => sac.router.navigate(sac.scope.hashFor(s.hash)),
             });
         }
         if (space) {
             register("ws:personal", {
-                label: "Switch to Personal", icon: "user", group: "Workspace",
+                label: fb.t("fb.palette.switch-personal", "Switch to Personal"), icon: "user", group: fb.t("fb.palette.workspace", "Workspace"),
                 run: () => sac.scope.set({ type: "root" }),
             });
         }
         for (const s of spaces.filter((x) => x.slug !== space)) {
             register(`ws:${s.slug}`, {
-                label: `Switch to ${s.name}`, icon: "users", group: "Workspace",
+                label: fb.t("fb.palette.switch-to", "Switch to {name}", { name: s.name }), icon: "users", group: fb.t("fb.palette.workspace", "Workspace"),
                 run: () => sac.scope.set({ type: "scoped", slug: s.slug }),
             });
         }
@@ -200,7 +208,7 @@
         if (!window.sac?.commands?.registerSource) return;
         sac.commands.registerSource({
             id: "fb-notes",
-            group: "Notes",
+            group: () => fb.t("fb.palette.notes", "Notes"),
             minLength: 2,
             debounce: 200,
             async search(q, { signal }) {
@@ -208,7 +216,7 @@
                 if (signal?.aborted) return [];
                 return (res?.notes || []).map((n) => ({
                     id: `fb-note:${n.id}`,
-                    label: (n.title || "").trim() || "Untitled note",
+                    label: (n.title || "").trim() || fb.t("fb.palette.untitled", "Untitled note"),
                     icon: n.archived ? "archive" : "note",
                     hint: hintFor(n, q),
                     run: () => go("notes", "open", n.id),

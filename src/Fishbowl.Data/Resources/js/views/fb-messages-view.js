@@ -33,10 +33,10 @@ class FbMessagesView extends HTMLElement {
                 fb-messages-view .msg-actions { flex-wrap: wrap; margin-top: 10px; }
             </style>
             <header><div>
-                <h1>Messages</h1>
-                <p class="subtitle">What this Fishbowl has to tell you.</p>
+                <h1>${fb.t("fb.messages.title", "Messages")}</h1>
+                <p class="subtitle">${fb.t("fb.messages.subtitle", "What this Fishbowl has to tell you.")}</p>
             </div></header>
-            <div class="card" id="messages-body"><p class="muted">Loading…</p></div>
+            <div class="card" id="messages-body"><p class="muted">${fb.t("fb.common.loading", "Loading…")}</p></div>
         `;
     }
 
@@ -48,7 +48,7 @@ class FbMessagesView extends HTMLElement {
             data = await fb.api.messages.list();
         } catch (err) {
             console.warn("[fb-messages-view] load failed:", err?.status);
-            mount.innerHTML = `<p class="muted">Messages can't be loaded right now.</p>`;
+            mount.innerHTML = `<p class="muted">${fb.t("fb.messages.load-failed", "Messages can't be loaded right now.")}</p>`;
             return;
         }
         const items = data?.items || [];
@@ -56,7 +56,7 @@ class FbMessagesView extends HTMLElement {
             mount.innerHTML = `
                 <div class="empty-state">
                     <sac-icon name="mail"></sac-icon>
-                    <h3>No messages</h3>
+                    <h3>${fb.t("fb.messages.empty", "No messages")}</h3>
                 </div>`;
             return;
         }
@@ -90,14 +90,14 @@ class FbMessagesView extends HTMLElement {
 
         if (m.kind === "user.pending") {
             const u = m.subject || {};
-            const label = u.name && u.email ? `${u.name} (${u.email})` : (u.name || u.email || "Someone");
+            const label = u.name && u.email ? `${u.name} (${u.email})` : (u.name || u.email || fb.t("fb.messages.someone", "Someone"));
             icon.setAttribute("name", "user");
-            text.textContent = `${label} wants to join this Fishbowl.`;
+            text.textContent = fb.t("fb.messages.wants-to-join", "{who} wants to join this Fishbowl.", { who: label });
             if (m.doneAt) {
-                const outcome = !u.exists ? "rejected"
-                    : u.state === "active" ? "approved"
-                    : u.state === "blocked" ? "blocked"
-                    : "handled";
+                const outcome = !u.exists ? fb.t("fb.messages.rejected", "rejected")
+                    : u.state === "active" ? fb.t("fb.messages.approved", "approved")
+                    : u.state === "blocked" ? fb.t("fb.messages.blocked", "blocked")
+                    : fb.t("fb.messages.handled", "handled");
                 meta.textContent = `${when} · ${outcome}`;
             } else {
                 meta.textContent = when;
@@ -105,22 +105,22 @@ class FbMessagesView extends HTMLElement {
             }
         } else if (m.kind === "user.approved") {
             icon.setAttribute("name", "success");
-            text.textContent = "Your account was approved. Welcome to this Fishbowl.";
+            text.textContent = fb.t("fb.messages.welcome", "Your account was approved. Welcome to this Fishbowl.");
             meta.textContent = when;
         } else if (m.kind === "quota.warning") {
             const d = m.data || {};
             const gb = (n) => `${((Number(n) || 0) / 1073741824).toFixed(1)} GB`;
             icon.setAttribute("name", "warn");
-            text.textContent = `Your storage is almost full: ${gb(d.usedBytes)} of ${gb(d.quotaBytes)}.`;
+            text.textContent = fb.t("fb.messages.quota", "Your storage is almost full: {used} of {quota}.", { used: gb(d.usedBytes), quota: gb(d.quotaBytes) });
             meta.textContent = when;
             const link = document.createElement("a");
             link.href = "#/data";   // personal: the quota is the user's own
-            link.textContent = "See your data";
+            link.textContent = fb.t("fb.messages.see-data", "See your data");
             link.className = "msg-link";
             body.appendChild(link);
         } else {
             icon.setAttribute("name", "info");
-            text.textContent = "A message this version can't show yet.";
+            text.textContent = fb.t("fb.messages.unknown", "A message this version can't show yet.");
             meta.textContent = when;
         }
 
@@ -128,8 +128,8 @@ class FbMessagesView extends HTMLElement {
             const read = document.createElement("button");
             read.type = "button";
             read.className = "icon-btn msg-read";
-            read.title = "Mark read";
-            read.setAttribute("aria-label", "Mark read");
+            read.title = fb.t("fb.messages.mark-read", "Mark read");
+            read.setAttribute("aria-label", read.title);
             read.innerHTML = `<sac-icon name="check"></sac-icon>`;
             read.addEventListener("click", () => fb.api.messages.read(m.id).catch(() => {}));
             row.appendChild(read);
@@ -141,9 +141,9 @@ class FbMessagesView extends HTMLElement {
         const actions = document.createElement("div");
         actions.className = "toolbar msg-actions";
         const quota = fb.accounts.quotaField(defaultQuota);
-        const approve = button("Approve", "btn primary");
-        const reject = button("Reject", "btn");
-        const block = button("Block", "btn danger");
+        const approve = button(fb.t("fb.accounts.approve", "Approve"), "btn primary");
+        const reject = button(fb.t("fb.accounts.reject", "Reject"), "btn");
+        const block = button(fb.t("fb.accounts.block", "Block"), "btn danger");
         approve.addEventListener("click", () => fb.accounts.approve(user, fb.accounts.readQuota(quota)));
         reject.addEventListener("click", () => fb.accounts.reject(user));
         block.addEventListener("click", () => fb.accounts.block(user));

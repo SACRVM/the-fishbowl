@@ -90,9 +90,11 @@ public class DatabaseFactoryTests : IDisposable
         Assert.Contains("state", userColumns);
         Assert.Contains("quota_bytes", userColumns);
         Assert.Contains("last_sign_in_at", userColumns);
+        // V13: UI language.
+        Assert.Contains("language", userColumns);
 
         var version = connection.ExecuteScalar<long>("PRAGMA user_version");
-        Assert.Equal(12, version);
+        Assert.Equal(13, version);
     }
 
     [Fact]

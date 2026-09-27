@@ -291,6 +291,31 @@ public class SpacesApiTests : IClassFixture<WebApplicationFactory<Program>>, IDi
         Assert.Equal("teal", me.GetProperty("accent").GetString());   // untouched by the dateFormat patch
     }
 
+    // The UI language: null = automatic, a known code, nothing else; the
+    // date format is a separate setting and stays put.
+    [Fact]
+    public async Task MeLanguage_AutoByDefault_TakesACode_RefusesOthers()
+    {
+        var client = _factory.CreateClient();
+        var ct = TestContext.Current.CancellationToken;
+        async Task<System.Text.Json.JsonElement> Me() => await (await client.SendAsync(Req(HttpMethod.Get, "/api/v1/me", UserB), ct))
+            .Content.ReadFromJsonAsync<System.Text.Json.JsonElement>(ct);
+
+        await client.SendAsync(Req(HttpMethod.Patch, "/api/v1/me", UserB, new { language = (string?)null }), ct);
+        Assert.Equal(System.Text.Json.JsonValueKind.Null, (await Me()).GetProperty("language").ValueKind);
+
+        await client.SendAsync(Req(HttpMethod.Patch, "/api/v1/me", UserB, new { dateFormat = "us" }), ct);
+        Assert.Equal(HttpStatusCode.NoContent,
+            (await client.SendAsync(Req(HttpMethod.Patch, "/api/v1/me", UserB, new { language = "de" }), ct)).StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest,
+            (await client.SendAsync(Req(HttpMethod.Patch, "/api/v1/me", UserB, new { language = "fr" }), ct)).StatusCode);
+        var me = await Me();
+        Assert.Equal("de", me.GetProperty("language").GetString());
+        Assert.Equal("us", me.GetProperty("dateFormat").GetString());
+
+        await client.SendAsync(Req(HttpMethod.Patch, "/api/v1/me", UserB, new { language = (string?)null, dateFormat = (string?)null }), ct);
+    }
+
     [Fact]
     public async Task MeVaultAutoLock_DefaultsTo15_TakesAChoice_RefusesOthers()
     {

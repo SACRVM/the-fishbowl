@@ -59,7 +59,7 @@
         return s.type === "scoped" ? `space:${s.slug}` : "personal";
     };
     const byId = (id) => state.apps.find((a) => a.id === id) || null;
-    const nameOf = (app) => app?.manifest?.name || app?.id || "App";
+    const nameOf = (app) => app?.manifest?.name || app?.id || fb.t("fb.apps.app", "App");
     const hostOf = (url) => { try { return new URL(url).host; } catch { return url; } };
     const has = (app, g) => (app.granted || []).includes(g);
     const identityOf = (app) => has(app, ID) ? "full" : has(app, ID_ANON) ? "pseudonymous" : "none";
@@ -150,8 +150,8 @@
         catch (err) {
             const code = err?.code;
             sac.toast?.(code === "integrity"
-                ? `${nameOf(byId(id))} changed since you installed it — review the update first.`
-                : `${nameOf(byId(id))} couldn't start.`, { kind: "error" });
+                ? fb.t("fb.apps.changed", "{name} changed since you installed it — review the update first.", { name: nameOf(byId(id)) })
+                : fb.t("fb.apps.no-start", "{name} couldn't start.", { name: nameOf(byId(id)) }), { kind: "error" });
         }
     }
 
@@ -218,7 +218,7 @@
     };
 
     function refuse(app) {
-        const e = new Error(`${nameOf(app)} wasn't given storage — allow "Files" under Settings → Apps.`);
+        const e = new Error(fb.t("fb.apps.no-storage", "{name} wasn't given storage — allow \"Files\" under Settings → Apps.", { name: nameOf(app) }));
         e.code = "denied";
         return e;
     }
@@ -416,23 +416,23 @@
 
     /** Step 1: the URL. Resolves with the inspected manifest, or null. */
     async function askUrl() {
-        const dlg = dialog("Install an app", "520px", [
-            { action: "cancel", label: "Cancel", kind: "default" },
-            { action: "read", label: "Read manifest", kind: "primary" },
+        const dlg = dialog(fb.t("fb.apps.install-title", "Install an app"), "520px", [
+            { action: "cancel", label: fb.t("fb.common.cancel", "Cancel"), kind: "default" },
+            { action: "read", label: fb.t("fb.apps.read", "Read manifest"), kind: "primary" },
         ]);
         const panel = el("div", "fb-app-dialog");
         const input = el("input");
         input.type = "url";
         input.id = "fb-app-url";
         input.placeholder = "https://github.com/owner/repo";
-        input.setAttribute("aria-label", "App URL");
+        input.setAttribute("aria-label", fb.t("fb.apps.url", "App URL"));
         const error = el("p", "fb-app-error");
         error.hidden = true;
         panel.append(
-            el("p", null, "Paste the app's repository URL — or its app.json, if it lives somewhere else."),
+            el("p", null, fb.t("fb.apps.url-intro", "Paste the app's repository URL — or its app.json, if it lives somewhere else.")),
             input,
             error,
-            el("p", "fb-app-hint", "Nothing runs yet: Fishbowl reads the manifest and shows you what the app is and what it asks for."),
+            el("p", "fb-app-hint", fb.t("fb.apps.url-hint", "Nothing runs yet: Fishbowl reads the manifest and shows you what the app is and what it asks for.")),
         );
         dlg.appendChild(panel);
         let inspected = null;
@@ -447,12 +447,12 @@
                 return false;
             }
             if (byId(inspected.id)) {
-                error.textContent = `${inspected.name} is already on this desktop.`;
+                error.textContent = fb.t("fb.apps.already", "{name} is already on this desktop.", { name: inspected.name });
                 error.hidden = false;
                 return false;
             }
             if (!inspected.entryIntegrity) {
-                error.textContent = "Fishbowl couldn't read the app's code to pin it (its server must allow cross-origin reads).";
+                error.textContent = fb.t("fb.apps.no-pin", "Fishbowl couldn't read the app's code to pin it (its server must allow cross-origin reads).");
                 error.hidden = false;
                 return false;
             }
@@ -472,11 +472,13 @@
     async function review({ kind, manifest, app = null }) {
         const inSpace = state.ws !== "personal";
         const name = manifest.name || app?.id;
-        const title = kind === "update" ? `Update ${name} to v${manifest.version || "?"}?`
-            : kind === "perms" ? `${name} — permissions` : `Install ${name}?`;
+        const title = kind === "update" ? fb.t("fb.apps.update-title", "Update {name} to v{version}?", { name, version: manifest.version || "?" })
+            : kind === "perms" ? fb.t("fb.apps.perms-title", "{name} — permissions", { name })
+            : fb.t("fb.apps.review-title", "Install {name}?", { name });
         const dlg = dialog(title, "560px", [
-            { action: "cancel", label: "Cancel", kind: "default" },
-            { action: "ok", label: kind === "update" ? "Update" : kind === "perms" ? "Save" : "Install", kind: "primary" },
+            { action: "cancel", label: fb.t("fb.common.cancel", "Cancel"), kind: "default" },
+            { action: "ok", label: kind === "update" ? fb.t("fb.apps.update", "Update")
+                : kind === "perms" ? fb.t("fb.common.save", "Save") : fb.t("fb.apps.install", "Install"), kind: "primary" },
         ]);
         dlg.id = "fb-app-review";
         const r = el("div", "fb-app-dialog");
@@ -489,16 +491,18 @@
             if (v instanceof Node) dd.append(v); else dd.textContent = v;
             dl.append(dd);
         };
-        row("Origin", manifest.origin || app?.origin || "");
-        row("Version", kind === "update" ? `${app?.version || "?"} → ${manifest.version || "?"}` : (manifest.version || app?.version || "—"));
+        row(fb.t("fb.apps.origin", "Origin"), manifest.origin || app?.origin || "");
+        row(fb.t("fb.apps.version", "Version"), kind === "update" ? `${app?.version || "?"} → ${manifest.version || "?"}` : (manifest.version || app?.version || "—"));
         const pin = kind === "perms" ? app?.entryIntegrity : manifest.entryIntegrity;
-        if (pin) row("Code pin", el("code", null, pin.length > 34 ? pin.slice(0, 32) + "…" : pin));
-        row("Installs into", inSpace ? `This space — every member sees it` : "Your personal desktop");
+        if (pin) row(fb.t("fb.apps.pin", "Code pin"), el("code", null, pin.length > 34 ? pin.slice(0, 32) + "…" : pin));
+        row(fb.t("fb.apps.into", "Installs into"), inSpace
+            ? fb.t("fb.apps.into-space", "This space — every member sees it")
+            : fb.t("fb.apps.into-personal", "Your personal desktop"));
         r.appendChild(dl);
 
         let mode = app?.mode || "sandboxed";
         if (kind === "install") {
-            r.appendChild(el("h4", null, "How it runs"));
+            r.appendChild(el("h4", null, fb.t("fb.apps.how", "How it runs")));
             const modes = el("div", "fb-app-modes");
             const option = (value, label, sub, disabled) => {
                 const lab = el("label", "fb-check");
@@ -515,11 +519,12 @@
                 return lab;
             };
             modes.append(
-                option("sandboxed", "Sandboxed (recommended)", "Own frame, pinned code, only what you allow below.", false),
-                option("trusted", "Trusted",
-                    inSpace ? "Not in a space — trusted apps are personal only."
-                        : !state.canTrust ? "Your admin keeps trusted apps to admins."
-                        : "Runs inside Fishbowl with your access. For your own apps; updates without asking.",
+                option("sandboxed", fb.t("fb.apps.sandboxed", "Sandboxed (recommended)"),
+                    fb.t("fb.apps.sandboxed-sub", "Own frame, pinned code, only what you allow below."), false),
+                option("trusted", fb.t("fb.apps.trusted", "Trusted"),
+                    inSpace ? fb.t("fb.apps.trusted-space", "Not in a space — trusted apps are personal only.")
+                        : !state.canTrust ? fb.t("fb.apps.trusted-admins", "Your admin keeps trusted apps to admins.")
+                        : fb.t("fb.apps.trusted-sub", "Runs inside Fishbowl with your access. For your own apps; updates without asking."),
                     inSpace || !state.canTrust),
             );
             r.appendChild(modes);
@@ -537,11 +542,11 @@
         function paintGrants() {
             grantsBox.replaceChildren();
             if (mode === "trusted") {
-                grantsBox.append(el("h4", null, "What it gets"),
-                    el("p", "fb-app-hint", "Everything you can do in Fishbowl — it runs as you. Only for apps you wrote or fully trust."));
+                grantsBox.append(el("h4", null, fb.t("fb.apps.gets", "What it gets")),
+                    el("p", "fb-app-hint", fb.t("fb.apps.gets-all", "Everything you can do in Fishbowl — it runs as you. Only for apps you wrote or fully trust.")));
                 return;
             }
-            grantsBox.append(el("h4", null, "It asks for"));
+            grantsBox.append(el("h4", null, fb.t("fb.apps.asks", "It asks for")));
             const grid = el("div", "fb-app-grants");
             if (asks(manifest, "files")) {
                 const lab = el("label", "fb-check");
@@ -550,15 +555,19 @@
                 box.id = "fb-app-files";
                 box.checked = files;
                 box.addEventListener("change", () => { files = box.checked; });
-                lab.append(box, el("span", null, "Files — its own folder only"));
+                lab.append(box, el("span", null, fb.t("fb.apps.files", "Files — its own folder only")));
                 grid.append(lab, el("code", null, folder));
             }
             if (asks(manifest, ID)) {
                 const sel = el("span", "select");
                 const s = el("select");
                 s.id = "fb-app-identity";
-                s.setAttribute("aria-label", "Who you are");
-                for (const [v, t] of [["none", "Nothing"], ["pseudonymous", "A stable anonymous id"], ["full", "Your name and picture"]]) {
+                s.setAttribute("aria-label", fb.t("fb.apps.who", "Who you are"));
+                for (const [v, t] of [
+                    ["none", fb.t("fb.apps.who-none", "Nothing")],
+                    ["pseudonymous", fb.t("fb.apps.who-anon", "A stable anonymous id")],
+                    ["full", fb.t("fb.apps.who-full", "Your name and picture")],
+                ]) {
                     const o = el("option", null, t);
                     o.value = v;
                     o.selected = v === identity;
@@ -566,23 +575,23 @@
                 }
                 s.addEventListener("change", () => { identity = s.value; });
                 sel.append(s);
-                grid.append(el("span", null, "Who you are"), sel);
+                grid.append(el("span", null, fb.t("fb.apps.who", "Who you are")), sel);
             }
             const talks = el("div", "fb-app-connect");
             if (connect.length) {
                 for (const o of connect) {
                     const line = el("div");
                     line.append(el("code", null, hostOf(o)));
-                    if (kind === "update" && !oldConnect.has(o)) line.append(" ", el("span", "fb-app-new", "new"));
+                    if (kind === "update" && !oldConnect.has(o)) line.append(" ", el("span", "fb-app-new", fb.t("fb.apps.new", "new")));
                     talks.append(line);
                 }
             } else {
-                talks.append(el("span", "fb-app-hint", "Nobody — no network at all"));
+                talks.append(el("span", "fb-app-hint", fb.t("fb.apps.talks-none", "Nobody — no network at all")));
             }
-            grid.append(el("span", null, "Talks to"), talks);
+            grid.append(el("span", null, fb.t("fb.apps.talks", "Talks to")), talks);
             grantsBox.append(grid, el("p", "fb-app-hint",
-                kind === "update" ? "Nothing changes until you update; its data stays."
-                    : "Everything else is blocked: no other network, no other files, no notes. You can change this later under Settings → Apps."));
+                kind === "update" ? fb.t("fb.apps.update-hint", "Nothing changes until you update; its data stays.")
+                    : fb.t("fb.apps.blocked-hint", "Everything else is blocked: no other network, no other files, no notes. You can change this later under Settings → Apps.")));
         }
         paintGrants();
         dlg.appendChild(r);
@@ -617,10 +626,10 @@
                 mode: choice.mode,
                 granted: choice.granted,
             });
-            sac.toast?.(`${inspected.name} is on your desktop.`, { kind: "success" });
+            sac.toast?.(fb.t("fb.apps.installed", "{name} is on your desktop.", { name: inspected.name }), { kind: "success" });
             changed();
         } catch (err) {
-            sac.dialog.info({ title: `Couldn't install ${inspected.name}`, message: errorText(err) });
+            sac.dialog.info({ title: fb.t("fb.apps.install-failed", "Couldn't install {name}", { name: inspected.name }), message: errorText(err) });
         }
     }
 
@@ -638,10 +647,10 @@
                 granted: choice.granted,
             });
             updates.delete(`${state.ws}|${id}`);
-            sac.toast?.(`${nameOf(app)} is up to date.`, { kind: "success" });
+            sac.toast?.(fb.t("fb.apps.updated", "{name} is up to date.", { name: nameOf(app) }), { kind: "success" });
             changed();
         } catch (err) {
-            sac.dialog.info({ title: `Couldn't update ${nameOf(app)}`, message: errorText(err) });
+            sac.dialog.info({ title: fb.t("fb.apps.update-failed", "Couldn't update {name}", { name: nameOf(app) }), message: errorText(err) });
         }
     }
 
@@ -654,7 +663,7 @@
             await fb.api.desktop.updateApp(id, { granted: choice.granted });
             changed();
         } catch (err) {
-            sac.dialog.info({ title: `Couldn't change ${nameOf(app)}`, message: errorText(err) });
+            sac.dialog.info({ title: fb.t("fb.apps.perms-failed", "Couldn't change {name}", { name: nameOf(app) }), message: errorText(err) });
         }
     }
 
@@ -662,18 +671,19 @@
         const app = byId(id);
         if (!app) return;
         const size = await dataSize(app);
-        const message = [`It leaves this desktop. The app itself stays at ${hostOf(app.origin)}; installing it again is one paste.`];
+        const message = [fb.t("fb.apps.remove-leaves", "It leaves this desktop. The app itself stays at {host}; installing it again is one paste.", { host: hostOf(app.origin) })];
         if (size.count) {
-            message.push(`It keeps ${formatBytes(size.bytes)} in Files → ${size.folder}. Kept by default, so reinstalling brings it back — or delete it now, which moves it to the trash.`);
+            message.push(fb.t("fb.apps.remove-data", "It keeps {size} in Files → {folder}. Kept by default, so reinstalling brings it back — or delete it now, which moves it to the trash.",
+                { size: formatBytes(size.bytes), folder: size.folder }));
         }
-        const buttons = [{ action: "cancel", label: "Cancel", kind: "default" }];
+        const buttons = [{ action: "cancel", label: fb.t("fb.common.cancel", "Cancel"), kind: "default" }];
         if (size.count) {
-            buttons.push({ action: "purge", label: "Delete data", kind: "destructive" });
-            buttons.push({ action: "keep", label: "Keep data", kind: "primary" });
+            buttons.push({ action: "purge", label: fb.t("fb.apps.delete-data", "Delete data"), kind: "destructive" });
+            buttons.push({ action: "keep", label: fb.t("fb.apps.keep-data", "Keep data"), kind: "primary" });
         } else {
-            buttons.push({ action: "keep", label: "Remove", kind: "destructive" });
+            buttons.push({ action: "keep", label: fb.t("fb.apps.remove", "Remove"), kind: "destructive" });
         }
-        const action = await sac.dialog.confirm({ title: `Remove ${nameOf(app)}?`, message, buttons });
+        const action = await sac.dialog.confirm({ title: fb.t("fb.apps.remove-title", "Remove {name}?", { name: nameOf(app) }), message, buttons });
         if (action !== "keep" && action !== "purge") return;
         try {
             try { sac.apps.remove(id); } catch { /* not open */ }
@@ -681,7 +691,7 @@
             await fb.api.desktop.removeApp(id, { purgeData: action === "purge" });
             changed();
         } catch (err) {
-            sac.dialog.info({ title: `Couldn't remove ${nameOf(app)}`, message: errorText(err) });
+            sac.dialog.info({ title: fb.t("fb.apps.remove-failed", "Couldn't remove {name}", { name: nameOf(app) }), message: errorText(err) });
         }
     }
 

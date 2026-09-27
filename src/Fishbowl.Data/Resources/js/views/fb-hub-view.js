@@ -134,9 +134,9 @@ class FbHubView extends HTMLElement {
             <div class="hub-container">
                 <header>
                     <h1>THE FISHBOWL</h1>
-                    <p class="intro-text">Your memory lives here. You don't.</p>
+                    <p class="intro-text">${fb.t("fb.desk.tagline", "Your memory lives here. You don't.")}</p>
                 </header>
-                <main class="grid" id="fb-tiles" aria-label="Apps"></main>
+                <main class="grid" id="fb-tiles" aria-label="${fb.t("fb.desk.apps", "Apps")}"></main>
             </div>
             <sac-footer brand="THE FISHBOWL"></sac-footer>
         `;
@@ -215,7 +215,9 @@ class FbHubView extends HTMLElement {
         const icon = document.createElement("sac-icon");
         icon.setAttribute("name", "plus");
         const label = document.createElement("span");
-        label.textContent = this._entries.some((e) => e.app) ? "Install app" : "Install your first app";
+        label.textContent = this._entries.some((e) => e.app)
+            ? fb.t("fb.desk.install", "Install app")
+            : fb.t("fb.desk.install-first", "Install your first app");
         add.append(icon, label);
         add.addEventListener("click", () => fb.desktopApps.install());
         return add;
@@ -226,7 +228,7 @@ class FbHubView extends HTMLElement {
         const hidden = this._entries.filter((e) => e.hidden);
         fb.toolbar.set(this._canArrange && hidden.length ? [{
             icon: "eye",
-            title: `Show hidden tiles (${hidden.length})`,
+            title: fb.t("fb.desk.show-hidden", "Show hidden tiles ({n})", { n: hidden.length }),
             onClick: () => this._showHidden(),
         }] : []);
     }
@@ -234,9 +236,9 @@ class FbHubView extends HTMLElement {
     _showHidden() {
         const dlg = document.createElement("sac-dialog");
         dlg.id = "fb-hidden-tiles";
-        dlg.setAttribute("title", "Hidden tiles");
+        dlg.setAttribute("title", fb.t("fb.desk.hidden-title", "Hidden tiles"));
         dlg.style.setProperty("--dialog-width", "340px");
-        dlg.buttons = [{ action: "close", label: "Close", kind: "default" }];
+        dlg.buttons = [{ action: "close", label: fb.t("fb.common.close", "Close"), kind: "default" }];
         const list = document.createElement("div");
         list.className = "stack";
         const fill = () => {
@@ -251,7 +253,7 @@ class FbHubView extends HTMLElement {
                 const show = document.createElement("button");
                 show.type = "button";
                 show.className = "btn";
-                show.textContent = "Show";
+                show.textContent = fb.t("fb.desk.show", "Show");
                 show.dataset.key = e.key;
                 show.addEventListener("click", () => { this._update(e, { hidden: false }); fill(); });
                 row.append(name, show);
@@ -274,7 +276,7 @@ class FbHubView extends HTMLElement {
         trigger.slot = "trigger";
         trigger.type = "button";
         trigger.className = "tile-menu-btn";
-        trigger.title = `${e.name} options`;
+        trigger.title = fb.t("fb.desk.options", "{name} options", { name: e.name });
         trigger.setAttribute("aria-label", trigger.title);
         trigger.textContent = "⋯";          // midline horizontal ellipsis
         menu.appendChild(trigger);
@@ -300,21 +302,21 @@ class FbHubView extends HTMLElement {
         });
 
         menu.append(
-            item("size:medium", "Medium tile"),
-            item("size:wide", "Wide tile"),
-            item("size:large", "Large tile"),
+            item("size:medium", fb.t("fb.desk.size-medium", "Medium tile")),
+            item("size:wide", fb.t("fb.desk.size-wide", "Wide tile")),
+            item("size:large", fb.t("fb.desk.size-large", "Large tile")),
             document.createElement("hr"),
             tint,
             document.createElement("hr"),
-            item("hide", "Hide from this desktop"),
+            item("hide", fb.t("fb.desk.hide", "Hide from this desktop")),
         );
         if (e.app) {
             // Items are added only when they apply — no dead entries.
             const fresh = fb.desktopApps.updateFor(e.app.id);
             const extra = [];
-            if (fresh) extra.push(item("app:update", `Update to v${fresh.version || "?"}…`));
-            if (e.app.mode === "sandboxed") extra.push(item("app:perms", "Permissions…"));
-            const remove = item("app:remove", "Remove from this desktop");
+            if (fresh) extra.push(item("app:update", fb.t("fb.desk.update-to", "Update to v{version}…", { version: fresh.version || "?" })));
+            if (e.app.mode === "sandboxed") extra.push(item("app:perms", fb.t("fb.desk.permissions", "Permissions…")));
+            const remove = item("app:remove", fb.t("fb.desk.remove", "Remove from this desktop"));
             remove.dataset.danger = "";
             menu.append(document.createElement("hr"), ...extra, remove);
         }
@@ -341,7 +343,7 @@ class FbHubView extends HTMLElement {
             await fb.desktop.save(e);
         } catch (err) {
             console.warn("[fb-hub-view] tile save failed:", err?.message || err);
-            window.sac?.toast?.("Couldn't save the desktop.", { kind: "error" });
+            window.sac?.toast?.(fb.t("fb.desk.save-failed", "Couldn't save the desktop."), { kind: "error" });
             this.refresh();
         }
     }

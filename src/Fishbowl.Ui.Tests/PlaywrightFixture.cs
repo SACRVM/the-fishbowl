@@ -81,7 +81,15 @@ public class PlaywrightFixture : IAsyncLifetime
         await WaitForHttpReady(BaseUrl + "/api/v1/version", TimeSpan.FromSeconds(60));
 
         Playwright = await Microsoft.Playwright.Playwright.CreateAsync();
-        Browser = await Playwright.Chromium.LaunchAsync(new BrowserTypeLaunchOptions { Headless = true });
+        // English, whatever the machine's language: the UI follows the
+        // browser's language when a user hasn't chosen one (users.language
+        // null), and the tests assert English strings. I18nTests switch to
+        // German explicitly.
+        Browser = await Playwright.Chromium.LaunchAsync(new BrowserTypeLaunchOptions
+        {
+            Headless = true,
+            Args = new[] { "--lang=en-US", "--accept-lang=en-US,en" },
+        });
     }
 
     public async ValueTask DisposeAsync()
