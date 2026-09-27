@@ -54,6 +54,9 @@ class FbCalendarView extends HTMLElement {
     }
 
     async connectedCallback() {
+        // A format change remounts the view, so this follows the setting.
+        const longTime = fb.format.time(new Date(2000, 0, 1, 22, 0)).length > 5;
+        this.style.setProperty("--cv-time-w", longTime ? "66px" : "52px");
         this.render();
         await this.loadEvents();
         // "New event" from the Ctrl-K palette (fb.desktop.go).
@@ -178,7 +181,10 @@ class FbCalendarView extends HTMLElement {
                 }
                 fb-calendar-view .cv-agenda-time {
                     flex-shrink: 0;
-                    width: 52px;
+                    /* One column width for the whole agenda: 12-hour times
+                       ("10:00 AM") get a wider one (set on connect). */
+                    width: var(--cv-time-w, 52px);
+                    white-space: nowrap;
                     font-size: 12px;
                     color: var(--text-muted);
                     font-variant-numeric: tabular-nums;

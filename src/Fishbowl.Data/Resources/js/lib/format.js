@@ -60,7 +60,9 @@
         d = toDate(d);
         const m = pad(d.getMonth() + 1), day = pad(d.getDate());
         const { order, sep } = p();
-        return order === "ymd" ? `${m}${sep}${day}`
+        // ISO has no unambiguous year-less short form ("10-09" reads as
+        // 10 September to most Europeans): the full date instead.
+        return order === "ymd" ? date(d)
              : order === "dmy" ? `${day}${sep}${m}${sep === "." ? "." : ""}`
              : `${m}${sep}${day}`;
     }
