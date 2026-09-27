@@ -21,7 +21,9 @@
  * Grants, as the owner chose them at install (never more than the manifest
  * asked for):
  *   files      the app's own folder in this workspace's Files, Apps/<name>
- *              — its storage (context.fs, backed here by the Files API).
+ *              — its storage (context.fs, backed here by the Files API) and,
+ *              since kit 2.20, its own picker (context.files, "scoped": the
+ *              kit's virtual dialog jailed in that folder).
  *              Without it the app runs, but nothing it writes is kept.
  *   identity   nothing (the default, whatever the manifest asks), a stable
  *              anonymous id per app ("identity:pseudonymous"), or your name
@@ -96,9 +98,17 @@
     function kitOptions(app) {
         const connect = Array.isArray(app.manifest?.connect) ? app.manifest.connect : [];
         const identity = has(app, ID) ? true : has(app, ID_ANON) ? "pseudonymous" : false;
+        // The files grant also gives the app a picker of its own (kit 2.20):
+        // the kit's virtual dialog jailed in the app's folder, so what it
+        // opens and saves is what its storage holds — never the rest of Files.
+        const ws = state.ws;
+        const folder = app.dataFolder || `Apps/${nameOf(app)}`;
+        const files = allowed(app) && window.sac?.files?.virtual
+            ? { provider: () => sac.files.virtual({ store: fb.filesStore({ workspace: ws }), root: folder, label: nameOf(app) }) }
+            : false;
         return app.mode === "trusted"
-            ? { isolated: false, integrity: false, grant: { files: false, identity: true, connect } }
-            : { isolated: true, integrity: app.entryIntegrity, grant: { files: false, identity, connect } };
+            ? { isolated: false, integrity: false, grant: { files, identity: true, connect } }
+            : { isolated: true, integrity: app.entryIntegrity, grant: { files, identity, connect } };
     }
 
     /** Hand the active workspace's apps to the kit; drop what left. */

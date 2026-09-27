@@ -128,7 +128,7 @@ public class AppsTests : IAsyncLifetime
             await Tile(page).ClickAsync();
             var frame = page.FrameLocator("sac-window iframe");
             await Assertions.Expect(frame.Locator("#hello")).ToHaveTextAsync("hello from fixture 1.0.0", new() { Timeout = 15000 });
-            await Assertions.Expect(frame.Locator("#granted")).ToHaveTextAsync("identity=false isolated=true");
+            await Assertions.Expect(frame.Locator("#granted")).ToHaveTextAsync("identity=false files=scoped isolated=true");
             await Assertions.Expect(frame.Locator("#stored")).ToHaveTextAsync("stored {\"n\":1}", new() { Timeout = 10000 });
             await Assertions.Expect(frame.Locator("#net")).ToHaveTextAsync("net blocked", new() { Timeout = 10000 });
             await page.ScreenshotAsync(new() { Path = Path.Combine(Shots, "desk-8-app-open.png") });
@@ -207,7 +207,7 @@ public class AppsTests : IAsyncLifetime
             await page.GotoAsync(_fixture.BaseUrl + "/#/");
             await Tile(page).ClickAsync();
             var frame = page.FrameLocator("sac-window iframe");
-            await Assertions.Expect(frame.Locator("#granted")).ToHaveTextAsync("identity=pseudonymous isolated=true", new() { Timeout = 15000 });
+            await Assertions.Expect(frame.Locator("#granted")).ToHaveTextAsync("identity=pseudonymous files=false isolated=true", new() { Timeout = 15000 });
             await Assertions.Expect(frame.Locator("#stored")).ToContainTextAsync("no storage", new() { Timeout = 10000 });
             Assert.Equal(404, await StatAsync(page, Folder + "/.fishbowl-app.json"));
         }

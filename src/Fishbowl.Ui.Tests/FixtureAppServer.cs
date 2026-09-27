@@ -50,7 +50,7 @@ public sealed class FixtureAppServer : IAsyncDisposable
                 async mount(ctx) {
                     this.innerHTML = '<p id="hello">hello from fixture {{Version}}</p><p id="granted"></p><p id="stored"></p><p id="net"></p>';
                     const g = ctx.granted || {};
-                    this.querySelector("#granted").textContent = "identity=" + g.identity + " isolated=" + ctx.isolated;
+                    this.querySelector("#granted").textContent = "identity=" + g.identity + " files=" + g.files + " isolated=" + ctx.isolated;
                     try {
                         await ctx.fs.write("state.json", { n: 1 });
                         const back = await ctx.fs.read("state.json", null);
