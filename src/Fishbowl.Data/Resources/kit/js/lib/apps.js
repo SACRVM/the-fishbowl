@@ -19,8 +19,6 @@
  *       notices:     [{ title, text }],       // optional — third-party credits, licence
  *                                             // and trademark text; sac.about renders
  *                                             // each as a titled section (+ name/icon/version)
- *       badge:       "NEW",                   // optional — short string, rendered by
- *                                             // <sac-launcher> as the tile's corner pill
  *       tile:        "wide",                  // optional tile footprint in the launcher
  *                                             // grid: "medium" (default, omit-able) |
  *                                             // "wide" (2 columns) | "large" (2 columns
@@ -31,7 +29,7 @@
  *             name: "Today",                  // entry points into a desktop). When set,
  *             icon: "clock",                  // these REPLACE the app's default tile.
  *             description: "…",               // Each entry may override name/icon/
- *             route: "today",                 // description/badge/tile/accent and adds:
+ *             route: "today",                 // description/tile/accent and adds:
  *             accent: "#e59500" },            //   route  — views: opens "#/<id>/<route>"
  *           …                                 //   params — windows: handed to open()
  *       ],                                    //   accent — colors the tile AND the app
@@ -159,6 +157,19 @@
  *   loaded on demand; the frame runs kit/js/lib/app-guest.js). The app gets
  *   the same context shape; context.isolated says true.
  *   grant { files, identity, connect } — what the host hands over.
+ *     files: true (the page's sac.files) | false | { provider } — a files
+ *     provider for THIS app only ({ kind, open, save }, the remote provider
+ *     pattern in files.js), or a factory (manifest) → provider | null run
+ *     once at register/add, e.g. to root it at the app's own folder:
+ *       grant: { files: { provider: (m) => sac.files.virtual({
+ *           store, root: `Apps/${m.id}`, readonly: true }) } }
+ *     context.files then talks to that provider alone (same-realm and
+ *     isolated alike; handles stay host-side for an isolated app), and
+ *     context.granted.files says "scoped". A malformed value grants nothing.
+ *     One shape on purpose — no separate filesFor(appId) hook: the grant is
+ *     already where a host decides per app, it is sticky with the rest of
+ *     the policy, and the factory covers "the id is only known after
+ *     inspect()". Needs kit/js/lib/files.js loaded, like `true`.
  *     identity: true (the host's profile as is) | "pseudonymous" | false.
  *     "pseudonymous" hands { id, name, avatar } where id is derived per
  *     (user, app) — SHA-256 over sac.apps.identitySalt + the user's id + the
@@ -167,6 +178,7 @@
  *     same-realm apps too. Needs crypto.subtle (a secure context); without
  *     it the pseudonymous identity stays null. Defaults:
  *     isolated      { fs: true, files: false, identity: false, connect: [] }
+ *                   (files: "scoped" with a provider grant)
  *     not isolated  everything the page loaded (as before); connect = the
  *                   manifest's ask — same-realm code shares the page's fetch,
  *                   so connect is advisory there, enforced only in the frame
@@ -261,8 +273,10 @@
  *       files: {                   // the USER's files (kit/js/lib/files.js) —
  *           open(opts),            // Open… / Save as… wherever the host keeps
  *           save(data, opts),      // them (device by default, the desktop's
- *           kind,                  // space when it installed one). Null when
- *       },                         // the host loaded no files lib
+ *           kind,                  // space when it installed one, or a
+ *           readonly,              // provider granted to this app alone —
+ *       },                         // readonly: save() rejects "denied").
+ *                                  // Null when the host loaded no files lib
  *       lang: {                    // the page's language (globals.js) —
  *           get(),                 // "en", "de", … READ-ONLY: the host owns
  *           onChange(cb),          // the switch, like the theme; re-render
@@ -276,7 +290,8 @@
  *                                  // a view goes home
  *       granted: {                 // what the host actually handed over —
  *           fs, files, identity,   // booleans (identity may also be
- *                                  // "pseudonymous"); check before reaching for a
+ *                                  // "pseudonymous", files "scoped" — a
+ *                                  // provider of its own); check before reaching for a
  *           connect: [origins],    // capability instead of guessing why it
  *       },                         // is null
  *       isolated: false,           // true inside a sandboxed frame
@@ -413,15 +428,43 @@
         return policies.get(id) || { hostIsolated: false, isolated: false, grant: {} };
     }
 
+    /** grant.files as the host said it: true | false | { provider } — a
+     *  provider ({ kind, open, save }, e.g. sac.files.virtual({ root })) or
+     *  a factory (manifest) → provider | null, run here once per register
+     *  (the host may not know the id before add() inspected the URL).
+     *  Anything malformed → false: fail closed, with a warning. */
+    function filesGrantOf(value, manifest) {
+        if (value === undefined || value === true || value === false) return value;
+        let p = value && typeof value === "object" ? value.provider : undefined;
+        if (typeof p === "function") {
+            try { p = p(Object.assign({}, manifest)); }
+            catch (err) {
+                console.warn(`[sac.apps] ${manifest.id}: the grant.files provider factory threw — files not granted`, err);
+                return false;
+            }
+        }
+        if (isFilesProvider(p)) return { provider: p };
+        if (p != null || !value || typeof value !== "object") console.warn(`[sac.apps] ${manifest.id}: grant.files needs true, false or { provider } with open() and save() — files not granted`);
+        return false;
+    }
+
+    const isFilesProvider = (p) => !!p && typeof p.open === "function" && typeof p.save === "function";
+    const scopedFiles = (g) => (g && g.files && typeof g.files === "object" && isFilesProvider(g.files.provider)
+        ? g.files.provider : null);
+
     /** What an app actually receives — context.granted. */
     function grantedFor(manifest, pol) {
         const g = pol.grant || {};
+        // files: a per-app provider → "scoped" (truthy, so `if (granted.files)`
+        // keeps working); the page's own sac.files → true.
+        const scoped = !!scopedFiles(g);
+        const oddFiles = !scoped && g.files != null && typeof g.files === "object";
         const cleanList = (list) => (Array.isArray(list) ? list : [])
             .map(originOf).filter((o, i, all) => o && all.indexOf(o) === i);
         if (pol.isolated) {
             return {
                 fs:       !!window.sac.fs,
-                files:    g.files === true && !!window.sac.files,
+                files:    !window.sac.files ? false : scoped ? "scoped" : g.files === true,
                 identity: !window.sac.identity ? false
                     : g.identity === true ? true
                     : g.identity === "pseudonymous" ? "pseudonymous" : false,
@@ -430,7 +473,7 @@
         }
         return {
             fs:       !!window.sac.fs,
-            files:    g.files !== false && !!window.sac.files,
+            files:    !window.sac.files || g.files === false || oddFiles ? false : scoped ? "scoped" : true,
             identity: !window.sac.identity || g.identity === false ? false
                 : g.identity === "pseudonymous" ? "pseudonymous" : true,
             connect:  cleanList(g.connect !== undefined ? g.connect : manifest.connect),
@@ -713,9 +756,11 @@
             identity: granted.identity === "pseudonymous" ? pseudonymousIdentity(id)
                 : granted.identity ? sac.identity.forApp() : null,
             // The user's files (kit/js/lib/files.js): Open… / Save as… wherever
-            // the host keeps them. Null when the host loaded no files lib, or
-            // granted none.
-            files: granted.files ? sac.files.forApp() : null,
+            // the host keeps them — the page's provider, or the one the host
+            // granted this app alone (grant.files = { provider }). Null when
+            // the host loaded no files lib, or granted none.
+            files: granted.files === "scoped" ? sac.files.forApp(scopedFiles(pol.grant))
+                : granted.files ? sac.files.forApp() : null,
             // The page's language (globals.js): read-only for apps — the
             // host owns the switch, like the theme. Re-render on onChange.
             lang: window.sac.lang ? {
@@ -819,7 +864,13 @@
         // Upsert: Map.set keeps the original position for existing keys, so
         // the order of FIRST registration is the list order.
         registry.set(manifest.id, copy);
-        policies.set(manifest.id, resolvePolicy(copy, opts, policies.get(manifest.id)));
+        const pol = resolvePolicy(copy, opts, policies.get(manifest.id));
+        // A new grant: a files provider factory runs now, once, with the
+        // manifest (a kept grant already holds its resolved provider).
+        if (opts && opts.grant !== undefined && pol.grant.files !== undefined) {
+            pol.grant.files = filesGrantOf(pol.grant.files, copy);
+        }
+        policies.set(manifest.id, pol);
 
         // A view is a destination, so it belongs in the nav panel — one
         // registration, both renderings. `nav: false` opts out. In the Ctrl-K

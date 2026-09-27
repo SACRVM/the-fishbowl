@@ -85,6 +85,7 @@
     const identitySubs = new Set();
     const fsWatchers = new Set();
     let filesKind = null;
+    let filesReadonly = false;
     let hostObj = null;
     let declared = new Set();
     let hostUrls = [];              // object URLs made for host toolbar avatars
@@ -483,6 +484,7 @@
                 progress ? { onProgress: opts.onProgress } : undefined);
         },
         get kind() { return filesKind; },
+        get readonly() { return filesReadonly; },
     };
 
     function buildContext(d) {
@@ -562,6 +564,7 @@
         if (appEl) return;
         identity = identityFrom(d.identity);
         filesKind = d.filesKind || null;
+        filesReadonly = d.filesReadonly === true;
         accentSeed = d.accent || null;
         applyTheme(d.theme);
         applyLang(d.lang);

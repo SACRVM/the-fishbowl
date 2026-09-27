@@ -75,8 +75,8 @@
  *               that mutate state outside sac.apps.
  *   setLinks(list) — plain link tiles beside the sac.apps entries, for
  *               anything that already has an address (a sac.router route,
- *               another page): [{ id, name, icon, description, href, badge,
- *               tile, accent, menu }]. No sac.apps registration involved. A
+ *               another page): [{ id, name, icon, description, href, tile,
+ *               accent, menu }]. No sac.apps registration involved. A
  *               link tile is a real <a href> — a "#/notes" href is an in-SPA
  *               navigation, never a reload. Its key is its `id`, sharing the
  *               key space (and so the persisted order/hidden layout) with the
@@ -85,11 +85,6 @@
  *               removed (the host owns them). Unordered link tiles come
  *               before unordered app tiles. Replaces the previous list;
  *               `launcher.links` reads it back (assignable too).
- *   setBadge(key, value) — repaint ONE tile's corner pill: a string or
- *               number shows it, null or "" clears it, undefined drops the
- *               override so the manifest's own `badge` shows again. Touches
- *               nothing else (not sac.apps, not order or hidden state), may
- *               be called before the tile exists, and survives re-syncs.
  *   setMenu(key, items) — the tile's corner menu, overriding the entry's own
  *               `menu` (null = no menu, undefined = back to the entry's).
  *
@@ -99,10 +94,9 @@
  * Per-tile menu: `menu` on a manifest, a manifest `tiles` entry, a link, or
  * via setMenu() — [{ id, label, labelKey, icon, danger, disabled, onClick }]
  * with "-" for a separator. It renders a <sac-menu> behind a "…" button in
- * the tile's bottom-right corner, in AND out of edit mode (the edit
- * controls own the top-right corner). On narrow phones (≤480px, where tiles
- * are rows) it sits centred on the right edge and steps aside for the edit
- * controls while editing. `labelKey` relabels the item on a
+ * the tile's top-right corner — always there, never moved. In edit mode
+ * the edit controls take that corner and the menu returns on Done. On narrow phones (≤480px, where tiles are rows) it sits
+ * centred on the row's right edge. `labelKey` relabels the item on a
  * language switch (t(labelKey, label)). onClick(info) gets
  * { key, appId, action, launcher }; `appId` is null for a link tile.
  *
@@ -126,25 +120,25 @@
  *   as real <button> tiles calling sac.apps.open(). Every tile looks the
  *   same — what a click does is not encoded in the border. A manifest with
  *   a `tiles` array deploys SEVERAL tiles for one app (each entry may
- *   override name/icon/description/badge/tile and carry `route` — a view
+ *   override name/icon/description/tile and carry `route` — a view
  *   sub-address — `params` for a window, and `accent`). A tile's `accent`
  *   colors the tile (icon, hover ring) AND seeds the app's --accent when
- *   opened through it — tile color = app highlight. Optional manifest
- *   fields shaping any tile: `badge` (short string — the tile's corner
- *   pill, rendered with the global .tile-badge pattern from ui.css) and
- *   `tile` ("medium" default | "wide" spans 2 grid columns | "large" spans
- *   2 columns AND 2 rows; unknown values fall back to medium silently). All
+ *   opened through it — tile color = app highlight. The optional manifest
+ *   field `tile` sets the footprint: "medium" (default) | "wide" spans 2
+ *   grid columns | "large" spans 2 columns AND 2 rows; unknown values fall
+ *   back to medium silently. Tiles are square like the .grid pattern's
+ *   (a wide one as tall as one column is wide, a large one 2×2). All
  *   footprints collapse to medium on narrow viewports (≤768px), matching
  *   the .grid pattern — and whenever the grid itself is too narrow for two
  *   columns (a launcher inside a sac-window or split panel on a wide
  *   screen), via a container query on the grid. In edit mode each tile grows keyboard-reachable
  *   controls: move left / move right / hide (or show, on grayed hidden
- *   tiles) and — for custom apps only — remove; the badge hides while
- *   editing so the controls own the corner. Built-in (host-registered)
+ *   tiles) and — for custom apps only — remove; they take the tile's top-right
+ *   corner while editing. Built-in (host-registered)
  *   apps can only be hidden, never removed.
  *   A dashed "Add app" tile opens a <sac-dialog> form: name, icon, tag,
  *   script URL, width, height. The form stays lean by design — user-added
- *   apps are always medium tiles with no badge.
+ *   apps are always medium tiles.
  *
  * Drag reorder (sac.sortable, axis "grid"): mouse/pen lift after 4px, touch
  * after a 250ms long-press (a swipe keeps scrolling the page), Escape puts
@@ -152,7 +146,7 @@
  * drop persists exactly like the move buttons (the effective order is
  * stored and sac:layout fires); the buttons stay the keyboard path.
  *
- * Compact/touch: the grid goes single-column below ~584px of its own width
+ * Compact/touch: the grid goes single-column below 581px of its own width
  * (the .grid pattern's 280px minimum), wide/large tiles included — a span-2
  * cell in a one-column grid would otherwise add a phantom column and scroll
  * the page sideways. Under (pointer: coarse) the edit controls grow from 28px
@@ -184,7 +178,6 @@ class SacLauncher extends HTMLElement {
         this._order = [];        // effective full order (known ids only)
         this._tiles = new Map(); // id → cell element
         this._links = [];        // setLinks() — plain link tiles
-        this._badges = new Map(); // key → badge override (setBadge)
         this._menus = new Map();  // key → menu override (setMenu)
         this._sortable = null;
         this._grid = null;
@@ -314,14 +307,6 @@ class SacLauncher extends HTMLElement {
         }
         this._state = next;
         if (this._grid) { this._sync(); this._syncEditUI(); }
-    }
-
-    /** Repaint one tile's badge — nothing else (see header). */
-    setBadge(key, value) {
-        if (value === undefined) this._badges.delete(key);
-        else this._badges.set(key, value);
-        const cell = this._tiles.get(key);
-        if (cell) this._paintBadge(cell);
     }
 
     /** Replace one tile's corner menu (see header). */
@@ -511,7 +496,7 @@ class SacLauncher extends HTMLElement {
             if (!list) {
                 out.push({ key: m.id, appId: m.id, kind,
                     name: m.name, icon: m.icon, description: m.description,
-                    badge: m.badge, tile: m.tile, accent: m.accent,
+                    tile: m.tile, accent: m.accent,
                     route: undefined, params: undefined, href: m.href,
                     menu: m.menu });
                 return;
@@ -523,7 +508,6 @@ class SacLauncher extends HTMLElement {
                     name: tl.name || m.name,
                     icon: tl.icon || m.icon,
                     description: tl.description != null ? tl.description : m.description,
-                    badge: tl.badge != null ? tl.badge : m.badge,
                     tile: tl.tile || m.tile,
                     accent: tl.accent || m.accent,
                     route: tl.route, params: tl.params,
@@ -547,7 +531,7 @@ class SacLauncher extends HTMLElement {
             }
             links.push({ key: l.id, appId: null, link: true, kind: "page",
                 name: l.name, icon: l.icon, description: l.description,
-                badge: l.badge, tile: l.tile, accent: l.accent,
+                tile: l.tile, accent: l.accent,
                 route: undefined, params: undefined, href: l.href,
                 menu: l.menu });
         });
@@ -655,21 +639,13 @@ class SacLauncher extends HTMLElement {
             }
         });
 
-        // Corner pill — the global .tile-badge pattern from ui.css, in its
-        // accent variant (the plain one is the danger-tinted warning pill).
-        // Kept in the DOM and toggled via [hidden] so a re-registered
-        // manifest can add or drop its badge without a rebuild.
-        cell._badge = document.createElement("span");
-        cell._badge.className = "tile-badge accent";
-        cell._badge.hidden = true;
-
         cell._icon = document.createElement("sac-icon");
         const body = document.createElement("div");
         body.className = "sac-launcher-tile-body";
         cell._h = document.createElement("h2");
         cell._p = document.createElement("p");
         body.append(cell._h, cell._p);
-        tile.append(cell._badge, cell._icon, body);
+        tile.append(cell._icon, body);
         cell._tile = tile;
         cell.appendChild(tile);
 
@@ -720,7 +696,6 @@ class SacLauncher extends HTMLElement {
         if (accent) cell._tile.style.setProperty("--accent", accent);
         else cell._tile.style.removeProperty("--accent");
 
-        this._paintBadge(cell);
         this._paintMenu(cell);
 
         // Footprint: the layout's size wins over the entry's `tile`; unknown
@@ -739,15 +714,6 @@ class SacLauncher extends HTMLElement {
         // straight to the controls.
         if (this.hasAttribute("edit")) cell._tile.setAttribute("tabindex", "-1");
         else cell._tile.removeAttribute("tabindex");
-    }
-
-    /** The corner pill: a setBadge() override wins over the entry's badge. */
-    _paintBadge(cell) {
-        const key = cell._entry.key;
-        const raw = this._badges.has(key) ? this._badges.get(key) : cell._entry.badge;
-        const badge = raw == null ? "" : String(raw).trim();
-        cell._badge.textContent = badge;
-        cell._badge.hidden = !badge;
     }
 
     /**
@@ -1223,11 +1189,12 @@ class SacLauncher extends HTMLElement {
 
             /* Manifest-declared footprint (tile: "wide" | "large"). Spans sit
                on the cell — the grid child — so everything positioned against
-               the cell (tile, badge, edit controls) covers the full area for
-               free. .grid's auto-rows make the large tile's second row real. */
+               the cell (tile, edit controls) covers the full area for free.
+               The cell is the .grid child, so it takes the square height
+               from ui.css; --grid-rows makes the large one 2×2. */
             sac-launcher .sac-launcher-cell.size-wide,
             sac-launcher .sac-launcher-cell.size-large { grid-column: span 2; }
-            sac-launcher .sac-launcher-cell.size-large { grid-row: span 2; }
+            sac-launcher .sac-launcher-cell.size-large { grid-row: span 2; --grid-rows: 2; }
             @media (max-width: 768px), (max-height: 480px) and (pointer: coarse) {
                 /* Narrow viewports: every footprint collapses to medium,
                    matching the .grid pattern's own .tile.large collapse. */
@@ -1235,22 +1202,20 @@ class SacLauncher extends HTMLElement {
                 sac-launcher .sac-launcher-cell.size-large {
                     grid-column: span 1;
                     grid-row: span 1;
+                    --grid-rows: 1;
                 }
             }
-            /* Two 280px columns + the 1.5rem gap: below that the grid has one
+            /* Two 280px columns + the 21px gap: below that the grid has one
                column and a span-2 cell would invent a second one. */
-            @container sac-launcher-grid (max-width: 583px) {
+            @container sac-launcher-grid (width < 581px) {
                 sac-launcher .sac-launcher-cell.size-wide,
                 sac-launcher .sac-launcher-cell.size-large {
                     grid-column: span 1;
                     grid-row: span 1;
+                    --grid-rows: 1;
                 }
             }
 
-            /* Badge: markup comes from ui.css's .tile-badge; only the toggle
-               is ours. In edit mode the move/hide controls own the corner. */
-            sac-launcher .tile-badge[hidden] { display: none; }
-            sac-launcher[edit] .tile-badge { display: none; }
             sac-launcher button.tile { text-align: left; font-size: inherit; }
             /* Link tiles (<a>) inherit the page's line-height; app tiles
                (<button>) have "normal" — one metric, so titles line up. */
@@ -1340,15 +1305,16 @@ class SacLauncher extends HTMLElement {
             sac-launcher .sac-launcher-ctrl sac-icon,
             sac-launcher .sac-launcher-menu > button sac-icon { pointer-events: none; }
 
-            /* Per-tile corner menu: bottom-right, in and out of edit mode
-               (the edit controls own the top-right corner, the badge too).
-               It rides the tile's hover lift so the two stay together. */
+            /* Per-tile corner menu: top-right — the corner a tile's "…" lives
+               in, and it never moves elsewhere. In edit mode the edit
+               controls take the corner and the menu returns on Done. It rides the tile's hover lift. */
             sac-launcher .sac-launcher-menu {
                 position: absolute;
-                right: 12px;
-                bottom: 12px;
+                right: 20px;
+                top: 21px;
                 transition: transform 0.4s var(--ease-bounce);
             }
+            sac-launcher[edit] .sac-launcher-menu { display: none; }
             sac-launcher:not([edit]) .sac-launcher-cell:has(> .sac-launcher-tile:hover) > .sac-launcher-menu {
                 transform: translateY(-8px);
             }
@@ -1356,35 +1322,27 @@ class SacLauncher extends HTMLElement {
                that look: sac-menu styles only its panel's items. */
             sac-launcher .sac-launcher-menu-btn { --icon-size: 16px; }
             sac-launcher .sac-launcher-menu[open] .sac-launcher-menu-btn { background: var(--hover-strong); }
-            sac-launcher .has-menu .sac-launcher-tile-body { padding-right: 28px; }
             @media (hover: none) {
                 sac-launcher:not([edit]) .sac-launcher-cell:has(> .sac-launcher-tile:hover) > .sac-launcher-menu {
                     transform: none;
                 }
             }
             @media (pointer: coarse) {
-                sac-launcher .has-menu .sac-launcher-tile-body { padding-right: 36px; }
                 /* sac-menu's touch rule makes every slotted button a 44px
                    row — the trigger keeps its 36px look (the ::after halo
                    makes the 44px target). */
                 sac-launcher .sac-launcher-menu-btn { min-height: 0; }
             }
-            /* Narrow phones: tiles are rows (ui.css) — too short for a top
-               AND a bottom corner. The menu centres on the right edge, the
-               badge steps left of it, and in edit mode the controls take
-               the edge alone (the menu returns on Done). */
+            /* Narrow phones: tiles are rows (ui.css) — the menu sits centred
+               on the row's right edge. */
             @media (max-width: 480px) {
                 sac-launcher .sac-launcher-menu {
                     top: 50%;
-                    bottom: auto;
                     margin-top: -14px;
                 }
-                sac-launcher .has-menu .tile-badge { right: 52px; }
-                sac-launcher[edit] .sac-launcher-menu { display: none; }
             }
             @media (max-width: 480px) and (pointer: coarse) {
                 sac-launcher .sac-launcher-menu { margin-top: -18px; }
-                sac-launcher .has-menu .tile-badge { right: 60px; }
             }
 
             /* Drag reorder. Edit mode: the inert tile shows it can be

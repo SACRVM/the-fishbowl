@@ -51,7 +51,20 @@
  *   cursor-style  — "bar": the cursor row is a solid --accent bar with
  *                   --on-accent ink while the list has focus (a hairline
  *                   frame without it), and only marked rows are tinted — the
- *                   commander look. Default: the tinted selected row.
+ *                   commander look. "quiet": selected / marked rows and the
+ *                   cursor are a --hover tint — no ring, no bar, no hairline;
+ *                   the cursor shows while the browser has the keys (focus
+ *                   in the list, or `active` below). Default: the tinted
+ *                   selected row.
+ *   flush         — presence: the list has no border, radius or ground of
+ *                   its own — it sits flush in a host panel.
+ *   active        — the "has the keys" cue of a two-pane layout, in the bar
+ *                   only: a 1px hairline under it, --accent on the active
+ *                   pane, and a muted bar on the other. "" / "true" = this
+ *                   pane has the keys, "false" = the other one does (the
+ *                   host toggles it — it knows, even while focus is in a
+ *                   dialog), "auto" = follows focus inside the browser.
+ *                   Absent = no cue, as before.
  *   delete-button — the per-row trash button: "cursor" (default) shows it
  *                   on the hovered row and on the cursor row, always on
  *                   touch; "hover" only on the row under a hovering pointer
@@ -172,7 +185,10 @@
  * labels and buttons are 44px on touch (the Done button too).
  *
  * Theming: tokens only — selected / marked row = --accent-tint ground and
- * --accent-text name; the bar cursor = --accent / --on-accent; the
+ * --accent-text name; the bar cursor = --accent / --on-accent; the quiet
+ * rows = --hover; --file-browser-bar-height = the bar's height (a floor;
+ * unset = its buttons', 28px / 44px on touch — line it up with a host
+ * footer); the
  * thumbnail checker is --checker-a/--checker-b. Rows expose
  * part="row file|folder [selected] [marked] [cursor]", so a host can style
  * e.g. ::part(marked) itself; also part="delete" (the trash button),
@@ -795,14 +811,31 @@
                         --del-w: 28px;
                     }
                     :host([hidden]) { display: none; }
+                    /* The gap below is a margin, so --file-browser-bar-height
+                       is the strip itself (a floor: 44px touch targets never clip). */
                     .bar {
                         flex: none;
                         display: flex;
                         align-items: center;
                         gap: 4px;
-                        padding-bottom: 8px;
+                        box-sizing: border-box;
+                        min-height: var(--file-browser-bar-height, 0px);
+                        margin-bottom: 8px;
                         min-width: 0;
                     }
+                    /* active: "has the keys" shows in the bar only — a 1px
+                       hairline under it, --accent on the active pane, and a
+                       quieter bar on the other one. */
+                    :host([active]) .bar {
+                        border-bottom: 1px solid var(--border);
+                        margin-bottom: 4px;
+                    }
+                    :host([active]:not([active="false"]):not([active="auto"])) .bar,
+                    :host([active="auto"]:focus-within) .bar { border-bottom-color: var(--accent); }
+                    :host([active="false"]) .bar :is(.tool, .crumbs, .count),
+                    :host([active="false"]) ::slotted([slot="title"]),
+                    :host([active="auto"]:not(:focus-within)) .bar :is(.tool, .crumbs, .count),
+                    :host([active="auto"]:not(:focus-within)) ::slotted([slot="title"]) { opacity: 0.6; }
                     ::slotted([slot="title"]) { flex: 0 1 auto; min-width: 0; }
                     .crumbs {
                         flex: 1;
@@ -1073,6 +1106,32 @@
                     :host([cursor-style="bar"]) .list.selecting:focus-within .row.focus.mark .check {
                         background: var(--on-accent);
                         color: var(--accent);
+                    }
+
+                    /* cursor-style="quiet": selection, marks and the cursor
+                       are a --hover tint — no ring, no bar, no hairline. The
+                       cursor shows while the browser has the keys: focus in
+                       the list, or active (not "false"; "auto" = focus). */
+                    :host([cursor-style="quiet"]) .row.sel { background: var(--hover); color: var(--text); }
+                    :host([cursor-style="quiet"]) .row.sel .name { color: var(--text); }
+                    :host([cursor-style="quiet"]) .row.focus { box-shadow: none; }
+                    :host([cursor-style="quiet"]) .list:focus-within .row.focus,
+                    :host([cursor-style="quiet"][active]:not([active="false"]):not([active="auto"])) .row.focus {
+                        background: var(--hover);
+                        color: var(--text);
+                    }
+
+                    /* flush: the list drops its own frame and ground and
+                       sits flush in the host's panel (the 1px border stays,
+                       transparent, so the header keeps its alignment). */
+                    :host([flush]) .list {
+                        border-color: transparent;
+                        border-radius: 0;
+                        background: none;
+                    }
+                    :host([flush]) .list.drop {
+                        border-color: var(--accent);
+                        background: color-mix(in srgb, var(--accent) 6%, transparent);
                     }
 
                     @container (max-width: 480px) {

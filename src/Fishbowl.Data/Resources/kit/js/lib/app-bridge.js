@@ -60,6 +60,11 @@
  *   hands it back on the next save(), which then saves without a picker.
  *   Bytes cross as structured-cloned Blob / File. A provider that refuses a
  *   save (read-only) throws an Error with code "denied"; the guest sees it.
+ *   Per app: when the host granted files: { provider } (#28), the context
+ *   this bridge serves holds a view bound to that provider alone — the
+ *   page's sac.files is never reached, and a handle id resolves only to a
+ *   handle that provider issued to this frame. context.files.readonly
+ *   crosses in mount (filesReadonly).
  *
  * IMAGES FROM THE HOST
  *   The frame's img-src allows only the entry's folder, blob: and data:. So
@@ -684,6 +689,7 @@
                 regional: regionalNow(),
                 identity,
                 filesKind: granted.files && ctx.files ? ctx.files.kind : null,
+                filesReadonly: !!(granted.files && ctx.files && ctx.files.readonly),
                 granted: jsonSafe(ctx.granted),
             });
 

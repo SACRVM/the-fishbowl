@@ -200,41 +200,14 @@
                         fb-files-view .fv-split { grid-template-columns: 1fr; }
                         fb-files-view .fv-end { display: none; }
                     }
-                    /* Quiet selection: a hover-tint row, no ring, no bar. */
-                    fb-files-view .fv-pane sac-file-browser::part(selected) {
-                        background: var(--hover);
-                        color: var(--text);
-                    }
-                    fb-files-view .fv-pane sac-file-browser::part(cursor) { box-shadow: none; }
-                    fb-files-view .fv-pane[data-active] sac-file-browser::part(cursor) { background: var(--hover); }
-                    /* Which pane has the keys shows in its header only: an
-                       accent hairline under it and full-strength text; the
-                       other header is muted. */
-                    fb-files-view .fv-pane sac-file-browser::part(bar) {
-                        /* One centre line: the kit pads the bar at the bottom
-                           only; here it is a fixed-height row, items centred,
-                           the side gutter the rows' highlight uses (5px). */
-                        height: var(--fv-bar-h);
-                        box-sizing: border-box;
-                        padding: 0 5px;
-                        margin-bottom: 4px;
-                        border-bottom: 1px solid var(--border);
-                        opacity: 0.6;
-                        transition: opacity 0.15s, border-color 0.15s;
-                    }
-                    fb-files-view .fv-pane sac-file-browser::part(crumbs) { align-self: stretch; }
                     fb-files-view .fv-ws { display: inline-flex; align-items: center; }
-                    fb-files-view .fv-pane[data-active] sac-file-browser::part(bar) {
-                        border-bottom-color: var(--accent);
-                        opacity: 1;
-                    }
-                    fb-files-view .fv-pane sac-file-browser { flex: 1; min-height: 0; }
-                    /* The pane is the frame: the kit list's own rounded box
-                       sat 1–2px inside it. Transparent, not removed, so the
-                       kit's row geometry (border + padding) stays exact. */
-                    fb-files-view .fv-pane sac-file-browser::part(list) {
-                        border-color: transparent;
-                        background: transparent;
+                    /* Selection, frame and the active cue are the kit's
+                       (cursor-style="quiet", flush, active); only the mono
+                       rows and the warm marks are Fishbowl's. */
+                    fb-files-view .fv-pane sac-file-browser {
+                        flex: 1;
+                        min-height: 0;
+                        --file-browser-bar-height: var(--fv-bar-h);
                     }
                     fb-files-view .fv-pane sac-file-browser::part(row) { font-family: var(--font-mono); }
                     fb-files-view .fv-pane sac-file-browser::part(marked) { color: var(--accent-warm-text); }
@@ -374,7 +347,7 @@
                 <div class="fv-filter" hidden>
                     <input type="search" placeholder="${t("fb.files.filter-placeholder", "Filter this folder")}" aria-label="${t("fb.files.filter-placeholder", "Filter this folder")}">
                 </div>
-                <sac-file-browser multiple no-thumbnails delete-button="hover" columns="size date">
+                <sac-file-browser multiple no-thumbnails delete-button="hover" columns="size date" cursor-style="quiet" flush active="false">
                     <sac-menu slot="title" class="fv-ws">
                         <button slot="trigger" class="fv-ws-btn" type="button" aria-label="${t("fb.files.workspace", "Workspace")}">
                             <sac-icon name="user"></sac-icon><span>${t("fb.files.personal", "Personal")}</span>
@@ -616,7 +589,10 @@
             if (this._phone.matches) side = "left";
             if (this._active === side && !force) return;
             this._active = side;
-            for (const p of Object.values(this._panes)) p.section.toggleAttribute("data-active", p.side === side);
+            for (const p of Object.values(this._panes)) {
+                p.section.toggleAttribute("data-active", p.side === side);
+                p.browser.setAttribute("active", p.side === side ? "true" : "false");
+            }
             this._paintBar();
         }
 
