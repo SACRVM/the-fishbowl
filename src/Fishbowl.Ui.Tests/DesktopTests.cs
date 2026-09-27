@@ -8,7 +8,7 @@ namespace Fishbowl.Ui.Tests;
 // The desktop in the browser: SACRVM Desktop's tiles and tile menu on the
 // kit's .grid, fed from fb.desktop's registry; their arrangement (size,
 // colour, hide) stored per workspace on the server, hidden tiles offered
-// back in the toolbar, the badges, and the Ctrl/⌘K palette. Every test that
+// back in the toolbar, and the Ctrl/⌘K palette. Every test that
 // arranges puts the personal desktop back, so the hub smoke test sees the
 // defaults.
 [Collection(UiCollection.Name)]
@@ -216,50 +216,6 @@ public class DesktopTests
         }
         finally
         {
-            await context.CloseAsync();
-        }
-    }
-
-    [Fact]
-    public async Task Desktop_Badges_ShowCounts_Test()
-    {
-        var (context, page, errors) = await OpenAsync();
-        var messages = new MessageRepository(new DatabaseFactory(_fixture.DataDir));
-        IReadOnlyList<string> messageIds = Array.Empty<string>();
-        string? todoId = null, eventId = null;
-        try
-        {
-            await ResetAsync(page);
-            var title = "Badge todo " + Guid.NewGuid().ToString("N")[..6];
-            var todo = await page.APIRequest.PostAsync(_fixture.BaseUrl + "/api/v1/todos", new APIRequestContextOptions
-            {
-                DataObject = new { title, dueAt = DateTime.UtcNow.AddMinutes(5).ToString("o") },
-            });
-            Assert.True(todo.Ok, await todo.TextAsync());
-            todoId = (await todo.JsonAsync())!.Value.GetProperty("id").GetString();
-            var eventTitle = "Badge event " + Guid.NewGuid().ToString("N")[..6];
-            var start = DateTime.Now.AddMinutes(1);
-            var evt = await page.APIRequest.PostAsync(_fixture.BaseUrl + "/api/v1/events", new APIRequestContextOptions
-            {
-                DataObject = new { title = eventTitle, startAt = start.ToUniversalTime().ToString("o"), endAt = start.AddHours(1).ToUniversalTime().ToString("o") },
-            });
-            Assert.True(evt.Ok, await evt.TextAsync());
-            eventId = (await evt.JsonAsync())!.Value.GetProperty("id").GetString();
-            messageIds = await messages.CreateAsync(new[] { TestUser }, "user.approved", "user", TestUser, null, Ct);
-
-            await page.GotoAsync(_fixture.BaseUrl + "/#/");
-            await Assertions.Expect(Cell(page, "builtin:todos").Locator(".tile-badge")).ToContainTextAsync("today", new() { Timeout = 5000 });
-            await Assertions.Expect(Cell(page, "builtin:calendar").Locator(".tile-badge")).ToBeVisibleAsync();
-            await Assertions.Expect(Cell(page, "builtin:messages").Locator(".tile-badge")).ToHaveTextAsync(new System.Text.RegularExpressions.Regex("^\\d+$"));
-            Assert.Empty(errors);
-        }
-        finally
-        {
-            // Leave the shared test user as it was: no extra todo, event or
-            // unread message for the tests that follow.
-            foreach (var id in messageIds) await messages.MarkReadAsync(id, TestUser, Ct);
-            if (todoId is not null) await page.APIRequest.DeleteAsync($"{_fixture.BaseUrl}/api/v1/todos/{todoId}");
-            if (eventId is not null) await page.APIRequest.DeleteAsync($"{_fixture.BaseUrl}/api/v1/events/{eventId}");
             await context.CloseAsync();
         }
     }

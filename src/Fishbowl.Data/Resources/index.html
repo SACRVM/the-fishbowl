@@ -93,6 +93,8 @@
     <script defer src="/js/lib/shell.js"></script>
 
     <sac-nav id="fb-nav" brand="THE FISHBOWL" brand-icon="fish">
+        <!-- First line of the burger: the way back to the desktop. -->
+        <a slot="panel" id="fb-home-link" class="fb-home-link" href="#/"><sac-icon name="fish"></sac-icon><span>Home</span></a>
         <sac-menu slot="context" id="fb-context">
             <button slot="trigger" class="nav-icon-btn labeled fb-context-pill" aria-label="Switch workspace">
                 <sac-icon name="user"></sac-icon>

@@ -86,6 +86,8 @@ class FbCalendarView extends HTMLElement {
                     height: calc(100dvh - 50px - env(safe-area-inset-top, 0px));
                     background: var(--bg);
                 }
+                fb-calendar-view [hidden] { display: none !important; }
+
                 /* --- LIST PANE ------------------------------------------------ */
                 fb-calendar-view .cv-list-pane {
                     min-height: 100%;
@@ -97,68 +99,96 @@ class FbCalendarView extends HTMLElement {
                     display: flex;
                     align-items: center;
                     gap: 4px;
-                    padding: 12px 1rem 0;
+                    padding: 12px 12px 0;
                 }
                 fb-calendar-view .cv-month-title {
                     flex: 1;
                     text-align: center;
                     font-family: 'Outfit', sans-serif;
                     font-weight: 700;
-                    font-size: 0.9rem;
+                    font-size: 14px;
+                    color: var(--text);
                 }
+                /* Pane buttons are the kit's .icon-btn (44px hit area on touch). */
+                fb-calendar-view .cv-list-pane .icon-btn { color: var(--text-muted); }
+
                 fb-calendar-view .cv-list-header {
                     display: flex;
                     align-items: center;
-                    gap: 4px;
-                    padding: 12px 1rem 8px;
+                    padding: 12px 16px 6px;
+                    gap: 2px;
                 }
-                fb-calendar-view .cv-list-header .sac-caption { flex: 1; min-width: 0; }
+                fb-calendar-view .cv-list-title {
+                    flex: 1;
+                    font-family: 'Outfit', sans-serif;
+                    font-weight: 700;
+                    font-size: 11px;
+                    text-transform: uppercase;
+                    letter-spacing: 0.1em;
+                    color: var(--text-muted);
+                }
                 fb-calendar-view .cv-items {
                     flex: 1;
                     overflow-y: auto;
-                    padding-bottom: env(safe-area-inset-bottom, 0px);
+                    padding: 2px 8px 12px;
                 }
-                /* The agenda is the kit's list-detail recipe grouped by day:
-                   a caption per day, flat rows with a divider, --hover on
-                   hover, --accent-tint for the open event. */
                 fb-calendar-view .cv-agenda-day-header {
-                    display: block;
-                    padding: 12px 1rem 6px;
-                    border-bottom: 1px solid var(--border);
+                    padding: 10px 8px 4px;
+                    font-family: 'Outfit', sans-serif;
+                    font-weight: 700;
+                    font-size: 11px;
+                    text-transform: uppercase;
+                    letter-spacing: 0.08em;
+                    color: var(--text-muted);
                 }
                 fb-calendar-view .cv-agenda-day-header.today { color: var(--accent); }
                 fb-calendar-view .cv-agenda-item {
                     display: flex;
-                    align-items: center;
-                    gap: 0.75rem;
-                    min-height: 44px;
-                    padding: 0.5rem 1rem;
-                    border-bottom: 1px solid var(--border);
+                    align-items: baseline;
+                    gap: 8px;
+                    padding: 8px 10px;
+                    border-radius: var(--radius-m);
                     cursor: pointer;
+                    border: 1px solid transparent;
+                    transition: background 0.12s, border-color 0.12s;
                 }
                 fb-calendar-view .cv-agenda-item:hover { background: var(--hover); }
-                fb-calendar-view .cv-agenda-item.selected { background: var(--accent-tint); }
+                fb-calendar-view .cv-agenda-item.selected {
+                    background: var(--accent-tint);
+                    border-color: color-mix(in srgb, var(--accent) 28%, transparent);
+                }
+                @media (pointer: coarse) {
+                    fb-calendar-view .cv-agenda-item { min-height: 44px; align-items: center; }
+                }
                 fb-calendar-view .cv-agenda-time {
                     flex-shrink: 0;
                     width: 52px;
-                    font-size: 0.85rem;
+                    font-size: 12px;
                     color: var(--text-muted);
                     font-variant-numeric: tabular-nums;
                 }
                 fb-calendar-view .cv-agenda-title {
                     flex: 1;
                     font-weight: 600;
+                    font-size: 13px;
+                    color: var(--text);
                     overflow: hidden;
                     text-overflow: ellipsis;
                     white-space: nowrap;
                 }
                 fb-calendar-view .cv-agenda-loc {
-                    font-size: 0.85rem;
+                    font-size: 11px;
                     color: var(--text-muted);
                     overflow: hidden;
                     text-overflow: ellipsis;
                     white-space: nowrap;
                     max-width: 90px;
+                }
+                fb-calendar-view .cv-empty-list {
+                    padding: 40px 16px;
+                    text-align: center;
+                    color: var(--text-muted);
+                    font-size: 13px;
                 }
 
                 /* --- MAIN PANE: MONTH GRID ------------------------------------ */
@@ -179,7 +209,7 @@ class FbCalendarView extends HTMLElement {
                     flex: 1 0 auto;
                     overflow: visible;
                 }
-                fb-calendar-view sac-split[collapsed] .cv-back { display: none; }
+                fb-calendar-view sac-split[collapsed] .cv-back-btn { display: none; }
                 fb-calendar-view .cv-grid-wrap {
                     flex: 1;
                     display: flex;
@@ -254,6 +284,7 @@ class FbCalendarView extends HTMLElement {
                     padding: 2px 6px;
                     border-radius: var(--radius-s);
                     background: color-mix(in srgb, var(--accent) 15%, transparent);
+                    border-left: 2px solid var(--accent);
                     color: var(--text);
                     white-space: nowrap;
                     overflow: hidden;
@@ -264,6 +295,7 @@ class FbCalendarView extends HTMLElement {
                 fb-calendar-view .cv-chip:hover { background: color-mix(in srgb, var(--accent) 28%, transparent); }
                 fb-calendar-view .cv-chip.all-day {
                     background: color-mix(in srgb, var(--accent-warm) 14%, transparent);
+                    border-left-color: var(--accent-warm);
                 }
                 fb-calendar-view .cv-chip.all-day:hover { background: color-mix(in srgb, var(--accent-warm) 26%, transparent); }
                 fb-calendar-view .cv-chip-time {
@@ -279,9 +311,29 @@ class FbCalendarView extends HTMLElement {
                 }
 
                 /* --- MAIN PANE: EDITOR ---------------------------------------- */
-                /* Back to the month: the kit's .btn in a .toolbar. The
-                   collapsed split's back bar replaces it on a phone. */
-                fb-calendar-view .cv-back { margin-bottom: 22px; }
+                fb-calendar-view .cv-back-btn {
+                    display: inline-flex;
+                    align-items: center;
+                    gap: 6px;
+                    align-self: flex-start;
+                    background: var(--hover);
+                    border: 1px solid var(--border);
+                    border-radius: var(--radius-m);
+                    color: var(--text-muted);
+                    font-family: inherit;
+                    font-size: 12px;
+                    font-weight: 600;
+                    padding: 6px 14px 6px 8px;
+                    cursor: pointer;
+                    margin-bottom: 22px;
+                    transition: background 0.15s, color 0.15s, border-color 0.15s;
+                }
+                fb-calendar-view .cv-back-btn:hover {
+                    background: var(--accent-tint);
+                    color: var(--text);
+                    border-color: var(--accent);
+                }
+                fb-calendar-view .cv-back-btn sac-icon { --icon-size: 14px; }
                 fb-calendar-view .cv-editor-wrap {
                     flex: 1;
                     display: flex;
@@ -308,61 +360,95 @@ class FbCalendarView extends HTMLElement {
                     margin-bottom: 18px;
                     padding: 0;
                 }
-                fb-calendar-view .cv-title-input::placeholder { color: var(--text-dim); }
+                fb-calendar-view .cv-title-input::placeholder {
+                    color: var(--text-muted);
+                    opacity: 0.4;
+                }
                 fb-calendar-view .cv-field {
                     display: flex;
                     flex-direction: column;
                     gap: 6px;
                     margin-bottom: 16px;
                 }
+                fb-calendar-view .cv-field label {
+                    font-family: 'Outfit', sans-serif;
+                    font-weight: 700;
+                    font-size: 10px;
+                    text-transform: uppercase;
+                    letter-spacing: 0.1em;
+                    color: var(--text-muted);
+                }
                 fb-calendar-view .cv-field-row {
                     display: flex;
                     gap: 20px;
                     flex-wrap: wrap;
                 }
-                /* Field look (16px on touch), the select chevron (.select)
-                   and the checkbox come from the kit — only sizing is ours. */
-                fb-calendar-view .cv-date-input { max-width: 260px; }
-                fb-calendar-view .cv-field .select { max-width: 260px; }
+                /* Field look (16px on touch) and the select chevron come from
+                   the kit's global form rules — only sizing lives here. */
+                fb-calendar-view .cv-date-input,
+                fb-calendar-view .cv-text-input {
+                    outline: none;
+                    max-width: 260px;
+                }
+                fb-calendar-view .cv-select { max-width: 260px; }
                 fb-calendar-view .cv-text-input { max-width: 420px; width: 100%; }
                 fb-calendar-view .cv-allday-label {
                     display: inline-flex;
                     align-items: center;
                     gap: 8px;
+                    font-size: 13px;
+                    color: var(--text);
+                    cursor: pointer;
+                    user-select: none;
                     margin-bottom: 16px;
+                }
+                fb-calendar-view .cv-allday-label input {
+                    accent-color: var(--accent);
+                    width: 15px;
+                    height: 15px;
                     cursor: pointer;
                 }
-                /* The kit's textarea; only its height is ours (it grows with
-                   the text, the body scrolls). */
                 fb-calendar-view .cv-desc-input {
                     display: block;
                     width: 100%;
                     min-height: 160px;
+                    background: var(--field);
+                    border: 1px solid var(--border);
+                    border-radius: var(--radius-m);
+                    color: var(--text);
+                    font-family: inherit;
+                    font-size: 14px;
+                    line-height: 1.6;
+                    outline: none;
                     resize: none;
+                    padding: 12px 14px;
                     overflow: hidden;
+                    transition: border-color 0.15s;
+                }
+                fb-calendar-view .cv-desc-input:focus { border-color: var(--accent); }
+                fb-calendar-view .cv-desc-input::placeholder {
+                    color: var(--text-muted);
+                    opacity: 0.55;
                 }
                 fb-calendar-view .cv-repeat-mark {
                     color: var(--text-muted);
                     font-size: 0.9em;
                     margin-right: 3px;
                 }
-                /* One quiet meta line, like sacrvm-notes' .ed-meta. */
-                fb-calendar-view .cv-meta {
+                fb-calendar-view .cv-editor-footer {
                     display: flex;
                     align-items: center;
-                    gap: 0.75rem;
+                    gap: 12px;
                     min-height: 32px;
                     padding: 8px clamp(1rem, 4vw, 20px);
                     padding-bottom: calc(8px + env(safe-area-inset-bottom, 0px));
-                    font-size: 0.72rem;
-                    color: var(--text-dim);
+                    border-top: 1px solid var(--border);
+                    background: var(--panel);
+                    font-size: 11px;
+                    color: var(--text-muted);
                     flex-shrink: 0;
                 }
-                fb-calendar-view .cv-hint { color: var(--accent-warm-text); }
-                /* Our display rules beat the UA's [hidden]; say it per class,
-                   as the kit does (.btn[hidden]). */
-                fb-calendar-view .cv-grid-wrap[hidden],
-                fb-calendar-view .cv-editor-wrap[hidden] { display: none; }
+                fb-calendar-view .cv-hint { color: var(--accent-warm); }
             </style>
 
             <sac-split class="cv-split" id="split" collapse show="start"
@@ -375,9 +461,9 @@ class FbCalendarView extends HTMLElement {
                         <button class="icon-btn" id="cv-next" title="Next month" aria-label="Next month"><sac-icon name="chevron-right"></sac-icon></button>
                     </div>
                     <div class="cv-list-header">
-                        <span class="sac-caption">Agenda</span>
-                        <button class="icon-btn tool" id="cv-today-btn" title="Jump to today" aria-label="Jump to today"><sac-icon name="clock"></sac-icon></button>
-                        <button class="icon-btn tool" id="cv-new-btn" title="New event" aria-label="New event"><sac-icon name="plus"></sac-icon></button>
+                        <span class="cv-list-title">Agenda</span>
+                        <button class="icon-btn" id="cv-today-btn" title="Jump to today" aria-label="Jump to today"><sac-icon name="clock"></sac-icon></button>
+                        <button class="icon-btn" id="cv-new-btn" title="New event" aria-label="New event"><sac-icon name="plus"></sac-icon></button>
                     </div>
                     <div class="cv-items" id="cv-agenda"></div>
                 </aside>
@@ -389,11 +475,9 @@ class FbCalendarView extends HTMLElement {
                     </div>
                     <div class="cv-editor-wrap" id="cv-editor-wrap" hidden>
                         <div class="cv-editor-body">
-                            <div class="toolbar cv-back">
-                                <button class="btn" id="cv-back" type="button">
-                                    <sac-icon name="chevron-left"></sac-icon>Back to calendar
-                                </button>
-                            </div>
+                            <button class="cv-back-btn" id="cv-back" type="button">
+                                <sac-icon name="chevron-left"></sac-icon> Back to calendar
+                            </button>
                             <input id="cv-title" class="cv-title-input" placeholder="What's happening?"/>
                             <label class="cv-allday-label">
                                 <input type="checkbox" id="cv-allday"/> All day
@@ -409,7 +493,7 @@ class FbCalendarView extends HTMLElement {
                                 </div>
                                 <div class="cv-field">
                                     <label for="cv-reminder">Reminder</label>
-                                    <span class="select"><select id="cv-reminder">
+                                    <select id="cv-reminder" class="cv-select">
                                         <option value="">No reminder</option>
                                         <option value="0">At start</option>
                                         <option value="5">5 minutes before</option>
@@ -418,18 +502,18 @@ class FbCalendarView extends HTMLElement {
                                         <option value="60">1 hour before</option>
                                         <option value="120">2 hours before</option>
                                         <option value="1440">1 day before</option>
-                                    </select></span>
+                                    </select>
                                 </div>
                                 <div class="cv-field">
                                     <label for="cv-repeat">Repeat</label>
-                                    <span class="select"><select id="cv-repeat">
+                                    <select id="cv-repeat" class="cv-select">
                                         <option value="">Never</option>
                                         <option value="FREQ=DAILY">Daily</option>
                                         <option value="FREQ=WEEKLY">Weekly</option>
                                         <option value="FREQ=WEEKLY;INTERVAL=2">Every 2 weeks</option>
                                         <option value="FREQ=MONTHLY">Monthly</option>
                                         <option value="FREQ=YEARLY">Yearly</option>
-                                    </select></span>
+                                    </select>
                                 </div>
                             </div>
                             <div class="cv-field">
@@ -441,7 +525,7 @@ class FbCalendarView extends HTMLElement {
                                 <textarea id="cv-desc" class="cv-desc-input" placeholder="Anything else worth remembering?"></textarea>
                             </div>
                         </div>
-                        <footer class="cv-meta">
+                        <footer class="cv-editor-footer">
                             <span id="cv-timestamp"></span>
                             <span class="cv-hint" id="cv-hint"></span>
                         </footer>
@@ -604,9 +688,7 @@ class FbCalendarView extends HTMLElement {
 
         const agenda = this.querySelector("#cv-agenda");
         if (dayKeys.length === 0) {
-            agenda.innerHTML = `<div class="empty-state"><sac-icon name="calendar"></sac-icon><h3>Nothing this month</h3><p>Events you add show up here, day by day.</p>
-                <button type="button" class="btn primary" data-new><sac-icon name="plus"></sac-icon>New event</button></div>`;
-            agenda.querySelector("[data-new]").addEventListener("click", () => this.createEvent());
+            agenda.innerHTML = `<div class="cv-empty-list">No events this month. Click + to create one.</div>`;
             return;
         }
 
@@ -626,7 +708,7 @@ class FbCalendarView extends HTMLElement {
             }).join("");
             return `
                 <div class="cv-agenda-day">
-                    <div class="sac-caption cv-agenda-day-header ${key === todayKey ? "today" : ""}">${header}</div>
+                    <div class="cv-agenda-day-header ${key === todayKey ? "today" : ""}">${header}</div>
                     ${rows}
                 </div>
             `;

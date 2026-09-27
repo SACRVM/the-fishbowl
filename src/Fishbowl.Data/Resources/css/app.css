@@ -320,3 +320,37 @@ label.fb-quota-field input { width: 6em; }
     font-size: 0.8rem;
     font-style: italic;
 }
+
+/* Home, the burger's first line (a panel-slot link). The kit's panel has no
+   Home entry for a standalone app, so this mirrors its .nav-item: wide
+   panel rows, and the compact rail look under sac-nav's COMPACT query. */
+#fb-nav > a.fb-home-link {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 0.75rem 1.5rem;
+    color: color-mix(in srgb, var(--fg) 78%, var(--bg));
+    text-decoration: none;
+    font-size: 0.95rem;
+    transition: background 0.2s;
+    --icon-size: 18px;
+}
+#fb-nav > a.fb-home-link:hover { background: color-mix(in srgb, var(--fg) 5%, transparent); color: var(--text); }
+#fb-nav > a.fb-home-link.active { background: var(--accent-tint); color: var(--accent); }
+@media (max-width: 768px), (max-height: 480px) and (pointer: coarse) {
+    #fb-nav > a.fb-home-link {
+        gap: 0.6rem;
+        margin: 0 0 2px;
+        padding: 0.45rem 0.6rem;
+        border-radius: var(--radius-m);
+        color: var(--text-muted);
+        font-size: 0.85rem;
+        --icon-size: 16px;
+    }
+    #fb-nav > a.fb-home-link:hover { background: var(--hover); color: var(--text); }
+    #fb-nav > a.fb-home-link.active { color: var(--accent-text); font-weight: 600; }
+}
+/* Touch: the kit's rows grow to a 44px target; so does Home. */
+@media (pointer: coarse) {
+    #fb-nav > a.fb-home-link { min-height: 44px; box-sizing: border-box; }
+}

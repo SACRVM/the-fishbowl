@@ -48,6 +48,27 @@
     }
     window.addEventListener("hashchange", syncTitle);
 
+    // --- Home in the burger -------------------------------------------------
+    // The kit's panel lists every route but "#/" (Home is only its host jump,
+    // with a HOST group). Ours is the panel's first line: the desktop of the
+    // active workspace.
+    const homeLink = document.getElementById("fb-home-link");
+    function syncHome() {
+        if (!homeLink) return;
+        homeLink.href = sac.scope.hashFor("#/");
+        homeLink.classList.toggle("active", sac.router.currentResource() === "#/");
+    }
+    window.addEventListener("sac:scope-changed", syncHome);
+    window.addEventListener("hashchange", syncHome);
+    syncHome();
+    // The kit's own "nav.home" string: Home / Start.
+    function labelHome() {
+        const span = homeLink?.querySelector("span");
+        if (span) span.textContent = sac.t ? sac.t("nav.home", "Home") : "Home";
+    }
+    sac.lang?.onChange?.(labelHome);
+    labelHome();
+
     // --- Accent colours -----------------------------------------------------
     // Both are kit palette slot names ("teal"…) or null for the kit default.
     // The personal accent is --accent. Inside a space that has a colour,

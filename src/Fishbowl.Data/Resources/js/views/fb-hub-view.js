@@ -15,28 +15,20 @@
  * their stored position, unarranged ones sort by registry index. Hidden
  * tiles come back from the toolbar ("Show hidden tiles"). A space member
  * who may not arrange gets no menus and no toolbar item.
- *
- * Badges are the host's, from existing APIs, as the kit's .tile-badge:
- * open / due todos, the next event, unread messages. Refreshed on entry, on
- * a workspace switch and when messages change.
  */
 class FbHubView extends HTMLElement {
     connectedCallback() {
         this._entries = [];
         this._canArrange = false;
-        this._badgeText = new Map();
         this.render();
         this.refresh();
         this._onContext = () => this.refresh();
-        this._onMessages = () => this._messageBadge();
         window.addEventListener("sac:scope-changed", this._onContext);
-        window.addEventListener("fb:messages-changed", this._onMessages);
         this._loadVersion();
     }
 
     disconnectedCallback() {
         window.removeEventListener("sac:scope-changed", this._onContext);
-        window.removeEventListener("fb:messages-changed", this._onMessages);
     }
 
     async _loadVersion() {
@@ -92,10 +84,6 @@ class FbHubView extends HTMLElement {
                     padding: 0.45rem 0.9rem 0.25rem;
                     width: 13rem;
                 }
-                /* The kit's badge owns the top-right corner; on a tile that
-                   wears one, the menu takes the bottom-right (sac-launcher's
-                   rule for the same pair). */
-                fb-hub-view .tile:has(> .tile-badge) > .tile-menu { top: auto; bottom: 8px; }
 
                 /* SACRVM Desktop's footprints, collapsed on narrow screens. */
                 fb-hub-view .grid .tile.size-wide  { grid-column: span 2; }
@@ -130,7 +118,6 @@ class FbHubView extends HTMLElement {
         this._entries = loaded.entries;
         this._canArrange = loaded.canArrange;
         this._renderTiles();
-        this._badges();
     }
 
     /* -------------------------------------------------------- tiles -- */
@@ -153,8 +140,6 @@ class FbHubView extends HTMLElement {
             body.append(h2, desc);
 
             tile.append(icon, body);
-            const badge = this._badgeText.get(e.key);
-            if (badge) tile.appendChild(this._badgeEl(badge));
             if (this._canArrange) tile.appendChild(this._menu(e));
             if (e.size === "wide" || e.size === "large") tile.classList.add("size-" + e.size);
             // Tile colour = the app's highlight, the SACRVM Desktop move.
@@ -276,62 +261,6 @@ class FbHubView extends HTMLElement {
         }
     }
 
-    _badgeEl(text) {
-        const b = document.createElement("span");
-        b.className = "tile-badge";
-        b.textContent = text;
-        return b;
-    }
-
-    /** Set (or clear, with null) one tile's badge, now and across repaints. */
-    _setBadge(key, text) {
-        if (text) this._badgeText.set(key, text);
-        else this._badgeText.delete(key);
-        const tile = this._grid?.querySelector(`a.tile[data-key="${key}"]`);
-        if (!tile) return;
-        tile.querySelector(":scope > .tile-badge")?.remove();
-        if (text) tile.insertBefore(this._badgeEl(text), tile.querySelector(":scope > .tile-menu"));
-    }
-
-/* ------------------------------------------------------- badges -- */
-
-    _badges() {
-        const has = (key) => this._entries.some((e) => e.key === key);
-        if (has("builtin:todos")) this._todoBadge();
-        if (has("builtin:calendar")) this._eventBadge();
-        if (has("builtin:messages")) this._messageBadge();
-    }
-
-    async _todoBadge() {
-        let todos;
-        try { todos = await fb.api.todos.list(); } catch { return; }
-        const end = new Date();
-        end.setHours(23, 59, 59, 999);
-        const open = (todos || []).filter((t) => !t.completedAt);
-        const due = open.filter((t) => t.dueAt && new Date(t.dueAt) <= end);
-        this._setBadge("builtin:todos",
-            !open.length ? null : due.length ? `${open.length} · ${due.length} today` : `${open.length}`);
-    }
-
-    async _eventBadge() {
-        let events;
-        try { events = await fb.api.events.upcoming(30); } catch { return; }
-        const now = Date.now();
-        const next = (events || [])
-            .filter((e) => new Date(e.endAt || e.startAt).getTime() >= now)
-            .sort((a, b) => new Date(a.startAt) - new Date(b.startAt))[0];
-        if (!next) { this._setBadge("builtin:calendar", null); return; }
-        const d = new Date(next.startAt);
-        const sameDay = d.toDateString() === new Date().toDateString();
-        const day = sameDay ? "Today" : `${fb.format.weekday(d)} ${fb.format.dayMonth(d)}`;
-        this._setBadge("builtin:calendar", next.allDay ? day : `${day} ${fb.format.time(d)}`);
-    }
-
-    async _messageBadge() {
-        let n = 0;
-        try { n = (await fb.api.messages.unreadCount())?.unread || 0; } catch { return; }
-        this._setBadge("builtin:messages", n ? (n > 99 ? "99+" : String(n)) : null);
-    }
 }
 
 customElements.define("fb-hub-view", FbHubView);
