@@ -138,6 +138,34 @@ public class DailyDigestDispatcherTests : IDisposable
     }
 
     [Fact]
+    public async Task GermanUser_GetsAGermanDigest()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        await SeedUserAsync(ct);
+        await SeedChannelAsync(ct);
+        await SetConfigAsync("Digest:Enabled", "true", ct);
+        await SetConfigAsync("Digest:Hour", "0", ct);
+        await SeedTodayEventAsync("Standup", ct);
+        using (var scope = _services.CreateScope())
+        {
+            await scope.ServiceProvider.GetRequiredService<ISystemRepository>().SetLanguageAsync(Alice, "de", ct);
+            await scope.ServiceProvider.GetRequiredService<ITodoRepository>().CreateAsync(Alice, new TodoItem
+            {
+                Title = "Miete zahlen",
+                DueAt = DateTime.UtcNow.AddDays(-2),
+            }, ct);
+        }
+
+        await _services.GetRequiredService<DailyDigestDispatcher>().RunTickAsync(DateTime.Now, ct);
+
+        var message = Assert.Single(_bot.Calls).Message;
+        Assert.StartsWith("**Guten Morgen — das ist dein Tag.**", message);
+        Assert.Contains("📅 **Heute:**", message);
+        Assert.Contains("✅ **Fällige Aufgaben:**", message);
+        Assert.Contains("**Miete zahlen** (überfällig)", message);
+    }
+
+    [Fact]
     public async Task IncludesOverdueTodos_AndMarksThem()
     {
         var ct = TestContext.Current.CancellationToken;

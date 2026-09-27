@@ -11,6 +11,11 @@
     <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.6" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- The message formatters (reminder, digest) are tested directly. -->
+    <InternalsVisibleTo Include="Fishbowl.Scheduler.Tests" />
+  </ItemGroup>
+
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>

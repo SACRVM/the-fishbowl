@@ -1,6 +1,7 @@
 using global::Discord;
 using Fishbowl.Core;
 using Fishbowl.Core.Search;
+using Fishbowl.Core.Util;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 
@@ -34,9 +35,11 @@ public class SearchCommandHandler : ISlashCommandHandler
     {
         var builder = new SlashCommandBuilder()
             .WithName(Name)
-            .WithDescription("Search your Fishbowl notes.")
+            .WithDescription(ChatText.Get("cmd.search", null))
+            .WithDescriptionLocalizations(ChatText.Localizations("cmd.search"))
             .AddOption("query", ApplicationCommandOptionType.String,
-                "What to search for.", isRequired: true);
+                ChatText.Get("cmd.search.query", null), isRequired: true,
+                descriptionLocalizations: ChatText.Localizations("cmd.search.query"));
 
         LinkCommandHandler.ApplyDmContext(builder);
         return builder.Build();
@@ -47,10 +50,11 @@ public class SearchCommandHandler : ISlashCommandHandler
         var userId = await _resolver.ResolveAsync(ctx.DiscordUserId, ct);
         if (string.IsNullOrEmpty(userId))
             return Replies.NotLinked;
+        var lang = await _resolver.LanguageAsync(userId, ct);
 
         var query = ctx.Get("query")?.Trim();
         if (string.IsNullOrWhiteSpace(query))
-            return SlashCommandReply.Plain("Search what? `/search query:<...>`.");
+            return Replies.Say(lang, "search.empty");
 
         var result = await _search.HybridSearchAsync(
             ContextRef.User(userId),
@@ -63,22 +67,20 @@ public class SearchCommandHandler : ISlashCommandHandler
 
         if (result.Hits.Count == 0)
         {
-            var degraded = result.Degraded
-                ? " (semantic search is still warming up — try again in a few minutes if this doesn't look right)"
-                : string.Empty;
-            return SlashCommandReply.Plain($"No matches for **{Escape(query)}**.{degraded}");
+            var degraded = result.Degraded ? ChatText.Get("search.noneDegraded", lang) : string.Empty;
+            return SlashCommandReply.Plain(ChatText.Get("search.none", lang, Escape(query)) + degraded);
         }
 
         var lines = new List<string>(result.Hits.Count + 2)
         {
-            $"Top {result.Hits.Count} for **{Escape(query)}**:",
+            ChatText.Get("search.top", lang, result.Hits.Count, Escape(query)),
         };
         foreach (var hit in result.Hits)
         {
             lines.Add($"• {Escape(hit.Note.Title)}  `{hit.Note.Id}`");
         }
         if (result.Degraded)
-            lines.Add("_(semantic search warming up — ranking is FTS-only for now)_");
+            lines.Add(ChatText.Get("search.degraded", lang));
 
         return SlashCommandReply.Plain(string.Join("\n", lines));
     }

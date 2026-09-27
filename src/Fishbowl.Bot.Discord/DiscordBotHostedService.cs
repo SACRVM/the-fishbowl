@@ -176,7 +176,8 @@ public class DiscordBotHostedService : IHostedService, IAsyncDisposable
             var handlers = scope.ServiceProvider.GetServices<ISlashCommandHandler>();
             var loggerFactory = scope.ServiceProvider.GetService<ILoggerFactory>();
             var routerLogger = loggerFactory?.CreateLogger<SlashCommandRouter>();
-            var router = new SlashCommandRouter(handlers, routerLogger);
+            var router = new SlashCommandRouter(handlers, routerLogger,
+                scope.ServiceProvider.GetService<DiscordUserResolver>());
 
             var reply = await router.DispatchAsync(command.Data.Name, ctx, CancellationToken.None);
             await command.FollowupAsync(reply.Message, ephemeral: reply.Ephemeral);

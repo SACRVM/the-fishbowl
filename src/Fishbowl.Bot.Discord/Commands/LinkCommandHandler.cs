@@ -1,5 +1,6 @@
 using global::Discord;
 using Fishbowl.Core.Repositories;
+using Fishbowl.Core.Util;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 
@@ -34,10 +35,12 @@ public class LinkCommandHandler : ISlashCommandHandler
     {
         var builder = new SlashCommandBuilder()
             .WithName(Name)
-            .WithDescription("Connect your Discord account to your Fishbowl.")
+            .WithDescription(ChatText.Get("cmd.link", null))
+            .WithDescriptionLocalizations(ChatText.Localizations("cmd.link"))
             .AddOption("code", ApplicationCommandOptionType.String,
-                "The link code shown in your Fishbowl notification settings.",
-                isRequired: true);
+                ChatText.Get("cmd.link.code", null),
+                isRequired: true,
+                descriptionLocalizations: ChatText.Localizations("cmd.link.code"));
 
         ApplyDmContext(builder);
         return builder.Build();
@@ -48,7 +51,7 @@ public class LinkCommandHandler : ISlashCommandHandler
         var code = ctx.Get("code")?.Trim().ToUpperInvariant();
         if (string.IsNullOrWhiteSpace(code))
         {
-            return SlashCommandReply.Plain("Please supply your link code: `/link <code>`.");
+            return Replies.Say(null, "link.missingCode");
         }
 
         // Don't let an already-linked Discord account silently re-link to a
@@ -57,9 +60,7 @@ public class LinkCommandHandler : ISlashCommandHandler
         var existing = await _system.GetUserIdByMappingAsync(DiscordProvider.Name, ctx.DiscordUserId, ct);
         if (!string.IsNullOrEmpty(existing))
         {
-            return SlashCommandReply.Plain(
-                "This Discord account is already linked to a Fishbowl. " +
-                "Unlink it from your Fishbowl notification settings before linking again.");
+            return Replies.Say(await LanguageAsync(existing, ct), "link.already");
         }
 
         var redemption = await _links.RedeemAsync(code, ct);
@@ -68,8 +69,7 @@ public class LinkCommandHandler : ISlashCommandHandler
             // Don't differentiate "wrong" vs "expired" — same wording either
             // way (helps in the rare worry of someone shoulder-surfing codes).
             _logger.LogInformation("Discord link rejected for {Discord} (bad/expired code)", ctx.DiscordUserId);
-            return SlashCommandReply.Plain(
-                "That code didn't work. Generate a fresh one in your Fishbowl notification settings (codes expire after 10 minutes).");
+            return Replies.Say(null, "link.badCode");
         }
 
         await _system.CreateUserMappingAsync(redemption.UserId, DiscordProvider.Name, ctx.DiscordUserId, ct);
@@ -77,10 +77,12 @@ public class LinkCommandHandler : ISlashCommandHandler
 
         _logger.LogInformation("Linked Discord {Discord} → Fishbowl {UserId}", ctx.DiscordUserId, redemption.UserId);
 
-        return SlashCommandReply.Plain(
-            "Linked. From here on you can `/remember`, `/search`, `/recent` — and I'll DM you reminders. " +
-            "Try `/help` for the full list.");
+        // Linked: from here on the bot speaks the user's language.
+        return Replies.Say(await LanguageAsync(redemption.UserId, ct), "link.done");
     }
+
+    private async Task<string?> LanguageAsync(string userId, CancellationToken ct)
+        => (await _system.GetUserAsync(userId, ct))?.Language;
 
     internal static void ApplyDmContext(SlashCommandBuilder builder)
     {

@@ -1,3 +1,4 @@
+using Fishbowl.Core.Util;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 
@@ -11,13 +12,18 @@ public class SlashCommandRouter
 {
     private readonly Dictionary<string, ISlashCommandHandler> _handlers;
     private readonly ILogger<SlashCommandRouter> _logger;
+    private readonly DiscordUserResolver? _resolver;
 
+    // The resolver only picks the language of the router's own replies
+    // (unknown command, failure); without one they're English.
     public SlashCommandRouter(
         IEnumerable<ISlashCommandHandler> handlers,
-        ILogger<SlashCommandRouter>? logger = null)
+        ILogger<SlashCommandRouter>? logger = null,
+        DiscordUserResolver? resolver = null)
     {
         _handlers = handlers.ToDictionary(h => h.Name, StringComparer.OrdinalIgnoreCase);
         _logger = logger ?? NullLogger<SlashCommandRouter>.Instance;
+        _resolver = resolver;
     }
 
     public IEnumerable<ISlashCommandHandler> Handlers => _handlers.Values;
@@ -31,7 +37,7 @@ public class SlashCommandRouter
         {
             _logger.LogWarning("Unknown slash command: {Command}", commandName);
             return SlashCommandReply.Plain(
-                $"Unknown command `/{commandName}`. Try `/help`.");
+                ChatText.Get("bot.unknownCommand", await LanguageAsync(ctx, ct), commandName));
         }
 
         try
@@ -45,8 +51,15 @@ public class SlashCommandRouter
         catch (Exception ex)
         {
             _logger.LogError(ex, "Slash command {Command} failed", commandName);
-            return SlashCommandReply.Plain(
-                "Something went wrong on my side. Try again, or check the Fishbowl host logs.");
+            return SlashCommandReply.Plain(ChatText.Get("bot.error", await LanguageAsync(ctx, ct)));
         }
+    }
+
+    // Never lets a lookup failure turn an error reply into another error.
+    private async Task<string?> LanguageAsync(SlashCommandContext ctx, CancellationToken ct)
+    {
+        if (_resolver is null) return null;
+        try { return await _resolver.LanguageOfAsync(ctx.DiscordUserId, ct); }
+        catch (Exception ex) when (ex is not OperationCanceledException) { return null; }
     }
 }

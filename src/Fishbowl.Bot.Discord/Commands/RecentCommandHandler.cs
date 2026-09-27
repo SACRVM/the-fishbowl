@@ -1,6 +1,7 @@
 using global::Discord;
 using Fishbowl.Core;
 using Fishbowl.Core.Repositories;
+using Fishbowl.Core.Util;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 
@@ -31,7 +32,8 @@ public class RecentCommandHandler : ISlashCommandHandler
     {
         var builder = new SlashCommandBuilder()
             .WithName(Name)
-            .WithDescription("Show your newest Fishbowl notes.");
+            .WithDescription(ChatText.Get("cmd.recent", null))
+            .WithDescriptionLocalizations(ChatText.Localizations("cmd.recent"));
         LinkCommandHandler.ApplyDmContext(builder);
         return builder.Build();
     }
@@ -41,6 +43,7 @@ public class RecentCommandHandler : ISlashCommandHandler
         var userId = await _resolver.ResolveAsync(ctx.DiscordUserId, ct);
         if (string.IsNullOrEmpty(userId))
             return Replies.NotLinked;
+        var lang = await _resolver.LanguageAsync(userId, ct);
 
         var notes = await _notes.GetAllAsync(
             ContextRef.User(userId),
@@ -52,9 +55,9 @@ public class RecentCommandHandler : ISlashCommandHandler
 
         var hits = notes.ToList();
         if (hits.Count == 0)
-            return SlashCommandReply.Plain("No notes yet. `/remember text:<...>` is a fine way to start.");
+            return Replies.Say(lang, "recent.none");
 
-        var lines = new List<string>(hits.Count + 1) { $"Most recent {hits.Count}:" };
+        var lines = new List<string>(hits.Count + 1) { ChatText.Get("recent.title", lang, hits.Count) };
         foreach (var note in hits)
             lines.Add($"• {note.Title.Replace("`", "\\`")}  `{note.Id}`");
 

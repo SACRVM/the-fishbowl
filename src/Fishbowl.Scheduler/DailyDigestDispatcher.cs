@@ -153,7 +153,9 @@ public class DailyDigestDispatcher : BackgroundService
         if (todaysEvents.Count == 0 && dueTodos.Count == 0)
             return false; // an empty digest is noise — stay quiet, latch the day
 
-        var message = FormatDigestMessage(todaysEvents, dueTodos, dayStartUtc);
+        // In the user's UI language (users.language; null → English).
+        var language = (await sp.GetRequiredService<ISystemRepository>().GetUserAsync(userId, ct))?.Language;
+        var message = FormatDigestMessage(todaysEvents, dueTodos, dayStartUtc, language);
         try
         {
             await target.SendAsync(userId, message, ct);
@@ -173,18 +175,18 @@ public class DailyDigestDispatcher : BackgroundService
     // platforms see the raw token, which is still unambiguous. Titles only
     // plus time/location — same content minimalism as the bot commands.
     internal static string FormatDigestMessage(
-        IReadOnlyList<Event> events, IReadOnlyList<TodoItem> todos, DateTime dayStartUtc)
+        IReadOnlyList<Event> events, IReadOnlyList<TodoItem> todos, DateTime dayStartUtc, string? language = null)
     {
-        var lines = new List<string> { "**Good morning — here's your day.**" };
+        var lines = new List<string> { ChatText.Get("digest.hello", language) };
 
         if (events.Count > 0)
         {
             lines.Add("");
-            lines.Add("📅 **Today:**");
+            lines.Add(ChatText.Get("digest.today", language));
             foreach (var ev in events)
             {
                 var unix = new DateTimeOffset(TimeUtil.AsUtc(ev.StartAt)).ToUnixTimeSeconds();
-                var when = ev.AllDay ? "all day" : $"<t:{unix}:t>";
+                var when = ev.AllDay ? ChatText.Get("digest.allDay", language) : $"<t:{unix}:t>";
                 var location = string.IsNullOrWhiteSpace(ev.Location) ? "" : $" — {ev.Location}";
                 lines.Add($"• {when}  **{ev.Title}**{location}");
             }
@@ -193,11 +195,11 @@ public class DailyDigestDispatcher : BackgroundService
         if (todos.Count > 0)
         {
             lines.Add("");
-            lines.Add("✅ **Due todos:**");
+            lines.Add(ChatText.Get("digest.todos", language));
             foreach (var todo in todos)
             {
                 var overdue = todo.DueAt is DateTime due && TimeUtil.AsUtc(due) < dayStartUtc
-                    ? " (overdue)"
+                    ? ChatText.Get("digest.overdue", language)
                     : "";
                 lines.Add($"• **{todo.Title}**{overdue}");
             }

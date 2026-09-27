@@ -2,6 +2,7 @@ using Fishbowl.Core;
 using Fishbowl.Core.Models;
 using Fishbowl.Core.Plugins;
 using Fishbowl.Core.Repositories;
+using Fishbowl.Core.Util;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -145,6 +146,9 @@ public class ReminderDispatcher : BackgroundService
         var toFire = due.Where(e => !alreadySent.Contains((e.Id, TriggerOf(e)))).ToList();
         if (toFire.Count == 0) return 0;
 
+        // The DM speaks the user's UI language (users.language; null → English).
+        var language = (await sp.GetRequiredService<ISystemRepository>().GetUserAsync(userId, ct))?.Language;
+
         var fired = 0;
         foreach (var ev in toFire)
         {
@@ -159,7 +163,7 @@ public class ReminderDispatcher : BackgroundService
                 var channel = await channels.GetAsync(userId, bot.Name, ct);
                 if (channel is null || !channel.Enabled) continue;
 
-                var message = FormatReminderMessage(ev, toUtc);
+                var message = FormatReminderMessage(ev, toUtc, language);
                 try
                 {
                     await bot.SendAsync(userId, message, ct);
@@ -203,20 +207,22 @@ public class ReminderDispatcher : BackgroundService
     // platforms either render or pass through the asterisks. No PII risk —
     // titles can contain anything the user typed, but they own that data
     // and chose to set a reminder on it.
-    internal static string FormatReminderMessage(Event ev, DateTime now)
+    internal static string FormatReminderMessage(Event ev, DateTime now, string? language = null)
     {
         var when = ev.StartAt - now;
         string whenText;
-        if (ev.AllDay && ev.StartDate is not null) whenText = $"on {ev.StartDate} (all day)";
-        else if (when.TotalSeconds <= 30) whenText = "now";
-        else if (when.TotalMinutes < 1) whenText = "in less than a minute";
-        else if (when.TotalMinutes < 60) whenText = $"in {(int)when.TotalMinutes}m";
-        else if (when.TotalHours < 24) whenText = $"in {(int)when.TotalHours}h{when.Minutes:D2}m";
-        else whenText = $"at {ev.StartAt:yyyy-MM-dd HH:mm} UTC";
+        if (ev.AllDay && ev.StartDate is not null)
+            whenText = ChatText.Get("reminder.onAllDay", language,
+                AllDayDates.TryParse(ev.StartDate, out var day) ? ChatText.Day(day, language) : ev.StartDate);
+        else if (when.TotalSeconds <= 30) whenText = ChatText.Get("reminder.now", language);
+        else if (when.TotalMinutes < 1) whenText = ChatText.Get("reminder.lessThanMinute", language);
+        else if (when.TotalMinutes < 60) whenText = ChatText.Get("reminder.inMinutes", language, (int)when.TotalMinutes);
+        else if (when.TotalHours < 24) whenText = ChatText.Get("reminder.inHours", language, (int)when.TotalHours, when.Minutes);
+        else whenText = ChatText.Get("reminder.at", language, ev.StartAt.ToString("yyyy-MM-dd HH:mm", System.Globalization.CultureInfo.InvariantCulture));
 
-        var msg = $"Reminder: **{ev.Title}** {whenText}.";
+        var msg = ChatText.Get("reminder.line", language, ev.Title, whenText);
         if (!string.IsNullOrWhiteSpace(ev.Location))
-            msg += $"\nLocation: {ev.Location}";
+            msg += "\n" + ChatText.Get("reminder.location", language, ev.Location);
         return msg;
     }
 }

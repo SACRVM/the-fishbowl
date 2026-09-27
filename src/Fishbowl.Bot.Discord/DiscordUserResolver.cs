@@ -25,4 +25,13 @@ public class DiscordUserResolver
 
     public Task<string?> ResolveAsync(string discordUserId, CancellationToken ct)
         => _system.GetUserIdByMappingAsync(DiscordProvider.Name, discordUserId, ct);
+
+    // The linked user's UI language (users.language) for the bot's replies —
+    // null for automatic, which a chat reads as English (ChatText).
+    public async Task<string?> LanguageAsync(string? userId, CancellationToken ct)
+        => string.IsNullOrEmpty(userId) ? null : (await _system.GetUserAsync(userId, ct))?.Language;
+
+    // Language for a Discord account: its linked user's, else null.
+    public async Task<string?> LanguageOfAsync(string discordUserId, CancellationToken ct)
+        => await LanguageAsync(await ResolveAsync(discordUserId, ct), ct);
 }

@@ -2,6 +2,7 @@ using global::Discord;
 using Fishbowl.Core;
 using Fishbowl.Core.Models;
 using Fishbowl.Core.Repositories;
+using Fishbowl.Core.Util;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 
@@ -34,13 +35,16 @@ public class RememberCommandHandler : ISlashCommandHandler
     {
         var builder = new SlashCommandBuilder()
             .WithName(Name)
-            .WithDescription("Save something to your Fishbowl.")
+            .WithDescription(ChatText.Get("cmd.remember", null))
+            .WithDescriptionLocalizations(ChatText.Localizations("cmd.remember"))
             .AddOption("text", ApplicationCommandOptionType.String,
-                "What to remember (the body of the note).",
-                isRequired: true)
+                ChatText.Get("cmd.remember.text", null),
+                isRequired: true,
+                descriptionLocalizations: ChatText.Localizations("cmd.remember.text"))
             .AddOption("title", ApplicationCommandOptionType.String,
-                "Optional title (defaults to a short slice of the text).",
-                isRequired: false);
+                ChatText.Get("cmd.remember.title", null),
+                isRequired: false,
+                descriptionLocalizations: ChatText.Localizations("cmd.remember.title"));
 
         LinkCommandHandler.ApplyDmContext(builder);
         return builder.Build();
@@ -51,10 +55,11 @@ public class RememberCommandHandler : ISlashCommandHandler
         var userId = await _resolver.ResolveAsync(ctx.DiscordUserId, ct);
         if (string.IsNullOrEmpty(userId))
             return Replies.NotLinked;
+        var lang = await _resolver.LanguageAsync(userId, ct);
 
         var text = ctx.Get("text")?.Trim();
         if (string.IsNullOrWhiteSpace(text))
-            return SlashCommandReply.Plain("Tell me what to remember: `/remember text:<...>`.");
+            return Replies.Say(lang, "remember.empty");
 
         var title = ctx.Get("title")?.Trim();
         if (string.IsNullOrWhiteSpace(title))
@@ -71,7 +76,7 @@ public class RememberCommandHandler : ISlashCommandHandler
         var id = await _notes.CreateAsync(ContextRef.User(userId), userId, note, NoteSource.Human, ct);
         _logger.LogInformation("Discord /remember → note {NoteId} for user {UserId}", id, userId);
 
-        return SlashCommandReply.Plain($"Saved as **{Trim(title, 80)}**.");
+        return Replies.Say(lang, "remember.saved", Trim(title, 80));
     }
 
     private static string TitleFrom(string text)

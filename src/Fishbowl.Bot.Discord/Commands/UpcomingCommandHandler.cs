@@ -40,10 +40,12 @@ public class UpcomingCommandHandler : ISlashCommandHandler
     {
         var builder = new SlashCommandBuilder()
             .WithName(Name)
-            .WithDescription("Show your upcoming Fishbowl events.")
+            .WithDescription(ChatText.Get("cmd.upcoming", null))
+            .WithDescriptionLocalizations(ChatText.Localizations("cmd.upcoming"))
             .AddOption("days", ApplicationCommandOptionType.Integer,
-                $"How many days ahead to look (default {DefaultDays}).",
-                isRequired: false, minValue: 1, maxValue: MaxDays);
+                ChatText.Get("cmd.upcoming.days", null, DefaultDays),
+                isRequired: false, minValue: 1, maxValue: MaxDays,
+                descriptionLocalizations: ChatText.Localizations("cmd.upcoming.days", DefaultDays));
         LinkCommandHandler.ApplyDmContext(builder);
         return builder.Build();
     }
@@ -53,6 +55,7 @@ public class UpcomingCommandHandler : ISlashCommandHandler
         var userId = await _resolver.ResolveAsync(ctx.DiscordUserId, ct);
         if (string.IsNullOrEmpty(userId))
             return Replies.NotLinked;
+        var lang = await _resolver.LanguageAsync(userId, ct);
 
         var days = DefaultDays;
         if (int.TryParse(ctx.Get("days"), out var parsed))
@@ -67,32 +70,31 @@ public class UpcomingCommandHandler : ISlashCommandHandler
             .ToList();
 
         if (found.Count == 0)
-            return SlashCommandReply.Plain(
-                $"Nothing on the calendar for the next {days} day{(days == 1 ? "" : "s")}.");
+            return days == 1 ? Replies.Say(lang, "upcoming.none.1") : Replies.Say(lang, "upcoming.none", days);
 
         var lines = new List<string>(Math.Min(found.Count, MaxLines) + 2)
         {
-            $"**Coming up in the next {days} day{(days == 1 ? "" : "s")}** ({found.Count}):",
+            days == 1
+                ? ChatText.Get("upcoming.title.1", lang, found.Count)
+                : ChatText.Get("upcoming.title", lang, days, found.Count),
         };
         foreach (var ev in found.Take(MaxLines))
         {
             var unix = new DateTimeOffset(TimeUtil.AsUtc(ev.StartAt)).ToUnixTimeSeconds();
             // A date, not a moment: <t:…> would shift it into the viewer's zone.
-            var when = ev.AllDay ? $"{DayText(ev.StartDate)} (all day)" : $"<t:{unix}:f>";
+            var when = ev.AllDay ? ChatText.Get("upcoming.allDay", lang, DayText(ev.StartDate, lang)) : $"<t:{unix}:f>";
             var repeat = string.IsNullOrEmpty(ev.RRule) ? "" : " ↻";
             var location = string.IsNullOrWhiteSpace(ev.Location) ? "" : $" — {Escape(ev.Location)}";
             lines.Add($"• {when}  **{Escape(ev.Title)}**{repeat}{location}");
         }
         if (found.Count > MaxLines)
-            lines.Add($"…and {found.Count - MaxLines} more.");
+            lines.Add(ChatText.Get("upcoming.more", lang, found.Count - MaxLines));
 
         return SlashCommandReply.Plain(string.Join("\n", lines));
     }
 
-    private static string DayText(string? date)
-        => AllDayDates.TryParse(date, out var d)
-            ? d.ToString("ddd d MMM yyyy", System.Globalization.CultureInfo.InvariantCulture)
-            : date ?? "";
+    private static string DayText(string? date, string? lang)
+        => AllDayDates.TryParse(date, out var d) ? ChatText.Day(d, lang) : date ?? "";
 
     private static string Escape(string s)
         => s.Replace("`", "\\`").Replace("*", "\\*").Replace("_", "\\_");

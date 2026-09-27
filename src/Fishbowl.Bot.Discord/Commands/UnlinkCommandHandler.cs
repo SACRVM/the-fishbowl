@@ -1,5 +1,6 @@
 using global::Discord;
 using Fishbowl.Core.Repositories;
+using Fishbowl.Core.Util;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 
@@ -33,7 +34,8 @@ public class UnlinkCommandHandler : ISlashCommandHandler
     {
         var builder = new SlashCommandBuilder()
             .WithName(Name)
-            .WithDescription("Disconnect this Discord account from your Fishbowl.");
+            .WithDescription(ChatText.Get("cmd.unlink", null))
+            .WithDescriptionLocalizations(ChatText.Localizations("cmd.unlink"));
         LinkCommandHandler.ApplyDmContext(builder);
         return builder.Build();
     }
@@ -43,20 +45,20 @@ public class UnlinkCommandHandler : ISlashCommandHandler
         var userId = await _system.GetUserIdByMappingAsync(DiscordProvider.Name, ctx.DiscordUserId, ct);
         if (string.IsNullOrEmpty(userId))
         {
-            return SlashCommandReply.Plain(
-                "This Discord account isn't linked to any Fishbowl. Nothing to do.");
+            return Replies.Say(null, "unlink.notLinked");
         }
 
         // Order matters mildly: delete the mapping first so any concurrent
         // SendAsync racing this command sees the channel disappear before the
         // identity does (the channel-only state is a strictly less surprising
         // failure mode than a stranded mapping with no DM path).
+        // Asked before the mapping goes: the goodbye is in their language.
+        var lang = (await _system.GetUserAsync(userId, ct))?.Language;
         await _system.DeleteUserMappingAsync(DiscordProvider.Name, ctx.DiscordUserId, ct);
         await _channels.RemoveAsync(userId, DiscordProvider.Name, ct);
 
         _logger.LogInformation("Unlinked Discord {Discord} from Fishbowl {UserId}", ctx.DiscordUserId, userId);
 
-        return SlashCommandReply.Plain(
-            "Unlinked. I'll forget this Discord account. Run `/link <code>` with a fresh code anytime to reconnect.");
+        return Replies.Say(lang, "unlink.done");
     }
 }

@@ -1,37 +1,46 @@
 using global::Discord;
+using Fishbowl.Core.Util;
 
 namespace Fishbowl.Bot.Discord.Commands;
 
 // /help — static command list. Doesn't require linkage; `/link` is in the
-// list so a fresh user can find their way in.
+// list so a fresh user can find their way in. In the linked user's language
+// (ChatText); unlinked accounts read English.
 public class HelpCommandHandler : ISlashCommandHandler
 {
     public string Name => "help";
+
+    private readonly DiscordUserResolver? _resolver;
+
+    // The resolver picks the reply language; without one (tests) it's English.
+    public HelpCommandHandler(DiscordUserResolver? resolver = null) => _resolver = resolver;
 
     public SlashCommandProperties Build()
     {
         var builder = new SlashCommandBuilder()
             .WithName(Name)
-            .WithDescription("List Fishbowl bot commands.");
+            .WithDescription(ChatText.Get("cmd.help", null))
+            .WithDescriptionLocalizations(ChatText.Localizations("cmd.help"));
         LinkCommandHandler.ApplyDmContext(builder);
         return builder.Build();
     }
 
-    public Task<SlashCommandReply> HandleAsync(SlashCommandContext ctx, CancellationToken ct)
+    public async Task<SlashCommandReply> HandleAsync(SlashCommandContext ctx, CancellationToken ct)
     {
+        var lang = _resolver is null ? null : await _resolver.LanguageOfAsync(ctx.DiscordUserId, ct);
         var lines = new[]
         {
-            "**Fishbowl bot — commands**",
-            "`/link <code>` — connect this Discord account to your Fishbowl",
-            "`/unlink` — disconnect this Discord account",
-            "`/remember text:<...> [title:<...>]` — save a note",
-            "`/search query:<...>` — hybrid search across your notes (titles only)",
-            "`/recent` — list your newest notes",
-            "`/upcoming [days:<n>]` — list your upcoming calendar events",
-            "`/help` — show this message",
+            ChatText.Get("help.title", lang),
+            ChatText.Get("help.link", lang),
+            ChatText.Get("help.unlink", lang),
+            ChatText.Get("help.remember", lang),
+            ChatText.Get("help.search", lang),
+            ChatText.Get("help.recent", lang),
+            ChatText.Get("help.upcoming", lang),
+            ChatText.Get("help.help", lang),
             string.Empty,
-            "I never reveal secret content (`:::secret` blocks) in chat — open them in the web UI.",
+            ChatText.Get("help.secrets", lang),
         };
-        return Task.FromResult(SlashCommandReply.Plain(string.Join("\n", lines)));
+        return SlashCommandReply.Plain(string.Join("\n", lines));
     }
 }

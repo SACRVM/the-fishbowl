@@ -239,6 +239,47 @@ public class ReminderDispatcherTests : IDisposable
         Assert.Contains("Zoom", _bot.Calls[0].Message);
     }
 
+    // The DM is in the user's UI language (users.language); automatic → English.
+    [Fact]
+    public async Task GermanUser_GetsAGermanReminder()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        await SeedUserAsync(Alice, ct);
+        await SeedDiscordChannelAsync(Alice, ct);
+        using (var scope = _services.CreateScope())
+        {
+            await scope.ServiceProvider.GetRequiredService<ISystemRepository>().SetLanguageAsync(Alice, "de", ct);
+            await scope.ServiceProvider.GetRequiredService<IEventRepository>().CreateAsync(Alice, new Event
+            {
+                Title = "Standup",
+                StartAt = DateTime.UtcNow.AddMinutes(30),
+                ReminderMinutes = 30,
+                Location = "Zoom",
+            }, ct);
+        }
+
+        var now = DateTime.UtcNow;
+        await _services.GetRequiredService<ReminderDispatcher>().RunTickAsync(now.AddMinutes(-1), now.AddMinutes(1), ct);
+
+        Assert.Single(_bot.Calls);
+        Assert.StartsWith("Erinnerung: **Standup** in ", _bot.Calls[0].Message);
+        Assert.Contains(" min.", _bot.Calls[0].Message);
+        Assert.Contains("\nOrt: Zoom", _bot.Calls[0].Message);
+    }
+
+    [Fact]
+    public void ReminderText_FollowsTheLanguage()
+    {
+        var now = new DateTime(2026, 10, 1, 8, 0, 0, DateTimeKind.Utc);
+        var timed = new Event { Title = "Call", StartAt = now.AddMinutes(90) };
+        Assert.Equal("Reminder: **Call** in 1h30m.", ReminderDispatcher.FormatReminderMessage(timed, now));
+        Assert.Equal("Erinnerung: **Call** in 1 h 30 min.", ReminderDispatcher.FormatReminderMessage(timed, now, "de"));
+
+        var allDay = new Event { Title = "Feiertag", AllDay = true, StartDate = "2026-10-03", StartAt = new DateTime(2026, 10, 3, 0, 0, 0, DateTimeKind.Utc) };
+        Assert.Equal("Reminder: **Feiertag** on Sat 3 Oct 2026 (all day).", ReminderDispatcher.FormatReminderMessage(allDay, now));
+        Assert.Equal("Erinnerung: **Feiertag** am Sa., 3. Okt. 2026 (ganztägig).", ReminderDispatcher.FormatReminderMessage(allDay, now, "de"));
+    }
+
     private sealed class CountingBotClient : IBotClient
     {
         public CountingBotClient(string name) { Name = name; }

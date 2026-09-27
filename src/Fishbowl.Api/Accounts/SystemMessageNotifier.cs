@@ -1,6 +1,7 @@
 using Fishbowl.Core.Models;
 using Fishbowl.Core.Plugins;
 using Fishbowl.Core.Repositories;
+using Fishbowl.Core.Util;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -26,29 +27,12 @@ public class SystemMessageNotifier
 
     // The one line a chat DM carries, in the recipient's UI language
     // (users.language; null/automatic → English — a chat has no browser to
-    // ask). Unknown kinds get the generic line, so a new kind never leaks its
-    // data by accident.
+    // ask), from the shared chat table (ChatText). Unknown kinds get the
+    // generic line, so a new kind never leaks its data by accident.
     public static string SubjectFor(string kind) => SubjectFor(kind, null);
 
-    public static string SubjectFor(string kind, string? language) => language == "de"
-        ? kind switch
-        {
-            MessageKinds.UserPending => "Fishbowl: ein neues Konto wartet auf deine Freigabe.",
-            MessageKinds.UserApproved => "Fishbowl: dein Konto ist freigegeben — du kannst loslegen.",
-            "quota.warning" => "Fishbowl: dein Speicher ist fast voll.",
-            "space.added" => "Fishbowl: du wurdest zu einem Space hinzugefügt.",
-            "app.update" => "Fishbowl: eine App auf deinem Desktop hat ein Update, das du bestätigen musst.",
-            _ => "Fishbowl: du hast eine neue Nachricht.",
-        }
-        : kind switch
-        {
-            MessageKinds.UserPending => "Fishbowl: a new account is waiting for your approval.",
-            MessageKinds.UserApproved => "Fishbowl: your account is approved — you can start now.",
-            "quota.warning" => "Fishbowl: your storage is almost full.",
-            "space.added" => "Fishbowl: you were added to a space.",
-            "app.update" => "Fishbowl: an app on your desktop has an update to confirm.",
-            _ => "Fishbowl: you have a new message.",
-        };
+    public static string SubjectFor(string kind, string? language)
+        => ChatText.Get(ChatText.Has("subject." + kind) ? "subject." + kind : "subject.other", language);
 
     public async Task NotifyAsync(IEnumerable<string> recipientIds, string kind, CancellationToken ct = default)
     {
