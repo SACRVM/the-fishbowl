@@ -36,10 +36,9 @@ class FbDataSettingsView extends HTMLElement {
                 fb-data-settings-view .storage .muted { margin: 12px 0 0; }
             </style>
             <header><div>
-                <h1>Your data</h1>
+                <h1>${fb.t("fb.data.title", "Your data")}</h1>
                 <p class="subtitle">
-                    Download everything in this workspace — it's yours. Each download is a ZIP
-                    you can open anywhere; the database is a plain SQLite file.
+                    ${fb.t("fb.data.subtitle", "Download everything in this workspace — it's yours. Each download is a ZIP you can open anywhere; the database is a plain SQLite file.")}
                 </p>
             </div></header>
             <div id="data-body"></div>
@@ -60,28 +59,28 @@ class FbDataSettingsView extends HTMLElement {
         mount.replaceChildren();
         if (usage) mount.appendChild(this._storagePanel(usage, inSpace));
 
-        const { card, panel } = section("Export");
+        const { card, panel } = section(fb.t("fb.data.export", "Export"));
         if (denied) {
             const p = document.createElement("p");
-            p.textContent = "Only the space's owner can export it.";
+            p.textContent = fb.t("fb.data.owner-only", "Only the space's owner can export it.");
             panel.appendChild(p);
         } else if (!info) {
             const p = document.createElement("p");
             p.className = "muted";
-            p.textContent = "The export can't be reached right now.";
+            p.textContent = fb.t("fb.data.unavailable", "The export can't be reached right now.");
             panel.appendChild(p);
         } else {
-            panel.appendChild(this._row("backup", "Database",
-                `${fmtBytes(info.dbBytes)} · notes, todos, events, contacts — a SQLite file`, "db"));
-            panel.appendChild(this._row("folder", "All files",
-                `${fmtBytes(info.filesBytes)} · the file tree as it is, without the trash`, "files"));
+            panel.appendChild(this._row("backup", fb.t("fb.data.db", "Database"),
+                fb.t("fb.data.db-meta", "{size} · notes, todos, events, contacts — a SQLite file", { size: fmtBytes(info.dbBytes) }), "db"));
+            panel.appendChild(this._row("folder", fb.t("fb.data.files", "All files"),
+                fb.t("fb.data.files-meta", "{size} · the file tree as it is, without the trash", { size: fmtBytes(info.filesBytes) }), "files"));
             if (info.combinedAllowed) {
-                panel.appendChild(this._row("download", "Database and files",
-                    `${fmtBytes(info.dbBytes + info.filesBytes)} · both in one ZIP`, "all"));
+                panel.appendChild(this._row("download", fb.t("fb.data.all", "Database and files"),
+                    fb.t("fb.data.all-meta", "{size} · both in one ZIP", { size: fmtBytes(info.dbBytes + info.filesBytes) }), "all"));
             } else {
                 const p = document.createElement("p");
                 p.className = "muted";
-                p.textContent = `Both in one ZIP is offered up to ${fmtBytes(info.combinedMaxBytes)} of files — download them separately.`;
+                p.textContent = fb.t("fb.data.all-too-big", "Both in one ZIP is offered up to {size} of files — download them separately.", { size: fmtBytes(info.combinedMaxBytes) });
                 panel.appendChild(p);
             }
         }
@@ -89,30 +88,32 @@ class FbDataSettingsView extends HTMLElement {
     }
 
     _storagePanel(usage, inSpace) {
-        const { card, panel } = section("Storage");
+        const { card, panel } = section(fb.t("fb.data.storage", "Storage"));
         card.classList.add("storage");
         const text = document.createElement("p");
         text.className = "storage-text";
         const quota = usage.ownerQuotaBytes || 0;
         const used = usage.ownerBytes || 0;
-        const whose = inSpace ? "The space's owner uses" : "You use";
+        const vars = { used: fmtBytes(used), quota: fmtBytes(quota) };
         text.textContent = quota > 0
-            ? `${whose} ${fmtBytes(used)} of ${fmtBytes(quota)}.`
-            : `${whose} ${fmtBytes(used)} — no quota.`;
+            ? (inSpace ? fb.t("fb.data.owner-uses-of", "The space's owner uses {used} of {quota}.", vars)
+                       : fb.t("fb.data.you-use-of", "You use {used} of {quota}.", vars))
+            : (inSpace ? fb.t("fb.data.owner-uses", "The space's owner uses {used} — no quota.", vars)
+                       : fb.t("fb.data.you-use", "You use {used} — no quota.", vars));
         panel.appendChild(text);
         if (quota > 0) {
             const ratio = Math.min(1, used / quota);
             const bar = document.createElement("sac-progress");
             bar.setAttribute("max", "1000");
             bar.setAttribute("value", String(Math.round(ratio * 1000)));
-            bar.setAttribute("aria-label", "Storage used");
+            bar.setAttribute("aria-label", fb.t("fb.data.storage-used", "Storage used"));
             panel.appendChild(bar);
         }
         const note = document.createElement("p");
         note.className = "muted";
         note.textContent = inSpace
-            ? `This space's files: ${fmtBytes(usage.bytes)}. A space counts toward its owner's quota.`
-            : `One quota covers your personal workspace and every space you own.`;
+            ? fb.t("fb.data.space-files", "This space's files: {size}. A space counts toward its owner's quota.", { size: fmtBytes(usage.bytes) })
+            : fb.t("fb.data.one-quota", "One quota covers your personal workspace and every space you own.");
         panel.appendChild(note);
         return card;
     }
@@ -129,7 +130,7 @@ class FbDataSettingsView extends HTMLElement {
             </div>
             <div class="toolbar">
                 <a class="btn" download>
-                    <sac-icon name="download"></sac-icon><span>Download</span>
+                    <sac-icon name="download"></sac-icon><span>${fb.t("fb.data.download", "Download")}</span>
                 </a>
             </div>`;
         row.querySelector(".export-name").textContent = name;
@@ -149,14 +150,7 @@ function section(title) {
     return { card, panel };
 }
 
-function fmtBytes(n) {
-    n = Number(n) || 0;
-    if (n < 1024) return `${n} B`;
-    const units = ["KB", "MB", "GB", "TB"];
-    let v = n / 1024, i = 0;
-    while (v >= 1024 && i < units.length - 1) { v /= 1024; i++; }
-    return `${v.toFixed(v < 10 ? 1 : 0)} ${units[i]}`;
-}
+function fmtBytes(n) { return fb.format.bytes(n); }
 
 customElements.define("fb-data-settings-view", FbDataSettingsView);
 sac.router.register("#/data", "fb-data-settings-view", { label: "Your data", icon: "download", palette: false });

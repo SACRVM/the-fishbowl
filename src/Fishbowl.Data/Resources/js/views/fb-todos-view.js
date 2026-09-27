@@ -398,18 +398,18 @@ class FbTodosView extends HTMLElement {
 
             <sac-split class="tv-split" id="split" collapse show="start"
                        position="${this._splitPosition()}" min-start="260px" min-end="360px"
-                       aria-label="Resize the todo list">
+                       aria-label="${fb.t("fb.todos.resize", "Resize the todo list")}">
                 <aside class="tv-list-pane" slot="start">
                     <div class="tv-search">
                         <sac-icon name="search"></sac-icon>
-                        <input type="search" id="search-input" placeholder="Search all todos"/>
+                        <input type="search" id="search-input" placeholder="${fb.t("fb.todos.search", "Search all todos")}"/>
                     </div>
                     <div class="tv-list-header">
-                        <span class="tv-list-title" id="list-title">Open Todos</span>
-                        <button class="icon-btn" id="toggle-completed-btn" title="Show completed" aria-label="Show completed">
+                        <span class="tv-list-title" id="list-title">${fb.t("fb.todos.open", "Open Todos")}</span>
+                        <button class="icon-btn" id="toggle-completed-btn" title="${fb.t("fb.todos.show-completed", "Show completed")}" aria-label="${fb.t("fb.todos.show-completed", "Show completed")}">
                             <sac-icon name="check"></sac-icon>
                         </button>
-                        <button class="icon-btn" id="new-btn" title="New todo" aria-label="New todo">
+                        <button class="icon-btn" id="new-btn" title="${fb.t("fb.todos.new", "New todo")}" aria-label="${fb.t("fb.todos.new", "New todo")}">
                             <sac-icon name="plus"></sac-icon>
                         </button>
                     </div>
@@ -420,28 +420,28 @@ class FbTodosView extends HTMLElement {
                     <div class="tv-editor-body">
                         <div class="empty-state tv-empty" id="editor-empty">
                             <sac-icon name="check"></sac-icon>
-                            <h3>No todo open</h3>
-                            <p>Pick one from the list, or add a new one.</p>
-                            <button type="button" class="btn primary" id="empty-new-btn"><sac-icon name="plus"></sac-icon> New todo</button>
+                            <h3>${fb.t("fb.todos.none-open", "No todo open")}</h3>
+                            <p>${fb.t("fb.todos.none-open-hint", "Pick one from the list, or add a new one.")}</p>
+                            <button type="button" class="btn primary" id="empty-new-btn"><sac-icon name="plus"></sac-icon> ${fb.t("fb.todos.new", "New todo")}</button>
                         </div>
                         <div id="editor" hidden>
-                            <textarea id="title" class="tv-title-input" rows="1" placeholder="What needs doing?"></textarea>
+                            <textarea id="title" class="tv-title-input" rows="1" placeholder="${fb.t("fb.todos.title-placeholder", "What needs doing?")}"></textarea>
                             <div class="tv-field">
-                                <label for="due-at">Due</label>
+                                <label for="due-at">${fb.t("fb.todos.due", "Due")}</label>
                                 <input id="due-at" class="tv-date-input"/>
-                                <button class="icon-btn tv-date-clear-btn" id="due-clear" title="Clear due date" aria-label="Clear due date" hidden><sac-icon name="close"></sac-icon></button>
+                                <button class="icon-btn tv-date-clear-btn" id="due-clear" title="${fb.t("fb.todos.clear-due", "Clear due date")}" aria-label="${fb.t("fb.todos.clear-due", "Clear due date")}" hidden><sac-icon name="close"></sac-icon></button>
                             </div>
                             <div class="tv-field">
-                                <label for="description">Notes</label>
-                                <textarea id="description" class="tv-desc-input" placeholder="Anything else worth remembering?"></textarea>
+                                <label for="description">${fb.t("fb.todos.notes", "Notes")}</label>
+                                <textarea id="description" class="tv-desc-input" placeholder="${fb.t("fb.todos.notes-placeholder", "Anything else worth remembering?")}"></textarea>
                             </div>
                         </div>
                     </div>
                     <footer class="tv-editor-footer" id="editor-footer" hidden>
                         <span class="tv-editor-footer-meta">
-                            Updated <span id="timestamp"></span>
+                            ${fb.t("fb.todos.updated", "Updated")} <span id="timestamp"></span>
                         </span>
-                        <sac-chip id="completed-pill" label="Completed" color="green" hidden></sac-chip>
+                        <sac-chip id="completed-pill" label="${fb.t("fb.todos.completed", "Completed")}" color="green" hidden></sac-chip>
                         <div class="tv-editor-footer-spacer"></div>
                     </footer>
                 </main>
@@ -471,7 +471,9 @@ class FbTodosView extends HTMLElement {
         this.querySelector("#toggle-completed-btn").addEventListener("click", () => {
             this.hideCompleted = !this.hideCompleted;
             this.querySelector("#toggle-completed-btn").classList.toggle("active", !this.hideCompleted);
-            this.querySelector("#list-title").textContent = this.hideCompleted ? "Open Todos" : "All Todos";
+            this.querySelector("#list-title").textContent = this.hideCompleted
+                ? fb.t("fb.todos.open", "Open Todos")
+                : fb.t("fb.todos.all", "All Todos");
             this.renderList();
         });
         this.querySelector("#search-input").addEventListener("input", (e) => {
@@ -533,13 +535,13 @@ class FbTodosView extends HTMLElement {
         fb.toolbar.set([
             {
                 icon:    "check",
-                title:   completed ? "Mark as not done" : "Mark as done",
+                title:   completed ? fb.t("fb.todos.mark-undone", "Mark as not done") : fb.t("fb.todos.mark-done", "Mark as done"),
                 active:  completed,
                 onClick: () => this.toggleCompleted()
             },
             {
                 icon:    "trash",
-                title:   "Delete todo",
+                title:   fb.t("fb.todos.delete", "Delete todo"),
                 onClick: () => this.deleteSelected()
             }
         ]);
@@ -577,7 +579,7 @@ class FbTodosView extends HTMLElement {
             console.error("[fb-todos-view] reorder failed:", err);
             todo.position = before;
             this.renderList();
-            window.sac?.toast?.("Couldn't save the new order.", { kind: "error" });
+            window.sac?.toast?.(fb.t("fb.todos.order-failed", "Couldn't save the new order."), { kind: "error" });
         }
     }
 
@@ -604,7 +606,7 @@ class FbTodosView extends HTMLElement {
 
         const list = this.querySelector("#todo-list");
         if (filtered.length === 0) {
-            list.innerHTML = `<div class="tv-empty-list">No todos. Click + to create one.</div>`;
+            list.innerHTML = `<div class="tv-empty-list">${fb.t("fb.todos.empty-list", "No todos. Click + to create one.")}</div>`;
             return;
         }
 
@@ -624,9 +626,9 @@ class FbTodosView extends HTMLElement {
             return `
                 <div class="${rowClasses}" data-id="${t.id}" tabindex="0">
                     <button class="tv-check ${isDone ? "checked" : ""}" data-action="check"
-                            title="${isDone ? "Mark as not done" : "Mark as done"}"
-                            aria-label="${isDone ? "Mark as not done" : "Mark as done"}">${checkSvg}</button>
-                    <div class="tv-item-title">${escapeHtml(t.title || "Untitled")}</div>
+                            title="${isDone ? fb.t("fb.todos.mark-undone", "Mark as not done") : fb.t("fb.todos.mark-done", "Mark as done")}"
+                            aria-label="${isDone ? fb.t("fb.todos.mark-undone", "Mark as not done") : fb.t("fb.todos.mark-done", "Mark as done")}">${checkSvg}</button>
+                    <div class="tv-item-title">${escapeHtml(t.title || fb.t("fb.todos.untitled", "Untitled"))}</div>
                     ${dueInfo.text ? `
                         <div class="tv-item-meta">
                             <span class="tv-item-due ${dueInfo.urgency}">
@@ -635,7 +637,7 @@ class FbTodosView extends HTMLElement {
                         </div>
                     ` : ""}
                     <div class="tv-item-actions">
-                        <button class="icon-btn hover-reveal danger tv-item-action delete" data-action="delete" title="Delete" aria-label="Delete"><sac-icon name="trash"></sac-icon></button>
+                        <button class="icon-btn hover-reveal danger tv-item-action delete" data-action="delete" title="${fb.t("fb.common.delete", "Delete")}" aria-label="${fb.t("fb.common.delete", "Delete")}"><sac-icon name="trash"></sac-icon></button>
                     </div>
                 </div>
             `;
@@ -683,12 +685,14 @@ class FbTodosView extends HTMLElement {
             const sameYear = due.getFullYear() === now.getFullYear();
             text = sameYear ? fb.format.dayMonth(due) : fb.format.date(due);
         } else if (sameDay) {
-            text = "Today · " + fb.format.time(due);
+            text = fb.t("fb.todos.today-at", "Today · {time}", { time: fb.format.time(due) });
         } else if (isTomorrow) {
-            text = "Tomorrow";
+            text = fb.t("fb.common.tomorrow", "Tomorrow");
         } else if (diff < 0) {
             const days = Math.ceil(-diff / msPerDay);
-            text = `${days} day${days === 1 ? "" : "s"} overdue`;
+            text = days === 1
+                ? fb.t("fb.todos.overdue-1", "1 day overdue")
+                : fb.t("fb.todos.overdue", "{n} days overdue", { n: days });
         } else if (diff < 7 * msPerDay) {
             text = fb.format.weekday(due);
         } else {
@@ -776,7 +780,7 @@ class FbTodosView extends HTMLElement {
         const row = this.querySelector(`.tv-item[data-id="${todo.id}"]`);
         if (!row) return;
         const titleEl = row.querySelector(".tv-item-title");
-        if (titleEl) titleEl.textContent = todo.title || "Untitled";
+        if (titleEl) titleEl.textContent = todo.title || fb.t("fb.todos.untitled", "Untitled");
         // Due date row: rebuild the meta section if presence changed, else
         // just update the text + urgency class.
         const dueInfo = this.describeDue(todo.dueAt, !!todo.completedAt);
@@ -855,12 +859,12 @@ class FbTodosView extends HTMLElement {
         if (!todo) return;
 
         const buttons = [
-            { action: "cancel", label: "Cancel", kind: "default" },
-            { action: "delete", label: "Delete", kind: "destructive", armAfterMs: 2000 },
+            { action: "cancel", label: fb.t("fb.common.cancel", "Cancel"), kind: "default" },
+            { action: "delete", label: fb.t("fb.common.delete", "Delete"), kind: "destructive", armAfterMs: 2000 },
         ];
         const result = await sac.dialog.confirm({
-            title:   "Delete this todo?",
-            message: "This todo will be permanently deleted.",
+            title:   fb.t("fb.todos.delete-title", "Delete this todo?"),
+            message: fb.t("fb.todos.delete-msg", "This todo will be permanently deleted."),
             buttons,
         });
         if (result !== "delete") return;

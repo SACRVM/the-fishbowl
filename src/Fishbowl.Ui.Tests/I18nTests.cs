@@ -103,6 +103,53 @@ public class I18nTests
             await context.CloseAsync();
         }
     }
+
+    // Phase 2: Notes, Todos (Aufgaben), Calendar and Files speak German —
+    // a few visible strings per view, plus the month and weekday names.
+    [Fact]
+    public async Task Language_German_MainApps_Test()
+    {
+        var (context, page, errors) = await OpenAsync();
+        try
+        {
+            var set = await page.APIRequest.PatchAsync(_fixture.BaseUrl + "/api/v1/me", new APIRequestContextOptions
+            {
+                DataObject = new Dictionary<string, object?> { ["language"] = "de" },
+            });
+            Assert.True(set.Ok, $"PATCH /me: {set.Status}");
+
+            await page.GotoAsync(_fixture.BaseUrl + "/#/notes");
+            await Assertions.Expect(page.Locator("fb-notes-view #list-title")).ToHaveTextAsync("Alle Notizen", new() { Timeout = 5000 });
+            await Assertions.Expect(page.Locator("fb-notes-view #search-input")).ToHaveAttributeAsync("placeholder", "Alle Notizen durchsuchen");
+            await Assertions.Expect(page.Locator("fb-notes-view #editor-empty h3")).ToHaveTextAsync("Keine Notiz offen");
+
+            await page.GotoAsync(_fixture.BaseUrl + "/#/todos");
+            await Assertions.Expect(page.Locator("fb-todos-view #list-title")).ToHaveTextAsync("Offene Aufgaben", new() { Timeout = 5000 });
+            await Assertions.Expect(page.Locator("fb-todos-view #empty-new-btn")).ToContainTextAsync("Neue Aufgabe");
+
+            await page.GotoAsync(_fixture.BaseUrl + "/#/calendar");
+            await Assertions.Expect(page.Locator("fb-calendar-view .cv-list-title")).ToHaveTextAsync("Agenda", new() { Timeout = 5000 });
+            await Assertions.Expect(page.Locator("fb-calendar-view #cv-new-btn")).ToHaveAttributeAsync("title", "Neuer Termin");
+            // Month and weekday names follow the language (the date format doesn't).
+            await Assertions.Expect(page.Locator("fb-calendar-view .cv-weekday").First).ToHaveTextAsync("Mo");
+            var german = new System.Globalization.CultureInfo("de-DE").DateTimeFormat.GetMonthName(DateTime.Now.Month);
+            await Assertions.Expect(page.Locator("fb-calendar-view #cv-month-title")).ToContainTextAsync(german);
+
+            await page.GotoAsync(_fixture.BaseUrl + "/#/files");
+            await Assertions.Expect(page.Locator("fb-files-view .fv-right-tabs sac-tab[name='props']")).ToHaveTextAsync("Eigenschaften", new() { Timeout = 5000 });
+            await Assertions.Expect(page.Locator("fb-files-view .fv-ws-btn span").First).ToHaveTextAsync("Persönlich");
+            await Assertions.Expect(page.Locator("fb-files-view .fv-status").First).ToContainTextAsync("Datei");
+            Assert.Empty(errors);
+        }
+        finally
+        {
+            await page.APIRequest.PatchAsync(_fixture.BaseUrl + "/api/v1/me", new APIRequestContextOptions
+            {
+                DataObject = new Dictionary<string, object?> { ["language"] = null },
+            });
+            await context.CloseAsync();
+        }
+    }
 }
 
 // Every fb.t / data-t key the translated files use has a German entry — a
@@ -120,7 +167,49 @@ public class I18nKeyTableTests
         "js/lib/accounts.js",
         "js/views/fb-hub-view.js",
         "js/views/fb-messages-view.js",
+        // Phase 2: the main apps (German in js/i18n/de-apps.js).
+        "js/views/fb-notes-view.js",
+        "js/views/fb-todos-view.js",
+        "js/views/fb-calendar-view.js",
+        "js/views/fb-files-view.js",
+        "js/lib/tag-manager.js",
+        // Phase 3: settings, admin, vault (German in js/i18n/de-settings.js).
+        "js/views/fb-spaces-settings-view.js",
+        "js/views/fb-keys-settings-view.js",
+        "js/views/fb-secrets-settings-view.js",
+        "js/views/fb-data-settings-view.js",
+        "js/views/fb-apps-settings-view.js",
+        "js/views/fb-users-admin-view.js",
+        "js/views/fb-system-settings-view.js",
+        "js/views/fb-system-view.js",
+        "js/lib/vault.js",
     };
+
+    // Phase 3's run-time keys: every server error code fb.errors knows, the
+    // System page's counts, and each editable config key's name.
+    [Fact]
+    public void ErrorCodesCountsAndSettings_HaveGermanEntries()
+    {
+        var root = Resources();
+        var de = string.Join("\n", Directory.GetFiles(Path.Combine(root, "js", "i18n"), "de*.js").Select(File.ReadAllText));
+        var table = Regex.Matches(de, "^\\s*\"([^\"]+)\"\\s*:", RegexOptions.Multiline).Select(m => m.Groups[1].Value).ToHashSet();
+
+        var errors = File.ReadAllText(Path.Combine(root, "js", "lib", "errors.js"));
+        var codes = Regex.Matches(errors, "^\\s*\"([\\w-]+)\":\\s*\"", RegexOptions.Multiline).Select(m => m.Groups[1].Value).ToList();
+        Assert.Contains("last-admin", codes);
+        var need = codes.Select(c => $"fb.errors.{c}").ToList();
+        foreach (var n in new[] { "account", "space", "archive", "day" })
+        {
+            need.Add($"fb.admin.count-{n}-1");
+            need.Add($"fb.admin.count-{n}-n");
+        }
+        var view = File.ReadAllText(Path.Combine(root, "js", "views", "fb-system-settings-view.js"));
+        var labels = Regex.Matches(view, "^\\s*\"([A-Za-z]+:[A-Za-z]+)\":\\s*\"", RegexOptions.Multiline).Select(m => m.Groups[1].Value).Distinct();
+        need.AddRange(labels.Select(k => $"fb.admin.cfg.{k}"));
+
+        var missing = need.Where(k => !table.Contains(k)).ToList();
+        Assert.True(missing.Count == 0, "No German entry for: " + string.Join(", ", missing));
+    }
 
     private static string Resources()
     {
@@ -135,14 +224,22 @@ public class I18nKeyTableTests
     public void EveryUsedKey_HasAGermanEntry()
     {
         var root = Resources();
-        var de = File.ReadAllText(Path.Combine(root, "js", "i18n", "de.js"));
+        // Every German table: de.js, plus one per area (de-apps.js…).
+        var de = string.Join("\n", Directory.GetFiles(Path.Combine(root, "js", "i18n"), "de*.js").Select(File.ReadAllText));
         var table = Regex.Matches(de, "^\\s*\"([^\"]+)\"\\s*:", RegexOptions.Multiline).Select(m => m.Groups[1].Value).ToHashSet();
 
         var used = new SortedSet<string>();
         foreach (var rel in Translated)
         {
             var text = File.ReadAllText(Path.Combine(root, rel));
-            foreach (Match m in Regex.Matches(text, "fb\\.t\\(\"(fb\\.[^\"]+)\"")) used.Add(m.Groups[1].Value);
+            // fb.t("key", …) and a view's local alias t("key", …).
+            foreach (Match m in Regex.Matches(text, "\\bt\\(\\s*\"(fb\\.[^\"]+)\"")) used.Add(m.Groups[1].Value);
+            // count(n, one, many, "key") uses "key-1" and "key".
+            foreach (Match m in Regex.Matches(text, "count\\([^;]*?\"(fb\\.[\\w.-]+)\"\\)"))
+            {
+                used.Add(m.Groups[1].Value);
+                used.Add(m.Groups[1].Value + "-1");
+            }
             foreach (Match m in Regex.Matches(text, "data-t(?:-[a-z]+)?=\"(fb\\.[^\"$]+)\"")) used.Add(m.Groups[1].Value);
         }
         // Keys built at run time: the built-in apps, Go entries, routes.

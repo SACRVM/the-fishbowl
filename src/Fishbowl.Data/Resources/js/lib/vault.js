@@ -64,7 +64,7 @@
 
     if (!window.crypto?.subtle) {
         console.warn("fb.vault: WebCrypto unavailable; secrets disabled.");
-        const unavailable = () => Promise.reject(new VaultError("unavailable", "Secrets need a secure (HTTPS) connection."));
+        const unavailable = () => Promise.reject(new VaultError("unavailable", fb.t("fb.vault.need-https", "Secrets need a secure (HTTPS) connection.")));
         fb.vault = { isUnlocked: () => false, ensureUnlocked: unavailable, lock() {},
                      status: async () => ({ available: false, initialized: false, unlocked: false }),
                      encryptBlock: unavailable, decryptBlock: unavailable, VaultError };
@@ -152,14 +152,14 @@
     async function wordlist() {
         if (_words) return _words;
         const res = await fetch(WORDLIST_URL, { cache: "no-cache" });
-        if (!res.ok) throw new VaultError("unavailable", "The recovery word list could not be loaded.");
+        if (!res.ok) throw new VaultError("unavailable", fb.t("fb.vault.words-load", "The recovery word list could not be loaded."));
         // Normalise line endings before hashing: the pinned hash is of the
         // LF file, and a CRLF checkout must not lock anyone out.
         const text = (await res.text()).replace(/\r\n/g, "\n");
         if (hex(await crypto.subtle.digest("SHA-256", enc.encode(text))) !== WORDLIST_SHA256)
-            throw new VaultError("unavailable", "The recovery word list failed its integrity check.");
+            throw new VaultError("unavailable", fb.t("fb.vault.words-integrity", "The recovery word list failed its integrity check."));
         const words = text.split("\n").map(w => w.trim()).filter(Boolean);
-        if (words.length !== 2048) throw new VaultError("unavailable", "The recovery word list is malformed.");
+        if (words.length !== 2048) throw new VaultError("unavailable", fb.t("fb.vault.words-malformed", "The recovery word list is malformed."));
         return (_words = words);
     }
 
@@ -177,17 +177,17 @@
     async function wordsToEntropy(input) {
         const words = await wordlist();
         const given = String(input).toLowerCase().split(/[^a-z]+/).filter(Boolean);
-        if (given.length !== RECOVERY_WORDS) throw new VaultError("input", `A recovery key has ${RECOVERY_WORDS} words — this has ${given.length}.`);
+        if (given.length !== RECOVERY_WORDS) throw new VaultError("input", fb.t("fb.vault.words-count", "A recovery key has {n} words — this has {given}.", { n: RECOVERY_WORDS, given: given.length }));
         const bits = given.map((w, i) => {
             const idx = words.indexOf(w);
-            if (idx < 0) throw new VaultError("input", `Word ${i + 1} ("${w}") is not a recovery word.`);
+            if (idx < 0) throw new VaultError("input", fb.t("fb.vault.word-unknown", "Word {n} (\"{word}\") is not a recovery word.", { n: i + 1, word: w }));
             return idx.toString(2).padStart(11, "0");
         }).join("");
         const bytes = new Uint8Array(33);
         for (let i = 0; i < 33; i++) bytes[i] = parseInt(bits.slice(i * 8, i * 8 + 8), 2);
         const entropy = bytes.slice(0, 32);
         const check = new Uint8Array(await crypto.subtle.digest("SHA-256", entropy))[0];
-        if (check !== bytes[32]) throw new VaultError("input", "These words don't form a valid recovery key — check for a typo.");
+        if (check !== bytes[32]) throw new VaultError("input", fb.t("fb.vault.words-invalid", "These words don't form a valid recovery key — check for a typo."));
         return entropy;
     }
 
@@ -279,9 +279,9 @@
 
     function passkeyError(e) {
         if (e instanceof VaultError) return e;
-        if (e?.name === "NotAllowedError") return new VaultError("input", "The passkey prompt was cancelled or timed out.");
-        if (e?.name === "InvalidStateError") return new VaultError("input", "This device already has a passkey for your secrets.");
-        return new VaultError("input", "The passkey didn't work here — use your passphrase instead.");
+        if (e?.name === "NotAllowedError") return new VaultError("input", fb.t("fb.vault.passkey-cancelled", "The passkey prompt was cancelled or timed out."));
+        if (e?.name === "InvalidStateError") return new VaultError("input", fb.t("fb.vault.passkey-exists", "This device already has a passkey for your secrets."));
+        return new VaultError("input", fb.t("fb.vault.passkey-failed", "The passkey didn't work here — use your passphrase instead."));
     }
 
     // Registers a new passkey and returns its slot parts and PRF output.
@@ -306,7 +306,7 @@
         } catch (e) { throw passkeyError(e); }
         const ext = cred.getClientExtensionResults?.().prf;
         if (!ext?.enabled && !ext?.results?.first)
-            throw new VaultError("input", "This passkey can't unlock secrets (no PRF support on this device).");
+            throw new VaultError("input", fb.t("fb.vault.passkey-no-prf", "This passkey can't unlock secrets (no PRF support on this device)."));
         const credentialId = toB64Url(new Uint8Array(cred.rawId));
         // Some authenticators return the PRF output at creation, most only on
         // the first assertion — then ask the new passkey once.
@@ -330,7 +330,7 @@
             } });
         } catch (e) { throw passkeyError(e); }
         const output = cred.getClientExtensionResults?.().prf?.results?.first;
-        if (!output) throw new VaultError("input", "This passkey can't unlock secrets (no PRF output).");
+        if (!output) throw new VaultError("input", fb.t("fb.vault.passkey-no-output", "This passkey can't unlock secrets (no PRF output)."));
         return { credentialId: toB64Url(new Uint8Array(cred.rawId)), output };
     }
 
@@ -338,12 +338,12 @@
         const list = passkeySlots.map(s => ({ credentialId: s.credentialId, salt: fromB64(JSON.parse(s.kdf).salt), slot: s }));
         const { credentialId, output } = await assertPasskey(list);
         const slot = passkeySlots.find(s => s.credentialId === credentialId);
-        if (!slot) throw new VaultError("input", "That passkey isn't one of your unlock methods.");
+        if (!slot) throw new VaultError("input", fb.t("fb.vault.passkey-unknown", "That passkey isn't one of your unlock methods."));
         try {
             const vk = await unwrap(slot, await passkeyKek(output, slot.kdf), extractable);
             markUsed(slot.id);
             return vk;
-        } catch { throw new VaultError("input", "This passkey doesn't open your secrets."); }
+        } catch { throw new VaultError("input", fb.t("fb.vault.passkey-wrong", "This passkey doesn't open your secrets.")); }
     }
 
     // ───── server (through fb.api.vault) ─────
@@ -354,7 +354,9 @@
         catch (e) {
             let body = null;
             try { body = JSON.parse(e?.body || "null"); } catch { /* not JSON */ }
-            throw new VaultError(body?.error || "server", body?.reason || e?.message || "Vault request failed.");
+            throw new VaultError(body?.error || "server", body?.error
+                ? fb.errors.text(e, body?.reason || fb.t("fb.vault.request-failed", "Vault request failed."))
+                : body?.reason || e?.message || fb.t("fb.vault.request-failed", "Vault request failed."));
         }
     }
     const getVault   = () => call(() => fb.api.vault.get());
@@ -367,7 +369,7 @@
     let _inFlight = null;
 
     async function ensureUnlocked({ setup = false } = {}) {
-        if (inSpace()) throw new VaultError("space", "Secrets are personal for now — they can't be used in a space.");
+        if (inSpace()) throw new VaultError("space", fb.t("fb.vault.in-space", "Secrets are personal for now — they can't be used in a space."));
         if (isUnlocked()) { touch(); return; }
         if (_inFlight) return _inFlight;
         _inFlight = (async () => {
@@ -378,7 +380,7 @@
             // no vault (ciphertext left over from a removed vault) must not
             // pop "Set up secrets" — there is nothing a new vault could open.
             else if (setup) await setupFlow();
-            else throw new VaultError("locked", "There is no vault to unlock.");
+            else throw new VaultError("locked", fb.t("fb.vault.no-vault", "There is no vault to unlock."));
             touch();
             announce();
         })();
@@ -390,7 +392,7 @@
     // passphrase and the recovery key are always there as the other ways in.
     // Resolves with the vault key (extractable only when asked, for slot
     // management); rejects with VaultError("cancelled").
-    async function unlockFlow(slots, { extractable = false, title = "Unlock secrets", intro } = {}) {
+    async function unlockFlow(slots, { extractable = false, title = fb.t("fb.vault.unlock-title", "Unlock secrets"), intro } = {}) {
         const passSlots = slots.filter(s => s.kind === "passphrase");
         const recSlots  = slots.filter(s => s.kind === "recovery");
         const keySlots  = slots.filter(s => s.kind === "passkey");
@@ -402,15 +404,15 @@
                 body.innerHTML = `
                     ${intro ? `<p class="fb-vault-intro"></p>` : ""}
                     <div class="fb-vault-passkey" ${canPasskey ? "" : "hidden"}>
-                        <button type="button" class="btn primary fb-vault-passkey-btn"><sac-icon name="key"></sac-icon> Unlock with a passkey</button>
-                        <p class="fb-vault-or">or</p>
+                        <button type="button" class="btn primary fb-vault-passkey-btn"><sac-icon name="key"></sac-icon> ${fb.t("fb.vault.unlock-passkey", "Unlock with a passkey")}</button>
+                        <p class="fb-vault-or">${fb.t("fb.vault.or", "or")}</p>
                     </div>
-                    <label class="fb-vault-field"><span>Passphrase</span>
+                    <label class="fb-vault-field"><span>${fb.t("fb.vault.passphrase", "Passphrase")}</span>
                         <input type="password" name="pass" autocomplete="current-password"></label>
-                    <label class="fb-vault-field" hidden><span>Recovery key — the 24 words</span>
+                    <label class="fb-vault-field" hidden><span>${fb.t("fb.vault.recovery-words", "Recovery key — the 24 words")}</span>
                         <textarea name="words" rows="4" autocomplete="off" autocapitalize="off" spellcheck="false"></textarea></label>
                     <p class="fb-vault-error" role="alert" hidden></p>
-                    <button type="button" class="fb-vault-link">Use the recovery key instead</button>`;
+                    <button type="button" class="fb-vault-link">${fb.t("fb.vault.use-recovery", "Use the recovery key instead")}</button>`;
                 if (intro) body.querySelector(".fb-vault-intro").textContent = intro;
                 const [passField, wordsField] = body.querySelectorAll(".fb-vault-field");
                 const toggle = body.querySelector(".fb-vault-link");
@@ -420,7 +422,7 @@
                     mode = mode === "recovery" ? "passphrase" : "recovery";
                     passField.hidden = mode === "recovery";
                     wordsField.hidden = mode !== "recovery";
-                    toggle.textContent = mode === "recovery" ? "Use the passphrase instead" : "Use the recovery key instead";
+                    toggle.textContent = mode === "recovery" ? fb.t("fb.vault.use-passphrase", "Use the passphrase instead") : fb.t("fb.vault.use-recovery", "Use the recovery key instead");
                     (mode === "recovery" ? wordsField : passField).querySelector("input, textarea").focus();
                 });
                 // The passkey button runs the same primary action, flagged;
@@ -436,8 +438,8 @@
                 });
                 return {
                     buttons: [
-                        { action: "cancel", label: "Cancel" },
-                        { action: "unlock", label: "Unlock", kind: "primary" },
+                        { action: "cancel", label: fb.t("fb.vault.cancel", "Cancel") },
+                        { action: "unlock", label: fb.t("fb.vault.unlock", "Unlock"), kind: "primary" },
                     ],
                     async onAction() {
                         if (viaPasskey) { viaPasskey = false; return unlockWithPasskey(keySlots, extractable); }
@@ -447,15 +449,15 @@
                                 try { const vk = await unwrap(s, await recoveryKek(entropy, s.kdf), extractable); markUsed(s.id); return vk; }
                                 catch { /* next slot */ }
                             }
-                            throw new VaultError("input", "This recovery key doesn't open your secrets.");
+                            throw new VaultError("input", fb.t("fb.vault.recovery-wrong", "This recovery key doesn't open your secrets."));
                         }
                         const pass = body.querySelector("input").value;
-                        if (!pass) throw new VaultError("input", "Enter your passphrase.");
+                        if (!pass) throw new VaultError("input", fb.t("fb.vault.enter-passphrase", "Enter your passphrase."));
                         for (const s of passSlots) {
                             try { const vk = await unwrap(s, await passphraseKek(pass, s.kdf), extractable); markUsed(s.id); return vk; }
                             catch { /* next slot */ }
                         }
-                        throw new VaultError("input", "Wrong passphrase.");
+                        throw new VaultError("input", fb.t("fb.vault.wrong-passphrase", "Wrong passphrase."));
                     },
                 };
             },
@@ -465,8 +467,8 @@
     async function setupFlow() {
         // Step 1 — passphrase.
         const passphrase = await choosePassphrase({
-            title: "Set up secrets",
-            intro: "Secret blocks are encrypted in this browser before they are saved. Choose a passphrase to unlock them — on any device, in any browser.",
+            title: fb.t("fb.vault.setup-title", "Set up secrets"),
+            intro: fb.t("fb.vault.setup-intro", "Secret blocks are encrypted in this browser before they are saved. Choose a passphrase to unlock them — on any device, in any browser."),
         });
 
         // Step 2 — the recovery key, confirmed by two of its words.
@@ -494,8 +496,8 @@
         try {
             await addSlot({ kind: "recovery", label: "Recovery key", kdf: recKdf, wrappedKey: toB64(recWrapped) });
         } catch (e) {
-            window.sac?.toast?.("Your passphrase works, but the recovery key could not be saved. Set up a new one under Secrets.",
-                { kind: "warn", duration: 0, title: "Recovery key not saved" });
+            window.sac?.toast?.(fb.t("fb.vault.recovery-not-saved", "Your passphrase works, but the recovery key could not be saved. Set up a new one under Secrets."),
+                { kind: "warn", duration: 0, title: fb.t("fb.vault.recovery-not-saved-title", "Recovery key not saved") });
         }
         _initialized = true;
 
@@ -503,14 +505,14 @@
         if (await passkeySupported()) {
             try {
                 const add = await confirmStep({
-                    title: "Unlock with a passkey too?",
-                    text: "Use your fingerprint, face or device PIN (Windows Hello, Touch ID, your phone) instead of typing the passphrase. The passphrase and recovery key keep working.",
-                    yes: "Add a passkey",
-                    no: "Not now",
+                    title: fb.t("fb.vault.passkey-offer-title", "Unlock with a passkey too?"),
+                    text: fb.t("fb.vault.passkey-offer", "Use your fingerprint, face or device PIN (Windows Hello, Touch ID, your phone) instead of typing the passphrase. The passphrase and recovery key keep working."),
+                    yes: fb.t("fb.vault.add-passkey", "Add a passkey"),
+                    no: fb.t("fb.vault.not-now", "Not now"),
                 });
                 if (add) await addPasskeyWith(vk);
             } catch (e) {
-                if (e?.code !== "cancelled") window.sac?.toast?.(e?.message || "The passkey could not be added.", { kind: "warn" });
+                if (e?.code !== "cancelled") window.sac?.toast?.(e?.message || fb.t("fb.vault.passkey-not-added", "The passkey could not be added."), { kind: "warn" });
             }
         }
 
@@ -524,13 +526,12 @@
             build(body, dlg) {
                 body.innerHTML = `
                     <p class="fb-vault-intro"></p>
-                    <p class="fb-vault-hint">Long beats complicated: a few random words are easy to
-                       remember and hard to guess.</p>
-                    <label class="fb-vault-field"><span>Passphrase</span>
+                    <p class="fb-vault-hint">${fb.t("fb.vault.passphrase-hint", "Long beats complicated: a few random words are easy to remember and hard to guess.")}</p>
+                    <label class="fb-vault-field"><span>${fb.t("fb.vault.passphrase", "Passphrase")}</span>
                         <input type="password" name="pass" autocomplete="new-password"></label>
-                    <label class="fb-vault-field"><span>Repeat it</span>
+                    <label class="fb-vault-field"><span>${fb.t("fb.vault.repeat", "Repeat it")}</span>
                         <input type="password" name="confirm" autocomplete="new-password"></label>
-                    <button type="button" class="fb-vault-link">Suggest one</button>
+                    <button type="button" class="fb-vault-link">${fb.t("fb.vault.suggest", "Suggest one")}</button>
                     <p class="fb-vault-suggestion" hidden></p>
                     <p class="fb-vault-error" role="alert" hidden></p>`;
                 body.querySelector(".fb-vault-intro").textContent = intro;
@@ -547,12 +548,12 @@
                 });
                 return {
                     buttons: [
-                        { action: "cancel", label: "Cancel" },
-                        { action: "next", label: "Next", kind: "primary" },
+                        { action: "cancel", label: fb.t("fb.vault.cancel", "Cancel") },
+                        { action: "next", label: fb.t("fb.vault.next", "Next"), kind: "primary" },
                     ],
                     async onAction() {
-                        if (pass.value.length < MIN_PASSPHRASE) throw new VaultError("input", `Use at least ${MIN_PASSPHRASE} characters.`);
-                        if (pass.value !== confirm.value) throw new VaultError("input", "The two entries don't match.");
+                        if (pass.value.length < MIN_PASSPHRASE) throw new VaultError("input", fb.t("fb.vault.min-length", "Use at least {n} characters.", { n: MIN_PASSPHRASE }));
+                        if (pass.value !== confirm.value) throw new VaultError("input", fb.t("fb.vault.mismatch", "The two entries don't match."));
                         return pass.value;
                     },
                 };
@@ -565,19 +566,17 @@
     function showRecoveryKey(words) {
         const a = Math.floor(Math.random() * 12), b = 12 + Math.floor(Math.random() * 12);
         return dialog({
-            title: "Your recovery key",
+            title: fb.t("fb.vault.recovery-title", "Your recovery key"),
             width: "560px",
             build(body) {
                 body.innerHTML = `
-                    <p>If you forget the passphrase, these 24 words are the only way back to your
-                       secrets. <strong>Write them down and keep them somewhere safe, outside
-                       Fishbowl.</strong> They are shown once.</p>
+                    <p>${fb.t("fb.vault.recovery-intro", "If you forget the passphrase, these 24 words are the only way back to your secrets. <strong>Write them down and keep them somewhere safe, outside Fishbowl.</strong> They are shown once.")}</p>
                     <ol class="fb-vault-words"></ol>
-                    <button type="button" class="fb-vault-link fb-vault-print"><sac-icon name="document"></sac-icon> Print an emergency kit</button>
-                    <p>To confirm, enter word <b>${a + 1}</b> and word <b>${b + 1}</b>:</p>
+                    <button type="button" class="fb-vault-link fb-vault-print"><sac-icon name="document"></sac-icon> ${fb.t("fb.vault.print-kit", "Print an emergency kit")}</button>
+                    <p>${fb.t("fb.vault.confirm-words", "To confirm, enter word <b>{a}</b> and word <b>{b}</b>:", { a: a + 1, b: b + 1 })}</p>
                     <div class="fb-vault-confirm-row">
-                        <label class="fb-vault-field"><span>Word ${a + 1}</span><input name="a" autocomplete="off" autocapitalize="off" spellcheck="false"></label>
-                        <label class="fb-vault-field"><span>Word ${b + 1}</span><input name="b" autocomplete="off" autocapitalize="off" spellcheck="false"></label>
+                        <label class="fb-vault-field"><span>${fb.t("fb.vault.word-n", "Word {n}", { n: a + 1 })}</span><input name="a" autocomplete="off" autocapitalize="off" spellcheck="false"></label>
+                        <label class="fb-vault-field"><span>${fb.t("fb.vault.word-n", "Word {n}", { n: b + 1 })}</span><input name="b" autocomplete="off" autocapitalize="off" spellcheck="false"></label>
                     </div>
                     <p class="fb-vault-error" role="alert" hidden></p>`;
                 const list = body.querySelector(".fb-vault-words");
@@ -585,13 +584,13 @@
                 body.querySelector(".fb-vault-print").addEventListener("click", () => printEmergencyKit(words));
                 return {
                     buttons: [
-                        { action: "cancel", label: "Cancel" },
-                        { action: "done", label: "I wrote them down", kind: "primary" },
+                        { action: "cancel", label: fb.t("fb.vault.cancel", "Cancel") },
+                        { action: "done", label: fb.t("fb.vault.wrote-down", "I wrote them down"), kind: "primary" },
                     ],
                     async onAction() {
                         const ga = body.querySelector('[name="a"]').value.trim().toLowerCase();
                         const gb = body.querySelector('[name="b"]').value.trim().toLowerCase();
-                        if (ga !== words[a] || gb !== words[b]) throw new VaultError("input", "Those words don't match — check what you wrote down.");
+                        if (ga !== words[a] || gb !== words[b]) throw new VaultError("input", fb.t("fb.vault.words-mismatch", "Those words don't match — check what you wrote down."));
                         return true;
                     },
                 };
@@ -611,7 +610,8 @@
         const esc = (s) => String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
         const today = window.fb?.format ? fb.format.date(new Date()) : new Date().toISOString().slice(0, 10);
         doc.open();
-        doc.write(`<!doctype html><html><head><meta charset="utf-8"><title>Fishbowl — emergency kit</title>
+        const K = (key, en, vars) => fb.t(key, en, vars);
+        doc.write(`<!doctype html><html lang="${esc(document.documentElement.lang || "en")}"><head><meta charset="utf-8"><title>${esc(K("fb.vault.kit-doc-title", "Fishbowl — emergency kit"))}</title>
             <style>
                 body { font: 12pt/1.5 system-ui, sans-serif; color: #000; margin: 2cm; }
                 h1 { font-size: 18pt; margin: 0 0 4pt; }
@@ -619,15 +619,12 @@
                 ol { columns: 3; column-gap: 1.2cm; padding-left: 1.4em; font: 13pt/1.9 ui-monospace, Consolas, monospace; }
                 .box { border: 1px solid #000; padding: 10pt 14pt; margin-top: 18pt; }
             </style></head><body>
-            <h1>Fishbowl secrets — emergency kit</h1>
-            <p class="meta">${esc(location.origin)} · created ${esc(today)}</p>
-            <p>These 24 words are your <strong>recovery key</strong>. With your Fishbowl login they unlock your
-               secrets if you forget your passphrase or lose your passkeys.</p>
+            <h1>${esc(K("fb.vault.kit-title", "Fishbowl secrets — emergency kit"))}</h1>
+            <p class="meta">${esc(K("fb.vault.kit-meta", "{origin} · created {date}", { origin: location.origin, date: today }))}</p>
+            <p>${fb.t("fb.vault.kit-intro", "These 24 words are your <strong>recovery key</strong>. With your Fishbowl login they unlock your secrets if you forget your passphrase or lose your passkeys.")}</p>
             <ol>${words.map(w => `<li>${esc(w)}</li>`).join("")}</ol>
             <div class="box">
-                <p><strong>Keep this page offline and private</strong> — in a drawer or a safe, not in a photo
-                   or a file. Fishbowl cannot recover or reset it. If you create a new recovery key,
-                   this page stops working: destroy it.</p>
+                <p>${fb.t("fb.vault.kit-keep", "<strong>Keep this page offline and private</strong> — in a drawer or a safe, not in a photo or a file. Fishbowl cannot recover or reset it. If you create a new recovery key, this page stops working: destroy it.")}</p>
             </div></body></html>`);
         doc.close();
         const done = () => setTimeout(() => frame.remove(), 1000);
@@ -680,7 +677,7 @@
                         err().hidden = false;
                     } else {
                         console.error("[fb.vault]", e);
-                        err().textContent = "Something went wrong — try again.";
+                        err().textContent = fb.t("fb.vault.went-wrong", "Something went wrong — try again.");
                         err().hidden = false;
                     }
                     return false;
@@ -692,7 +689,7 @@
                 setTimeout(() => {
                     dlg.remove();
                     if (done) resolve(result);
-                    else reject(new VaultError("cancelled", "Cancelled."));
+                    else reject(new VaultError("cancelled", fb.t("fb.vault.cancelled", "Cancelled.")));
                 }, 120);
             }, { once: true });
             document.body.appendChild(dlg);
@@ -709,10 +706,10 @@
     // for one management step. As a side effect the vault is unlocked for
     // the session too (non-extractable), since the user just proved access.
     async function authorize(reason) {
-        if (inSpace()) throw new VaultError("space", "Secrets are personal for now.");
+        if (inSpace()) throw new VaultError("space", fb.t("fb.vault.personal-only", "Secrets are personal for now."));
         const vault = await getVault();
-        if (!vault.initialized) throw new VaultError("locked", "There is no vault yet.");
-        const vk = await unlockFlow(vault.slots, { extractable: true, title: "Confirm it's you", intro: reason });
+        if (!vault.initialized) throw new VaultError("locked", fb.t("fb.vault.no-vault-yet", "There is no vault yet."));
+        const vk = await unlockFlow(vault.slots, { extractable: true, title: fb.t("fb.vault.confirm-title", "Confirm it's you"), intro: reason });
         if (!isUnlocked()) { _vk = await sessionCopy(vk); announce(); }
         touch();
         return { vk, slots: vault.slots };
@@ -730,21 +727,21 @@
     function guessDeviceLabel() {
         const ua = navigator.userAgent;
         const os = /Windows/.test(ua) ? "Windows" : /iPhone|iPad/.test(ua) ? "iPhone / iPad" : /Mac OS X/.test(ua) ? "Mac"
-                 : /Android/.test(ua) ? "Android" : /Linux/.test(ua) ? "Linux" : "This device";
+                 : /Android/.test(ua) ? "Android" : /Linux/.test(ua) ? "Linux" : fb.t("fb.vault.this-device", "This device");
         const browser = /Edg\//.test(ua) ? "Edge" : /Firefox\//.test(ua) ? "Firefox" : /Chrome\//.test(ua) ? "Chrome" : /Safari\//.test(ua) ? "Safari" : "";
         return browser ? `${os} · ${browser}` : os;
     }
 
     async function addPasskey() {
-        if (!(await passkeySupported())) throw new VaultError("unavailable", "This browser or device can't unlock with a passkey.");
-        const { vk, slots } = await authorize("To add a passkey, unlock once more.");
+        if (!(await passkeySupported())) throw new VaultError("unavailable", fb.t("fb.vault.passkey-unsupported", "This browser or device can't unlock with a passkey."));
+        const { vk, slots } = await authorize(fb.t("fb.vault.auth-passkey", "To add a passkey, unlock once more."));
         await addPasskeyWith(vk, slots);
         announce();
     }
 
     async function changePassphrase() {
-        const { vk, slots } = await authorize("To change the passphrase, unlock with your current one — or another way in.");
-        const passphrase = await choosePassphrase({ title: "New passphrase", intro: "Choose the new passphrase. The old one stops working." });
+        const { vk, slots } = await authorize(fb.t("fb.vault.auth-passphrase", "To change the passphrase, unlock with your current one — or another way in."));
+        const passphrase = await choosePassphrase({ title: fb.t("fb.vault.new-passphrase-title", "New passphrase"), intro: fb.t("fb.vault.new-passphrase-intro", "Choose the new passphrase. The old one stops working.") });
         const kdf = newPassKdf();
         const wrapped = toB64(await wrap(vk, await passphraseKek(passphrase, kdf), "passphrase", kdf));
         const current = slots.find(s => s.kind === "passphrase");
@@ -756,7 +753,7 @@
     }
 
     async function newRecoveryKey() {
-        const { vk, slots } = await authorize("To create a new recovery key, unlock once more.");
+        const { vk, slots } = await authorize(fb.t("fb.vault.auth-recovery", "To create a new recovery key, unlock once more."));
         const entropy = random(32);
         await showRecoveryKey(await entropyToWords(entropy));
         const kdf = newRecKdf();
@@ -778,7 +775,7 @@
         try { await deleteSlot(id); }
         catch (e) {
             if (e.code === "last-recoverable-slot")
-                throw new VaultError("input", "Keep at least a passphrase or a recovery key — a passkey alone can't be the only way in.");
+                throw new VaultError("input", fb.t("fb.errors.last-recoverable-slot", "Keep at least a passphrase or a recovery key — a passkey alone can't be the only way in."));
             throw e;
         }
         const left = (await getVault()).slots;

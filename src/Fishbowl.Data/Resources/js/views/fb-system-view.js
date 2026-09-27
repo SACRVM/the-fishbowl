@@ -26,9 +26,9 @@ class FbSystemView extends HTMLElement {
         this.classList.add("fb-page");
         this.innerHTML = `
             <header><div>
-                <h1>System</h1>
+                <h1>${fb.t("fb.admin.system-title", "System")}</h1>
                 <p class="subtitle">
-                    How this Fishbowl is doing. Sizes and times only — nobody's notes or files.
+                    ${fb.t("fb.admin.system-subtitle", "How this Fishbowl is doing. Sizes and times only — nobody's notes or files.")}
                 </p>
             </div></header>
             <div id="system-body"></div>
@@ -42,8 +42,8 @@ class FbSystemView extends HTMLElement {
         if (sac.scope.get().type === "scoped") {
             mount.innerHTML = `
                 <div class="card">
-                    <p>System is shown for the whole Fishbowl, from your personal workspace.</p>
-                    <div class="toolbar"><button type="button" class="btn" id="to-personal">Open in Personal</button></div>
+                    <p>${fb.t("fb.admin.system-personal-only", "System is shown for the whole Fishbowl, from your personal workspace.")}</p>
+                    <div class="toolbar"><button type="button" class="btn" id="to-personal">${fb.t("fb.admin.open-personal", "Open in Personal")}</button></div>
                 </div>`;
             mount.querySelector("#to-personal").addEventListener("click", () => sac.router.navigate("#/admin/system"));
             return;
@@ -54,46 +54,55 @@ class FbSystemView extends HTMLElement {
             s = await fb.api.admin.system();
         } catch (err) {
             console.warn("[fb-system-view] load failed:", err?.status);
-            mount.innerHTML = `<div class="card"><p class="muted">System information can't be loaded right now.</p></div>`;
+            mount.innerHTML = `<div class="card"><p class="muted">${fb.t("fb.admin.system-unavailable", "System information can't be loaded right now.")}</p></div>`;
             return;
         }
         if (!this.isConnected) return;
 
         const bytes = fb.accounts.formatBytes;
         const size = (n) => (n ? bytes(n) : "0 KB");
-        const count = (n, one, many) => `${n} ${n === 1 ? one : many}`;
-        const when = (iso, verb) => (iso ? `Last ${verb} ${fb.format.dateTime(iso)}` : `Not ${verb} yet since the last start`);
+        // "{n} account" / "{n} accounts" — a key per form, English inline.
+        const count = (n, key, one, many) => n === 1
+            ? fb.t(`fb.admin.count-${key}-1`, `{n} ${one}`, { n })
+            : fb.t(`fb.admin.count-${key}-n`, `{n} ${many}`, { n });
+        const when = (iso, what) => iso
+            ? (what === "checked"
+                ? fb.t("fb.admin.last-checked", "Last checked {when}", { when: fb.format.dateTime(iso) })
+                : fb.t("fb.admin.last-run", "Last run {when}", { when: fb.format.dateTime(iso) }))
+            : (what === "checked"
+                ? fb.t("fb.admin.not-checked", "Not checked yet since the last start")
+                : fb.t("fb.admin.not-run", "Not run yet since the last start"));
 
-        const running = section("Running");
+        const running = section(fb.t("fb.admin.running", "Running"));
         running.panel.append(
-            row("info", "Version", s.version, "version"),
-            row("search", "Search model", {
-                ready: "Ready — search ranks by meaning and by words",
-                downloading: "Not ready yet — search uses words only until the download finishes",
-                off: "Not installed on this host",
+            row("info", fb.t("fb.admin.version", "Version"), s.version, "version"),
+            row("search", fb.t("fb.admin.search-model", "Search model"), {
+                ready: fb.t("fb.admin.model-ready", "Ready — search ranks by meaning and by words"),
+                downloading: fb.t("fb.admin.model-downloading", "Not ready yet — search uses words only until the download finishes"),
+                off: fb.t("fb.admin.model-off", "Not installed on this host"),
             }[s.embedding?.status] || s.embedding?.status || "—", "embedding"),
-            row("clock", "Reminders", when(s.scheduler?.reminderTickAt, "checked"), "reminders"),
-            row("sync", "Daily maintenance", when(s.scheduler?.maintenanceAt, "run"), "maintenance"));
+            row("clock", fb.t("fb.admin.reminders", "Reminders"), when(s.scheduler?.reminderTickAt, "checked"), "reminders"),
+            row("sync", fb.t("fb.admin.maintenance", "Daily maintenance"), when(s.scheduler?.maintenanceAt, "run"), "maintenance"));
 
-        const data = section("Data");
+        const data = section(fb.t("fb.admin.data", "Data"));
         const d = s.data || {};
         data.panel.append(
-            row("user", "Personal workspaces", `${size(d.users?.bytes)} · ${count(d.users?.count ?? 0, "account", "accounts")}`, "users"),
-            row("users", "Spaces", `${size(d.spaces?.bytes)} · ${count(d.spaces?.count ?? 0, "space", "spaces")}`, "spaces"),
-            row("settings", "System database", size(d.systemBytes), "system"),
-            row("search", "Search model files", size(d.modelsBytes), "models"),
-            row("note", "Logs", size(d.logsBytes), "logs"));
+            row("user", fb.t("fb.admin.personal-workspaces", "Personal workspaces"), `${size(d.users?.bytes)} · ${count(d.users?.count ?? 0, "account", "account", "accounts")}`, "users"),
+            row("users", fb.t("fb.admin.spaces", "Spaces"), `${size(d.spaces?.bytes)} · ${count(d.spaces?.count ?? 0, "space", "space", "spaces")}`, "spaces"),
+            row("settings", fb.t("fb.admin.system-db", "System database"), size(d.systemBytes), "system"),
+            row("search", fb.t("fb.admin.model-files", "Search model files"), size(d.modelsBytes), "models"),
+            row("note", fb.t("fb.admin.logs", "Logs"), size(d.logsBytes), "logs"));
 
-        const archives = section("Archives");
+        const archives = section(fb.t("fb.admin.archives", "Archives"));
         const a = s.archives || {};
         archives.panel.append(
-            row("archive", "Deleted spaces", `${size(a.spaces?.bytes)} · ${count(a.spaces?.count ?? 0, "archive", "archives")}`, "archived-spaces"),
-            row("archive", "Deleted accounts", `${size(a.users?.bytes)} · ${count(a.users?.count ?? 0, "archive", "archives")}`, "archived-users"));
+            row("archive", fb.t("fb.admin.deleted-spaces", "Deleted spaces"), `${size(a.spaces?.bytes)} · ${count(a.spaces?.count ?? 0, "archive", "archive", "archives")}`, "archived-spaces"),
+            row("archive", fb.t("fb.admin.deleted-accounts", "Deleted accounts"), `${size(a.users?.bytes)} · ${count(a.users?.count ?? 0, "archive", "archive", "archives")}`, "archived-users"));
         const keep = document.createElement("p");
         keep.className = "muted";
         keep.textContent = a.retentionDays > 0
-            ? `Archives are kept ${count(a.retentionDays, "day", "days")}, then removed (Archive:RetentionDays in System settings).`
-            : "Archives are kept until someone deletes them (Archive:RetentionDays is 0).";
+            ? fb.t("fb.admin.archives-kept", "Archives are kept {days}, then removed (Archive:RetentionDays in System settings).", { days: count(a.retentionDays, "day", "day", "days") })
+            : fb.t("fb.admin.archives-forever", "Archives are kept until someone deletes them (Archive:RetentionDays is 0).");
         archives.panel.appendChild(keep);
 
         mount.replaceChildren(running.card, data.card, archives.card);

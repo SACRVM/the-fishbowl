@@ -55,7 +55,8 @@ class FbCalendarView extends HTMLElement {
 
     async connectedCallback() {
         // A format change remounts the view, so this follows the setting.
-        const longTime = fb.format.time(new Date(2000, 0, 1, 22, 0)).length > 5;
+        const longTime = fb.format.time(new Date(2000, 0, 1, 22, 0)).length > 5
+            || fb.t("fb.calendar.all-day-short", "all day").length > 7;   // "ganztägig"
         this.style.setProperty("--cv-time-w", longTime ? "66px" : "52px");
         this.render();
         await this.loadEvents();
@@ -478,17 +479,17 @@ class FbCalendarView extends HTMLElement {
 
             <sac-split class="cv-split" id="split" collapse show="start"
                        position="${this._splitPosition()}" min-start="260px" min-end="480px"
-                       back-label="Calendar" aria-label="Resize the agenda">
+                       back-label="${fb.t("fb.route.calendar", "Calendar")}" aria-label="${fb.t("fb.calendar.resize", "Resize the agenda")}">
                 <aside class="cv-list-pane" slot="start">
                     <div class="cv-month-nav">
-                        <button class="icon-btn" id="cv-prev" title="Previous month" aria-label="Previous month"><sac-icon name="chevron-left"></sac-icon></button>
+                        <button class="icon-btn" id="cv-prev" title="${fb.t("fb.calendar.prev", "Previous month")}" aria-label="${fb.t("fb.calendar.prev", "Previous month")}"><sac-icon name="chevron-left"></sac-icon></button>
                         <div class="cv-month-title" id="cv-month-title"></div>
-                        <button class="icon-btn" id="cv-next" title="Next month" aria-label="Next month"><sac-icon name="chevron-right"></sac-icon></button>
+                        <button class="icon-btn" id="cv-next" title="${fb.t("fb.calendar.next", "Next month")}" aria-label="${fb.t("fb.calendar.next", "Next month")}"><sac-icon name="chevron-right"></sac-icon></button>
                     </div>
                     <div class="cv-list-header">
-                        <span class="cv-list-title">Agenda</span>
-                        <button class="icon-btn" id="cv-today-btn" title="Jump to today" aria-label="Jump to today"><sac-icon name="clock"></sac-icon></button>
-                        <button class="icon-btn" id="cv-new-btn" title="New event" aria-label="New event"><sac-icon name="plus"></sac-icon></button>
+                        <span class="cv-list-title">${fb.t("fb.calendar.agenda", "Agenda")}</span>
+                        <button class="icon-btn" id="cv-today-btn" title="${fb.t("fb.calendar.today", "Jump to today")}" aria-label="${fb.t("fb.calendar.today", "Jump to today")}"><sac-icon name="clock"></sac-icon></button>
+                        <button class="icon-btn" id="cv-new-btn" title="${fb.t("fb.calendar.new", "New event")}" aria-label="${fb.t("fb.calendar.new", "New event")}"><sac-icon name="plus"></sac-icon></button>
                     </div>
                     <div class="cv-items" id="cv-agenda"></div>
                 </aside>
@@ -501,51 +502,51 @@ class FbCalendarView extends HTMLElement {
                     <div class="cv-editor-wrap" id="cv-editor-wrap" hidden>
                         <div class="cv-editor-body">
                             <button class="cv-back-btn" id="cv-back" type="button">
-                                <sac-icon name="chevron-left"></sac-icon> Back to calendar
+                                <sac-icon name="chevron-left"></sac-icon> ${fb.t("fb.calendar.back", "Back to calendar")}
                             </button>
-                            <input id="cv-title" class="cv-title-input" placeholder="What's happening?"/>
-                            <sac-toggle id="cv-allday" class="cv-allday-toggle" label="All day"></sac-toggle>
+                            <input id="cv-title" class="cv-title-input" placeholder="${fb.t("fb.calendar.title-placeholder", "What's happening?")}"/>
+                            <sac-toggle id="cv-allday" class="cv-allday-toggle" label="${fb.t("fb.calendar.all-day", "All day")}"></sac-toggle>
                             <div class="cv-field-row">
                                 <div class="cv-field">
-                                    <label for="cv-start">Starts</label>
+                                    <label for="cv-start">${fb.t("fb.calendar.starts", "Starts")}</label>
                                     <input id="cv-start" class="cv-date-input"/>
                                 </div>
                                 <div class="cv-field">
-                                    <label for="cv-end">Ends</label>
+                                    <label for="cv-end">${fb.t("fb.calendar.ends", "Ends")}</label>
                                     <input id="cv-end" class="cv-date-input"/>
                                 </div>
                                 <div class="cv-field">
-                                    <label for="cv-reminder">Reminder</label>
+                                    <label for="cv-reminder">${fb.t("fb.calendar.reminder", "Reminder")}</label>
                                     <span class="select cv-select-wrap"><select id="cv-reminder" class="cv-select">
-                                        <option value="">No reminder</option>
-                                        <option value="0">At start</option>
-                                        <option value="5">5 minutes before</option>
-                                        <option value="15">15 minutes before</option>
-                                        <option value="30">30 minutes before</option>
-                                        <option value="60">1 hour before</option>
-                                        <option value="120">2 hours before</option>
-                                        <option value="1440">1 day before</option>
+                                        <option value="">${fb.t("fb.calendar.rem-none", "No reminder")}</option>
+                                        <option value="0">${fb.t("fb.calendar.rem-start", "At start")}</option>
+                                        <option value="5">${fb.t("fb.calendar.rem-min", "{n} minutes before", { n: 5 })}</option>
+                                        <option value="15">${fb.t("fb.calendar.rem-min", "{n} minutes before", { n: 15 })}</option>
+                                        <option value="30">${fb.t("fb.calendar.rem-min", "{n} minutes before", { n: 30 })}</option>
+                                        <option value="60">${fb.t("fb.calendar.rem-hour", "1 hour before")}</option>
+                                        <option value="120">${fb.t("fb.calendar.rem-hours", "{n} hours before", { n: 2 })}</option>
+                                        <option value="1440">${fb.t("fb.calendar.rem-day", "1 day before")}</option>
                                     </select></span>
                                 </div>
                                 <div class="cv-field">
-                                    <label for="cv-repeat">Repeat</label>
+                                    <label for="cv-repeat">${fb.t("fb.calendar.repeat", "Repeat")}</label>
                                     <span class="select cv-select-wrap"><select id="cv-repeat" class="cv-select">
-                                        <option value="">Never</option>
-                                        <option value="FREQ=DAILY">Daily</option>
-                                        <option value="FREQ=WEEKLY">Weekly</option>
-                                        <option value="FREQ=WEEKLY;INTERVAL=2">Every 2 weeks</option>
-                                        <option value="FREQ=MONTHLY">Monthly</option>
-                                        <option value="FREQ=YEARLY">Yearly</option>
+                                        <option value="">${fb.t("fb.calendar.rep-never", "Never")}</option>
+                                        <option value="FREQ=DAILY">${fb.t("fb.calendar.rep-daily", "Daily")}</option>
+                                        <option value="FREQ=WEEKLY">${fb.t("fb.calendar.rep-weekly", "Weekly")}</option>
+                                        <option value="FREQ=WEEKLY;INTERVAL=2">${fb.t("fb.calendar.rep-2weeks", "Every 2 weeks")}</option>
+                                        <option value="FREQ=MONTHLY">${fb.t("fb.calendar.rep-monthly", "Monthly")}</option>
+                                        <option value="FREQ=YEARLY">${fb.t("fb.calendar.rep-yearly", "Yearly")}</option>
                                     </select></span>
                                 </div>
                             </div>
                             <div class="cv-field">
-                                <label for="cv-location">Location</label>
-                                <input id="cv-location" class="cv-text-input" placeholder="Where?"/>
+                                <label for="cv-location">${fb.t("fb.calendar.location", "Location")}</label>
+                                <input id="cv-location" class="cv-text-input" placeholder="${fb.t("fb.calendar.location-placeholder", "Where?")}"/>
                             </div>
                             <div class="cv-field">
-                                <label for="cv-desc">Notes</label>
-                                <textarea id="cv-desc" class="cv-desc-input" placeholder="Anything else worth remembering?"></textarea>
+                                <label for="cv-desc">${fb.t("fb.calendar.notes", "Notes")}</label>
+                                <textarea id="cv-desc" class="cv-desc-input" placeholder="${fb.t("fb.calendar.notes-placeholder", "Anything else worth remembering?")}"></textarea>
                             </div>
                         </div>
                         <footer class="cv-editor-footer">
@@ -687,9 +688,9 @@ class FbCalendarView extends HTMLElement {
 
             const chips = dayEvents.slice(0, MAX_CHIPS).map(e => {
                 const time = e.allDay || e._cont ? "" : fb.format.time(e.startAt);
-                const repeat = e.rRule ? `<span class="cv-repeat-mark" title="Repeats">&#8635;</span>` : "";
-                return `<div class="cv-chip ${e.allDay ? "all-day" : ""} ${e._cont ? "cont" : ""}" data-id="${e.id}" title="${escapeHtml(e.title || "Untitled")}">
-                            ${time ? `<span class="cv-chip-time">${time}</span>` : ""}${repeat}${escapeHtml(e.title || "Untitled")}
+                const repeat = e.rRule ? `<span class="cv-repeat-mark" title="${fb.t("fb.calendar.repeats", "Repeats")}">&#8635;</span>` : "";
+                return `<div class="cv-chip ${e.allDay ? "all-day" : ""} ${e._cont ? "cont" : ""}" data-id="${e.id}" title="${escapeHtml(e.title || fb.t("fb.calendar.untitled", "Untitled"))}">
+                            ${time ? `<span class="cv-chip-time">${time}</span>` : ""}${repeat}${escapeHtml(e.title || fb.t("fb.calendar.untitled", "Untitled"))}
                         </div>`;
             }).join("");
             const more = dayEvents.length - MAX_CHIPS;
@@ -698,7 +699,7 @@ class FbCalendarView extends HTMLElement {
                 <div class="${classes}" data-key="${key}">
                     <div class="cv-day-num">${d.getDate()}</div>
                     ${chips}
-                    ${more > 0 ? `<button type="button" class="cv-more" aria-label="All ${dayEvents.length} events">+${more} more</button>` : ""}
+                    ${more > 0 ? `<button type="button" class="cv-more" aria-label="${fb.t("fb.calendar.all-events", "All {n} events", { n: dayEvents.length })}">${fb.t("fb.calendar.more", "+{n} more", { n: more })}</button>` : ""}
                 </div>
             `);
         }
@@ -741,9 +742,9 @@ class FbCalendarView extends HTMLElement {
             const b = document.createElement("button");
             b.type = "button";
             b.dataset.action = ev.id;
-            const t = ev.allDay || ev._cont ? "all day" : fb.format.time(ev.startAt);
-            const repeat = ev.rRule ? ` <span class="cv-repeat-mark" title="Repeats">&#8635;</span>` : "";
-            b.innerHTML = `<span class="cv-chip-time">${t}</span> ${escapeHtml(ev.title || "Untitled")}${repeat}`;
+            const t = ev.allDay || ev._cont ? fb.t("fb.calendar.all-day-short", "all day") : fb.format.time(ev.startAt);
+            const repeat = ev.rRule ? ` <span class="cv-repeat-mark" title="${fb.t("fb.calendar.repeats", "Repeats")}">&#8635;</span>` : "";
+            b.innerHTML = `<span class="cv-chip-time">${t}</span> ${escapeHtml(ev.title || fb.t("fb.calendar.untitled", "Untitled"))}${repeat}`;
             menu.appendChild(b);
         }
         menu.addEventListener("sac:select", (ev) => {
@@ -770,7 +771,7 @@ class FbCalendarView extends HTMLElement {
 
         const agenda = this.querySelector("#cv-agenda");
         if (dayKeys.length === 0) {
-            agenda.innerHTML = `<div class="cv-empty-list">No events this month. Click + to create one.</div>`;
+            agenda.innerHTML = `<div class="cv-empty-list">${fb.t("fb.calendar.empty-month", "No events this month. Click + to create one.")}</div>`;
             return;
         }
 
@@ -780,12 +781,12 @@ class FbCalendarView extends HTMLElement {
             const rows = byDay.get(key).map(e => {
                 // A multi-day event's following days: no start time again,
                 // dimmed like its grid chip.
-                const time = e.allDay || e._cont ? "all day" : fb.format.time(e.startAt);
-                const repeat = e.rRule ? ` <span class="cv-repeat-mark" title="Repeats">&#8635;</span>` : "";
+                const time = e.allDay || e._cont ? fb.t("fb.calendar.all-day-short", "all day") : fb.format.time(e.startAt);
+                const repeat = e.rRule ? ` <span class="cv-repeat-mark" title="${fb.t("fb.calendar.repeats", "Repeats")}">&#8635;</span>` : "";
                 return `
                     <div class="cv-agenda-item ${e.id === this.editing?.id ? "selected" : ""} ${e._cont ? "cont" : ""}" data-id="${e.id}">
                         <span class="cv-agenda-time">${time}</span>
-                        <span class="cv-agenda-title">${escapeHtml(e.title || "Untitled")}${repeat}</span>
+                        <span class="cv-agenda-title">${escapeHtml(e.title || fb.t("fb.calendar.untitled", "Untitled"))}${repeat}</span>
                         ${e.location ? `<span class="cv-agenda-loc">${escapeHtml(e.location)}</span>` : ""}
                     </div>
                 `;
@@ -860,12 +861,12 @@ class FbCalendarView extends HTMLElement {
         fb.toolbar.set([
             {
                 icon:    "chevron-left",
-                title:   "Back to calendar",
+                title:   fb.t("fb.calendar.back", "Back to calendar"),
                 onClick: () => this.closeEditor()
             },
             {
                 icon:    "trash",
-                title:   "Delete event",
+                title:   fb.t("fb.calendar.delete", "Delete event"),
                 onClick: () => this.deleteEditing()
             }
         ]);
@@ -910,7 +911,7 @@ class FbCalendarView extends HTMLElement {
         if (value && ![...select.options].some(o => o.value === value)) {
             const opt = document.createElement("option");
             opt.value = value;
-            opt.textContent = "Custom rule";
+            opt.textContent = fb.t("fb.calendar.rep-custom", "Custom rule");
             opt.setAttribute("data-custom", "");
             select.appendChild(opt);
         }
@@ -988,15 +989,15 @@ class FbCalendarView extends HTMLElement {
         let endAt = fb.format.readInput(this.querySelector("#cv-end"));
 
         if (!title) {
-            hint.textContent = "Add a title to save";
+            hint.textContent = fb.t("fb.calendar.hint-title", "Add a title to save");
             return null;
         }
         if (!startAt) {
-            hint.textContent = "Start is required";
+            hint.textContent = fb.t("fb.calendar.hint-start", "Start is required");
             return null;
         }
         if (endAt && endAt < startAt) {
-            hint.textContent = "End can't be before start";
+            hint.textContent = fb.t("fb.calendar.hint-end", "End can't be before start");
             return null;
         }
         hint.textContent = "";
@@ -1085,10 +1086,10 @@ class FbCalendarView extends HTMLElement {
         if (!this.editing) { ts.textContent = ""; hint.textContent = ""; return; }
         if (!this.editing.id) {
             ts.textContent = "";
-            hint.textContent = "Not saved yet — add a title";
+            hint.textContent = fb.t("fb.calendar.hint-unsaved", "Not saved yet — add a title");
         } else {
-            ts.textContent = "Updated " + this.formatFullTimestamp(this.editing.updatedAt)
-                + (this.editing.rRule ? " · repeats — edits apply to the whole series" : "");
+            ts.textContent = fb.t("fb.calendar.updated", "Updated {when}", { when: this.formatFullTimestamp(this.editing.updatedAt) })
+                + (this.editing.rRule ? fb.t("fb.calendar.series-note", " · repeats — edits apply to the whole series") : "");
             hint.textContent = "";
         }
     }
@@ -1099,13 +1100,13 @@ class FbCalendarView extends HTMLElement {
         if (!e.id) { this._discardEditor(); return; } // unsaved draft — just drop it
 
         const result = await sac.dialog.confirm({
-            title:   "Delete this event?",
+            title:   fb.t("fb.calendar.delete-title", "Delete this event?"),
             message: e.rRule
-                ? "This event repeats — the whole series and its reminders will be permanently deleted."
-                : "This event and its reminders will be permanently deleted.",
+                ? fb.t("fb.calendar.delete-msg-series", "This event repeats — the whole series and its reminders will be permanently deleted.")
+                : fb.t("fb.calendar.delete-msg", "This event and its reminders will be permanently deleted."),
             buttons: [
-                { action: "cancel", label: "Cancel", kind: "default" },
-                { action: "delete", label: "Delete", kind: "destructive", armAfterMs: 2000 },
+                { action: "cancel", label: fb.t("fb.common.cancel", "Cancel"), kind: "default" },
+                { action: "delete", label: fb.t("fb.common.delete", "Delete"), kind: "destructive", armAfterMs: 2000 },
             ],
         });
         if (result !== "delete") return;

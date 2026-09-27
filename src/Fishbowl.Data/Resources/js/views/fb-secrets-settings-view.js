@@ -45,10 +45,9 @@ class FbSecretsSettingsView extends HTMLElement {
                 fb-secrets-settings-view .panel-foot .muted { margin: 0; flex-basis: 100%; }
             </style>
             <header><div>
-                <h1>Secrets</h1>
+                <h1>${fb.t("fb.secrets.title", "Secrets")}</h1>
                 <p class="subtitle">
-                    Secret blocks in your notes are encrypted in this browser. These are the ways
-                    to unlock them — any one of them opens your secrets on any device.
+                    ${fb.t("fb.secrets.subtitle", "Secret blocks in your notes are encrypted in this browser. These are the ways to unlock them — any one of them opens your secrets on any device.")}
                 </p>
             </div></header>
             <div id="secrets-body"></div>
@@ -63,22 +62,21 @@ class FbSecretsSettingsView extends HTMLElement {
         if (sac.scope.get().type === "scoped") {
             mount.innerHTML = `
                 <div class="card">
-                    <p>Secrets are personal for now — a space has no vault.</p>
-                    <div class="toolbar"><button type="button" class="btn" id="to-personal">Open in Personal</button></div>
+                    <p>${fb.t("fb.secrets.space-none", "Secrets are personal for now — a space has no vault.")}</p>
+                    <div class="toolbar"><button type="button" class="btn" id="to-personal">${fb.t("fb.secrets.open-personal", "Open in Personal")}</button></div>
                 </div>`;
             mount.querySelector("#to-personal").addEventListener("click", () => sac.router.navigate("#/secrets"));
             return;
         }
         if (!status.available) {
-            mount.innerHTML = `<div class="card"><p class="muted">The vault can't be reached right now.</p></div>`;
+            mount.innerHTML = `<div class="card"><p class="muted">${fb.t("fb.secrets.unavailable", "The vault can't be reached right now.")}</p></div>`;
             return;
         }
         if (!status.initialized) {
             mount.innerHTML = `
-                <div class="card"><sac-section title="Not set up yet">
-                    <p>Write <code>:::secret</code> … <code>:::end</code> in a note, or set up now: you choose a
-                       passphrase and get a recovery key to keep somewhere safe.</p>
-                    <div class="toolbar"><button type="button" class="btn primary" id="setup">Set up secrets</button></div>
+                <div class="card"><sac-section title="${fb.t("fb.secrets.not-set-up", "Not set up yet")}">
+                    <p>${fb.t("fb.secrets.setup-hint", "Write <code>:::secret</code> … <code>:::end</code> in a note, or set up now: you choose a passphrase and get a recovery key to keep somewhere safe.")}</p>
+                    <div class="toolbar"><button type="button" class="btn primary" id="setup">${fb.t("fb.secrets.setup", "Set up secrets")}</button></div>
                 </sac-section></div>`;
             mount.querySelector("#setup").addEventListener("click", () => this._run(() => fb.vault.ensureUnlocked({ setup: true })));
             return;
@@ -86,34 +84,35 @@ class FbSecretsSettingsView extends HTMLElement {
 
         const [slots, passkeys] = await Promise.all([fb.vault.slots(), fb.vault.passkeySupported()]);
         const minutes = fb.vault.autoLockMinutes();
-        const choiceLabel = (m) => m < 60 ? `${m} minutes` : m === 60 ? "1 hour" : `${m / 60} hours`;
+        const choiceLabel = (m) => m < 60 ? fb.t("fb.secrets.minutes", "{n} minutes", { n: m })
+            : m === 60 ? fb.t("fb.secrets.hour", "1 hour") : fb.t("fb.secrets.hours", "{n} hours", { n: m / 60 });
         const order = { passkey: 0, passphrase: 1, recovery: 2 };
         slots.sort((a, b) => order[a.kind] - order[b.kind] || String(a.createdAt).localeCompare(String(b.createdAt)));
 
         mount.innerHTML = `
-            <div class="card"><sac-section title="Status">
+            <div class="card"><sac-section title="${fb.t("fb.secrets.status", "Status")}">
                 <div class="status-row">
                     <span class="status-text">${status.unlocked
-                        ? `<sac-icon name="unlock"></sac-icon>Unlocked in this tab`
-                        : `<sac-icon name="lock"></sac-icon>Locked`}</span>
-                    <div class="toolbar"><button type="button" class="btn" id="lock-toggle">${status.unlocked ? "Lock now" : "Unlock"}</button></div>
+                        ? `<sac-icon name="unlock"></sac-icon>${fb.t("fb.secrets.unlocked", "Unlocked in this tab")}`
+                        : `<sac-icon name="lock"></sac-icon>${fb.t("fb.secrets.locked", "Locked")}`}</span>
+                    <div class="toolbar"><button type="button" class="btn" id="lock-toggle">${status.unlocked ? fb.t("fb.secrets.lock-now", "Lock now") : fb.t("fb.secrets.unlock", "Unlock")}</button></div>
                 </div>
-                <div class="autolock"><span>Lock automatically after</span>
-                    <span class="select"><select id="autolock" aria-label="Lock automatically after">
+                <div class="autolock"><span>${fb.t("fb.secrets.autolock-before", "Lock automatically after")}</span>
+                    <span class="select"><select id="autolock" aria-label="${fb.t("fb.secrets.autolock-before", "Lock automatically after")}">
                         ${fb.vault.AUTO_LOCK_CHOICES.map(m => `<option value="${m}"${m === minutes ? " selected" : ""}>${choiceLabel(m)}</option>`).join("")}
                     </select></span>
-                    <span>without using a secret</span>
+                    <span>${fb.t("fb.secrets.autolock-after", "without using a secret")}</span>
                 </div>
             </sac-section></div>
-            <div class="card"><sac-section title="Ways to unlock">
+            <div class="card"><sac-section title="${fb.t("fb.secrets.ways", "Ways to unlock")}">
                 <div id="slot-list"></div>
                 <div class="toolbar panel-foot">
-                    ${slots.some(s => s.kind === "passphrase") ? "" : `<button type="button" class="btn" id="add-passphrase"><sac-icon name="key"></sac-icon> Set a passphrase</button>`}
-                    ${slots.some(s => s.kind === "recovery") ? "" : `<button type="button" class="btn" id="add-recovery"><sac-icon name="document"></sac-icon> Create a recovery key</button>`}
+                    ${slots.some(s => s.kind === "passphrase") ? "" : `<button type="button" class="btn" id="add-passphrase"><sac-icon name="key"></sac-icon> ${fb.t("fb.secrets.set-passphrase", "Set a passphrase")}</button>`}
+                    ${slots.some(s => s.kind === "recovery") ? "" : `<button type="button" class="btn" id="add-recovery"><sac-icon name="document"></sac-icon> ${fb.t("fb.secrets.create-recovery", "Create a recovery key")}</button>`}
                     ${passkeys
-                        ? `<button type="button" class="btn primary" id="add-passkey"><sac-icon name="plus"></sac-icon> Add a passkey</button>
-                           <p class="muted">Fingerprint, face or device PIN — Windows Hello, Touch ID, your phone.</p>`
-                        : `<p class="muted">Passkeys aren't available in this browser or on this device (they need WebAuthn PRF support).</p>`}
+                        ? `<button type="button" class="btn primary" id="add-passkey"><sac-icon name="plus"></sac-icon> ${fb.t("fb.secrets.add-passkey", "Add a passkey")}</button>
+                           <p class="muted">${fb.t("fb.secrets.passkey-hint", "Fingerprint, face or device PIN — Windows Hello, Touch ID, your phone.")}</p>`
+                        : `<p class="muted">${fb.t("fb.secrets.passkey-unsupported", "Passkeys aren't available in this browser or on this device (they need WebAuthn PRF support).")}</p>`}
                 </div>
             </sac-section></div>
         `;
@@ -125,12 +124,12 @@ class FbSecretsSettingsView extends HTMLElement {
             this._run(() => status.unlocked ? fb.vault.lock() : fb.vault.ensureUnlocked()));
         mount.querySelector("#autolock").addEventListener("change", (e) => this._setAutoLock(Number(e.target.value), minutes));
         mount.querySelector("#add-passkey")?.addEventListener("click", () =>
-            this._run(() => fb.vault.addPasskey(), "Passkey added."));
+            this._run(() => fb.vault.addPasskey(), fb.t("fb.secrets.passkey-added", "Passkey added.")));
         // Missing a passphrase or a recovery key: the same flows add one.
         mount.querySelector("#add-passphrase")?.addEventListener("click", () =>
-            this._run(() => fb.vault.changePassphrase(), "Passphrase set."));
+            this._run(() => fb.vault.changePassphrase(), fb.t("fb.secrets.passphrase-set", "Passphrase set.")));
         mount.querySelector("#add-recovery")?.addEventListener("click", () =>
-            this._run(() => fb.vault.newRecoveryKey(), "Recovery key saved."));
+            this._run(() => fb.vault.newRecoveryKey(), fb.t("fb.secrets.recovery-saved", "Recovery key saved.")));
     }
 
     _slotRow(s) {
@@ -139,9 +138,13 @@ class FbSecretsSettingsView extends HTMLElement {
         row.dataset.id = s.id;
         row.dataset.kind = s.kind;
         const icon = { passphrase: "key", recovery: "document", passkey: "user" }[s.kind] || "key";
-        const kindText = { passphrase: "Passphrase", recovery: "Recovery key · 24 words", passkey: "Passkey" }[s.kind] || s.kind;
-        const added = s.createdAt ? `Added ${fb.format.date(s.createdAt)}` : "";
-        const used = s.lastUsedAt ? `Last used ${fb.format.dateTime(s.lastUsedAt)}` : "Never used";
+        const kindText = {
+            passphrase: fb.t("fb.secrets.kind-passphrase", "Passphrase"),
+            recovery: fb.t("fb.secrets.kind-recovery", "Recovery key · 24 words"),
+            passkey: fb.t("fb.secrets.kind-passkey", "Passkey"),
+        }[s.kind] || s.kind;
+        const added = s.createdAt ? fb.t("fb.secrets.added", "Added {when}", { when: fb.format.date(s.createdAt) }) : "";
+        const used = s.lastUsedAt ? fb.t("fb.secrets.last-used", "Last used {when}", { when: fb.format.dateTime(s.lastUsedAt) }) : fb.t("fb.secrets.never-used", "Never used");
         row.innerHTML = `
             <sac-icon name="${icon}"></sac-icon>
             <div class="fb-row-info">
@@ -165,10 +168,10 @@ class FbSecretsSettingsView extends HTMLElement {
             actions.appendChild(b);
             return b;
         };
-        if (s.kind === "passphrase") button("btn", "Change", () => this._run(() => fb.vault.changePassphrase(), "Passphrase changed."));
-        if (s.kind === "recovery") button("btn", "Replace", () => this._run(() => fb.vault.newRecoveryKey(), "New recovery key saved — the old one no longer works."));
-        if (s.kind === "passkey") button("icon-btn rename", "Rename", () => this._rename(row, s), "pencil");
-        button("icon-btn danger remove", "Remove", () => this._remove(s, kindText), "trash");
+        if (s.kind === "passphrase") button("btn", fb.t("fb.secrets.change", "Change"), () => this._run(() => fb.vault.changePassphrase(), fb.t("fb.secrets.passphrase-changed", "Passphrase changed.")));
+        if (s.kind === "recovery") button("btn", fb.t("fb.secrets.replace", "Replace"), () => this._run(() => fb.vault.newRecoveryKey(), fb.t("fb.secrets.recovery-replaced", "New recovery key saved — the old one no longer works.")));
+        if (s.kind === "passkey") button("icon-btn rename", fb.t("fb.secrets.rename", "Rename"), () => this._rename(row, s), "pencil");
+        button("icon-btn danger remove", fb.t("fb.secrets.remove", "Remove"), () => this._remove(s, kindText), "trash");
         return row;
     }
 
@@ -196,18 +199,22 @@ class FbSecretsSettingsView extends HTMLElement {
     }
 
     async _remove(s, kindText) {
-        const what = s.kind === "passkey" ? `the passkey "${s.label || "Passkey"}"` : `the ${kindText.split(" ·")[0].toLowerCase()}`;
+        const title = s.kind === "passkey"
+            ? fb.t("fb.secrets.remove-passkey-title", "Remove the passkey \"{name}\"?", { name: s.label || fb.t("fb.secrets.kind-passkey", "Passkey") })
+            : s.kind === "recovery"
+                ? fb.t("fb.secrets.remove-recovery-title", "Remove the recovery key?")
+                : fb.t("fb.secrets.remove-passphrase-title", "Remove the passphrase?");
         const answer = await sac.dialog.confirm({
-            title: `Remove ${what}?`,
+            title,
             message: s.kind === "passkey"
-                ? "It stops unlocking your secrets. Your passphrase and recovery key keep working."
-                : "It stops unlocking your secrets. Make sure another way in still works for you.",
+                ? fb.t("fb.secrets.remove-passkey-body", "It stops unlocking your secrets. Your passphrase and recovery key keep working.")
+                : fb.t("fb.secrets.remove-body", "It stops unlocking your secrets. Make sure another way in still works for you."),
             buttons: [
-                { action: "cancel", label: "Cancel" },
-                { action: "remove", label: "Remove", kind: "destructive" },
+                { action: "cancel", label: fb.t("fb.secrets.cancel", "Cancel") },
+                { action: "remove", label: fb.t("fb.secrets.remove", "Remove"), kind: "destructive" },
             ],
         });
-        if (answer === "remove") await this._run(() => fb.vault.removeSlot(s.id), "Removed.");
+        if (answer === "remove") await this._run(() => fb.vault.removeSlot(s.id), fb.t("fb.secrets.removed", "Removed."));
     }
 
     async _setAutoLock(minutes, before) {
@@ -216,7 +223,7 @@ class FbSecretsSettingsView extends HTMLElement {
             fb.vault.setAutoLock(minutes);
         } catch (err) {
             console.warn("[fb-secrets-settings-view] auto-lock save failed:", err);
-            window.sac?.toast?.("Couldn't save the auto-lock time.", { kind: "error" });
+            window.sac?.toast?.(fb.t("fb.secrets.autolock-failed", "Couldn't save the auto-lock time."), { kind: "error" });
             this.querySelector("#autolock").value = String(before);
         }
     }
@@ -230,7 +237,8 @@ class FbSecretsSettingsView extends HTMLElement {
         } catch (e) {
             if (e?.code !== "cancelled") {
                 console.warn("[fb-secrets-settings-view]", e);
-                window.sac?.toast?.(e?.message || "That didn't work.", { kind: "error" });
+                // fb.vault's errors carry their text already (translated there).
+                window.sac?.toast?.(e?.message || fb.t("fb.secrets.failed", "That didn't work."), { kind: "error" });
             }
         }
         this.refresh();

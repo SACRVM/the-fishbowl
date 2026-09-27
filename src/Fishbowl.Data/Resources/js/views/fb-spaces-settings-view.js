@@ -76,38 +76,38 @@ class FbSpacesSettingsView extends HTMLElement {
             </style>
 
             <header><div>
-                <h1>Spaces</h1>
+                <h1>${fb.t("fb.spaces.title", "Spaces")}</h1>
                 <p class="subtitle">
-                    Shared workspaces — each space has its own notes, separate from your personal data.
+                    ${fb.t("fb.spaces.subtitle", "Shared workspaces — each space has its own notes, separate from your personal data.")}
                 </p>
             </div></header>
 
             <div class="card">
-                <sac-section title="Personal workspace">
+                <sac-section title="${fb.t("fb.spaces.personal", "Personal workspace")}">
                     <div id="personal-row"></div>
                 </sac-section>
             </div>
 
             <div class="card">
-                <sac-section title="New space">
+                <sac-section title="${fb.t("fb.spaces.new", "New space")}">
                     <sac-status-banner id="form-status"></sac-status-banner>
                     <div class="create-row">
-                        <input type="text" id="name-input" placeholder="New space name (e.g. 'Fishbowl Dev')" maxlength="60"/>
+                        <input type="text" id="name-input" placeholder="${fb.t("fb.spaces.name-placeholder", "New space name (e.g. 'Fishbowl Dev')")}" maxlength="60"/>
                         <div class="toolbar">
-                            <button type="button" class="btn primary" id="create-btn">Create space</button>
+                            <button type="button" class="btn primary" id="create-btn">${fb.t("fb.spaces.create", "Create space")}</button>
                         </div>
                     </div>
                 </sac-section>
             </div>
 
             <div class="card">
-                <sac-section title="Your spaces">
+                <sac-section title="${fb.t("fb.spaces.yours", "Your spaces")}">
                     <div id="space-list"></div>
                 </sac-section>
             </div>
 
             <div class="card" id="archive-section" hidden>
-                <sac-section title="Archived spaces">
+                <sac-section title="${fb.t("fb.spaces.archived", "Archived spaces")}">
                     <div id="archive-list"></div>
                 </sac-section>
             </div>
@@ -136,7 +136,7 @@ class FbSpacesSettingsView extends HTMLElement {
         if (!mount) return;
 
         if (!this.me?.id) {
-            mount.innerHTML = `<p class="muted">Loading…</p>`;
+            mount.innerHTML = `<p class="muted">${fb.t("fb.spaces.loading", "Loading…")}</p>`;
             return;
         }
 
@@ -144,7 +144,7 @@ class FbSpacesSettingsView extends HTMLElement {
             <div class="fb-row space-row">
                 <sac-icon name="user"></sac-icon>
                 <div class="fb-row-info">
-                    <p class="fb-row-name">${escapeHtml(this.me.name || this.me.email || "You")}</p>
+                    <p class="fb-row-name">${escapeHtml(this.me.name || this.me.email || fb.t("fb.spaces.you", "You"))}</p>
                     <div class="fb-row-meta">
                         <code title="users/${escapeAttr(this.me.id)}/personal.db">${escapeHtml(this.me.id)}</code>
                     </div>
@@ -161,8 +161,8 @@ class FbSpacesSettingsView extends HTMLElement {
             list.innerHTML = `
                 <div class="empty-state">
                     <sac-icon name="users"></sac-icon>
-                    <h3>No spaces yet</h3>
-                    <p>Create one above.</p>
+                    <h3>${fb.t("fb.spaces.empty", "No spaces yet")}</h3>
+                    <p>${fb.t("fb.spaces.empty-hint", "Create one above.")}</p>
                 </div>`;
             return;
         }
@@ -170,22 +170,22 @@ class FbSpacesSettingsView extends HTMLElement {
         list.innerHTML = this.spaces.map(t => `
             <div class="fb-row space-row" data-slug="${escapeAttr(t.slug)}">
                 ${t.role === "owner"
-                    ? `<button type="button" class="space-color" title="Change colour" aria-label="Change colour"
+                    ? `<button type="button" class="space-color" title="${fb.t("fb.spaces.change-colour", "Change colour")}" aria-label="${fb.t("fb.spaces.change-colour", "Change colour")}"
                                style="--space-color: ${this._colorVar(t.color)}"></button>`
-                    : `<span class="space-color" title="Space colour" style="--space-color: ${this._colorVar(t.color)}"></span>`}
+                    : `<span class="space-color" title="${fb.t("fb.spaces.colour", "Space colour")}" style="--space-color: ${this._colorVar(t.color)}"></span>`}
                 <div class="fb-row-info">
                     <p class="fb-row-name">${escapeHtml(t.name)}</p>
                     <div class="fb-row-meta">
                         <span>/${escapeHtml(t.slug)}</span>
-                        <sac-chip class="role" label="${escapeAttr(t.role)}"></sac-chip>
+                        <sac-chip class="role" label="${escapeAttr(roleLabel(t.role))}"></sac-chip>
                         <code title="spaces/${escapeAttr(t.id)}/space.db">${escapeHtml(t.id)}</code>
                     </div>
                 </div>
-                <button type="button" class="icon-btn open-btn" title="Open this space" aria-label="Open">
+                <button type="button" class="icon-btn open-btn" title="${fb.t("fb.spaces.open", "Open this space")}" aria-label="${fb.t("fb.spaces.open-aria", "Open")}">
                     <sac-icon name="chevron-right"></sac-icon>
                 </button>
                 ${t.role === "owner"
-                    ? `<button type="button" class="icon-btn danger delete-btn" title="Delete space" aria-label="Delete">
+                    ? `<button type="button" class="icon-btn danger delete-btn" title="${fb.t("fb.spaces.delete", "Delete space")}" aria-label="${fb.t("fb.spaces.delete-aria", "Delete")}">
                            <sac-icon name="trash"></sac-icon>
                        </button>`
                     : ""}
@@ -231,9 +231,9 @@ class FbSpacesSettingsView extends HTMLElement {
         const space = this.spaces.find(t => t.slug === slug);
         if (!space) return;
         const dlg = document.createElement("sac-dialog");
-        dlg.setAttribute("title", `Colour — ${space.name}`);
+        dlg.setAttribute("title", fb.t("fb.spaces.colour-title", "Colour — {name}", { name: space.name }));
         dlg.style.setProperty("--dialog-width", "340px");
-        dlg.buttons = [{ action: "close", label: "Close", kind: "default" }];
+        dlg.buttons = [{ action: "close", label: fb.t("fb.spaces.close", "Close"), kind: "default" }];
         const grid = document.createElement("sac-swatch-grid");
         grid.setAttribute("selectable", "");
         grid.setAttribute("columns", "6");
@@ -250,7 +250,7 @@ class FbSpacesSettingsView extends HTMLElement {
             } catch (err) {
                 console.warn("[fb-spaces-settings-view] colour failed:", err);
                 grid.colors = fb.accents.swatches(space.color);
-                window.sac?.toast?.(err?.status === 403 ? "Only the owner can change the colour." : "Failed to save the colour.", { kind: "error" });
+                window.sac?.toast?.(err?.status === 403 ? fb.t("fb.spaces.colour-owner-only", "Only the owner can change the colour.") : fb.t("fb.spaces.colour-failed", "Failed to save the colour."), { kind: "error" });
             }
         });
         document.body.appendChild(dlg);
@@ -264,7 +264,7 @@ class FbSpacesSettingsView extends HTMLElement {
         const input = this.querySelector("#name-input");
         const name  = input.value.trim();
         if (!name) {
-            this._showStatus("Space name is required.");
+            this._showStatus(fb.t("fb.spaces.name-required", "Space name is required."));
             input.focus();
             return;
         }
@@ -278,8 +278,8 @@ class FbSpacesSettingsView extends HTMLElement {
         } catch (err) {
             console.warn("[fb-spaces-settings-view] create failed:", err);
             const status = err?.status;
-            if (status === 400) this._showStatus("Invalid space name.");
-            else                this._showStatus("Failed to create space.");
+            if (status === 400) this._showStatus(fb.errors.text(err, fb.t("fb.spaces.name-invalid", "Invalid space name.")));
+            else                this._showStatus(fb.t("fb.spaces.create-failed", "Failed to create space."));
         } finally {
             this.busy = false;
             this._setBusy(false);
@@ -291,18 +291,18 @@ class FbSpacesSettingsView extends HTMLElement {
     _askDelete(space) {
         return new Promise((resolve) => {
             const dlg = document.createElement("sac-dialog");
-            dlg.setAttribute("title", `Delete space "${space.name}"?`);
+            dlg.setAttribute("title", fb.t("fb.spaces.delete-title", "Delete space \"{name}\"?", { name: space.name }));
             dlg.style.setProperty("--dialog-width", "440px");
             dlg.buttons = [
-                { action: "cancel", label: "Cancel", kind: "default" },
-                { action: "delete", label: "Delete", kind: "destructive", armAfterMs: 1500 },
+                { action: "cancel", label: fb.t("fb.spaces.cancel", "Cancel"), kind: "default" },
+                { action: "delete", label: fb.t("fb.spaces.delete-confirm", "Delete"), kind: "destructive", armAfterMs: 1500 },
             ];
             dlg.innerHTML = `
                 <div class="fb-space-delete">
-                    <p>Its notes, todos, events and files are removed for every member, and its API keys stop working.</p>
+                    <p>${fb.t("fb.spaces.delete-body", "Its notes, todos, events and files are removed for every member, and its API keys stop working.")}</p>
                     <label class="fb-check fb-space-archive">
                         <input type="checkbox" name="archive" checked>
-                        <span>Archive before deleting</span>
+                        <span>${fb.t("fb.spaces.archive-first", "Archive before deleting")}</span>
                     </label>
                     <p class="fb-space-delete-hint"></p>
                 </div>`;
@@ -310,8 +310,8 @@ class FbSpacesSettingsView extends HTMLElement {
             const hint = dlg.querySelector(".fb-space-delete-hint");
             const paint = () => {
                 hint.textContent = box.checked
-                    ? "A ZIP of the whole space is kept under Archived spaces — download it or restore it as a new space."
-                    : "Nothing is kept. This can't be undone.";
+                    ? fb.t("fb.spaces.archive-hint", "A ZIP of the whole space is kept under Archived spaces — download it or restore it as a new space.")
+                    : fb.t("fb.spaces.no-archive-hint", "Nothing is kept. This can't be undone.");
             };
             box.addEventListener("change", paint);
             paint();
@@ -335,13 +335,13 @@ class FbSpacesSettingsView extends HTMLElement {
         try {
             await fb.api.spaces.delete(slug, { archive: choice.archive });
             await this.refresh();
-            if (choice.archive) window.sac?.toast?.(`"${space.name}" was archived and deleted.`, { kind: "success" });
+            if (choice.archive) window.sac?.toast?.(fb.t("fb.spaces.archived-deleted", "\"{name}\" was archived and deleted.", { name: space.name }), { kind: "success" });
         } catch (err) {
             console.warn("[fb-spaces-settings-view] delete failed:", err);
             const status = err?.status;
-            if (status === 403)      this._showStatus("Only the owner can delete this space.");
-            else if (status === 507) this._showStatus("Not enough disk space to archive it — nothing was deleted.");
-            else                     this._showStatus("Failed to delete space.");
+            if (status === 403)      this._showStatus(fb.t("fb.spaces.delete-owner-only", "Only the owner can delete this space."));
+            else if (status === 507) this._showStatus(fb.t("fb.spaces.archive-no-disk", "Not enough disk space to archive it — nothing was deleted."));
+            else                     this._showStatus(fb.t("fb.spaces.delete-failed", "Failed to delete space."));
         }
     }
 
@@ -361,20 +361,20 @@ class FbSpacesSettingsView extends HTMLElement {
                     <p class="fb-row-name space-name"></p>
                     <div class="fb-row-meta"><span class="archived-at"></span><span class="expires"></span></div>
                 </div>
-                <a class="icon-btn open-btn" title="Download the archive" aria-label="Download" download>
+                <a class="icon-btn open-btn" title="${fb.t("fb.spaces.archive-download", "Download the archive")}" aria-label="${fb.t("fb.spaces.archive-download-aria", "Download")}" download>
                     <sac-icon name="download"></sac-icon>
                 </a>
-                <button type="button" class="icon-btn open-btn restore-btn" title="Restore as a new space" aria-label="Restore">
+                <button type="button" class="icon-btn open-btn restore-btn" title="${fb.t("fb.spaces.archive-restore", "Restore as a new space")}" aria-label="${fb.t("fb.spaces.archive-restore-aria", "Restore")}">
                     <sac-icon name="undo"></sac-icon>
                 </button>
-                <button type="button" class="icon-btn danger delete-btn" title="Delete the archive" aria-label="Delete archive">
+                <button type="button" class="icon-btn danger delete-btn" title="${fb.t("fb.spaces.archive-delete", "Delete the archive")}" aria-label="${fb.t("fb.spaces.archive-delete-aria", "Delete archive")}">
                     <sac-icon name="trash"></sac-icon>
                 </button>`;
             row.querySelector(".space-name").textContent = a.name;
-            row.querySelector(".archived-at").textContent = `Archived ${fb.format.dateTime(a.archivedAt)} · ${fmtSize(a.sizeBytes)}`;
+            row.querySelector(".archived-at").textContent = fb.t("fb.spaces.archived-at", "Archived {when} · {size}", { when: fb.format.dateTime(a.archivedAt), size: fmtSize(a.sizeBytes) });
             row.querySelector(".expires").textContent = a.expiresAt
                 ? daysLeft(a.expiresAt)
-                : "Kept until you delete it";
+                : fb.t("fb.spaces.kept", "Kept until you delete it");
             row.querySelector("a").href = fb.api.archive.downloadUrl(a.id);
             row.querySelector(".restore-btn").addEventListener("click", () => this._restore(a));
             row.querySelector(".delete-btn").addEventListener("click", () => this._deleteArchive(a));
@@ -383,28 +383,30 @@ class FbSpacesSettingsView extends HTMLElement {
 
         function daysLeft(iso) {
             const days = Math.ceil((new Date(iso).getTime() - Date.now()) / 86400000);
-            return days <= 0 ? "Deleted at the next cleanup" : days === 1 ? "Deleted in 1 day" : `Deleted in ${days} days`;
+            return days <= 0 ? fb.t("fb.spaces.expires-now", "Deleted at the next cleanup")
+                : days === 1 ? fb.t("fb.spaces.expires-1", "Deleted in 1 day")
+                : fb.t("fb.spaces.expires-n", "Deleted in {n} days", { n: days });
         }
     }
 
     async _restore(a) {
         try {
             const space = await fb.api.archive.restore(a.id);
-            window.sac?.toast?.(`Restored as "${space.name}" (${space.slug}) — you're its only member.`, { kind: "success" });
+            window.sac?.toast?.(fb.t("fb.spaces.restored", "Restored as \"{name}\" ({slug}) — you're its only member.", { name: space.name, slug: space.slug }), { kind: "success" });
             await this.refresh();
         } catch (err) {
             console.warn("[fb-spaces-settings-view] restore failed:", err);
-            window.sac?.toast?.(err?.status === 507 ? "Not enough disk space to restore it." : "Failed to restore the space.", { kind: "error" });
+            window.sac?.toast?.(err?.status === 507 ? fb.t("fb.spaces.restore-no-disk", "Not enough disk space to restore it.") : fb.t("fb.spaces.restore-failed", "Failed to restore the space."), { kind: "error" });
         }
     }
 
     async _deleteArchive(a) {
         const result = await sac.dialog.confirm({
-            title: `Delete the archive of "${a.name}"?`,
-            message: "The archive is removed for good — it can't be restored afterwards.",
+            title: fb.t("fb.spaces.archive-delete-title", "Delete the archive of \"{name}\"?", { name: a.name }),
+            message: fb.t("fb.spaces.archive-delete-body", "The archive is removed for good — it can't be restored afterwards."),
             buttons: [
-                { action: "cancel", label: "Cancel", kind: "default" },
-                { action: "delete", label: "Delete", kind: "destructive", armAfterMs: 1500 },
+                { action: "cancel", label: fb.t("fb.spaces.cancel", "Cancel"), kind: "default" },
+                { action: "delete", label: fb.t("fb.spaces.delete-confirm", "Delete"), kind: "destructive", armAfterMs: 1500 },
             ],
         });
         if (result !== "delete") return;
@@ -413,7 +415,7 @@ class FbSpacesSettingsView extends HTMLElement {
             await this.refresh();
         } catch (err) {
             console.warn("[fb-spaces-settings-view] archive delete failed:", err);
-            window.sac?.toast?.("Failed to delete the archive.", { kind: "error" });
+            window.sac?.toast?.(fb.t("fb.spaces.archive-delete-failed", "Failed to delete the archive."), { kind: "error" });
         }
     }
 
@@ -427,14 +429,11 @@ function escapeHtml(s) {
     return String(s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));
 }
 function escapeAttr(s) { return escapeHtml(s); }
-function fmtSize(n) {
-    n = Number(n) || 0;
-    if (n < 1024) return `${n} B`;
-    const units = ["KB", "MB", "GB", "TB"];
-    let v = n / 1024, i = 0;
-    while (v >= 1024 && i < units.length - 1) { v /= 1024; i++; }
-    return `${v.toFixed(v < 10 ? 1 : 0)} ${units[i]}`;
+function roleLabel(role) {
+    return { owner: fb.t("fb.spaces.role-owner", "owner"), member: fb.t("fb.spaces.role-member", "member"),
+             readonly: fb.t("fb.spaces.role-readonly", "readonly") }[role] || role;
 }
+function fmtSize(n) { return fb.format.bytes(n); }
 
 customElements.define("fb-spaces-settings-view", FbSpacesSettingsView);
 sac.router.register("#/spaces", "fb-spaces-settings-view", { label: "Spaces", icon: "users", palette: false });

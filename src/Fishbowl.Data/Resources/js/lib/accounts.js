@@ -15,7 +15,7 @@
     function formatBytes(bytes) {
         if (bytes == null) return fb.t("fb.accounts.default", "Default");
         if (bytes === 0) return fb.t("fb.accounts.unlimited", "Unlimited");
-        if (bytes >= GB) return `${+(bytes / GB).toFixed(1)} GB`;
+        if (bytes >= GB) return `${fb.format.num(bytes / GB, { min: 0, max: 1 })} GB`;
         if (bytes >= MB) return `${Math.round(bytes / MB)} MB`;
         return `${Math.max(1, Math.round(bytes / 1024))} KB`;
     }
@@ -104,11 +104,11 @@
         try {
             const res = await fb.api.admin.unblock(user.id);
             window.sac?.toast?.(res?.state === "pending"
-                ? `${who(user)} is waiting for approval again.`
-                : `${who(user)} can sign in again.`, { kind: "success" });
+                ? fb.t("fb.admin.unblocked-pending", "{who} is waiting for approval again.", { who: who(user) })
+                : fb.t("fb.admin.can-sign-in", "{who} can sign in again.", { who: who(user) }), { kind: "success" });
             return true;
         } catch (err) {
-            return failed(err, "Couldn't unblock the account.");
+            return failed(err, fb.t("fb.admin.unblock-failed", "Couldn't unblock the account."));
         }
     }
 
@@ -124,17 +124,16 @@
             const dlg = document.createElement("sac-dialog");
             dlg.setAttribute("title", title);
             dlg.style.setProperty("--dialog-width", "480px");
-            dlg.buttons = [{ action: "done", label: "I've passed it on", kind: "primary" }];
+            dlg.buttons = [{ action: "done", label: fb.t("fb.admin.passed-on", "I've passed it on"), kind: "primary" }];
             dlg.innerHTML = `
                 <p class="fb-temp-pw-note"></p>
                 <div class="fb-temp-pw-row">
                     <div class="fb-temp-pw"></div>
-                    <sac-copy-button label="Copy password"></sac-copy-button>
+                    <sac-copy-button label="${fb.t("fb.admin.copy-password", "Copy password")}"></sac-copy-button>
                 </div>
-                <p class="fb-temp-pw-hint">They must choose their own password when they first sign in.
-                    It is <strong>never</strong> shown again.</p>`;
+                <p class="fb-temp-pw-hint">${fb.t("fb.admin.temp-pw-hint", "They must choose their own password when they first sign in. It is <strong>never</strong> shown again.")}</p>`;
             dlg.querySelector(".fb-temp-pw-note").textContent =
-                `Give ${username} this temporary password, in person or by a channel you trust.`;
+                fb.t("fb.admin.temp-pw-note", "Give {username} this temporary password, in person or by a channel you trust.", { username });
             dlg.querySelector(".fb-temp-pw").textContent = tempPassword;
             dlg.querySelector("sac-copy-button").setAttribute("value", tempPassword);
             dlg.addEventListener("sac:action", (e) => {
@@ -150,19 +149,18 @@
     function addLocalUser(defaultQuota) {
         return new Promise((resolve) => {
             const dlg = document.createElement("sac-dialog");
-            dlg.setAttribute("title", "Add a local user");
+            dlg.setAttribute("title", fb.t("fb.admin.add-title", "Add a local user"));
             dlg.style.setProperty("--dialog-width", "440px");
             dlg.buttons = [
-                { action: "cancel", label: "Cancel" },
-                { action: "create", label: "Add user", kind: "primary" },
+                { action: "cancel", label: fb.t("fb.common.cancel", "Cancel") },
+                { action: "create", label: fb.t("fb.admin.add-user", "Add user"), kind: "primary" },
             ];
             dlg.innerHTML = `
-                <p class="fb-add-user-note">For someone who signs in with a username and password
-                    instead of Google. They're active at once.</p>
-                <label for="fb-add-username">Username</label>
+                <p class="fb-add-user-note">${fb.t("fb.admin.add-note", "For someone who signs in with a username and password instead of Google. They're active at once.")}</p>
+                <label for="fb-add-username">${fb.t("fb.admin.username", "Username")}</label>
                 <input id="fb-add-username" type="text" autocomplete="off" spellcheck="false"
                        autocapitalize="off" maxlength="64" placeholder="ada">
-                <label for="fb-add-name">Display name <span class="fb-add-optional">(optional)</span></label>
+                <label for="fb-add-name">${fb.t("fb.admin.display-name", "Display name")} <span class="fb-add-optional">${fb.t("fb.admin.optional", "(optional)")}</span></label>
                 <input id="fb-add-name" type="text" autocomplete="off" maxlength="100">
                 <div class="fb-add-quota"></div>
                 <p class="fb-add-error" role="alert" hidden></p>`;
@@ -177,15 +175,15 @@
                 const displayName = dlg.querySelector("#fb-add-name").value.trim();
                 const quotaBytes = readQuota(quota);
                 if (!/^[\p{L}\p{N}_.-]{3,64}$/u.test(username)) {
-                    showErr("A username is 3–64 letters, digits, _, . or -.");
+                    showErr(fb.t("fb.admin.username-rule", "A username is 3–64 letters, digits, _, . or -."));
                     return false;
                 }
-                if (quotaBytes === undefined) { showErr("The quota must be a number of GB, 0 for unlimited."); return false; }
+                if (quotaBytes === undefined) { showErr(fb.t("fb.accounts.quota-invalid", "The quota must be a number of GB, 0 for unlimited.")); return false; }
                 try {
                     created = await fb.api.admin.createUser({ username, displayName: displayName || null, quotaBytes });
                     return true;
                 } catch (e) {
-                    showErr(errorText(e, "Couldn't add the user."));
+                    showErr(errorText(e, fb.t("fb.admin.add-failed", "Couldn't add the user.")));
                     return false;
                 }
             };
@@ -194,8 +192,8 @@
             dlg.addEventListener("sac:action", async (e) => {
                 setTimeout(() => dlg.remove(), 120);
                 if (e.detail.action !== "create" || !created) { resolve(false); return; }
-                await revealPassword({ title: "User added", username: created.username, tempPassword: created.tempPassword });
-                window.sac?.toast?.(`${created.username} can sign in now.`, { kind: "success" });
+                await revealPassword({ title: fb.t("fb.admin.user-added", "User added"), username: created.username, tempPassword: created.tempPassword });
+                window.sac?.toast?.(fb.t("fb.admin.can-sign-in-now", "{who} can sign in now.", { who: created.username }), { kind: "success" });
                 resolve(true);
             }, { once: true });
             document.body.appendChild(dlg);
@@ -205,40 +203,40 @@
 
     async function resetPassword(user) {
         const answer = await sac.dialog.confirm({
-            title: `Reset the password of ${who(user)}?`,
-            message: "Their current password stops working at once. You get a temporary one to pass on; they choose a new one when they sign in.",
+            title: fb.t("fb.admin.reset-title", "Reset the password of {who}?", { who: who(user) }),
+            message: fb.t("fb.admin.reset-body", "Their current password stops working at once. You get a temporary one to pass on; they choose a new one when they sign in."),
             buttons: [
-                { action: "cancel", label: "Cancel" },
-                { action: "reset", label: "Reset password", kind: "destructive", armAfterMs: 800 },
+                { action: "cancel", label: fb.t("fb.common.cancel", "Cancel") },
+                { action: "reset", label: fb.t("fb.admin.menu-reset", "Reset password"), kind: "destructive", armAfterMs: 800 },
             ],
         });
         if (answer !== "reset") return false;
         try {
             const res = await fb.api.admin.resetPassword(user.id);
-            await revealPassword({ title: "Password reset", username: who(user), tempPassword: res.tempPassword });
+            await revealPassword({ title: fb.t("fb.admin.password-reset", "Password reset"), username: who(user), tempPassword: res.tempPassword });
             return true;
         } catch (err) {
-            return failed(err, "Couldn't reset the password.");
+            return failed(err, fb.t("fb.admin.reset-failed", "Couldn't reset the password."));
         }
     }
 
     async function setQuota(user, defaultQuota) {
         const current = user.quotaBytes ?? defaultQuota;
         const raw = await sac.dialog.prompt({
-            title: `Storage for ${who(user)}`,
-            message: "Personal workspace plus every space they own. 0 = unlimited; empty = this Fishbowl's default.",
-            label: "Quota in GB",
+            title: fb.t("fb.admin.quota-title", "Storage for {who}", { who: who(user) }),
+            message: fb.t("fb.admin.quota-body", "Personal workspace plus every space they own. 0 = unlimited; empty = this Fishbowl's default."),
+            label: fb.t("fb.admin.quota-label", "Quota in GB"),
             value: current == null ? "" : String(+(current / GB).toFixed(1)),
             select: "all",
             validate: (v) => {
                 const t = v.trim();
                 if (!t) return null;
                 const n = Number(t);
-                return Number.isFinite(n) && n >= 0 ? null : "A number of GB, 0 for unlimited.";
+                return Number.isFinite(n) && n >= 0 ? null : fb.t("fb.admin.quota-rule", "A number of GB, 0 for unlimited.");
             },
             buttons: [
-                { action: "cancel", label: "Cancel" },
-                { action: "save", label: "Save", kind: "primary" },
+                { action: "cancel", label: fb.t("fb.common.cancel", "Cancel") },
+                { action: "save", label: fb.t("fb.admin.save", "Save"), kind: "primary" },
             ],
         });
         if (raw == null) return false;
@@ -246,54 +244,54 @@
         const quotaBytes = t ? Math.round(Number(t) * GB) : null;
         try {
             await fb.api.admin.updateUser(user.id, { quotaBytes });
-            window.sac?.toast?.(`${who(user)}: storage ${formatBytes(quotaBytes)}.`, { kind: "success" });
+            window.sac?.toast?.(fb.t("fb.admin.quota-saved", "{who}: storage {size}.", { who: who(user), size: formatBytes(quotaBytes) }), { kind: "success" });
             return true;
         } catch (err) {
-            return failed(err, "Couldn't change the quota.");
+            return failed(err, fb.t("fb.admin.quota-failed", "Couldn't change the quota."));
         }
     }
 
     async function setAdmin(user, on) {
         const answer = await sac.dialog.confirm(on ? {
-            title: `Make ${who(user)} an admin?`,
-            message: "Admins approve and manage accounts and change this Fishbowl's settings. They still can't see anyone's notes or files.",
-            buttons: [{ action: "cancel", label: "Cancel" }, { action: "ok", label: "Make admin", kind: "primary" }],
+            title: fb.t("fb.admin.make-admin-title", "Make {who} an admin?", { who: who(user) }),
+            message: fb.t("fb.admin.make-admin-body", "Admins approve and manage accounts and change this Fishbowl's settings. They still can't see anyone's notes or files."),
+            buttons: [{ action: "cancel", label: fb.t("fb.common.cancel", "Cancel") }, { action: "ok", label: fb.t("fb.admin.menu-admin-on", "Make admin"), kind: "primary" }],
         } : {
-            title: `Remove ${who(user)} as an admin?`,
+            title: fb.t("fb.admin.remove-admin-title", "Remove {who} as an admin?", { who: who(user) }),
             message: user.self
-                ? "You lose access to Users and System settings at once."
-                : "They keep their account and their data, just not the admin tools.",
-            buttons: [{ action: "cancel", label: "Cancel" }, { action: "ok", label: "Remove admin", kind: "destructive" }],
+                ? fb.t("fb.admin.remove-admin-self", "You lose access to Users and System settings at once.")
+                : fb.t("fb.admin.remove-admin-body", "They keep their account and their data, just not the admin tools."),
+            buttons: [{ action: "cancel", label: fb.t("fb.common.cancel", "Cancel") }, { action: "ok", label: fb.t("fb.admin.menu-admin-off", "Remove admin"), kind: "destructive" }],
         });
         if (answer !== "ok") return false;
         try {
             await fb.api.admin.updateUser(user.id, { isAdmin: on });
-            window.sac?.toast?.(on ? `${who(user)} is an admin now.` : `${who(user)} is no longer an admin.`, { kind: "success" });
+            window.sac?.toast?.(on ? fb.t("fb.admin.is-admin", "{who} is an admin now.", { who: who(user) }) : fb.t("fb.admin.no-longer-admin", "{who} is no longer an admin.", { who: who(user) }), { kind: "success" });
             if (!on && user.self) window.location.hash = "#/";
             return true;
         } catch (err) {
-            return failed(err, on ? "Couldn't make them an admin." : "Couldn't remove the admin.");
+            return failed(err, on ? fb.t("fb.admin.make-admin-failed", "Couldn't make them an admin.") : fb.t("fb.admin.remove-admin-failed", "Couldn't remove the admin."));
         }
     }
 
     async function setDisabled(user, on) {
         if (on) {
             const answer = await sac.dialog.confirm({
-                title: `Disable ${who(user)}?`,
-                message: "They can't sign in until you enable the account again, a session that is open now ends with its next click, and their API keys are revoked. Their data stays.",
+                title: fb.t("fb.admin.disable-title", "Disable {who}?", { who: who(user) }),
+                message: fb.t("fb.admin.disable-body", "They can't sign in until you enable the account again, a session that is open now ends with its next click, and their API keys are revoked. Their data stays."),
                 buttons: [
-                    { action: "cancel", label: "Cancel" },
-                    { action: "ok", label: "Disable", kind: "destructive", armAfterMs: 800 },
+                    { action: "cancel", label: fb.t("fb.common.cancel", "Cancel") },
+                    { action: "ok", label: fb.t("fb.admin.menu-disable", "Disable"), kind: "destructive", armAfterMs: 800 },
                 ],
             });
             if (answer !== "ok") return false;
         }
         try {
             await fb.api.admin.updateUser(user.id, { disabled: on });
-            window.sac?.toast?.(on ? `${who(user)} is disabled.` : `${who(user)} can sign in again.`, { kind: "success" });
+            window.sac?.toast?.(on ? fb.t("fb.admin.disabled", "{who} is disabled.", { who: who(user) }) : fb.t("fb.admin.can-sign-in", "{who} can sign in again.", { who: who(user) }), { kind: "success" });
             return true;
         } catch (err) {
-            return failed(err, on ? "Couldn't disable the account." : "Couldn't enable the account.");
+            return failed(err, on ? fb.t("fb.admin.disable-failed", "Couldn't disable the account.") : fb.t("fb.admin.enable-failed", "Couldn't enable the account."));
         }
     }
 
@@ -311,24 +309,24 @@
         try {
             check = await fb.api.admin.deleteCheck(user.id);
         } catch (err) {
-            return failed(err, "Couldn't check the account.");
+            return failed(err, fb.t("fb.admin.check-failed", "Couldn't check the account."));
         }
         const blocked = (check.ownedSpaces || []).length > 0;
         const choice = await new Promise((resolve) => {
             const dlg = document.createElement("sac-dialog");
-            dlg.setAttribute("title", `Delete ${who(user)}?`);
+            dlg.setAttribute("title", fb.t("fb.admin.delete-title", "Delete {who}?", { who: who(user) }));
             dlg.style.setProperty("--dialog-width", "460px");
             dlg.buttons = blocked
-                ? [{ action: "cancel", label: "Close", kind: "default" }]
+                ? [{ action: "cancel", label: fb.t("fb.admin.close", "Close"), kind: "default" }]
                 : [
-                    { action: "cancel", label: "Cancel", kind: "default" },
-                    { action: "delete", label: "Delete account", kind: "destructive", armAfterMs: 1500 },
+                    { action: "cancel", label: fb.t("fb.common.cancel", "Cancel"), kind: "default" },
+                    { action: "delete", label: fb.t("fb.admin.delete-account", "Delete account"), kind: "destructive", armAfterMs: 1500 },
                 ];
             const body = document.createElement("div");
             body.className = "fb-user-delete";
             if (blocked) {
                 const p = document.createElement("p");
-                p.textContent = "They are the only owner of these spaces. Make someone else an owner, or delete the spaces, first:";
+                p.textContent = fb.t("fb.admin.delete-owns", "They are the only owner of these spaces. Make someone else an owner, or delete the spaces, first:");
                 const list = document.createElement("ul");
                 list.className = "fb-user-delete-spaces";
                 for (const s of check.ownedSpaces) {
@@ -339,26 +337,25 @@
                 body.append(p, list);
             } else {
                 body.innerHTML = `
-                    <p>Their sign-ins, API keys, space memberships and their personal workspace —
-                        notes, todos, events, files — are removed.</p>
+                    <p>${fb.t("fb.admin.delete-body", "Their sign-ins, API keys, space memberships and their personal workspace — notes, todos, events, files — are removed.")}</p>
                     <label class="fb-check">
                         <input type="checkbox" name="archive" checked>
-                        <span>Archive their data first</span>
+                        <span>${fb.t("fb.admin.archive-first", "Archive their data first")}</span>
                     </label>
                     <p class="fb-user-delete-hint"></p>`;
                 const box = body.querySelector("input[name=archive]");
                 const hint = body.querySelector(".fb-user-delete-hint");
                 const paint = () => {
                     hint.textContent = box.checked
-                        ? "A ZIP of their whole folder stays on the server for the archive retention time (System shows it). Nobody opens it here."
-                        : "Nothing is kept. This can't be undone.";
+                        ? fb.t("fb.admin.archive-hint", "A ZIP of their whole folder stays on the server for the archive retention time (System shows it). Nobody opens it here.")
+                        : fb.t("fb.admin.no-archive-hint", "Nothing is kept. This can't be undone.");
                 };
                 box.addEventListener("change", paint);
                 paint();
                 if (!check.hasData) {
                     box.checked = false;
                     box.disabled = true;
-                    hint.textContent = "They never stored anything, so there's nothing to archive.";
+                    hint.textContent = fb.t("fb.admin.nothing-to-archive", "They never stored anything, so there's nothing to archive.");
                 }
             }
             dlg.appendChild(body);
@@ -375,24 +372,19 @@
         try {
             await fb.api.admin.deleteUser(user.id, { archive: choice.archive });
             window.sac?.toast?.(choice.archive
-                ? `${who(user)} was archived and deleted.`
-                : `${who(user)} was deleted.`, { kind: "success" });
+                ? fb.t("fb.admin.archived-deleted", "{who} was archived and deleted.", { who: who(user) })
+                : fb.t("fb.admin.deleted", "{who} was deleted.", { who: who(user) }), { kind: "success" });
             return true;
         } catch (err) {
-            if (err?.status === 507) return failed(err, "Not enough disk space for the archive — nothing was deleted.");
-            return failed(err, "Couldn't delete the account.");
+            if (err?.status === 507) return failed(err, fb.t("fb.admin.archive-no-disk", "Not enough disk space for the archive — nothing was deleted."));
+            return failed(err, fb.t("fb.admin.delete-failed", "Couldn't delete the account."));
         }
     }
 
+    // Server error codes → text in the page's language (fb.errors); a
+    // sentence the server sent is shown as it is; else the fallback.
     function errorText(err, fallback) {
-        try {
-            const body = JSON.parse(err?.body || "{}");
-            if (body.error === "last-admin") return "That's the last admin — make someone else an admin first.";
-            if (body.error === "not-pending") return "Someone already handled this request.";
-            if (body.error === "not-active") return "Only an active account can do that.";
-            if (typeof body.error === "string" && body.error.includes(" ")) return body.error;
-        } catch { /* not JSON */ }
-        return fallback;
+        return fb.errors ? fb.errors.text(err, fallback) : fallback;
     }
 
     function failed(err, fallback) {

@@ -69,8 +69,15 @@
         : /(Days|Hour|Hours|Minutes|Count)$/.test(key) ? "number"
         : "text";
 
-    const labelOf = (key) => LABELS[key]
-        || key.split(":").pop().replace(/([a-z])([A-Z])/g, "$1 $2");
+    // Label, description, group title and choice names in the page's
+    // language: "fb.admin.cfg.<Key>", "fb.admin.cfg-desc.<Key>",
+    // "fb.admin.cfg-group.<English title>", "fb.admin.cfg-choice.<value>".
+    // The key itself (shown beside the label) stays as it is — an identifier.
+    const labelOf = (key) => fb.t(`fb.admin.cfg.${key}`, LABELS[key]
+        || key.split(":").pop().replace(/([a-z])([A-Z])/g, "$1 $2"));
+    const descOf = (r) => r.description ? fb.t(`fb.admin.cfg-desc.${r.key}`, r.description) : "";
+    const groupOf = (title) => fb.t(`fb.admin.cfg-group.${title}`, title);
+    const choiceOf = (v) => fb.t(`fb.admin.cfg-choice.${v}`, v);
 
     class FbSystemSettingsView extends HTMLElement {
         connectedCallback() {
@@ -101,11 +108,11 @@
                     fb-system-settings-view .cfg-error { margin: 8px 0 0; font-size: 13px; color: var(--danger-text); }
                 </style>
                 <header><div>
-                    <h1>System settings</h1>
-                    <p class="subtitle">How this Fishbowl runs, for everyone on it. Each setting saves on its own.</p>
+                    <h1>${fb.t("fb.admin.settings-title", "System settings")}</h1>
+                    <p class="subtitle">${fb.t("fb.admin.settings-subtitle", "How this Fishbowl runs, for everyone on it. Each setting saves on its own.")}</p>
                 </div></header>
                 <sac-status-banner class="restart-note" kind="warn"
-                    message="Some saved changes take effect after the next restart of Fishbowl."></sac-status-banner>
+                    message="${fb.t("fb.admin.restart-note", "Some saved changes take effect after the next restart of Fishbowl.")}"></sac-status-banner>
                 <div id="settings-body"></div>
             `;
         }
@@ -117,8 +124,8 @@
             if (sac.scope.get().type === "scoped") {
                 mount.innerHTML = `
                     <div class="card">
-                        <p>System settings belong to the whole Fishbowl — open them from your personal workspace.</p>
-                        <div class="toolbar"><button type="button" class="btn" id="to-personal">Open in Personal</button></div>
+                        <p>${fb.t("fb.admin.settings-personal-only", "System settings belong to the whole Fishbowl — open them from your personal workspace.")}</p>
+                        <div class="toolbar"><button type="button" class="btn" id="to-personal">${fb.t("fb.admin.open-personal", "Open in Personal")}</button></div>
                     </div>`;
                 mount.querySelector("#to-personal").addEventListener("click", () => sac.router.navigate("#/admin/settings"));
                 return;
@@ -129,7 +136,7 @@
                 rows = await fb.api.admin.config();
             } catch (err) {
                 console.warn("[fb-system-settings-view] load failed:", err?.status);
-                mount.innerHTML = `<div class="card"><p>The settings can't be loaded right now.</p></div>`;
+                mount.innerHTML = `<div class="card"><p>${fb.t("fb.admin.settings-unavailable", "The settings can't be loaded right now.")}</p></div>`;
                 return;
             }
 
@@ -146,7 +153,7 @@
                 card.className = "card";
                 card.dataset.section = s.title;
                 const panel = document.createElement("sac-section");
-                panel.setAttribute("title", s.title);
+                panel.setAttribute("title", groupOf(s.title));
                 for (const r of s.rows) panel.appendChild(this._row(r));
                 card.appendChild(panel);
                 panels.push(card);
@@ -165,7 +172,7 @@
                 <p class="cfg-error" role="alert" hidden></p>`;
             row.querySelector(".cfg-label").textContent = labelOf(r.key);
             row.querySelector(".cfg-key").textContent = r.key;
-            row.querySelector(".cfg-desc").textContent = r.description || "";
+            row.querySelector(".cfg-desc").textContent = descOf(r);
             const edit = row.querySelector(".cfg-edit");
             const errEl = row.querySelector(".cfg-error");
             const showErr = (text) => { errEl.textContent = text || ""; errEl.hidden = !text; };
@@ -185,7 +192,7 @@
                     this._saved(res, labelOf(r.key));
                     await this.refresh();
                 } catch (err) {
-                    showErr(this._error(err, "Couldn't save this setting."));
+                    showErr(this._error(err, fb.t("fb.admin.cfg-save-failed", "Couldn't save this setting.")));
                 }
             };
             const clear = async () => {
@@ -195,7 +202,7 @@
                     this._saved(res, labelOf(r.key), true);
                     await this.refresh();
                 } catch (err) {
-                    showErr(this._error(err, "Couldn't reset this setting."));
+                    showErr(this._error(err, fb.t("fb.admin.cfg-reset-failed", "Couldn't reset this setting.")));
                 }
             };
 
@@ -203,15 +210,15 @@
             if (r.secret) {
                 const state = document.createElement("span");
                 state.className = "cfg-state" + (r.isSet ? " set" : "");
-                state.textContent = r.isSet ? "Set" : "Not set";
-                const replace = button(r.isSet ? "Replace" : "Set");
+                state.textContent = r.isSet ? fb.t("fb.admin.cfg-set", "Set") : fb.t("fb.admin.cfg-not-set", "Not set");
+                const replace = button(r.isSet ? fb.t("fb.admin.cfg-replace", "Replace") : fb.t("fb.admin.cfg-set-action", "Set"));
                 replace.addEventListener("click", () => {
                     const input = document.createElement("input");
                     input.type = "password";
                     input.autocomplete = "new-password";
                     input.setAttribute("aria-label", labelOf(r.key));
-                    const ok = button("Save", "btn primary");
-                    const cancel = button("Cancel");
+                    const ok = button(fb.t("fb.admin.save", "Save"), "btn primary");
+                    const cancel = button(fb.t("fb.common.cancel", "Cancel"));
                     ok.addEventListener("click", () => { if (input.value.trim()) save(input.value.trim()); });
                     input.addEventListener("keydown", (e) => { if (e.key === "Enter" && input.value.trim()) save(input.value.trim()); });
                     cancel.addEventListener("click", () => this.refresh());
@@ -220,7 +227,7 @@
                 });
                 edit.append(state, replace);
                 if (r.isSet) {
-                    const remove = button("Remove");
+                    const remove = button(fb.t("fb.admin.cfg-remove", "Remove"));
                     remove.addEventListener("click", clear);
                     edit.appendChild(remove);
                 }
@@ -237,7 +244,7 @@
                 CHOICES[r.key].forEach((v, i) => {
                     const o = document.createElement("option");
                     o.value = v;
-                    o.textContent = i === 0 ? `${v} (default)` : v;
+                    o.textContent = i === 0 ? fb.t("fb.admin.cfg-default-choice", "{value} (default)", { value: choiceOf(v) }) : choiceOf(v);
                     sel.appendChild(o);
                 });
                 sel.value = r.isSet ? r.value : CHOICES[r.key][0];
@@ -260,7 +267,7 @@
                     input.autocomplete = "off";
                 }
                 if (r.isSet) input.value = kind === "bytes" ? String(+(Number(r.value) / GB).toFixed(2)) : r.value;
-                else input.placeholder = "Default";
+                else input.placeholder = fb.t("fb.admin.cfg-default", "Default");
                 read = () => {
                     const t = input.value.trim();
                     if (!t) return "";
@@ -274,12 +281,12 @@
                 if (kind === "bytes") {
                     const unit = document.createElement("span");
                     unit.className = "cfg-unit";
-                    unit.textContent = "GB · 0 = unlimited";
+                    unit.textContent = fb.t("fb.admin.cfg-gb", "GB · 0 = unlimited");
                     edit.appendChild(unit);
                 }
             }
 
-            const saveBtn = button("Save", "btn primary");
+            const saveBtn = button(fb.t("fb.admin.save", "Save"), "btn primary");
             saveBtn.disabled = true;
             const initial = read();
             const sync = () => { saveBtn.disabled = read() === initial; };
@@ -288,7 +295,7 @@
             const commit = () => {
                 const v = read();
                 if (v === initial) return;
-                if (v === "bad") { showErr("Enter a number of GB, 0 for unlimited."); return; }
+                if (v === "bad") { showErr(fb.t("fb.admin.cfg-gb-rule", "Enter a number of GB, 0 for unlimited.")); return; }
                 if (v === "") { if (r.isSet) clear(); else sync(); return; }
                 save(v);
             };
@@ -296,7 +303,7 @@
             if (input.tagName === "INPUT") input.addEventListener("keydown", (e) => { if (e.key === "Enter") commit(); });
             edit.appendChild(saveBtn);
             if (r.isSet) {
-                const reset = button("Use default");
+                const reset = button(fb.t("fb.admin.cfg-use-default", "Use default"));
                 reset.addEventListener("click", clear);
                 edit.appendChild(reset);
             }
@@ -305,15 +312,11 @@
 
         _saved(res, label, cleared) {
             if (res?.restartRequired) this.querySelector(".restart-note").setAttribute("open", "");
-            window.sac?.toast?.(cleared ? `${label}: back to the default.` : `${label} saved.`, { kind: "success" });
+            window.sac?.toast?.(cleared ? fb.t("fb.admin.cfg-cleared", "{label}: back to the default.", { label }) : fb.t("fb.admin.cfg-saved", "{label} saved.", { label }), { kind: "success" });
         }
 
         _error(err, fallback) {
-            try {
-                const body = JSON.parse(err?.body || "{}");
-                if (typeof body.error === "string" && body.error) return body.error;
-            } catch { /* not JSON */ }
-            return fallback;
+            return fb.errors.text(err, fallback);
         }
     }
 

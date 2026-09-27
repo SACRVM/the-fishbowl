@@ -109,7 +109,7 @@ class FbMessagesView extends HTMLElement {
             meta.textContent = when;
         } else if (m.kind === "quota.warning") {
             const d = m.data || {};
-            const gb = (n) => `${((Number(n) || 0) / 1073741824).toFixed(1)} GB`;
+            const gb = (n) => `${fb.format.num((Number(n) || 0) / 1073741824, 1)} GB`;
             icon.setAttribute("name", "warn");
             text.textContent = fb.t("fb.messages.quota", "Your storage is almost full: {used} of {quota}.", { used: gb(d.usedBytes), quota: gb(d.quotaBytes) });
             meta.textContent = when;

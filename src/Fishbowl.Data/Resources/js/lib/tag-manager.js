@@ -27,7 +27,7 @@
         if (win) return win;
         win = document.createElement("sac-window");
         win.id = "fb-tag-manager";
-        win.setAttribute("title", "Manage tags");
+        win.setAttribute("title", fb.t("fb.notes.manage-tags", "Manage tags"));
         win.setAttribute("width", "640px");
         win.setAttribute("height", "480px");
         win.setAttribute("top", "80px");
@@ -48,6 +48,8 @@
         onChanged = opts.onChanged || null;
         dirty = false;
         const w = ensureWindow();
+        // The window outlives a language switch: relabel it on every open.
+        w.setAttribute("title", fb.t("fb.notes.manage-tags", "Manage tags"));
         const list = w.querySelector(".fb-tags-list");
         let tags = [];
         try { tags = await fb.api.tags.list(); }
@@ -61,12 +63,12 @@
         const row = document.createElement("div");
         row.className = "fb-tags-row";
         row.innerHTML = `
-            ${system ? `<sac-chip class="fb-tags-badge" label="system" title="System tag"></sac-chip>` : ""}
-            <input class="fb-tags-name" type="text" aria-label="Tag name"
-                   ${system ? `readonly title="System tag — the name is protected"` : ""}>
-            <sac-swatch-grid selectable columns="${fb.tags.SLOTS.length}" aria-label="Tag colour"></sac-swatch-grid>
-            <span class="fb-tags-count" title="Notes using this tag"></span>
-            ${system ? "" : `<button type="button" class="icon-btn fb-tags-delete" title="Delete tag" aria-label="Delete tag">
+            ${system ? `<sac-chip class="fb-tags-badge" label="system" title="${fb.t("fb.notes.tags.system", "System tag")}"></sac-chip>` : ""}
+            <input class="fb-tags-name" type="text" aria-label="${fb.t("fb.notes.tags.name", "Tag name")}"
+                   ${system ? `readonly title="${fb.t("fb.notes.tags.protected", "System tag — the name is protected")}"` : ""}>
+            <sac-swatch-grid selectable columns="${fb.tags.SLOTS.length}" aria-label="${fb.t("fb.notes.tags.colour", "Tag colour")}"></sac-swatch-grid>
+            <span class="fb-tags-count" title="${fb.t("fb.notes.tags.count", "Notes using this tag")}"></span>
+            ${system ? "" : `<button type="button" class="icon-btn fb-tags-delete" title="${fb.t("fb.notes.tags.delete", "Delete tag")}" aria-label="${fb.t("fb.notes.tags.delete", "Delete tag")}">
                                  <sac-icon name="trash"></sac-icon></button>`}`;
 
         // User-sourced strings go in through properties, never markup.
@@ -129,11 +131,13 @@
             const used = tag.usageCount || 0;
             if (used > 0) {
                 const answer = await sac.dialog.confirm({
-                    title: `Delete tag "${currentName}"?`,
-                    message: `Used by ${used} ${used === 1 ? "note" : "notes"}. Deleting removes the tag from all of them. The notes themselves stay.`,
+                    title: fb.t("fb.notes.tags.delete-title", "Delete tag \"{name}\"?", { name: currentName }),
+                    message: used === 1
+                        ? fb.t("fb.notes.tags.delete-msg-1", "Used by 1 note. Deleting removes the tag from it. The note itself stays.")
+                        : fb.t("fb.notes.tags.delete-msg", "Used by {n} notes. Deleting removes the tag from all of them. The notes themselves stay.", { n: used }),
                     buttons: [
-                        { action: "cancel", label: "Cancel", kind: "default" },
-                        { action: "delete", label: "Delete", kind: "destructive", armAfterMs: 1500 },
+                        { action: "cancel", label: fb.t("fb.common.cancel", "Cancel"), kind: "default" },
+                        { action: "delete", label: fb.t("fb.common.delete", "Delete"), kind: "destructive", armAfterMs: 1500 },
                     ],
                 });
                 if (answer !== "delete") return;

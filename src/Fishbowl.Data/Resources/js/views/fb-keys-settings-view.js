@@ -73,15 +73,14 @@ class FbKeysSettingsView extends HTMLElement {
             </style>
 
             <header><div>
-                <h1>API keys</h1>
+                <h1>${fb.t("fb.keys.title", "API keys")}</h1>
                 <p class="subtitle">
-                    Bearer tokens for MCP and programmatic clients. The raw token is
-                    shown exactly once when you create it — copy it immediately.
+                    ${fb.t("fb.keys.subtitle", "Bearer tokens for MCP and programmatic clients. The raw token is shown exactly once when you create it — copy it immediately.")}
                 </p>
             </div></header>
 
             <div class="card">
-                <sac-section title="New key">
+                <sac-section title="${fb.t("fb.keys.new", "New key")}">
                     <sac-status-banner id="form-status"></sac-status-banner>
                     <div id="form-mount"></div>
                 </sac-section>
@@ -100,22 +99,22 @@ class FbKeysSettingsView extends HTMLElement {
         const scope = sac.scope.get();
         const active = scope.type === "scoped" ? scope.slug : null;
         const contextOptions = [
-            `<option value="user::">Personal</option>`,
+            `<option value="user::">${fb.t("fb.keys.personal", "Personal")}</option>`,
             ...this.spaces.map(t =>
-                `<option value="space::${escapeAttr(t.slug)}"${t.slug === active ? " selected" : ""}>Space — ${escapeHtml(t.name)}</option>`),
+                `<option value="space::${escapeAttr(t.slug)}"${t.slug === active ? " selected" : ""}>${fb.t("fb.keys.space-option", "Space — {name}", { name: escapeHtml(t.name) })}</option>`),
         ].join("");
 
         mount.innerHTML = `
             <div class="field">
-                <label for="key-name">Name</label>
-                <input type="text" id="key-name" placeholder="e.g. 'Claude Code on laptop'" maxlength="80"/>
+                <label for="key-name">${fb.t("fb.keys.name", "Name")}</label>
+                <input type="text" id="key-name" placeholder="${fb.t("fb.keys.name-placeholder", "e.g. 'Claude Code on laptop'")}" maxlength="80"/>
             </div>
             <div class="field">
-                <label for="key-context">Context</label>
+                <label for="key-context">${fb.t("fb.keys.context", "Context")}</label>
                 <span class="select"><select id="key-context">${contextOptions}</select></span>
             </div>
             <div class="field">
-                <label>Scopes</label>
+                <label>${fb.t("fb.keys.scopes", "Scopes")}</label>
                 <div class="scopes">
                     ${["read:notes","write:notes","read:tags","write:tags",
                        "read:tasks","write:tasks","read:events","write:events",
@@ -129,7 +128,7 @@ class FbKeysSettingsView extends HTMLElement {
                 </div>
             </div>
             <div class="toolbar">
-                <button type="button" class="btn primary" id="create-btn">Create key</button>
+                <button type="button" class="btn primary" id="create-btn">${fb.t("fb.keys.create", "Create key")}</button>
             </div>
         `;
 
@@ -157,8 +156,8 @@ class FbKeysSettingsView extends HTMLElement {
             list.innerHTML = `
                 <div class="card"><div class="empty-state">
                     <sac-icon name="key"></sac-icon>
-                    <h3>No keys yet</h3>
-                    <p>Create one above.</p>
+                    <h3>${fb.t("fb.keys.empty", "No keys yet")}</h3>
+                    <p>${fb.t("fb.keys.empty-hint", "Create one above.")}</p>
                 </div></div>`;
             return;
         }
@@ -173,8 +172,8 @@ class FbKeysSettingsView extends HTMLElement {
                 const space = this.spaces.find(t => t.slug === k.contextId);
                 return { key: `space:${k.contextId}`, icon: "users", label: space?.name || k.contextId };
             }
-            if (k.contextType === "app") return { key: `app:${k.contextId}`, icon: "cube", label: `App ${k.contextId}` };
-            return { key: "user:", icon: "user", label: "Personal" };
+            if (k.contextType === "app") return { key: `app:${k.contextId}`, icon: "cube", label: fb.t("fb.keys.app", "App {id}", { id: k.contextId }) };
+            return { key: "user:", icon: "user", label: fb.t("fb.keys.personal", "Personal") };
         };
         for (const k of this.keys) {
             const d = describe(k);
@@ -189,8 +188,8 @@ class FbKeysSettingsView extends HTMLElement {
             const scopes = (k.scopes || []).map(s =>
                 `<sac-chip label="${escapeAttr(s)}"></sac-chip>`).join("");
             const lastUsed = k.lastUsedAt
-                ? `last used ${formatRelative(k.lastUsedAt)}`
-                : "never used";
+                ? fb.t("fb.keys.last-used", "last used {when}", { when: formatRelative(k.lastUsedAt) })
+                : fb.t("fb.keys.never-used", "never used");
             return `
                 <div class="fb-row key-row" data-id="${escapeAttr(k.id)}">
                     <sac-icon name="key"></sac-icon>
@@ -203,7 +202,7 @@ class FbKeysSettingsView extends HTMLElement {
                         </div>
                         <div class="fb-row-meta key-scopes">${scopes}</div>
                     </div>
-                    <button type="button" class="icon-btn danger revoke-btn" title="Revoke" aria-label="Revoke">
+                    <button type="button" class="icon-btn danger revoke-btn" title="${fb.t("fb.keys.revoke", "Revoke")}" aria-label="${fb.t("fb.keys.revoke", "Revoke")}">
                         <sac-icon name="trash"></sac-icon>
                     </button>
                 </div>
@@ -235,7 +234,7 @@ class FbKeysSettingsView extends HTMLElement {
         const nameInput = this.querySelector("#key-name");
         const name = nameInput.value.trim();
         if (!name) {
-            this._showStatus("Name is required.");
+            this._showStatus(fb.t("fb.keys.name-required", "Name is required."));
             nameInput.focus();
             return;
         }
@@ -246,7 +245,7 @@ class FbKeysSettingsView extends HTMLElement {
             .map(el => el.value);
 
         if (scopes.length === 0) {
-            this._showStatus("Pick at least one scope.");
+            this._showStatus(fb.t("fb.keys.scope-required", "Pick at least one scope."));
             return;
         }
 
@@ -265,10 +264,10 @@ class FbKeysSettingsView extends HTMLElement {
         } catch (err) {
             console.warn("[fb-keys-settings-view] create failed:", err);
             const status = err?.status;
-            if (status === 400)      this._showStatus(`Invalid: ${err?.body || "check form"}`);
-            else if (status === 403) this._showStatus("You can't mint a key for that context.");
-            else if (status === 404) this._showStatus("Unknown space.");
-            else                     this._showStatus("Failed to create key.");
+            if (status === 400)      this._showStatus(fb.errors.text(err, fb.t("fb.keys.invalid", "Invalid — check the form.")));
+            else if (status === 403) this._showStatus(fb.t("fb.keys.forbidden", "You can't mint a key for that context."));
+            else if (status === 404) this._showStatus(fb.t("fb.keys.unknown-space", "Unknown space."));
+            else                     this._showStatus(fb.t("fb.keys.create-failed", "Failed to create key."));
         } finally {
             this.busy = false;
             this._setBusy(false);
@@ -280,11 +279,11 @@ class FbKeysSettingsView extends HTMLElement {
         if (!key) return;
 
         const result = await sac.dialog.confirm({
-            title: `Revoke "${key.name}"?`,
-            message: `The token will stop working immediately. This cannot be undone — you'll have to mint a new key.`,
+            title: fb.t("fb.keys.revoke-title", "Revoke \"{name}\"?", { name: key.name }),
+            message: fb.t("fb.keys.revoke-body", "The token will stop working immediately. This cannot be undone — you'll have to mint a new key."),
             buttons: [
-                { action: "cancel", label: "Cancel", kind: "default" },
-                { action: "revoke", label: "Revoke",  kind: "destructive", armAfterMs: 1200 },
+                { action: "cancel", label: fb.t("fb.keys.cancel", "Cancel"), kind: "default" },
+                { action: "revoke", label: fb.t("fb.keys.revoke", "Revoke"),  kind: "destructive", armAfterMs: 1200 },
             ],
         });
         if (result !== "revoke") return;
@@ -294,7 +293,7 @@ class FbKeysSettingsView extends HTMLElement {
             await this.refresh();
         } catch (err) {
             console.warn("[fb-keys-settings-view] revoke failed:", err);
-            this._showStatus("Failed to revoke key.");
+            this._showStatus(fb.t("fb.keys.revoke-failed", "Failed to revoke key."));
         }
     }
 
@@ -305,14 +304,14 @@ class FbKeysSettingsView extends HTMLElement {
     async _revealToken(created) {
         const show = () => new Promise((resolve) => {
             const dlg = document.createElement("sac-dialog");
-            dlg.setAttribute("title", "Key created");
+            dlg.setAttribute("title", fb.t("fb.keys.created", "Key created"));
             dlg.style.setProperty("--dialog-width", "520px");
-            dlg.buttons = [{ action: "done", label: "I've saved it", kind: "primary" }];
+            dlg.buttons = [{ action: "done", label: fb.t("fb.keys.saved-it", "I've saved it"), kind: "primary" }];
             dlg.innerHTML = `
-                <p class="fb-token-warn">Copy the token now — it is <strong>never</strong> shown again.</p>
+                <p class="fb-token-warn">${fb.t("fb.keys.copy-now", "Copy the token now — it is <strong>never</strong> shown again.")}</p>
                 <div class="fb-token-row">
                     <div class="fb-token-block"></div>
-                    <sac-copy-button label="Copy token"></sac-copy-button>
+                    <sac-copy-button label="${fb.t("fb.keys.copy-token", "Copy token")}"></sac-copy-button>
                 </div>`;
             // The token goes in as text / an attribute value, never markup.
             dlg.querySelector(".fb-token-block").textContent = created.rawToken;
@@ -341,10 +340,10 @@ function formatRelative(iso) {
     try {
         const then = new Date(iso).getTime();
         const delta = Date.now() - then;
-        if (delta < 60_000) return "just now";
-        if (delta < 3_600_000) return `${Math.floor(delta / 60_000)}m ago`;
-        if (delta < 86_400_000) return `${Math.floor(delta / 3_600_000)}h ago`;
-        return `${Math.floor(delta / 86_400_000)}d ago`;
+        if (delta < 60_000) return fb.t("fb.keys.just-now", "just now");
+        if (delta < 3_600_000) return fb.t("fb.keys.minutes-ago", "{n}m ago", { n: Math.floor(delta / 60_000) });
+        if (delta < 86_400_000) return fb.t("fb.keys.hours-ago", "{n}h ago", { n: Math.floor(delta / 3_600_000) });
+        return fb.t("fb.keys.days-ago", "{n}d ago", { n: Math.floor(delta / 86_400_000) });
     } catch { return iso; }
 }
 

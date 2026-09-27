@@ -84,13 +84,13 @@ class FbNotesView extends HTMLElement {
         fb.toolbar.set([
             {
                 icon:     "undo",
-                title:    "Undo (Ctrl+Z)",
+                title:    fb.t("fb.notes.undo", "Undo (Ctrl+Z)"),
                 onClick:  () => this._editorUndo(),
                 disabled: true,
             },
             {
                 icon:     "redo",
-                title:    "Redo (Ctrl+Y)",
+                title:    fb.t("fb.notes.redo", "Redo (Ctrl+Y)"),
                 onClick:  () => this._editorRedo(),
                 disabled: true,
             },
@@ -98,12 +98,12 @@ class FbNotesView extends HTMLElement {
             // MCP writes landing. Order is left-to-right as rendered.
             {
                 icon:    "sync",
-                title:   "Refresh notes",
+                title:   fb.t("fb.notes.refresh", "Refresh notes"),
                 onClick: () => this.loadNotes(),
             },
             {
                 icon:    "settings",
-                title:   "Manage tags",
+                title:   fb.t("fb.notes.manage-tags", "Manage tags"),
                 onClick: () => this._openManageDialog(),
             },
         ]);
@@ -618,24 +618,24 @@ class FbNotesView extends HTMLElement {
 
             <sac-split class="nv-split" id="split" collapse show="start"
                        position="${this._splitPosition()}" min-start="260px" min-end="360px"
-                       aria-label="Resize the note list">
+                       aria-label="${fb.t("fb.notes.resize", "Resize the note list")}">
                 <aside class="nv-list-pane" slot="start">
                     <div class="nv-search">
                         <sac-icon name="search"></sac-icon>
-                        <input type="search" id="search-input" placeholder="Search all notes"/>
+                        <input type="search" id="search-input" placeholder="${fb.t("fb.notes.search", "Search all notes")}"/>
                     </div>
                     <div class="nv-search-hint" id="search-degraded-hint" hidden>
-                        Full-text ranking — embeddings still loading.
+                        ${fb.t("fb.notes.search-degraded", "Full-text ranking — embeddings still loading.")}
                     </div>
                     <sac-collapsible class="nv-tag-collapsible" id="tag-filter-wrapper" max-height="82px" hidden>
                         <div class="nv-tag-filter" id="tag-filter"></div>
                     </sac-collapsible>
                     <div class="nv-list-header">
-                        <span class="nv-list-title" id="list-title">All Notes</span>
-                        <button class="icon-btn" id="toggle-archived-btn" title="Show archived" aria-label="Show archived">
+                        <span class="nv-list-title" id="list-title">${fb.t("fb.notes.all", "All Notes")}</span>
+                        <button class="icon-btn" id="toggle-archived-btn" title="${fb.t("fb.notes.show-archived", "Show archived")}" aria-label="${fb.t("fb.notes.show-archived", "Show archived")}">
                             <sac-icon name="archive"></sac-icon>
                         </button>
-                        <button class="icon-btn" id="new-btn" title="New note" aria-label="New note">
+                        <button class="icon-btn" id="new-btn" title="${fb.t("fb.notes.new", "New note")}" aria-label="${fb.t("fb.notes.new", "New note")}">
                             <sac-icon name="plus"></sac-icon>
                         </button>
                     </div>
@@ -646,27 +646,27 @@ class FbNotesView extends HTMLElement {
                     <div class="nv-editor-body">
                         <div class="empty-state nv-empty" id="editor-empty">
                             <sac-icon name="note"></sac-icon>
-                            <h3>No note open</h3>
-                            <p>Pick one from the list, or start a new one.</p>
-                            <button type="button" class="btn primary" id="empty-new-btn"><sac-icon name="plus"></sac-icon> New note</button>
+                            <h3>${fb.t("fb.notes.none-open", "No note open")}</h3>
+                            <p>${fb.t("fb.notes.none-open-hint", "Pick one from the list, or start a new one.")}</p>
+                            <button type="button" class="btn primary" id="empty-new-btn"><sac-icon name="plus"></sac-icon> ${fb.t("fb.notes.new", "New note")}</button>
                         </div>
                         <div id="editor" class="nv-editor" hidden>
-                            <sac-md-editor id="content" class="nv-content-input" placeholder="Start writing — the first line is the title"></sac-md-editor>
+                            <sac-md-editor id="content" class="nv-content-input" placeholder="${fb.t("fb.notes.placeholder", "Start writing — the first line is the title")}"></sac-md-editor>
                         </div>
                     </div>
                     <section class="nv-editor-tagbar" id="tagbar" hidden>
-                        <sac-chip-input id="tag-input" add-label="Add tag" allow-create></sac-chip-input>
+                        <sac-chip-input id="tag-input" add-label="${fb.t("fb.notes.add-tag", "Add tag")}" allow-create></sac-chip-input>
                     </section>
                     <footer class="nv-editor-footer" id="editor-footer" hidden>
                         <span class="nv-editor-footer-meta">
-                            Updated <span id="timestamp"></span>
+                            ${fb.t("fb.notes.updated", "Updated")} <span id="timestamp"></span>
                         </span>
                         <span class="nv-archived-pill" id="archived-pill" hidden>
-                            <sac-icon name="archive"></sac-icon> Archived · Read-only
+                            <sac-icon name="archive"></sac-icon> ${fb.t("fb.notes.archived-ro", "Archived · Read-only")}
                         </span>
                         <button type="button" class="nv-archived-pill nv-locked-pill" id="locked-pill" hidden
-                                title="Unlock to read and edit this note's secrets">
-                            <sac-icon name="lock"></sac-icon> Secrets locked · Unlock
+                                title="${fb.t("fb.notes.unlock-title", "Unlock to read and edit this note's secrets")}">
+                            <sac-icon name="lock"></sac-icon> ${fb.t("fb.notes.locked-pill", "Secrets locked · Unlock")}
                         </button>
                         <div class="nv-editor-footer-spacer"></div>
                     </footer>
@@ -697,7 +697,9 @@ class FbNotesView extends HTMLElement {
         this.querySelector("#toggle-archived-btn").addEventListener("click", () => {
             this.showArchived = !this.showArchived;
             this.querySelector("#toggle-archived-btn").classList.toggle("active", this.showArchived);
-            this.querySelector("#list-title").textContent = this.showArchived ? "All + Archived" : "All Notes";
+            this.querySelector("#list-title").textContent = this.showArchived
+                ? fb.t("fb.notes.all-archived", "All + Archived")
+                : fb.t("fb.notes.all", "All Notes");
             this.renderList();
         });
         this.querySelector("#search-input").addEventListener("input", (e) => {
@@ -910,7 +912,7 @@ class FbNotesView extends HTMLElement {
 
         const list = this.querySelector("#note-list");
         if (filtered.length === 0) {
-            list.innerHTML = `<div class="nv-empty-list">No notes. Click + to create one.</div>`;
+            list.innerHTML = `<div class="nv-empty-list">${fb.t("fb.notes.empty-list", "No notes. Click + to create one.")}</div>`;
             return;
         }
 
@@ -918,8 +920,8 @@ class FbNotesView extends HTMLElement {
             const snippet = snippetFor(n);
             const date = this.formatDate(n.updatedAt);
             const isSelected = n.id === this.selectedId;
-            const archiveTitle = n.archived ? "Unarchive" : "Archive";
-            const pinTitle = n.pinned ? "Unpin" : "Pin to top";
+            const archiveTitle = n.archived ? fb.t("fb.notes.unarchive", "Unarchive") : fb.t("fb.notes.archive", "Archive");
+            const pinTitle = n.pinned ? fb.t("fb.notes.unpin", "Unpin") : fb.t("fb.notes.pin", "Pin to top");
             const rowClasses = [
                 "nv-item",
                 "reveal-on-hover",
@@ -933,23 +935,23 @@ class FbNotesView extends HTMLElement {
             // strips review:pending via the existing Human-update path
             // (NoteRepository.ApplySourceTags does the strip server-side).
             const approveBtnHtml = isPending
-                ? `<button class="icon-btn hover-reveal nv-item-action approve" data-action="approve" title="Approve (clear review:pending)" aria-label="Approve"><sac-icon name="check"></sac-icon></button>`
+                ? `<button class="icon-btn hover-reveal nv-item-action approve" data-action="approve" title="${fb.t("fb.notes.approve-title", "Approve (clear review:pending)")}" aria-label="${fb.t("fb.notes.approve", "Approve")}"><sac-icon name="check"></sac-icon></button>`
                 : "";
             return `
                 <div class="${rowClasses}" data-id="${n.id}" tabindex="0">
                     <div class="nv-item-title-row">
-                        <span class="nv-item-title">${escapeHtml(n.title || "Untitled")}</span>
+                        <span class="nv-item-title">${escapeHtml(n.title || fb.t("fb.notes.untitled", "Untitled"))}</span>
                     </div>
                     <div class="nv-item-preview">
                         <span class="nv-item-date">${date}</span>
-                        <span class="nv-item-snippet">${escapeHtml(snippet || "No additional text")}</span>
+                        <span class="nv-item-snippet">${escapeHtml(snippet || fb.t("fb.notes.no-text", "No additional text"))}</span>
                     </div>
                     ${tagLine}
                     <div class="nv-item-actions">
                         ${approveBtnHtml}
                         <button class="icon-btn hover-reveal nv-item-action pin ${n.pinned ? "active" : ""}" data-action="pin" title="${pinTitle}" aria-label="${pinTitle}"><sac-icon name="pin"></sac-icon></button>
                         <button class="icon-btn hover-reveal nv-item-action archive ${n.archived ? "active" : ""}" data-action="archive" title="${archiveTitle}" aria-label="${archiveTitle}"><sac-icon name="archive"></sac-icon></button>
-                        <button class="icon-btn hover-reveal danger nv-item-action delete" data-action="delete" title="Delete" aria-label="Delete"><sac-icon name="trash"></sac-icon></button>
+                        <button class="icon-btn hover-reveal danger nv-item-action delete" data-action="delete" title="${fb.t("fb.common.delete", "Delete")}" aria-label="${fb.t("fb.common.delete", "Delete")}"><sac-icon name="trash"></sac-icon></button>
                     </div>
                 </div>
             `;
@@ -1158,11 +1160,11 @@ class FbNotesView extends HTMLElement {
      *  a space, a locked vault) shouldn't stack a toast per keystroke. */
     _reportSaveError(err) {
         const message = err?.userFacing ? err.message
-            : err?.status === 400 ? (safeJson(err.body)?.reason || "The note was refused by the server.")
-            : "Couldn't save the note.";
+            : err?.status === 400 ? (safeJson(err.body)?.reason || fb.t("fb.notes.refused", "The note was refused by the server."))
+            : fb.t("fb.notes.save-failed", "Couldn't save the note.");
         if (message === this._lastSaveError) return;
         this._lastSaveError = message;
-        window.sac?.toast?.(message, { kind: "error", title: "Not saved" });
+        window.sac?.toast?.(message, { kind: "error", title: fb.t("fb.notes.not-saved", "Not saved") });
     }
 
     _sameTags(a, b) {
@@ -1193,11 +1195,11 @@ class FbNotesView extends HTMLElement {
         const titleEl   = row.querySelector(".nv-item-title");
         const dateEl    = row.querySelector(".nv-item-date");
         const snippetEl = row.querySelector(".nv-item-snippet");
-        if (titleEl) titleEl.textContent = note.title || "Untitled";
+        if (titleEl) titleEl.textContent = note.title || fb.t("fb.notes.untitled", "Untitled");
         if (dateEl)  dateEl.textContent  = this.formatDate(note.updatedAt);
         if (snippetEl) {
             const snippet = snippetFor(note);
-            snippetEl.textContent = snippet || "No additional text";
+            snippetEl.textContent = snippet || fb.t("fb.notes.no-text", "No additional text");
         }
         // Replace (or insert) the tagline so colors/names update on save.
         const existing = row.querySelector(".nv-item-tagline");
@@ -1286,19 +1288,19 @@ class FbNotesView extends HTMLElement {
 
         // Offer Archive as the safer alternative, unless the note is already
         // archived (then it'd be a no-op and clutters the dialog).
-        const buttons = [{ action: "cancel", label: "Cancel", kind: "default" }];
+        const buttons = [{ action: "cancel", label: fb.t("fb.common.cancel", "Cancel"), kind: "default" }];
         if (!note.archived) {
-            buttons.push({ action: "archive", label: "Archive", kind: "primary" });
+            buttons.push({ action: "archive", label: fb.t("fb.notes.archive", "Archive"), kind: "primary" });
         }
         // armAfterMs gives the user 2s to read before Delete becomes the
         // Enter default — see spec 2026-04-20-fb-dialog-design.md.
-        buttons.push({ action: "delete", label: "Delete", kind: "destructive", armAfterMs: 2000 });
+        buttons.push({ action: "delete", label: fb.t("fb.common.delete", "Delete"), kind: "destructive", armAfterMs: 2000 });
 
         const message = note.archived
-            ? "This note will be permanently deleted."
-            : "This note will be permanently deleted. Archive it instead to keep it hidden but recoverable.";
+            ? fb.t("fb.notes.delete-msg", "This note will be permanently deleted.")
+            : fb.t("fb.notes.delete-msg-archive", "This note will be permanently deleted. Archive it instead to keep it hidden but recoverable.");
 
-        const result = await sac.dialog.confirm({ title: "Delete this note?", message, buttons });
+        const result = await sac.dialog.confirm({ title: fb.t("fb.notes.delete-title", "Delete this note?"), message, buttons });
 
         if (result === "archive") return this.toggleArchivedById(id);
         if (result !== "delete") return;
@@ -1340,7 +1342,7 @@ class FbNotesView extends HTMLElement {
         const isYesterday = d.toDateString() === yesterday.toDateString();
         const sameYear = d.getFullYear() === now.getFullYear();
         if (sameDay)     return fb.format.time(d);
-        if (isYesterday) return "Yesterday";
+        if (isYesterday) return fb.t("fb.common.yesterday", "Yesterday");
         if (sameYear)    return fb.format.dayMonth(d);
         return fb.format.date(d);
     }
@@ -1429,7 +1431,8 @@ function plainText(md) {
 
 const SECRET_BLOCK_RE  = /^[ \t]*:{2,3}secret(?:[ \t][^\n]*)?\n[\s\S]*?\n[ \t]*:{2,3}end[^\n]*$/gim;
 const SECRET_MARKER_RE = /:{2,3}secret#\d+:{2,3}end/gi;
-const LOCKED_PLACEHOLDER = "locked — unlock to show";
+// Display only: the editor shows it for a locked secret; never saved.
+const lockedPlaceholder = () => fb.t("fb.notes.locked-placeholder", "locked — unlock to show");
 
 function maskSecrets(text) {
     return String(text || "").replace(SECRET_BLOCK_RE, "🔒").replace(SECRET_MARKER_RE, "🔒");
@@ -1451,7 +1454,7 @@ function editorTextFor(note) {
     // placeholder body, not as the raw `:::secret#N:::end` storage marker.
     // Display only: saveSelected never writes a locked note's text back.
     const content = hasLockedSecrets(note)
-        ? (note.content || "").replace(SECRET_MARKER_RE, `:::secret\n${LOCKED_PLACEHOLDER}\n:::end`)
+        ? (note.content || "").replace(SECRET_MARKER_RE, `:::secret\n${lockedPlaceholder()}\n:::end`)
         : note.content || "";
     if (!title || titleFromText(content) === title) return content;
     return content ? `# ${title}\n\n${content}` : `# ${title}\n`;

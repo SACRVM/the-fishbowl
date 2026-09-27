@@ -24,17 +24,31 @@ public class SystemMessageNotifier
         _logger = logger ?? NullLogger<SystemMessageNotifier>.Instance;
     }
 
-    // The one line a chat DM carries. Unknown kinds get the generic line, so
-    // a new kind never leaks its data by accident.
-    public static string SubjectFor(string kind) => kind switch
-    {
-        MessageKinds.UserPending => "Fishbowl: a new account is waiting for your approval.",
-        MessageKinds.UserApproved => "Fishbowl: your account is approved — you can start now.",
-        "quota.warning" => "Fishbowl: your storage is almost full.",
-        "space.added" => "Fishbowl: you were added to a space.",
-        "app.update" => "Fishbowl: an app on your desktop has an update to confirm.",
-        _ => "Fishbowl: you have a new message.",
-    };
+    // The one line a chat DM carries, in the recipient's UI language
+    // (users.language; null/automatic → English — a chat has no browser to
+    // ask). Unknown kinds get the generic line, so a new kind never leaks its
+    // data by accident.
+    public static string SubjectFor(string kind) => SubjectFor(kind, null);
+
+    public static string SubjectFor(string kind, string? language) => language == "de"
+        ? kind switch
+        {
+            MessageKinds.UserPending => "Fishbowl: ein neues Konto wartet auf deine Freigabe.",
+            MessageKinds.UserApproved => "Fishbowl: dein Konto ist freigegeben — du kannst loslegen.",
+            "quota.warning" => "Fishbowl: dein Speicher ist fast voll.",
+            "space.added" => "Fishbowl: du wurdest zu einem Space hinzugefügt.",
+            "app.update" => "Fishbowl: eine App auf deinem Desktop hat ein Update, das du bestätigen musst.",
+            _ => "Fishbowl: du hast eine neue Nachricht.",
+        }
+        : kind switch
+        {
+            MessageKinds.UserPending => "Fishbowl: a new account is waiting for your approval.",
+            MessageKinds.UserApproved => "Fishbowl: your account is approved — you can start now.",
+            "quota.warning" => "Fishbowl: your storage is almost full.",
+            "space.added" => "Fishbowl: you were added to a space.",
+            "app.update" => "Fishbowl: an app on your desktop has an update to confirm.",
+            _ => "Fishbowl: you have a new message.",
+        };
 
     public async Task NotifyAsync(IEnumerable<string> recipientIds, string kind, CancellationToken ct = default)
     {
@@ -42,10 +56,14 @@ public class SystemMessageNotifier
         var bots = scope.ServiceProvider.GetServices<IBotClient>().ToList();
         if (bots.Count == 0) return;
         var channels = scope.ServiceProvider.GetRequiredService<INotificationChannelRepository>();
-        var subject = SubjectFor(kind);
+        var system = scope.ServiceProvider.GetService<ISystemRepository>();
 
         foreach (var userId in recipientIds.Distinct(StringComparer.Ordinal))
         {
+            string? language = null;
+            try { language = system is null ? null : (await system.GetUserAsync(userId, ct))?.Language; }
+            catch (Exception ex) when (ex is not OperationCanceledException) { /* English then */ }
+            var subject = SubjectFor(kind, language);
             foreach (var bot in bots)
             {
                 try

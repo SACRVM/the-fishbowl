@@ -24,6 +24,11 @@
  */
 (function () {
     const RIGHT_KEY = "fb.files.right";
+    const t = (key, fallback, vars) => fb.t(key, fallback, vars);
+    // The shortcut group's name: the bar, the hotkeys and the sheet agree on it.
+    const group = () => t("fb.files.group", "Files");
+    /** "1 file" / "{n} files" — two keys, the kit has no plural rules. */
+    const count = (n, one, many, key) => (n === 1 ? t(key + "-1", one) : t(key, many, { n }));
     // The Undo on the trash toast (sac.toast action, relabelled on a
     // language switch).
     sac.i18n?.add?.("en", { "fb.files.undo": "Undo" });
@@ -35,9 +40,9 @@
     function sizeText(bytes) {
         if (bytes == null) return "";
         if (bytes < 1024) return `${bytes} B`;
-        if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(bytes < 10240 ? 1 : 0)} KB`;
-        if (bytes < 1024 ** 3) return `${(bytes / 1024 ** 2).toFixed(1)} MB`;
-        return `${(bytes / 1024 ** 3).toFixed(1)} GB`;
+        if (bytes < 1024 * 1024) return `${fb.format.num(bytes / 1024, bytes < 10240 ? 1 : 0)} KB`;
+        if (bytes < 1024 ** 3) return `${fb.format.num(bytes / 1024 ** 2, 1)} MB`;
+        return `${fb.format.num(bytes / 1024 ** 3, 1)} GB`;
     }
 
     function escapeHtml(s) {
@@ -89,13 +94,13 @@
         return async (name, remaining) => {
             if (sticky) return sticky;
             const { action, all } = await ask({
-                title: "A file with this name exists",
-                message: `“${name}” is already in the target folder.`,
-                allLabel: remaining > 1 ? `Do this for the other ${remaining - 1} too` : null,
+                title: t("fb.files.clash-title", "A file with this name exists"),
+                message: t("fb.files.clash-msg", "“{name}” is already in the target folder.", { name }),
+                allLabel: remaining > 1 ? t("fb.files.clash-all", "Do this for the other {n} too", { n: remaining - 1 }) : null,
                 buttons: [
-                    { action: "skip", label: "Skip" },
-                    { action: "rename", label: "Keep both" },
-                    { action: "replace", label: "Replace", kind: "primary" },
+                    { action: "skip", label: t("fb.files.skip", "Skip") },
+                    { action: "rename", label: t("fb.files.keep-both", "Keep both") },
+                    { action: "replace", label: t("fb.files.replace", "Replace"), kind: "primary" },
                 ],
             });
             const answer = action || "skip";
@@ -321,8 +326,8 @@
                     <div class="fv-col" data-col="left">
                         <section class="fv-pane" data-side="left"></section>
                         <div class="fv-foot">
-                            <sac-tab-group active="browse" aria-label="Left pane">
-                                <sac-tab name="browse">Browse</sac-tab>
+                            <sac-tab-group active="browse" aria-label="${t("fb.files.left-pane", "Left pane")}">
+                                <sac-tab name="browse">${t("fb.files.browse", "Browse")}</sac-tab>
                             </sac-tab-group>
                             <div class="fv-status" aria-live="polite"></div>
                         </div>
@@ -334,18 +339,18 @@
                         </section>
                         <section class="fv-pane fv-props" hidden></section>
                         <div class="fv-foot">
-                            <sac-tab-group class="fv-right-tabs" active="browse" aria-label="Right pane">
-                                <sac-tab name="browse">Browse</sac-tab>
-                                <sac-tab name="preview">Preview</sac-tab>
-                                <sac-tab name="props">Properties</sac-tab>
+                            <sac-tab-group class="fv-right-tabs" active="browse" aria-label="${t("fb.files.right-pane", "Right pane")}">
+                                <sac-tab name="browse">${t("fb.files.browse", "Browse")}</sac-tab>
+                                <sac-tab name="preview">${t("fb.files.preview", "Preview")}</sac-tab>
+                                <sac-tab name="props">${t("fb.files.properties", "Properties")}</sac-tab>
                             </sac-tab-group>
                             <div class="fv-status" aria-live="polite"></div>
                         </div>
                     </div>
                 </div>
                 <div class="fv-bottom">
-                    <sac-shortcut-bar group="Files"></sac-shortcut-bar>
-                    <sac-progress hidden label="Uploading" value="0" max="100"></sac-progress>
+                    <sac-shortcut-bar group="${group()}"></sac-shortcut-bar>
+                    <sac-progress hidden label="${t("fb.files.uploading", "Uploading")}" value="0" max="100"></sac-progress>
                 </div>
             `;
             // One pane on a phone — the same breakpoint the CSS uses.
@@ -367,17 +372,17 @@
         _buildPane(section, side, status) {
             section.innerHTML = `
                 <div class="fv-filter" hidden>
-                    <input type="search" placeholder="Filter this folder" aria-label="Filter this folder">
+                    <input type="search" placeholder="${t("fb.files.filter-placeholder", "Filter this folder")}" aria-label="${t("fb.files.filter-placeholder", "Filter this folder")}">
                 </div>
                 <sac-file-browser multiple no-thumbnails delete-button="hover" columns="size date">
                     <sac-menu slot="title" class="fv-ws">
-                        <button slot="trigger" class="fv-ws-btn" type="button" aria-label="Workspace">
-                            <sac-icon name="user"></sac-icon><span>Personal</span>
+                        <button slot="trigger" class="fv-ws-btn" type="button" aria-label="${t("fb.files.workspace", "Workspace")}">
+                            <sac-icon name="user"></sac-icon><span>${t("fb.files.personal", "Personal")}</span>
                             <sac-icon name="chevron-down"></sac-icon>
                         </button>
                     </sac-menu>
                 </sac-file-browser>
-                <sac-drop-zone overlay multiple label="Drop to upload here" hint=""></sac-drop-zone>
+                <sac-drop-zone overlay multiple label="${t("fb.files.drop", "Drop to upload here")}" hint=""></sac-drop-zone>
             `;
             return {
                 side,
@@ -456,17 +461,17 @@
 
             // Extra hotkeys the bar doesn't carry: workspace menus, clipboard.
             const reg = (combo, fn, description, opts = {}) =>
-                this._offs.push(sac.hotkeys.register(combo, fn, { description, group: "Files", ...opts }));
-            reg("alt+1", () => this._panes.left.menu.open(), "Workspace of the left pane");
-            reg("alt+2", () => { if (!this._phone.matches) this._panes.right.menu.open(); }, "Workspace of the right pane");
-            reg("mod+c", () => this._clip("copy"), "Copy", { skipInInput: true });
-            reg("mod+x", () => this._clip("move"), "Cut", { skipInInput: true });
-            reg("mod+v", () => this._paste(), "Paste", { skipInInput: true });
-            reg("alt+i", () => this._setRightMode(this._rightMode === "props" ? "browse" : "props"), "Properties");
+                this._offs.push(sac.hotkeys.register(combo, fn, { description, group: group(), ...opts }));
+            reg("alt+1", () => this._panes.left.menu.open(), t("fb.files.key-ws-left", "Workspace of the left pane"));
+            reg("alt+2", () => { if (!this._phone.matches) this._panes.right.menu.open(); }, t("fb.files.key-ws-right", "Workspace of the right pane"));
+            reg("mod+c", () => this._clip("copy"), t("fb.files.copy", "Copy"), { skipInInput: true });
+            reg("mod+x", () => this._clip("move"), t("fb.files.cut", "Cut"), { skipInInput: true });
+            reg("mod+v", () => this._paste(), t("fb.files.paste", "Paste"), { skipInInput: true });
+            reg("alt+i", () => this._setRightMode(this._rightMode === "props" ? "browse" : "props"), t("fb.files.properties", "Properties"));
             this._offs.push(sac.shortcuts.add([
-                { group: "Files", keys: "Tab", description: "Switch pane" },
-                { group: "Files", keys: "Shift + ↑/↓", description: "Mark a range" },
-                { group: "Files", keys: ["Ctrl", "click"], description: "Mark one" },
+                { group: group(), keys: "Tab", description: t("fb.files.key-switch", "Switch pane") },
+                { group: group(), keys: [t("fb.files.k-shift", "Shift"), "↑/↓"], description: t("fb.files.key-range", "Mark a range") },
+                { group: group(), keys: [t("fb.files.k-ctrl", "Ctrl"), t("fb.files.k-click", "click")], description: t("fb.files.key-one", "Mark one") },
             ]));
             this._offs.push(sac.shortcuts.bind());
         }
@@ -505,7 +510,7 @@
         }
 
         _label(ws) {
-            if (ws === "personal") return "Personal";
+            if (ws === "personal") return t("fb.files.personal", "Personal");
             return this._spaceOf(ws)?.name || ws.slice("space:".length);
         }
 
@@ -524,7 +529,7 @@
                 pane.browser.store = pane.store;
                 // The workspace menu in the title names the workspace; the
                 // breadcrumb starts at its files.
-                pane.browser.setAttribute("root-label", "Files");
+                pane.browser.setAttribute("root-label", t("fb.route.files", "Files"));
                 pane.usage = null;
                 this._loadUsage(pane);
             }
@@ -544,7 +549,7 @@
         _paintMenus() {
             for (const pane of Object.values(this._panes)) {
                 const current = pane.workspace;
-                const items = [["personal", "Personal", "user"],
+                const items = [["personal", t("fb.files.personal", "Personal"), "user"],
                     ...this._spaces.map((s) => [`space:${s.slug}`, s.name, "users"])];
                 pane.menu.querySelectorAll(":scope > button:not([slot])").forEach((b) => b.remove());
                 for (const [ws, name, icon] of items) {
@@ -646,17 +651,17 @@
             let text;
             if (marked.length) {
                 const size = items.filter((r) => marked.includes(r.path)).reduce((n, r) => n + (r.stat?.size || 0), 0);
-                text = `${marked.length} of ${items.length} marked · ${sizeText(size)}`;
+                text = t("fb.files.marked", "{n} of {total} marked", { n: marked.length, total: items.length }) + ` · ${sizeText(size)}`;
             } else {
                 const parts = [];
-                if (folders) parts.push(`${folders} folder${folders === 1 ? "" : "s"}`);
-                parts.push(`${files.length} file${files.length === 1 ? "" : "s"}`);
+                if (folders) parts.push(count(folders, "1 folder", "{n} folders", "fb.files.n-folders"));
+                parts.push(count(files.length, "1 file", "{n} files", "fb.files.n-files"));
                 parts.push(sizeText(total));
                 text = parts.join(" · ");
             }
             const u = pane.usage;
-            if (u && u.quotaBytes > 0) text += ` · ${sizeText(Math.max(0, u.quotaBytes - u.bytes))} free`;
-            if (!this._writable(pane)) text += " · read-only";
+            if (u && u.quotaBytes > 0) text += " · " + t("fb.files.free", "{size} free", { size: sizeText(Math.max(0, u.quotaBytes - u.bytes)) });
+            if (!this._writable(pane)) text += " · " + t("fb.files.read-only", "read-only");
             // While the right column previews, its footer speaks for the
             // right pane only when it is shown.
             if (pane.side === "right" && this._preview) return;
@@ -667,9 +672,9 @@
             const pane = this._activePane;
             const items = [];
             if (pane && this._writable(pane)) {
-                items.push({ icon: "upload", title: "Upload (Alt+U)", onClick: () => this._browse() });
+                items.push({ icon: "upload", title: t("fb.files.upload-key", "Upload (Alt+U)"), onClick: () => this._browse() });
             }
-            items.push({ icon: "trash", title: "Trash", onClick: () => this._openTrash(this._activePane) });
+            items.push({ icon: "trash", title: t("fb.files.trash", "Trash"), onClick: () => this._openTrash(this._activePane) });
             fb.toolbar.set(items);
         }
 
@@ -682,32 +687,32 @@
             // Several rows marked (or touch mark mode): no single-row actions.
             const many = pane.browser.selecting || pane.browser.marked.length > 1;
             const items = [];
-            if (canWrite && !many) items.push({ id: "new", label: "New folder", combo: "alt+n", icon: "folder-plus", action: () => pane.browser.newFolder() });
-            if (canWrite && !many) items.push({ id: "rename", label: "Rename", combo: "alt+r", icon: "pencil", action: () => pane.browser.rename() });
+            if (canWrite && !many) items.push({ id: "new", label: t("fb.files.new-folder", "New folder"), combo: "alt+n", icon: "folder-plus", action: () => pane.browser.newFolder() });
+            if (canWrite && !many) items.push({ id: "rename", label: t("fb.files.rename", "Rename"), combo: "alt+r", icon: "pencil", action: () => pane.browser.rename() });
             if (phone) {
-                items.push({ id: "copy", label: "Copy to…", combo: "alt+c", icon: "copy", action: () => this._pickAndTransfer("copy") });
-                if (canWrite) items.push({ id: "move", label: "Move to…", combo: "alt+m", icon: "move", action: () => this._pickAndTransfer("move") });
+                items.push({ id: "copy", label: t("fb.files.copy-to", "Copy to…"), combo: "alt+c", icon: "copy", action: () => this._pickAndTransfer("copy") });
+                if (canWrite) items.push({ id: "move", label: t("fb.files.move-to", "Move to…"), combo: "alt+m", icon: "move", action: () => this._pickAndTransfer("move") });
             } else if (!this._preview && this._writable(other)) {
-                items.push({ id: "copy", label: "Copy →", combo: "alt+c", icon: "copy", action: () => this._transferTo(other, "copy") });
-                if (canWrite) items.push({ id: "move", label: "Move →", combo: "alt+m", icon: "move", action: () => this._transferTo(other, "move") });
+                items.push({ id: "copy", label: t("fb.files.copy-across", "Copy →"), combo: "alt+c", icon: "copy", action: () => this._transferTo(other, "copy") });
+                if (canWrite) items.push({ id: "move", label: t("fb.files.move-across", "Move →"), combo: "alt+m", icon: "move", action: () => this._transferTo(other, "move") });
             }
             if (canWrite) {
                 items.push({
-                    id: "trash", label: "Trash", combo: "delete", icon: "trash",
+                    id: "trash", label: t("fb.files.trash", "Trash"), combo: "delete", icon: "trash",
                     action: () => this._remove(pane, this._targets(pane), false),
-                    shiftLabel: "Delete permanently",
+                    shiftLabel: t("fb.files.delete-perm", "Delete permanently"),
                     shiftAction: () => this._remove(pane, this._targets(pane), true),
                 });
             }
             if (!phone) {
                 const mode = this._rightMode;
-                items.push({ id: "preview", label: mode === "preview" ? "Close preview" : "Preview", combo: "alt+p", icon: "eye", action: () => this._togglePreview() });
-                items.push({ id: "props", label: mode === "props" ? "Close properties" : "Properties", combo: "alt+i", icon: "info", action: () => this._setRightMode(mode === "props" ? "browse" : "props") });
+                items.push({ id: "preview", label: mode === "preview" ? t("fb.files.close-preview", "Close preview") : t("fb.files.preview", "Preview"), combo: "alt+p", icon: "eye", action: () => this._togglePreview() });
+                items.push({ id: "props", label: mode === "props" ? t("fb.files.close-props", "Close properties") : t("fb.files.properties", "Properties"), combo: "alt+i", icon: "info", action: () => this._setRightMode(mode === "props" ? "browse" : "props") });
             }
-            items.push({ id: "look", label: "Quick look", combo: "space", icon: "image", action: () => this._quickLook(pane) });
-            if (canWrite) items.push({ id: "upload", label: "Upload", combo: "alt+u", icon: "upload", action: () => this._browse() });
-            items.push({ id: "download", label: "Download", combo: "alt+s", icon: "download", action: () => this._download(pane) });
-            items.push({ id: "filter", label: "Filter", combo: "mod+f", icon: "search", action: () => this._openFilter(pane) });
+            items.push({ id: "look", label: t("fb.files.quick-look", "Quick look"), combo: "space", icon: "image", action: () => this._quickLook(pane) });
+            if (canWrite) items.push({ id: "upload", label: t("fb.files.upload", "Upload"), combo: "alt+u", icon: "upload", action: () => this._browse() });
+            items.push({ id: "download", label: t("fb.files.download", "Download"), combo: "alt+s", icon: "download", action: () => this._download(pane) });
+            items.push({ id: "filter", label: t("fb.files.filter", "Filter"), combo: "mod+f", icon: "search", action: () => this._openFilter(pane) });
             this._bar.items = items;
             this._paintToolbar();
         }
@@ -758,20 +763,20 @@
             if (isPdf(stat)) {
                 const open = document.createElement("button");
                 open.className = "btn";
-                open.innerHTML = `<sac-icon name="external-link"></sac-icon> Open in new tab`;
+                open.innerHTML = `<sac-icon name="external-link"></sac-icon> ${t("fb.files.open-tab", "Open in new tab")}`;
                 open.addEventListener("click", () => window.open(pane.store.api.contentUrl(path, { inline: true }), "_blank", "noopener"));
                 buttons.push(open);
             }
             if (stat.link) {
                 const note = document.createElement("span");
-                note.textContent = "A link on the server — Fishbowl never follows it.";
+                note.textContent = t("fb.files.link-note", "A link on the server — Fishbowl never follows it.");
                 buttons.push(note);
             } else {
                 const dl = document.createElement("a");
                 dl.className = "btn";
                 dl.href = pane.store.api.contentUrl(path);
                 dl.download = stat.name;
-                dl.innerHTML = `<sac-icon name="download"></sac-icon> Download`;
+                dl.innerHTML = `<sac-icon name="download"></sac-icon> ${t("fb.files.download", "Download")}`;
                 buttons.push(dl);
             }
             for (const b of buttons) { b.slot = "actions"; look.appendChild(b); }
@@ -821,8 +826,8 @@
                 this._paintProps(pane, cursor, kind);
             }
             const stat = cursor && kind === "file" ? pane.store.cached(cursor) : null;
-            this._rightStatus.textContent = !cursor ? "Nothing selected"
-                : stat ? `${stat.name} · ${sizeText(stat.size)}` : `${baseName(cursor)} · folder`;
+            this._rightStatus.textContent = !cursor ? t("fb.files.nothing", "Nothing selected")
+                : stat ? `${stat.name} · ${sizeText(stat.size)}` : `${baseName(cursor)} · ${t("fb.files.folder-lc", "folder")}`;
         }
 
         /** Properties of the left pane's cursor item. Folders get their
@@ -831,7 +836,7 @@
             const box = this._propsPane;
             const token = (this._propsToken = (this._propsToken || 0) + 1);
             if (!path) {
-                box.innerHTML = `<div class="fv-props-empty">Nothing selected in the left pane.</div>`;
+                box.innerHTML = `<div class="fv-props-empty">${t("fb.files.nothing-left", "Nothing selected in the left pane.")}</div>`;
                 return;
             }
             const stat = kind === "file" ? pane.store.cached(path) : null;
@@ -839,12 +844,12 @@
             const row = (label, value, mono) => rows.push(
                 `<dt>${escapeHtml(label)}</dt><dd${mono ? ' class="fv-mono"' : ""}>${value}</dd>`);
             const name = stat?.name || baseName(path);
-            row("Kind", escapeHtml(kind === "folder" ? "Folder" : stat?.link ? "Link" : (stat?.type || "File")));
-            if (stat) row("Size", `${escapeHtml(sizeText(stat.size))} <span class="fv-mono">(${Number(stat.size).toLocaleString("en-US")} bytes)</span>`);
-            if (kind === "folder") row("Items", `<span data-prop="items">…</span>`);
-            row("Modified", `<span data-prop="modified">${stat?.modified ? escapeHtml(fb.format.dateTime(new Date(stat.modified))) : "…"}</span>`);
-            row("Workspace", escapeHtml(this._label(pane.workspace)));
-            row("Path", escapeHtml("/" + path), true);
+            row(t("fb.files.p-kind", "Kind"), escapeHtml(kind === "folder" ? t("fb.files.p-folder", "Folder") : stat?.link ? t("fb.files.p-link", "Link") : (stat?.type || t("fb.files.p-file", "File"))));
+            if (stat) row(t("fb.files.p-size", "Size"), `${escapeHtml(sizeText(stat.size))} <span class="fv-mono">(${escapeHtml(t("fb.files.p-bytes", "{n} bytes", { n: Number(stat.size).toLocaleString("en-US") }))})</span>`);
+            if (kind === "folder") row(t("fb.files.p-items", "Items"), `<span data-prop="items">…</span>`);
+            row(t("fb.files.p-modified", "Modified"), `<span data-prop="modified">${stat?.modified ? escapeHtml(fb.format.dateTime(new Date(stat.modified))) : "…"}</span>`);
+            row(t("fb.files.workspace", "Workspace"), escapeHtml(this._label(pane.workspace)));
+            row(t("fb.files.p-path", "Path"), escapeHtml("/" + path), true);
             box.innerHTML = `
                 <div class="fv-props-body">
                     <h3>${escapeHtml(name)}</h3>
@@ -855,13 +860,13 @@
             if (kind === "file" && stat && !stat.link) {
                 const open = document.createElement("button");
                 open.className = "btn";
-                open.innerHTML = `<sac-icon name="external-link"></sac-icon> Open in new tab`;
+                open.innerHTML = `<sac-icon name="external-link"></sac-icon> ${t("fb.files.open-tab", "Open in new tab")}`;
                 open.addEventListener("click", () => window.open(pane.store.api.contentUrl(path, { inline: true }), "_blank", "noopener"));
                 const dl = document.createElement("a");
                 dl.className = "btn";
                 dl.href = pane.store.api.contentUrl(path);
                 dl.download = stat.name;
-                dl.innerHTML = `<sac-icon name="download"></sac-icon> Download`;
+                dl.innerHTML = `<sac-icon name="download"></sac-icon> ${t("fb.files.download", "Download")}`;
                 actions.append(open, dl);
             }
             if (kind !== "folder") return;
@@ -879,7 +884,7 @@
                 const folders = entries.filter((e) => e.kind === "folder").length;
                 const files = entries.length - folders;
                 const el = box.querySelector('[data-prop="items"]');
-                if (el) el.textContent = `${folders} folder${folders === 1 ? "" : "s"}, ${files} file${files === 1 ? "" : "s"}`;
+                if (el) el.textContent = `${count(folders, "1 folder", "{n} folders", "fb.files.n-folders")}, ${count(files, "1 file", "{n} files", "fb.files.n-files")}`;
             }).catch(() => {
                 const el = box.querySelector('[data-prop="items"]');
                 if (el && token === this._propsToken) el.textContent = "—";
@@ -935,7 +940,7 @@
             try {
                 await pane.store.move(from, to);
             } catch (err) {
-                sac.toast(explain(err, "Couldn't rename that."), { kind: "error" });
+                sac.toast(explain(err, t("fb.files.err-rename", "Couldn't rename that.")), { kind: "error" });
                 return;
             }
             await pane.browser.refresh();
@@ -949,13 +954,13 @@
             if (permanent) {
                 const n = paths.length;
                 const answer = await sac.dialog.confirm({
-                    title: n === 1 ? "Delete permanently?" : `Delete ${n} items permanently?`,
+                    title: n === 1 ? t("fb.files.perm-title-1", "Delete permanently?") : t("fb.files.perm-title", "Delete {n} items permanently?", { n }),
                     message: n === 1
-                        ? `“${baseName(paths[0])}” will be deleted for good — it won't go to the trash.`
-                        : `${n} items will be deleted for good — they won't go to the trash.`,
+                        ? t("fb.files.perm-msg-1", "“{name}” will be deleted for good — it won't go to the trash.", { name: baseName(paths[0]) })
+                        : t("fb.files.perm-msg", "{n} items will be deleted for good — they won't go to the trash.", { n }),
                     buttons: [
-                        { action: "cancel", label: "Cancel" },
-                        { action: "delete", label: "Delete permanently", kind: "destructive", armAfterMs: 1200 },
+                        { action: "cancel", label: t("fb.common.cancel", "Cancel") },
+                        { action: "delete", label: t("fb.files.delete-perm", "Delete permanently"), kind: "destructive", armAfterMs: 1200 },
                     ],
                 });
                 if (answer !== "delete") return;
@@ -968,7 +973,7 @@
                     else trashed.push((await pane.store.api.trash(p))?.id);
                     done++;
                 } catch (err) {
-                    sac.toast(explain(err, `Couldn't delete “${baseName(p)}”.`), { kind: "error" });
+                    sac.toast(explain(err, t("fb.files.err-delete-name", "Couldn't delete “{name}”.", { name: baseName(p) })), { kind: "error" });
                     break;
                 }
             }
@@ -977,10 +982,10 @@
             this._loadUsage(pane);
             this._refreshTwin(pane);
             if (done && permanent) {
-                sac.toast(`Deleted ${done} item${done === 1 ? "" : "s"} permanently.`, { kind: "success" });
+                sac.toast(count(done, "Deleted 1 item permanently.", "Deleted {n} items permanently.", "fb.files.deleted"), { kind: "success" });
             } else if (done) {
                 const ids = trashed.filter(Boolean);
-                sac.toast(`Moved ${done} item${done === 1 ? "" : "s"} to the trash.`, {
+                sac.toast(count(done, "Moved 1 item to the trash.", "Moved {n} items to the trash.", "fb.files.trashed"), {
                     kind: "success",
                     action: ids.length ? {
                         label: "Undo", labelKey: "fb.files.undo",
@@ -1000,15 +1005,15 @@
             for (const id of ids) {
                 try { await api.restore(id); back++; }
                 catch (err) {
-                    if (err.status !== 409) { sac.toast(explain(err, "Couldn't restore that."), { kind: "error" }); continue; }
+                    if (err.status !== 409) { sac.toast(explain(err, t("fb.files.err-restore", "Couldn't restore that.")), { kind: "error" }); continue; }
                     try { await api.restore(id, "rename"); back++; }
-                    catch (err2) { sac.toast(explain(err2, "Couldn't restore that."), { kind: "error" }); }
+                    catch (err2) { sac.toast(explain(err2, t("fb.files.err-restore", "Couldn't restore that.")), { kind: "error" }); }
                 }
             }
             await pane.browser.refresh();
             this._loadUsage(pane);
             this._refreshTwin(pane);
-            if (back) sac.toast(`Restored ${back} item${back === 1 ? "" : "s"}.`, { kind: "success" });
+            if (back) sac.toast(count(back, "Restored 1 item.", "Restored {n} items.", "fb.files.restored"), { kind: "success" });
         }
 
         /** The other pane shows the same folder of the same workspace? Refresh it. */
@@ -1039,13 +1044,15 @@
                     try {
                         res = await fb.api.files.transfer({ op, from, paths: group, to, folder, onConflict: mode });
                     } catch (err) {
-                        sac.toast(explain(err, "Couldn't do that."), { kind: "error" });
+                        sac.toast(explain(err, t("fb.files.err-generic", "Couldn't do that.")), { kind: "error" });
                         return moved;
                     }
                     for (const r of res.results || []) {
                         if (!r.error) { moved++; continue; }
                         if (r.error === "name_exists") clashes.push(r.from);
-                        else sac.toast(r.message || `Couldn't ${op} “${baseName(r.from)}”.`, { kind: "error" });
+                        else sac.toast(r.message || (op === "move"
+                            ? t("fb.files.err-move", "Couldn't move “{name}”.", { name: baseName(r.from) })
+                            : t("fb.files.err-copy", "Couldn't copy “{name}”.", { name: baseName(r.from) })), { kind: "error" });
                     }
                 }
                 pending = [];
@@ -1061,8 +1068,15 @@
             await Promise.all(Object.values(this._panes).map((p) => p.browser.refresh()));
             Object.values(this._panes).forEach((p) => this._loadUsage(p));
             if (n) {
-                const verb = op === "move" ? "Moved" : "Copied";
-                sac.toast(`${verb} ${n} item${n === 1 ? "" : "s"}${targetLabel ? ` to ${targetLabel}` : ""}.`, { kind: "success" });
+                const key = (op === "move" ? "fb.files.moved" : "fb.files.copied") + (targetLabel ? "-to" : "");
+                const msg = op === "move"
+                    ? (targetLabel
+                        ? count(n, "Moved 1 item to {target}.", "Moved {n} items to {target}.", key)
+                        : count(n, "Moved 1 item.", "Moved {n} items.", key))
+                    : (targetLabel
+                        ? count(n, "Copied 1 item to {target}.", "Copied {n} items to {target}.", key)
+                        : count(n, "Copied 1 item.", "Copied {n} items.", key));
+                sac.toast(msg.replace("{target}", targetLabel || ""), { kind: "success" });
             }
             this._focusPane(source?.side || "left");
         }
@@ -1093,14 +1107,14 @@
         _pickDestination(op, workspace) {
             return new Promise((resolve) => {
                 const dlg = document.createElement("sac-dialog");
-                dlg.setAttribute("title", op === "move" ? "Move to…" : "Copy to…");
+                dlg.setAttribute("title", op === "move" ? t("fb.files.move-to", "Move to…") : t("fb.files.copy-to", "Copy to…"));
                 dlg.style.setProperty("--dialog-width", "560px");
-                const writable = [["personal", "Personal"],
+                const writable = [["personal", t("fb.files.personal", "Personal")],
                     ...this._spaces.filter((s) => s.role !== "readonly").map((s) => [`space:${s.slug}`, s.name])];
                 const wrap = document.createElement("div");
                 wrap.className = "fv-pick";
                 const select = document.createElement("select");
-                select.setAttribute("aria-label", "Workspace");
+                select.setAttribute("aria-label", t("fb.files.workspace", "Workspace"));
                 for (const [ws, name] of writable) {
                     const o = document.createElement("option");
                     o.value = ws;
@@ -1123,8 +1137,8 @@
                 wrap.append(selectWrap, picker);
                 dlg.appendChild(wrap);
                 dlg.buttons = [
-                    { action: "cancel", label: "Cancel" },
-                    { action: "ok", label: op === "move" ? "Move here" : "Copy here", kind: "primary" },
+                    { action: "cancel", label: t("fb.common.cancel", "Cancel") },
+                    { action: "ok", label: op === "move" ? t("fb.files.move-here", "Move here") : t("fb.files.copy-here", "Copy here"), kind: "primary" },
                 ];
                 dlg.addEventListener("sac:action", (e) => {
                     const result = e.detail.action === "ok" ? { workspace: select.value, folder: picker.path || "" } : null;
@@ -1142,7 +1156,7 @@
             if (!source || !detail.paths?.length) return;
             const op = detail.copy ? "copy" : "move";
             if (op === "move" && !this._writable(source)) {
-                sac.toast("That workspace is read-only — hold Ctrl to copy instead.", { kind: "warn" });
+                sac.toast(t("fb.files.ro-drag", "That workspace is read-only — hold Ctrl to copy instead."), { kind: "warn" });
                 return;
             }
             const n = await this._transfer({ op, from: source.workspace, paths: detail.paths, to: pane.workspace, folder: detail.target || "" });
@@ -1157,7 +1171,10 @@
             if (op === "move" && !this._writable(pane)) return;
             this._clipboard = { op, workspace: pane.workspace, paths };
             const n = paths.length;
-            sac.toast(`${op === "move" ? "Cut" : "Copied"} ${n} item${n === 1 ? "" : "s"} — paste with ${sac.hotkeys.format("mod+v")}.`);
+            const combo = sac.hotkeys.format("mod+v");
+            sac.toast(op === "move"
+                ? count(n, "Cut 1 item — paste with {combo}.", "Cut {n} items — paste with {combo}.", "fb.files.cut-n").replace("{combo}", combo)
+                : count(n, "Copied 1 item — paste with {combo}.", "Copied {n} items — paste with {combo}.", "fb.files.copied-n").replace("{combo}", combo));
         }
 
         async _paste() {
@@ -1194,7 +1211,7 @@
             const api = pane.store.api;
             for (const f of folders) {
                 try { await api.createFolder(join(folder, f)); }
-                catch (err) { if (err.status !== 409) { sac.toast(explain(err, "Couldn't create a folder."), { kind: "error" }); return; } }
+                catch (err) { if (err.status !== 409) { sac.toast(explain(err, t("fb.files.err-folder", "Couldn't create a folder.")), { kind: "error" }); return; } }
             }
             const total = files.reduce((n, f) => n + f.size, 0) || 1;
             let base = 0;
@@ -1217,7 +1234,7 @@
                     await send(file, path, "create");
                 } catch (err) {
                     if (err.status === 412) clashes.push({ file, path });
-                    else { sac.toast(explain(err, `Couldn't upload “${file.name}”.`), { kind: "error" }); break; }
+                    else { sac.toast(explain(err, t("fb.files.err-upload", "Couldn't upload “{name}”.", { name: file.name })), { kind: "error" }); break; }
                 }
                 base += file.size;
                 this._progress.value = String(Math.round((base / total) * 100));
@@ -1232,20 +1249,20 @@
                         await send(file, join(dir, await this._freeName(api, dir, baseName(path))), "create");
                     }
                 } catch (err) {
-                    sac.toast(explain(err, `Couldn't upload “${file.name}”.`), { kind: "error" });
+                    sac.toast(explain(err, t("fb.files.err-upload", "Couldn't upload “{name}”.", { name: file.name })), { kind: "error" });
                 }
             }
             this._progress.hidden = true;
             await pane.browser.refresh();
             this._loadUsage(pane);
             this._refreshTwin(pane);
-            if (done) sac.toast(`Uploaded ${done} file${done === 1 ? "" : "s"}.`, { kind: "success" });
+            if (done) sac.toast(count(done, "Uploaded 1 file.", "Uploaded {n} files.", "fb.files.uploaded"), { kind: "success" });
         }
 
         _download(pane) {
             const paths = this._targets(pane).filter((p) => this._kindOf(pane, p) === "file");
             if (!paths.length) {
-                sac.toast("Pick a file to download — folders come as ZIPs later.", { kind: "info" });
+                sac.toast(t("fb.files.pick-download", "Pick a file to download — folders come as ZIPs later."), { kind: "info" });
                 return;
             }
             for (const p of paths) {
@@ -1263,12 +1280,12 @@
         async _openTrash(pane) {
             this._trashWin?.remove();
             const win = document.createElement("sac-window");
-            win.setAttribute("title", `Trash — ${this._label(pane.workspace)}`);
+            win.setAttribute("title", t("fb.files.trash-title", "Trash — {ws}", { ws: this._label(pane.workspace) }));
             win.setAttribute("width", "640px");
             win.setAttribute("height", "520px");
             win.innerHTML = `<div class="fv-trash-body">
                 <ul class="fv-trash-list"></ul>
-                <div><button class="btn fv-trash-emptyall" type="button" hidden>Empty trash</button></div>
+                <div><button class="btn fv-trash-emptyall" type="button" hidden>${t("fb.files.empty-trash", "Empty trash")}</button></div>
             </div>`;
             document.body.appendChild(win);
             this._trashWin = win;
@@ -1280,8 +1297,8 @@
             const paint = async () => {
                 let entries = [];
                 try { entries = await api.trashList(); }
-                catch (err) { sac.toast(explain(err, "Couldn't read the trash."), { kind: "error" }); }
-                list.innerHTML = entries.length ? "" : `<li class="fv-trash-empty">The trash is empty.</li>`;
+                catch (err) { sac.toast(explain(err, t("fb.files.err-trash", "Couldn't read the trash.")), { kind: "error" }); }
+                list.innerHTML = entries.length ? "" : `<li class="fv-trash-empty">${t("fb.files.trash-empty", "The trash is empty.")}</li>`;
                 emptyAll.hidden = !entries.length || !writable;
                 for (const e of entries) {
                     const li = document.createElement("li");
@@ -1291,8 +1308,8 @@
                         <sac-icon name="${e.kind === "folder" ? "folder" : "document"}"></sac-icon>
                         <span class="fv-trash-name" title="${escapeHtml(e.originalPath)}">${escapeHtml(e.originalPath)}</span>
                         <span class="fv-trash-meta">${escapeHtml(sizeText(e.size))} · ${escapeHtml(fb.format.dateTime(new Date(e.deletedAt)))}</span>
-                        ${writable ? `<button class="btn fv-restore" type="button">Restore</button>
-                        <button class="icon-btn fv-purge" type="button" title="Delete permanently" aria-label="Delete permanently"><sac-icon name="trash"></sac-icon></button>` : ""}`;
+                        ${writable ? `<button class="btn fv-restore" type="button">${t("fb.files.restore", "Restore")}</button>
+                        <button class="icon-btn fv-purge" type="button" title="${t("fb.files.delete-perm", "Delete permanently")}" aria-label="${t("fb.files.delete-perm", "Delete permanently")}"><sac-icon name="trash"></sac-icon></button>` : ""}`;
                     list.appendChild(li);
                 }
             };
@@ -1305,26 +1322,26 @@
                     try {
                         await api.restore(id);
                     } catch (err) {
-                        if (err.status !== 409) { sac.toast(explain(err, "Couldn't restore that."), { kind: "error" }); return; }
+                        if (err.status !== 409) { sac.toast(explain(err, t("fb.files.err-restore", "Couldn't restore that.")), { kind: "error" }); return; }
                         const { action } = await ask({
-                            title: "Something is in the way",
-                            message: `“${name}” exists again at its old place.`,
-                            buttons: [{ action: "cancel", label: "Cancel" }, { action: "rename", label: "Restore as a copy", kind: "primary" }],
+                            title: t("fb.files.in-the-way", "Something is in the way"),
+                            message: t("fb.files.in-the-way-msg", "“{name}” exists again at its old place.", { name }),
+                            buttons: [{ action: "cancel", label: t("fb.common.cancel", "Cancel") }, { action: "rename", label: t("fb.files.restore-copy", "Restore as a copy"), kind: "primary" }],
                         });
                         if (action !== "rename") return;
                         try { await api.restore(id, "rename"); }
-                        catch (err2) { sac.toast(explain(err2, "Couldn't restore that."), { kind: "error" }); return; }
+                        catch (err2) { sac.toast(explain(err2, t("fb.files.err-restore", "Couldn't restore that.")), { kind: "error" }); return; }
                     }
-                    sac.toast("Restored.", { kind: "success" });
+                    sac.toast(t("fb.files.restored-one", "Restored."), { kind: "success" });
                 } else if (ev.target.closest(".fv-purge")) {
                     const answer = await sac.dialog.confirm({
-                        title: "Delete permanently?",
-                        message: `“${name}” will be gone for good.`,
-                        buttons: [{ action: "cancel", label: "Cancel" }, { action: "delete", label: "Delete permanently", kind: "destructive", armAfterMs: 1200 }],
+                        title: t("fb.files.perm-title-1", "Delete permanently?"),
+                        message: t("fb.files.gone-msg", "“{name}” will be gone for good.", { name }),
+                        buttons: [{ action: "cancel", label: t("fb.common.cancel", "Cancel") }, { action: "delete", label: t("fb.files.delete-perm", "Delete permanently"), kind: "destructive", armAfterMs: 1200 }],
                     });
                     if (answer !== "delete") return;
                     try { await api.purge(id); }
-                    catch (err) { sac.toast(explain(err, "Couldn't delete that."), { kind: "error" }); return; }
+                    catch (err) { sac.toast(explain(err, t("fb.files.err-delete", "Couldn't delete that.")), { kind: "error" }); return; }
                 } else {
                     return;
                 }
@@ -1333,13 +1350,13 @@
             });
             emptyAll.addEventListener("click", async () => {
                 const answer = await sac.dialog.confirm({
-                    title: "Empty the trash?",
-                    message: "Everything in it will be gone for good.",
-                    buttons: [{ action: "cancel", label: "Cancel" }, { action: "empty", label: "Empty trash", kind: "destructive", armAfterMs: 1200 }],
+                    title: t("fb.files.empty-title", "Empty the trash?"),
+                    message: t("fb.files.empty-msg", "Everything in it will be gone for good."),
+                    buttons: [{ action: "cancel", label: t("fb.common.cancel", "Cancel") }, { action: "empty", label: t("fb.files.empty-trash", "Empty trash"), kind: "destructive", armAfterMs: 1200 }],
                 });
                 if (answer !== "empty") return;
                 try { await api.emptyTrash(); }
-                catch (err) { sac.toast(explain(err, "Couldn't empty the trash."), { kind: "error" }); return; }
+                catch (err) { sac.toast(explain(err, t("fb.files.err-empty", "Couldn't empty the trash.")), { kind: "error" }); return; }
                 await paint();
                 this._loadUsage(pane);
             });

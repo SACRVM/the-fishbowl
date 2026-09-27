@@ -66,53 +66,100 @@
                       stroke-width="2.5" stroke-linecap="round"/>
             </svg>
             <h1>THE FISHBOWL</h1>
-            <p class="tagline">Your memory lives here. You don't.</p>
+            <p class="tagline" data-t="tagline">Your memory lives here. You don't.</p>
 
             <div class="providers" id="providers">
                 <!-- Populated by JS -->
             </div>
             <form id="local-form" class="local-login" style="display:none;">
                 <div class="form-group">
-                    <label for="local-username">Username</label>
+                    <label for="local-username" data-t="username">Username</label>
                     <input type="text" id="local-username" name="username"
                            autocomplete="username" required>
                 </div>
                 <div class="form-group">
-                    <label for="local-password">Password</label>
+                    <label for="local-password" data-t="password">Password</label>
                     <input type="password" id="local-password" name="password"
                            autocomplete="current-password" required>
                 </div>
-                <button type="submit" class="btn primary">
-                    Sign in
-                </button>
+                <button type="submit" class="btn primary" data-t="sign-in">Sign in</button>
             </form>
 
             <form id="change-form" class="local-login" style="display:none;">
-                <p class="tagline">An administrator reset your password. Pick a new one to continue.</p>
+                <p class="tagline" data-t="reset-intro">An administrator reset your password. Pick a new one to continue.</p>
                 <div class="form-group">
-                    <label for="change-username">Username</label>
+                    <label for="change-username" data-t="username">Username</label>
                     <input type="text" id="change-username" name="username"
                            autocomplete="username" readonly>
                 </div>
                 <div class="form-group">
-                    <label for="change-current">Temporary password</label>
+                    <label for="change-current" data-t="temp-password">Temporary password</label>
                     <input type="password" id="change-current" name="currentPassword"
                            autocomplete="current-password" required>
                 </div>
                 <div class="form-group">
-                    <label for="change-new">New password</label>
+                    <label for="change-new" data-t="new-password">New password</label>
                     <input type="password" id="change-new" name="newPassword"
-                           autocomplete="new-password" placeholder="at least 12 characters" required>
+                           autocomplete="new-password" placeholder="at least 12 characters" data-t-placeholder="min-length" required>
                 </div>
-                <button type="submit" class="btn primary">
-                    Save and sign in
-                </button>
+                <button type="submit" class="btn primary" data-t="save-sign-in">Save and sign in</button>
             </form>
             <p id="error" class="error" style="display:none;"></p>
         </div>
     </div>
 
     <script>
+    // English / German, before the SPA's i18n exists: the language the user
+    // picked last (the SPA mirrors it into localStorage "sac-lang"), else the
+    // browser's. English is the markup and the fallback.
+    const LANG = (() => {
+        let chosen = "";
+        try { chosen = String(localStorage.getItem("sac-lang") || "").toLowerCase().split(/[-_]/)[0]; } catch { /* storage off */ }
+        const code = chosen && chosen !== "auto" ? chosen : String(navigator.language || "").toLowerCase().split(/[-_]/)[0];
+        return code === "de" ? "de" : "en";
+    })();
+    const DE = {
+        "title": "Anmelden · The Fishbowl",
+        "tagline": "Dein Gedächtnis lebt hier. Du nicht.",
+        "username": "Benutzername",
+        "password": "Passwort",
+        "sign-in": "Anmelden",
+        "reset-intro": "Ein Admin hat dein Passwort zurückgesetzt. Wähl ein neues, um weiterzumachen.",
+        "temp-password": "Vorläufiges Passwort",
+        "new-password": "Neues Passwort",
+        "min-length": "mindestens 12 Zeichen",
+        "save-sign-in": "Speichern und anmelden",
+        "continue-with": "Weiter mit {name}",
+        "providers-failed": "Die Anmeldewege lassen sich nicht laden: {message}",
+        "wrong": "Falscher Benutzername oder falsches Passwort.",
+        "cant-sign-in": "Dieses Konto kann sich nicht anmelden.",
+        "sign-in-failed": "Anmelden fehlgeschlagen: {message}",
+        "request-failed": "Anfrage fehlgeschlagen: {message}",
+        "new-too-short": "Das neue Passwort braucht mindestens 12 Zeichen.",
+        "new-same": "Das neue Passwort muss sich vom vorläufigen unterscheiden.",
+        "temp-wrong": "Das vorläufige Passwort stimmt nicht. Bitte den Admin um ein neues.",
+        "change-failed": "Das Passwort konnte nicht geändert werden: {message}",
+        // Sign-in refusals the server sends back as ?authError=… (its English).
+        "This Fishbowl only accepts accounts from certain e-mail domains.": "Dieses Fishbowl nimmt nur Konten aus bestimmten E-Mail-Domains an.",
+        "This Fishbowl isn't open for new accounts. Ask its admin to add you.": "Dieses Fishbowl nimmt keine neuen Konten an. Bitte den Admin, dich hinzuzufügen.",
+        "This account can't sign in to this Fishbowl.": "Dieses Konto kann sich bei diesem Fishbowl nicht anmelden.",
+        "This account is disabled. Ask the admin of this Fishbowl.": "Dieses Konto ist deaktiviert. Frag den Admin dieses Fishbowl.",
+        "This account was deleted.": "Dieses Konto wurde gelöscht.",
+        "Sign-in refused.": "Anmeldung abgelehnt.",
+    };
+    // T(key, english, vars): the German text when German, else the English.
+    function T(key, en, vars) {
+        let s = LANG === "de" && DE[key] ? DE[key] : en;
+        if (vars) s = s.replace(/\{(\w+)\}/g, (m, k) => (k in vars ? String(vars[k]) : m));
+        return s;
+    }
+    document.documentElement.lang = LANG;
+    if (LANG === "de") {
+        document.title = DE.title;
+        for (const el of document.querySelectorAll("[data-t]")) el.textContent = T(el.dataset.t, el.textContent.trim());
+        for (const el of document.querySelectorAll("[data-t-placeholder]")) el.placeholder = T(el.dataset.tPlaceholder, el.placeholder);
+    }
+
     (async function () {
         const providersEl = document.getElementById("providers");
         const localForm = document.getElementById("local-form");
@@ -128,7 +175,7 @@
         // A refused sign-in (Google or the account gate) comes back here with
         // the reason as ?authError=… — shown as text, never as HTML.
         const authError = new URLSearchParams(window.location.search).get("authError");
-        if (authError) showError(authError);
+        if (authError) showError(T(authError, authError));
 
         // Swap the visible form. Carries the username forward and pre-fills the
         // "temporary password" field with whatever the user just typed (saves
@@ -157,7 +204,7 @@
             const oauthProviders = providers.filter(p => p.id !== "local");
             providersEl.innerHTML = oauthProviders.map(p => `
                 <a class="btn" href="/login/challenge/${p.id}">
-                    <span>Continue with ${p.name}</span>
+                    <span>${T("continue-with", "Continue with {name}", { name: p.name })}</span>
                 </a>
             `).join("");
 
@@ -168,7 +215,7 @@
                 localForm.style.display = "block";
             }
         } catch (err) {
-            showError("Unable to load providers: " + err.message);
+            showError(T("providers-failed", "Unable to load providers: {message}", { message: err.message }));
         }
 
         localForm.addEventListener("submit", async (e) => {
@@ -199,18 +246,18 @@
                     }
                 }
                 if (res.status === 401) {
-                    showError("Wrong username or password.");
+                    showError(T("wrong", "Wrong username or password."));
                     return;
                 }
                 if (res.status === 403) {
                     const body = await res.json().catch(() => ({}));
-                    showError(body?.message || "This account can't sign in.");
+                    showError(body?.message ? T(body.message, body.message) : T("cant-sign-in", "This account can't sign in."));
                     return;
                 }
                 const text = await res.text().catch(() => "");
-                showError("Sign-in failed: " + (text || res.status));
+                showError(T("sign-in-failed", "Sign-in failed: {message}", { message: text || res.status }));
             } catch (err) {
-                showError("Request failed: " + err.message);
+                showError(T("request-failed", "Request failed: {message}", { message: err.message }));
             }
         });
 
@@ -223,11 +270,11 @@
             const newPassword = document.getElementById("change-new").value;
 
             if (newPassword.length < 12) {
-                showError("New password must be at least 12 characters.");
+                showError(T("new-too-short", "New password must be at least 12 characters."));
                 return;
             }
             if (newPassword === currentPassword) {
-                showError("New password must differ from the temporary one.");
+                showError(T("new-same", "New password must differ from the temporary one."));
                 return;
             }
 
@@ -242,13 +289,13 @@
                     return;
                 }
                 if (res.status === 401) {
-                    showError("Temporary password didn't match. Ask the admin for a fresh reset.");
+                    showError(T("temp-wrong", "Temporary password didn't match. Ask the admin for a fresh reset."));
                     return;
                 }
                 const text = await res.text().catch(() => "");
-                showError("Couldn't change password: " + (text || res.status));
+                showError(T("change-failed", "Couldn't change password: {message}", { message: text || res.status }));
             } catch (err) {
-                showError("Request failed: " + err.message);
+                showError(T("request-failed", "Request failed: {message}", { message: err.message }));
             }
         });
     })();

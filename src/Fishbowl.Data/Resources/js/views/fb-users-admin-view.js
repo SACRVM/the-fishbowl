@@ -63,10 +63,9 @@ class FbUsersAdminView extends HTMLElement {
                 .fb-user-delete-hint { margin: 10px 0 0 !important; font-size: 13px; color: var(--text-muted); }
             </style>
             <header><div>
-                <h1>Users</h1>
+                <h1>${fb.t("fb.admin.users-title", "Users")}</h1>
                 <p class="subtitle">
-                    Who can use this Fishbowl. You see who people are and how much room they have —
-                    never what they keep here.
+                    ${fb.t("fb.admin.users-subtitle", "Who can use this Fishbowl. You see who people are and how much room they have — never what they keep here.")}
                 </p>
             </div></header>
             <div id="users-body"></div>
@@ -81,8 +80,8 @@ class FbUsersAdminView extends HTMLElement {
             fb.toolbar.set([]);
             mount.innerHTML = `
                 <div class="card">
-                    <p>Users are managed for the whole Fishbowl, from your personal workspace.</p>
-                    <div class="toolbar"><button type="button" class="btn" id="to-personal">Open in Personal</button></div>
+                    <p>${fb.t("fb.admin.users-personal-only", "Users are managed for the whole Fishbowl, from your personal workspace.")}</p>
+                    <div class="toolbar"><button type="button" class="btn" id="to-personal">${fb.t("fb.admin.open-personal", "Open in Personal")}</button></div>
                 </div>`;
             mount.querySelector("#to-personal").addEventListener("click", () => sac.router.navigate("#/admin/users"));
             return;
@@ -93,7 +92,7 @@ class FbUsersAdminView extends HTMLElement {
             data = await fb.api.admin.users();
         } catch (err) {
             console.warn("[fb-users-admin-view] load failed:", err?.status);
-            mount.innerHTML = `<div class="card"><p class="muted">The user list can't be loaded right now.</p></div>`;
+            mount.innerHTML = `<div class="card"><p class="muted">${fb.t("fb.admin.users-unavailable", "The user list can't be loaded right now.")}</p></div>`;
             return;
         }
         if (!this.isConnected) return; // navigated away while loading: the toolbar is another view's now
@@ -101,26 +100,26 @@ class FbUsersAdminView extends HTMLElement {
         // The page's action sits in the nav toolbar, as every view's does.
         fb.toolbar.set([{
             icon: "plus",
-            title: "Add local user",
+            title: fb.t("fb.admin.add-local", "Add local user"),
             onClick: async () => { if (await fb.accounts.addLocalUser(this._defaultQuota)) this.refresh(); },
         }]);
         const users = data?.users || [];
         const pending = users.filter(u => u.state === "pending");
         const others = users.filter(u => u.state !== "pending");
         const policy = {
-            approval: "New accounts wait for your approval.",
-            open: "New accounts can use this Fishbowl right away.",
-            closed: "New accounts can't sign up.",
+            approval: fb.t("fb.admin.signup-approval", "New accounts wait for your approval."),
+            open: fb.t("fb.admin.signup-open", "New accounts can use this Fishbowl right away."),
+            closed: fb.t("fb.admin.signup-closed", "New accounts can't sign up."),
         }[data?.signUp] || "";
 
         const parts = [];
         if (pending.length) {
-            const { card, panel } = this._panel(`Waiting for approval · ${pending.length}`);
+            const { card, panel } = this._panel(fb.t("fb.admin.waiting", "Waiting for approval · {n}", { n: pending.length }));
             card.dataset.section = "pending";
             for (const u of pending) panel.appendChild(this._pendingRow(u, data.defaultQuotaBytes));
             parts.push(card);
         }
-        const { card: allCard, panel: all } = this._panel(`Accounts · ${others.length}`);
+        const { card: allCard, panel: all } = this._panel(fb.t("fb.admin.accounts", "Accounts · {n}", { n: others.length }));
         allCard.dataset.section = "accounts";
         if (policy) {
             const p = document.createElement("p");
@@ -156,7 +155,7 @@ class FbUsersAdminView extends HTMLElement {
             </div>`;
         const avatar = row.querySelector("sac-avatar");
         avatar.setAttribute("name", u.name || u.email || "?");
-        row.querySelector(".n").textContent = u.name || u.email || "Unnamed";
+        row.querySelector(".n").textContent = u.name || u.email || fb.t("fb.admin.unnamed", "Unnamed");
         if (u.name && u.email) row.querySelector(".user-email").textContent = u.email;
         return row;
     }
@@ -179,19 +178,19 @@ class FbUsersAdminView extends HTMLElement {
     }
 
     _providers(u) {
-        const names = (u.providers || []).map(p => p === "google" ? "Google" : p === "local" ? "Password" : p);
-        return names.length ? `Signs in with ${names.join(" & ")}` : null;
+        const names = (u.providers || []).map(p => p === "google" ? "Google" : p === "local" ? fb.t("fb.admin.provider-password", "Password") : p);
+        return names.length ? fb.t("fb.admin.signs-in-with", "Signs in with {names}", { names: names.join(" & ") }) : null;
     }
 
     _pendingRow(u, defaultQuota) {
         const row = this._head(u);
-        this._meta(row, [`Asked ${fb.format.dateTime(u.createdAt)}`, this._providers(u)]);
+        this._meta(row, [fb.t("fb.admin.asked", "Asked {when}", { when: fb.format.dateTime(u.createdAt) }), this._providers(u)]);
         const actions = document.createElement("div");
         actions.className = "toolbar user-actions";
         const quota = fb.accounts.quotaField(defaultQuota);
-        const approve = this._button("Approve", "btn primary");
-        const reject = this._button("Reject", "btn");
-        const block = this._button("Block", "btn danger");
+        const approve = this._button(fb.t("fb.admin.approve", "Approve"), "btn primary");
+        const reject = this._button(fb.t("fb.admin.reject", "Reject"), "btn");
+        const block = this._button(fb.t("fb.admin.block", "Block"), "btn danger");
         approve.addEventListener("click", () => fb.accounts.approve(u, fb.accounts.readQuota(quota)));
         reject.addEventListener("click", () => fb.accounts.reject(u));
         block.addEventListener("click", () => fb.accounts.block(u));
@@ -202,14 +201,14 @@ class FbUsersAdminView extends HTMLElement {
 
     _userRow(u) {
         const row = this._head(u);
-        if (u.isAdmin) this._tag(row, "Admin");
-        if (u.self) this._tag(row, "You");
-        if (u.state === "blocked") this._tag(row, "Blocked", true);
-        if (u.state === "disabled") this._tag(row, "Disabled", true);
+        if (u.isAdmin) this._tag(row, fb.t("fb.admin.tag-admin", "Admin"));
+        if (u.self) this._tag(row, fb.t("fb.admin.tag-you", "You"));
+        if (u.state === "blocked") this._tag(row, fb.t("fb.admin.tag-blocked", "Blocked"), true);
+        if (u.state === "disabled") this._tag(row, fb.t("fb.admin.tag-disabled", "Disabled"), true);
         this._meta(row, [
             this._providers(u),
-            `Storage ${fb.accounts.formatBytes(u.quotaBytes)}`,
-            u.lastSignInAt ? `Last sign-in ${fb.format.dateTime(u.lastSignInAt)}` : "Never signed in since the upgrade",
+            fb.t("fb.admin.storage", "Storage {size}", { size: fb.accounts.formatBytes(u.quotaBytes) }),
+            u.lastSignInAt ? fb.t("fb.admin.last-sign-in", "Last sign-in {when}", { when: fb.format.dateTime(u.lastSignInAt) }) : fb.t("fb.admin.never-signed-in", "Never signed in since the upgrade"),
         ]);
         row.appendChild(this._menu(u));
         return row;
@@ -226,7 +225,7 @@ class FbUsersAdminView extends HTMLElement {
         trigger.slot = "trigger";
         trigger.type = "button";
         trigger.className = "icon-btn";
-        trigger.title = `Manage ${u.name || u.email || "account"}`;
+        trigger.title = fb.t("fb.admin.manage", "Manage {name}", { name: u.name || u.email || fb.t("fb.admin.account", "account") });
         trigger.setAttribute("aria-label", trigger.title);
         const more = document.createElement("sac-icon");
         more.setAttribute("name", "more");
@@ -243,17 +242,17 @@ class FbUsersAdminView extends HTMLElement {
             menu.appendChild(b);
         };
         const active = u.state === "active";
-        item("quota", "Storage…", "backup");
-        if ((u.providers || []).includes("local") && u.state !== "blocked") item("reset", "Reset password", "key");
-        if (active && !u.isAdmin) item("admin-on", "Make admin", "star");
-        if (u.isAdmin) item("admin-off", "Remove admin", "star");
+        item("quota", fb.t("fb.admin.menu-storage", "Storage…"), "backup");
+        if ((u.providers || []).includes("local") && u.state !== "blocked") item("reset", fb.t("fb.admin.menu-reset", "Reset password"), "key");
+        if (active && !u.isAdmin) item("admin-on", fb.t("fb.admin.menu-admin-on", "Make admin"), "star");
+        if (u.isAdmin) item("admin-off", fb.t("fb.admin.menu-admin-off", "Remove admin"), "star");
         if (!u.self) {
             menu.appendChild(document.createElement("hr"));
-            if (active) item("disable", "Disable", "lock", true);
-            if (u.state === "disabled") item("enable", "Enable", "unlock");
-            if (u.state === "blocked") item("unblock", "Unblock", "unlock");
-            else item("block", "Block", "close", true);
-            item("delete", "Delete…", "trash", true);
+            if (active) item("disable", fb.t("fb.admin.menu-disable", "Disable"), "lock", true);
+            if (u.state === "disabled") item("enable", fb.t("fb.admin.menu-enable", "Enable"), "unlock");
+            if (u.state === "blocked") item("unblock", fb.t("fb.admin.menu-unblock", "Unblock"), "unlock");
+            else item("block", fb.t("fb.admin.menu-block", "Block"), "close", true);
+            item("delete", fb.t("fb.admin.menu-delete", "Delete…"), "trash", true);
         }
 
         const acts = {

@@ -334,6 +334,24 @@ public class AdminManageApiTests : IClassFixture<WebApplicationFactory<Program>>
         Assert.False(_bot.Sent.ContainsKey("boss"));
     }
 
+    // The chat line follows the recipient's UI language; automatic is English.
+    [Fact]
+    public async Task SubjectLine_IsInTheRecipientsLanguage()
+    {
+        await SeedAdminAsync("boss");
+        await _system.CreateUserAsync("jana", "Jana", null, null, Ct);
+        await _admin.SetStateAsync("jana", UserStates.Pending, Ct);
+        await _system.SetLanguageAsync("jana", "de", Ct);
+        await new NotificationChannelRepository(_db).UpsertAsync("jana", _bot.Name, "dm-jana", Ct);
+
+        Assert.Equal(HttpStatusCode.OK, (await As("boss").PostAsync("/api/v1/admin/users/jana/approve", null, Ct)).StatusCode);
+
+        var sent = await _bot.WaitForAsync("jana");
+        Assert.Equal(SystemMessageNotifier.SubjectFor(MessageKinds.UserApproved, "de"), sent);
+        Assert.Contains("freigegeben", sent);
+        Assert.Equal(SystemMessageNotifier.SubjectFor("x", null), SystemMessageNotifier.SubjectFor("x", "en"));
+    }
+
     [Fact]
     public async Task AFailingBot_NeverBlocksTheMessage()
     {

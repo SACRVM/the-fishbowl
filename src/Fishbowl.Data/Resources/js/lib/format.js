@@ -13,7 +13,7 @@
  *   uk   25/09/2026 20:00
  *   us   09/25/2026 8:00 PM
  *
- * Month and weekday *names* follow the UI language (English), not the format.
+ * Month and weekday *names* follow the UI language (sac.lang), not the format.
  *
  * Inputs are the kit's <sac-date-field> + <sac-time-field>. The chosen
  * format drives them page-wide through sac.regional (fb.format.set maps it:
@@ -30,7 +30,8 @@
         uk:  { order: "dmy", sep: "/", h12: false, kit: "dmy/" },
         us:  { order: "mdy", sep: "/", h12: true,  kit: "mdy/" },
     };
-    const NAMES = "en-GB";   // month/weekday names: the UI's language
+    // Month/weekday names: the UI's language, never the date format.
+    const namesLocale = () => (window.sac?.lang?.get?.() === "de" ? "de-DE" : "en-GB");
     const KEY = "fb.dateFormat";
 
     let name = "iso";
@@ -67,7 +68,27 @@
              : `${m}${sep}${day}`;
     }
 
+    // Numbers follow the UI LANGUAGE (decimal comma in German), not the
+    // date format: "20,0 GB". `digits` fixed, or { min, max } fraction digits.
+    function num(v, digits = 0) {
+        const { min, max } = typeof digits === "number" ? { min: digits, max: digits } : digits;
+        const locale = window.sac?.lang?.locale?.() || "en";
+        return new Intl.NumberFormat(locale, { minimumFractionDigits: min, maximumFractionDigits: max, useGrouping: false }).format(v);
+    }
+
+    /** Bytes as people say them: "512 B", "3,4 MB", "20 GB" (one decimal below 10). */
+    function bytes(n) {
+        n = Number(n) || 0;
+        if (n < 1024) return `${n} B`;
+        const units = ["KB", "MB", "GB", "TB"];
+        let v = n / 1024, i = 0;
+        while (v >= 1024 && i < units.length - 1) { v /= 1024; i++; }
+        return `${num(v, v < 10 ? 1 : 0)} ${units[i]}`;
+    }
+
     const api = {
+        num,
+        bytes,
         NAMES: Object.keys(PATTERNS),
         get name() { return name; },
 
@@ -85,8 +106,8 @@
         time,
         dayMonth,
         dateTime: (d) => `${date(d)} ${time(d)}`,
-        weekday:  (d) => toDate(d).toLocaleDateString(NAMES, { weekday: "short" }),
-        monthYear: (d) => toDate(d).toLocaleDateString(NAMES, { month: "long", year: "numeric" }),
+        weekday:  (d) => toDate(d).toLocaleDateString(namesLocale(), { weekday: "short" }),
+        monthYear: (d) => toDate(d).toLocaleDateString(namesLocale(), { month: "long", year: "numeric" }),
 
         /** An example of `formatName` for a settings list ("25.09.2026 20:00"). */
         example(formatName, d = new Date()) {
