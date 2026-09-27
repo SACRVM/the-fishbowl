@@ -29,6 +29,20 @@ public interface IUserAdminRepository
     // (false) for anything but a pending account.
     Task<bool> DeletePendingAsync(string userId, CancellationToken ct = default);
 
+    // Spaces where this account is the only owner — they must be handed over
+    // or deleted before the account can go (admin spec § Delete).
+    Task<IReadOnlyList<OwnedSpaceRow>> ListSolelyOwnedSpacesAsync(string userId, CancellationToken ct = default);
+
+    // Removes an account from system.db in one transaction: its sign-in
+    // mappings, API keys (its own and its apps'), notification channels,
+    // Discord link codes, space memberships, messages addressed to it, its
+    // per-user config latches, and the users row — and leaves a tombstone in
+    // deleted_users. The folder is the caller's (archive, then delete).
+    Task<bool> DeleteUserAsync(string userId, CancellationToken ct = default);
+
+    // True for an id whose account was deleted.
+    Task<bool> IsDeletedAsync(string userId, CancellationToken ct = default);
+
     Task RecordAdminActionAsync(string actorId, string action, string? targetType, string? targetId, CancellationToken ct = default);
 
     Task<IReadOnlyList<AdminAuditEntry>> ListAuditAsync(int limit = 200, CancellationToken ct = default);
@@ -47,6 +61,8 @@ public sealed record AdminUserRow(
     DateTime CreatedAt,
     DateTime? LastSignInAt,
     DateTime? ApprovedAt);
+
+public sealed record OwnedSpaceRow(string Id, string Slug, string Name);
 
 public sealed record AdminAuditEntry(
     string Id,

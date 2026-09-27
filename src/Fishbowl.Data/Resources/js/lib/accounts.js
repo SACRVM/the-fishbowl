@@ -2,7 +2,8 @@
  * Fishbowl — fb.accounts: what the Messages and Users views share about
  * accounts. The quota field of an approval, the approve / reject / block
  * flows (confirm → API → toast), managing an account that exists (add a
- * local user, reset a password, quota, admin, disable — A2), and the
+ * local user, reset a password, quota, admin, disable — A2; delete with
+ * archive — A3), and the
  * registration of the admin-only routes, which shell.js calls once /me says
  * the user is an admin, so for everyone else those routes don't exist.
  */
@@ -296,6 +297,93 @@
         }
     }
 
+    /* ------------------------------------------------------ lifecycle (A3) -- */
+
+    /**
+     * Delete an account. The dialog first asks the server what stands in the
+     * way: spaces this account alone owns must be handed over or deleted
+     * first (listed, and there's no Delete button then). Otherwise "Archive
+     * their data first" is checked by default — a ZIP of their whole folder,
+     * kept like archived spaces. Resolves true when the account is gone.
+     */
+    async function deleteUser(user) {
+        let check;
+        try {
+            check = await fb.api.admin.deleteCheck(user.id);
+        } catch (err) {
+            return failed(err, "Couldn't check the account.");
+        }
+        const blocked = (check.ownedSpaces || []).length > 0;
+        const choice = await new Promise((resolve) => {
+            const dlg = document.createElement("sac-dialog");
+            dlg.setAttribute("title", `Delete ${who(user)}?`);
+            dlg.style.setProperty("--dialog-width", "460px");
+            dlg.buttons = blocked
+                ? [{ action: "cancel", label: "Close", kind: "default" }]
+                : [
+                    { action: "cancel", label: "Cancel", kind: "default" },
+                    { action: "delete", label: "Delete account", kind: "destructive", armAfterMs: 1500 },
+                ];
+            const body = document.createElement("div");
+            body.className = "fb-user-delete";
+            if (blocked) {
+                const p = document.createElement("p");
+                p.textContent = "They are the only owner of these spaces. Make someone else an owner, or delete the spaces, first:";
+                const list = document.createElement("ul");
+                list.className = "fb-user-delete-spaces";
+                for (const s of check.ownedSpaces) {
+                    const li = document.createElement("li");
+                    li.textContent = s.name;
+                    list.appendChild(li);
+                }
+                body.append(p, list);
+            } else {
+                body.innerHTML = `
+                    <p>Their sign-ins, API keys, space memberships and their personal workspace —
+                        notes, todos, events, files — are removed.</p>
+                    <label class="fb-check">
+                        <input type="checkbox" name="archive" checked>
+                        <span>Archive their data first</span>
+                    </label>
+                    <p class="fb-user-delete-hint"></p>`;
+                const box = body.querySelector("input[name=archive]");
+                const hint = body.querySelector(".fb-user-delete-hint");
+                const paint = () => {
+                    hint.textContent = box.checked
+                        ? "A ZIP of their whole folder stays on the server for the archive retention time (System shows it). Nobody opens it here."
+                        : "Nothing is kept. This can't be undone.";
+                };
+                box.addEventListener("change", paint);
+                paint();
+                if (!check.hasData) {
+                    box.checked = false;
+                    box.disabled = true;
+                    hint.textContent = "They never stored anything, so there's nothing to archive.";
+                }
+            }
+            dlg.appendChild(body);
+            dlg.addEventListener("sac:action", (e) => {
+                const action = e.detail?.action;
+                const archive = body.querySelector("input[name=archive]")?.checked ?? false;
+                setTimeout(() => dlg.remove(), 120);
+                resolve(action === "delete" ? { archive } : null);
+            }, { once: true });
+            document.body.appendChild(dlg);
+            setTimeout(() => dlg.open(), 0);
+        });
+        if (!choice) return false;
+        try {
+            await fb.api.admin.deleteUser(user.id, { archive: choice.archive });
+            window.sac?.toast?.(choice.archive
+                ? `${who(user)} was archived and deleted.`
+                : `${who(user)} was deleted.`, { kind: "success" });
+            return true;
+        } catch (err) {
+            if (err?.status === 507) return failed(err, "Not enough disk space for the archive — nothing was deleted.");
+            return failed(err, "Couldn't delete the account.");
+        }
+    }
+
     function errorText(err, fallback) {
         try {
             const body = JSON.parse(err?.body || "{}");
@@ -312,6 +400,7 @@
         try {
             const body = JSON.parse(err?.body || "{}");
             if (body.error === "last-admin") msg = "That's the last admin — make someone else an admin first.";
+            else if (body.error === "owns-spaces") msg = "They still own spaces alone — hand them over or delete them first.";
             else if (body.error === "not-pending") msg = "Someone already handled this request.";
             else if (body.error === "not-active") msg = "Only an active account can do that.";
             else if (typeof body.error === "string" && body.error.includes(" ")) msg = body.error;
@@ -327,10 +416,11 @@
         adminRegistered = true;
         sac.router.register("#/admin/users", "fb-users-admin-view", { label: "Users", icon: "users", palette: false });
         sac.router.register("#/admin/settings", "fb-system-settings-view", { label: "System settings", icon: "settings", palette: false });
+        sac.router.register("#/admin/system", "fb-system-view", { label: "System", icon: "info", palette: false });
     }
 
     fb.accounts = {
         formatBytes, quotaField, readQuota, approve, reject, block, unblock, registerAdminRoutes,
-        addLocalUser, resetPassword, setQuota, setAdmin, setDisabled, revealPassword,
+        addLocalUser, resetPassword, setQuota, setAdmin, setDisabled, revealPassword, deleteUser,
     };
 })();

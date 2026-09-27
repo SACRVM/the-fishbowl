@@ -20,6 +20,7 @@ public static class SignInRefusals
         Closed => "This Fishbowl isn't open for new accounts. Ask its admin to add you.",
         Blocked => "This account can't sign in to this Fishbowl.",
         Disabled => "This account is disabled. Ask the admin of this Fishbowl.",
+        "deleted" => "This account was deleted.",
         _ => "Sign-in refused.",
     };
 }

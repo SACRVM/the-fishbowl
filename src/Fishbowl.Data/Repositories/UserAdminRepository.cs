@@ -125,6 +125,56 @@ public class UserAdminRepository : IUserAdminRepository
         return true;
     }
 
+    public async Task<IReadOnlyList<OwnedSpaceRow>> ListSolelyOwnedSpacesAsync(string userId, CancellationToken ct = default)
+    {
+        using var db = _dbFactory.CreateSystemConnection();
+        var rows = await db.QueryAsync<OwnedSpaceRow>(new CommandDefinition(@"
+            SELECT s.id AS Id, s.slug AS Slug, s.name AS Name
+            FROM spaces s
+            JOIN space_members m ON m.space_id = s.id AND m.user_id = @userId AND m.role = 'owner'
+            WHERE NOT EXISTS (
+                SELECT 1 FROM space_members o
+                WHERE o.space_id = s.id AND o.role = 'owner' AND o.user_id <> @userId)
+            ORDER BY s.name COLLATE NOCASE", new { userId }, cancellationToken: ct));
+        return rows.ToList();
+    }
+
+    public async Task<bool> DeleteUserAsync(string userId, CancellationToken ct = default)
+    {
+        using var db = _dbFactory.CreateSystemConnection();
+        if (db.State != System.Data.ConnectionState.Open) db.Open();
+        using var tx = db.BeginTransaction();
+        var exists = await db.ExecuteScalarAsync<long>(new CommandDefinition(
+            "SELECT COUNT(*) FROM users WHERE id = @userId", new { userId }, tx, cancellationToken: ct));
+        if (exists == 0)
+        {
+            tx.Rollback();
+            return false;
+        }
+        foreach (var sql in new[]
+        {
+            "DELETE FROM api_keys WHERE user_id = @userId OR (owner_type = 'user' AND owner_id = @userId) OR (context_type = 'user' AND context_id = @userId)",
+            "DELETE FROM notification_channels WHERE user_id = @userId",
+            "DELETE FROM discord_link_codes WHERE user_id = @userId",
+            "DELETE FROM space_members WHERE user_id = @userId",
+            "DELETE FROM messages WHERE recipient_id = @userId",
+            "DELETE FROM system_config WHERE key IN ('Digest:LastSent:' || @userId, 'Files:QuotaWarned:' || @userId)",
+            "DELETE FROM user_mappings WHERE user_id = @userId",
+            "DELETE FROM users WHERE id = @userId",
+            "INSERT OR REPLACE INTO deleted_users (id, deleted_at) VALUES (@userId, @now)",
+        })
+            await db.ExecuteAsync(new CommandDefinition(sql, new { userId, now = DateTime.UtcNow.ToString("o") }, tx, cancellationToken: ct));
+        tx.Commit();
+        return true;
+    }
+
+    public async Task<bool> IsDeletedAsync(string userId, CancellationToken ct = default)
+    {
+        using var db = _dbFactory.CreateSystemConnection();
+        return await db.ExecuteScalarAsync<long>(new CommandDefinition(
+            "SELECT COUNT(*) FROM deleted_users WHERE id = @userId", new { userId }, cancellationToken: ct)) > 0;
+    }
+
     public async Task RecordAdminActionAsync(string actorId, string action, string? targetType, string? targetId, CancellationToken ct = default)
     {
         using var db = _dbFactory.CreateSystemConnection();

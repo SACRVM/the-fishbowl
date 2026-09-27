@@ -76,6 +76,8 @@ public class DatabaseFactoryTests : IDisposable
         Assert.Contains("api_keys", tables);
         Assert.Contains("notification_channels", tables);
         Assert.Contains("discord_link_codes", tables);
+        // V12: tombstones of deleted accounts (admin A3).
+        Assert.Contains("deleted_users", tables);
 
         // V5 + V6 added local-auth columns + the must-change flag to users.
         var userColumns = connection.Query<string>(
@@ -90,7 +92,7 @@ public class DatabaseFactoryTests : IDisposable
         Assert.Contains("last_sign_in_at", userColumns);
 
         var version = connection.ExecuteScalar<long>("PRAGMA user_version");
-        Assert.Equal(11, version);
+        Assert.Equal(12, version);
     }
 
     [Fact]

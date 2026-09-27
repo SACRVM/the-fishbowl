@@ -24,13 +24,15 @@ public class FilesMaintenanceService : BackgroundService
     private readonly IServiceScopeFactory _scopes;
     private readonly DatabaseFactory _dbFactory;
     private readonly ILogger<FilesMaintenanceService> _logger;
+    private readonly SchedulerStatus? _status;
 
     public FilesMaintenanceService(IServiceScopeFactory scopes, DatabaseFactory dbFactory,
-        ILogger<FilesMaintenanceService>? logger = null)
+        ILogger<FilesMaintenanceService>? logger = null, SchedulerStatus? status = null)
     {
         _scopes = scopes;
         _dbFactory = dbFactory;
         _logger = logger ?? NullLogger<FilesMaintenanceService>.Instance;
+        _status = status;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -81,14 +83,18 @@ public class FilesMaintenanceService : BackgroundService
         }
         if (done > 0) _logger.LogInformation("Files maintenance ran for {Count} workspaces", done);
 
-        // Archived spaces past Archive:RetentionDays, and leftover folders.
+        // Archived spaces and accounts past Archive:RetentionDays, and
+        // leftover folders.
         try
         {
             using var scope = _scopes.CreateScope();
             await scope.ServiceProvider.GetRequiredService<ISpaceArchiveService>().PurgeAsync(ct);
+            var users = scope.ServiceProvider.GetService<IUserArchiveService>();
+            if (users is not null) await users.PurgeAsync(ct);
         }
         catch (OperationCanceledException) { throw; }
         catch (Exception ex) { _logger.LogWarning(ex, "Archive purge failed — will retry next interval"); }
+        _status?.MarkMaintenance(DateTime.UtcNow);
         return done;
     }
 }

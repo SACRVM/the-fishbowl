@@ -132,6 +132,7 @@ public class AdminTests
             await Assertions.Expect(page.Locator("#fb-messages-btn")).ToBeVisibleAsync();
             Assert.False(await page.EvaluateAsync<bool>("() => sac.router.routes().some(r => r.hash === '#/admin/users')"));
             Assert.False(await page.EvaluateAsync<bool>("() => sac.router.routes().some(r => r.hash === '#/admin/settings')"));
+            Assert.False(await page.EvaluateAsync<bool>("() => sac.router.routes().some(r => r.hash === '#/admin/system')"));
             await Assertions.Expect(page.Locator("fb-hub-view a.tile[href*='admin']")).ToHaveCountAsync(0);
             await Assertions.Expect(page.Locator("fb-users-admin-view")).ToHaveCountAsync(0);
             await Assertions.Expect(page.Locator("fb-hub-view")).ToBeVisibleAsync();
@@ -233,6 +234,114 @@ public class AdminTests
         finally
         {
             await context.CloseAsync();
+        }
+    }
+
+    // A3: Delete… lists the spaces the account alone owns and offers no
+    // Delete then; otherwise "Archive their data first" is checked and the
+    // account, its folder and its row go.
+    [Fact]
+    public async Task Admin_DeletesAnAccount_ArchiveFirst_BlockedByOwnedSpaces_Test()
+    {
+        var (db, system, _, _) = Repos();
+        var shot = Path.Combine(Path.GetTempPath(), "a3-final");
+        Directory.CreateDirectory(shot);
+
+        var owner = "ui-owner-" + Guid.NewGuid().ToString("N")[..8];
+        var ownerName = "Owner " + owner[^4..];
+        await system.CreateUserAsync(owner, ownerName, owner + "@example.com", null, Ct);
+        var spaceName = "Solo " + owner[^4..];
+        using (var sys = db.CreateSystemConnection())
+        {
+            var now = DateTime.UtcNow.ToString("o");
+            sys.Execute("INSERT INTO spaces (id, slug, name, created_by, created_at) VALUES (@id, @slug, @name, @owner, @now)",
+                new { id = "sp-" + owner, slug = "solo-" + owner[^8..], name = spaceName, owner, now });
+            sys.Execute("INSERT INTO space_members (space_id, user_id, role, joined_at) VALUES (@id, @owner, 'owner', @now)",
+                new { id = "sp-" + owner, owner, now });
+        }
+
+        var gone = "ui-gone-" + Guid.NewGuid().ToString("N")[..8];
+        var goneName = "Leaving " + gone[^4..];
+        await system.CreateUserAsync(gone, goneName, gone + "@example.com", null, Ct);
+        using (var conn = db.CreateContextConnection(Fishbowl.Core.ContextRef.User(gone)))
+            conn.Execute("INSERT INTO notes (id, title, created_by, created_at, updated_at) VALUES ('n', 't', @u, @now, @now)",
+                new { u = gone, now = DateTime.UtcNow.ToString("o") });
+        Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
+
+        var context = await _fixture.Browser!.NewContextAsync(new BrowserNewContextOptions { IgnoreHTTPSErrors = true });
+        var page = await context.NewPageAsync();
+        try
+        {
+            await page.GotoAsync(_fixture.BaseUrl + "/#/admin/users");
+
+            // Blocked: the dialog lists the space and only closes.
+            var ownerRow = Row(page, ownerName);
+            await Assertions.Expect(ownerRow).ToHaveCountAsync(1, new() { Timeout = 5000 });
+            await ChooseAsync(page, ownerRow, "delete");
+            var blocked = page.Locator("sac-dialog[open]");
+            await Assertions.Expect(blocked.Locator(".fb-user-delete-spaces li")).ToHaveTextAsync(spaceName, new() { Timeout = 5000 });
+            await Assertions.Expect(blocked.GetByRole(AriaRole.Button, new() { Name = "Delete account" })).ToHaveCountAsync(0);
+            await page.ScreenshotAsync(new PageScreenshotOptions { Path = Path.Combine(shot, "desk-delete-blocked.png") });
+            await blocked.GetByRole(AriaRole.Button, new() { Name = "Close" }).ClickAsync();
+            Assert.NotNull(await system.GetUserAsync(owner, Ct));
+
+            // Allowed: archive is checked by default.
+            var row = Row(page, goneName);
+            await ChooseAsync(page, row, "delete");
+            var dlg = page.Locator("sac-dialog[open]");
+            await Assertions.Expect(dlg.Locator("input[name=archive]")).ToBeCheckedAsync(new() { Timeout = 5000 });
+            await page.ScreenshotAsync(new PageScreenshotOptions { Path = Path.Combine(shot, "desk-delete-dialog.png") });
+            await dlg.GetByRole(AriaRole.Button, new() { Name = "Delete account" }).ClickAsync();
+            await Assertions.Expect(page.Locator("#sac-toast-stack").GetByText("was archived and deleted").First)
+                .ToBeVisibleAsync(new() { Timeout = 10000 });
+            await Assertions.Expect(row).ToHaveCountAsync(0, new() { Timeout = 5000 });
+            Assert.Null(await system.GetUserAsync(gone, Ct));
+            Assert.False(Directory.Exists(db.ResolveContextFolder(Fishbowl.Core.ContextRef.User(gone))));
+            Assert.Contains(Directory.EnumerateFiles(Path.Combine(_fixture.DataDir, "archive", "users"), "*.zip"),
+                f => Path.GetFileName(f).StartsWith(gone + "-", StringComparison.Ordinal));
+
+            await ChooseAsync(page, ownerRow, "quota");   // the menu still works after a refresh
+            await page.Keyboard.PressAsync("Escape");
+            await page.ScreenshotAsync(new PageScreenshotOptions { Path = Path.Combine(shot, "desk-users.png"), FullPage = true });
+        }
+        finally
+        {
+            await context.CloseAsync();
+        }
+    }
+
+    [Fact]
+    public async Task Admin_SeesTheSystemPage_WithVersionSizesAndArchives_Test()
+    {
+        var shot = Path.Combine(Path.GetTempPath(), "a3-final");
+        Directory.CreateDirectory(shot);
+        foreach (var (w, h, tag, mobile) in new[] { (1400, 900, "desk", false), (390, 800, "phone", true) })
+        {
+            var context = await _fixture.Browser!.NewContextAsync(new BrowserNewContextOptions
+            {
+                IgnoreHTTPSErrors = true,
+                ViewportSize = new ViewportSize { Width = w, Height = h },
+                IsMobile = mobile,
+                HasTouch = mobile,
+            });
+            var page = await context.NewPageAsync();
+            try
+            {
+                await page.GotoAsync(_fixture.BaseUrl + "/#/admin/system");
+                var view = page.Locator("fb-system-view");
+                await Assertions.Expect(view.Locator(".fb-row[data-key='version'] .fb-row-meta")).Not.ToBeEmptyAsync(new() { Timeout = 5000 });
+                await Assertions.Expect(view.Locator(".fb-row[data-key='users'] .fb-row-meta")).ToContainTextAsync("account");
+                await Assertions.Expect(view.Locator(".fb-row[data-key='archived-users']")).ToBeVisibleAsync();
+                await Assertions.Expect(view.Locator(".fb-row[data-key='embedding'] .fb-row-meta")).Not.ToBeEmptyAsync();
+                await page.ScreenshotAsync(new PageScreenshotOptions { Path = Path.Combine(shot, $"{tag}-system.png"), FullPage = true });
+                // The desktop has its tile, for admins.
+                await page.GotoAsync(_fixture.BaseUrl + "/#/");
+                await Assertions.Expect(page.Locator("fb-hub-view a.tile[href='#/admin/system']")).ToBeVisibleAsync(new() { Timeout = 5000 });
+            }
+            finally
+            {
+                await context.CloseAsync();
+            }
         }
     }
 

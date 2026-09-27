@@ -10,6 +10,9 @@ public static class VersionApi
     // Read once at startup — the assembly can't change under a running process.
     private static readonly string RunningVersion = ResolveVersion();
 
+    // The same string /api/v1/version reports (the admin System page shows it too).
+    public static string Running => RunningVersion;
+
     public static RouteGroupBuilder MapVersionApi(this IEndpointRouteBuilder routes)
     {
         var group = routes.MapGroup("/api/v1");

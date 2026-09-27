@@ -16,6 +16,8 @@ public static class ServiceCollectionExtensions
     public static IServiceCollection AddFishbowlScheduler(this IServiceCollection services)
     {
         services.AddScoped<IReminderRepository, ReminderRepository>();
+        // When the jobs last ran — the admin's System page reads it.
+        services.AddSingleton<Fishbowl.Core.SchedulerStatus>();
         services.AddHostedService<ReminderDispatcher>();
         services.AddHostedService<DailyDigestDispatcher>();
         // Needs IFileService (registered by the host).

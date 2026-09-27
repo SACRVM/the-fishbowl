@@ -33,14 +33,17 @@ public class ReminderDispatcher : BackgroundService
 
     private readonly IServiceScopeFactory _scopes;
     private readonly ILogger<ReminderDispatcher> _logger;
+    private readonly SchedulerStatus? _status;
     private DateTime _lastTickUtc;
 
     public ReminderDispatcher(
         IServiceScopeFactory scopes,
-        ILogger<ReminderDispatcher>? logger = null)
+        ILogger<ReminderDispatcher>? logger = null,
+        SchedulerStatus? status = null)
     {
         _scopes = scopes;
         _logger = logger ?? NullLogger<ReminderDispatcher>.Instance;
+        _status = status;
         // First tick covers the catch-up window so a restart doesn't drop
         // notifications that became due during the downtime.
         _lastTickUtc = DateTime.UtcNow - CatchUpWindow;
@@ -78,6 +81,7 @@ public class ReminderDispatcher : BackgroundService
             }
 
             _lastTickUtc = tickStart;
+            _status?.MarkReminderTick(tickStart);
 
             try { await Task.Delay(TickInterval, stoppingToken); }
             catch (OperationCanceledException) { break; }

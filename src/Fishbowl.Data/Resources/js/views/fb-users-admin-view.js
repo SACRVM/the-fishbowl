@@ -9,7 +9,8 @@
  * in, their state and quota, when they last signed in. Never what they
  * store — the admin runs the instance, not the people on it. Each account
  * has a "…" menu (A2): Storage…, Reset password (local sign-in only),
- * Make / Remove admin, Disable / Enable, Block / Unblock. "Add local user"
+ * Make / Remove admin, Disable / Enable, Block / Unblock, Delete… (A3,
+ * archive first by default; blocked while they alone own a space). "Add local user"
  * is the page's action in the nav toolbar.
  *
  * Personal only: in a space the page says so and points back to Personal.
@@ -57,6 +58,9 @@ class FbUsersAdminView extends HTMLElement {
                 .fb-add-optional { color: var(--text-muted); font-weight: 400; }
                 .fb-add-quota { margin-top: 12px; }
                 .fb-add-error { margin: 10px 0 0; color: var(--danger-text); font-size: 13px; }
+                .fb-user-delete p { margin: 0 0 12px; }
+                .fb-user-delete-spaces { margin: 0 0 4px; padding-left: 1.2rem; }
+                .fb-user-delete-hint { margin: 10px 0 0 !important; font-size: 13px; color: var(--text-muted); }
             </style>
             <header><div>
                 <h1>Users</h1>
@@ -249,6 +253,7 @@ class FbUsersAdminView extends HTMLElement {
             if (u.state === "disabled") item("enable", "Enable", "unlock");
             if (u.state === "blocked") item("unblock", "Unblock", "unlock");
             else item("block", "Block", "close", true);
+            item("delete", "Delete…", "trash", true);
         }
 
         const acts = {
@@ -260,6 +265,7 @@ class FbUsersAdminView extends HTMLElement {
             enable: () => fb.accounts.setDisabled(u, false),
             block: () => fb.accounts.block(u),
             unblock: () => fb.accounts.unblock(u),
+            delete: () => fb.accounts.deleteUser(u),
         };
         menu.addEventListener("sac:select", async (e) => {
             const run = acts[e.detail.action];

@@ -3,10 +3,12 @@ using System.Text.Json;
 using Dapper;
 using Fishbowl.Core;
 using Fishbowl.Core.Auth;
+using Fishbowl.Core.Files;
 using Fishbowl.Core.Mcp;
 using Fishbowl.Core.Models;
 using Fishbowl.Core.Repositories;
 using Fishbowl.Data;
+using Fishbowl.Data.Files;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
@@ -381,6 +383,7 @@ public static class AdminApi
         .RequireAuthorization();
 
         MapManage(group);
+        MapLifecycle(group);
     }
 
     // A2 — managing accounts that exist: add a local user, change the quota,
@@ -556,6 +559,156 @@ public static class AdminApi
         .RequireAuthorization();
     }
 
+    // A3 — lifecycle: deleting an account (archive first by default) and the
+    // System page's facts. Metadata only, like everything here: the archive
+    // is a server-side copy the admin never opens.
+    private static void MapLifecycle(RouteGroupBuilder group)
+    {
+        // What the delete dialog needs to know before it offers the button.
+        group.MapGet("/users/{userId}/delete-check", async (
+            string userId,
+            ClaimsPrincipal caller,
+            ISystemRepository system,
+            IUserAdminRepository admin,
+            DatabaseFactory dbFactory,
+            CancellationToken ct) =>
+        {
+            if (!await IsCookieAdminAsync(caller, system, ct)) return Results.Forbid();
+            var target = await system.GetUserAsync(userId, ct);
+            if (target is null) return Results.NotFound(new { error = "No such user." });
+            var owned = await admin.ListSolelyOwnedSpacesAsync(userId, ct);
+            var lastAdmin = target.IsAdmin && target.State == UserStates.Active
+                && await admin.CountActiveAdminsAsync(ct) <= 1;
+            return Results.Ok(new
+            {
+                id = userId,
+                self = userId == ActorId(caller),
+                lastAdmin,
+                hasData = Directory.Exists(dbFactory.ResolveContextFolder(ContextRef.User(userId))),
+                ownedSpaces = owned.Select(sp => new { slug = sp.Slug, name = sp.Name }),
+            });
+        })
+        .WithName("CheckDeleteUser")
+        .WithSummary("Whether an account can be deleted now: yourself, the last admin, and the spaces it alone owns block it.")
+        .RequireAuthorization();
+
+        // DELETE /users/{id}?archive=true|false — archive defaults to true.
+        group.MapDelete("/users/{userId}", async (
+            string userId,
+            bool? archive,
+            ClaimsPrincipal caller,
+            ISystemRepository system,
+            IUserAdminRepository admin,
+            IMessageRepository messages,
+            IUserArchiveService archiver,
+            CancellationToken ct) =>
+        {
+            if (!await IsCookieAdminAsync(caller, system, ct)) return Results.Forbid();
+            var actor = ActorId(caller);
+            if (userId == actor) return Results.BadRequest(new { error = "You can't delete yourself." });
+            var target = await system.GetUserAsync(userId, ct);
+            if (target is null) return Results.NotFound(new { error = "No such user." });
+            if (target.IsAdmin && target.State == UserStates.Active && await admin.CountActiveAdminsAsync(ct) <= 1)
+                return Results.Conflict(new { error = "last-admin" });
+            var owned = await admin.ListSolelyOwnedSpacesAsync(userId, ct);
+            if (owned.Count > 0)
+                return Results.Conflict(new
+                {
+                    error = "owns-spaces",
+                    spaces = owned.Select(sp => new { slug = sp.Slug, name = sp.Name }),
+                });
+
+            // Archive first: only a verified ZIP lets the delete go on.
+            ArchivedUser? archived = null;
+            if (archive != false)
+            {
+                try { archived = await archiver.ArchiveAsync(userId, target.Name, target.CreatedAt, actor, ct); }
+                catch (FileStoreException ex) { return FilesApi.Fail(ex); }
+            }
+
+            await messages.ResolveAsync(MessageKinds.UserPending, "user", userId, ct);
+            if (!await admin.DeleteUserAsync(userId, ct))
+                return Results.NotFound(new { error = "No such user." });
+            await archiver.DeleteUserFolderAsync(userId, ct);
+            await admin.RecordAdminActionAsync(actor, AdminActions.Delete, "user", userId, ct);
+
+            return Results.Ok(new
+            {
+                id = userId,
+                archive = archived is null ? null : new
+                {
+                    id = archived.Id,
+                    sizeBytes = archived.SizeBytes,
+                    expiresAt = archived.ExpiresAt,
+                },
+            });
+        })
+        .WithName("DeleteUser")
+        .WithSummary("Deletes an account: archives users/<id>/ first unless ?archive=false, then removes its rows, keys, memberships and folder.")
+        .RequireAuthorization();
+
+        group.MapGet("/system", async (
+            HttpContext http,
+            ClaimsPrincipal caller,
+            ISystemRepository system,
+            DatabaseFactory dbFactory,
+            IUserArchiveService userArchives,
+            CancellationToken ct) =>
+        {
+            if (!await IsCookieAdminAsync(caller, system, ct)) return Results.Forbid();
+            var dataRoot = Path.GetDirectoryName(dbFactory.UsersRoot)!;
+
+            var userCount = (await system.ListUserIdsAsync(ct)).Count;
+            long spaceCount;
+            using (var sys = dbFactory.CreateSystemConnection())
+                spaceCount = await sys.ExecuteScalarAsync<long>(new CommandDefinition("SELECT COUNT(*) FROM spaces", cancellationToken: ct));
+
+            var systemBytes = Directory.EnumerateFiles(dataRoot, "system.db*").Sum(f => new FileInfo(f).Length);
+            var userArchiveList = await userArchives.ListAsync(ct);
+            var spaceZips = ZipsIn(Path.Combine(dataRoot, "archive", "spaces"));
+            var retention = await system.GetConfigAsync(DataLifecycleLimits.ArchiveRetentionDaysKey, ct);
+
+            var downloader = http.RequestServices.GetService(typeof(Fishbowl.Search.ModelDownloader)) as Fishbowl.Search.ModelDownloader;
+            var status = http.RequestServices.GetService(typeof(SchedulerStatus)) as SchedulerStatus;
+
+            return Results.Ok(new
+            {
+                version = VersionApi.Running,
+                data = new
+                {
+                    users = new { count = userCount, bytes = DiskFileStore.Measure(dbFactory.UsersRoot).Bytes },
+                    spaces = new { count = spaceCount, bytes = DiskFileStore.Measure(dbFactory.SpacesRoot).Bytes },
+                    systemBytes,
+                    modelsBytes = DiskFileStore.Measure(Path.Combine(dataRoot, "models")).Bytes,
+                    logsBytes = DiskFileStore.Measure(Path.Combine(dataRoot, "logs")).Bytes,
+                },
+                archives = new
+                {
+                    spaces = new { count = spaceZips.Count, bytes = spaceZips.Sum(f => f.Length) },
+                    users = new { count = userArchiveList.Count, bytes = userArchiveList.Sum(a => a.SizeBytes) },
+                    retentionDays = int.TryParse(retention, out var days) && days >= 0
+                        ? days : DataLifecycleLimits.DefaultArchiveRetentionDays,
+                },
+                embedding = new { status = downloader is null ? "off" : downloader.IsReady() ? "ready" : "downloading" },
+                scheduler = new
+                {
+                    reminderTickAt = status?.LastReminderTickAt,
+                    maintenanceAt = status?.LastMaintenanceAt,
+                },
+            });
+        })
+        .WithName("GetAdminSystem")
+        .WithSummary("The System page: version, data size by context type, archives, embedding model status, when the scheduler last ran.")
+        .RequireAuthorization();
+    }
+
+    private static List<FileInfo> ZipsIn(string folder) =>
+        Directory.Exists(folder)
+            ? Directory.EnumerateFiles(folder, "*.zip")
+                .Where(f => !Path.GetFileName(f).StartsWith('.'))
+                .Select(f => new FileInfo(f)).ToList()
+            : new List<FileInfo>();
+
     // Same rules as setup and cold import.
     private static string? ValidateUsername(string username)
     {
@@ -634,6 +787,7 @@ public static class AdminActions
     public const string CreateLocal = "user.create";
     public const string ImportUser = "user.import";
     public const string ResetPassword = "user.reset-password";
+    public const string Delete = "user.delete";
     public const string ConfigSet = "config.set";
     public const string ConfigClear = "config.clear";
 }

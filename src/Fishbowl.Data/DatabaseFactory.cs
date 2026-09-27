@@ -153,13 +153,18 @@ public class DatabaseFactory
     // The second wall behind the request gate: a personal DB is only ever
     // created for an active account. A users row in any other state (pending,
     // disabled, blocked) refuses; no row at all is allowed, because tooling
-    // and tests open contexts for ids that were never registered. Runs only
-    // when the file doesn't exist yet, so existing DBs pay nothing.
+    // and tests open contexts for ids that were never registered — unless the
+    // id belongs to a deleted account (system v12 tombstone), so a session
+    // that outlived the delete can't bring the folder back. Runs only when
+    // the file doesn't exist yet, so existing DBs pay nothing.
     private void EnsureAccountMayStore(string userId)
     {
         using var system = CreateSystemConnection();
         var state = system.ExecuteScalar<string?>(
             "SELECT state FROM users WHERE id = @userId", new { userId });
+        if (state is null && system.ExecuteScalar<long>(
+                "SELECT COUNT(*) FROM deleted_users WHERE id = @userId", new { userId }) > 0)
+            state = "deleted";
         if (state is not null && state != Fishbowl.Core.Auth.UserStates.Active)
             throw new Fishbowl.Core.Auth.InactiveAccountException(userId, state);
     }
@@ -546,7 +551,27 @@ public class DatabaseFactory
             ApplySystemV11(connection);
             connection.Execute("PRAGMA user_version = 11");
             _logger.LogInformation("Applied system schema v11");
+            version = 11;
         }
+
+        if (version < 12)
+        {
+            ApplySystemV12(connection);
+            connection.Execute("PRAGMA user_version = 12");
+            _logger.LogInformation("Applied system schema v12");
+        }
+    }
+
+    // Admin A3: deleted accounts leave a tombstone (id + when, nothing else).
+    // The request gate refuses a session that outlived the delete, and the
+    // factory won't create a personal DB for the id again.
+    private void ApplySystemV12(IDbConnection connection)
+    {
+        connection.Execute(@"
+            CREATE TABLE IF NOT EXISTS deleted_users (
+                id          TEXT PRIMARY KEY,
+                deleted_at  TEXT NOT NULL
+            );");
     }
 
     // App DBs have no built-in schema. Owner brings in real SQL tables via

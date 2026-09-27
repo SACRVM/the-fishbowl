@@ -509,6 +509,14 @@
             updateUser:    (id, body) => request(`/admin/users/${encodeURIComponent(id)}`,
                 { method: "PATCH", body: JSON.stringify(body) }),
             resetPassword: (id)       => request(`/admin/users/${encodeURIComponent(id)}/reset-password`, { method: "POST" }),
+            // A3: { self, lastAdmin, hasData, ownedSpaces: [{ slug, name }] } before the dialog…
+            deleteCheck:   (id)       => request(`/admin/users/${encodeURIComponent(id)}/delete-check`),
+            // …then the delete; archive defaults to true on the server too.
+            deleteUser:    (id, { archive = true } = {}) =>
+                request(`/admin/users/${encodeURIComponent(id)}?archive=${archive ? "true" : "false"}`, { method: "DELETE" })
+                    .then(messagesChanged),
+            // The System page: version, data sizes, archives, embedding, scheduler.
+            system:        ()         => request("/admin/system"),
             // System settings: [{ key, value (secrets redacted), isSet, secret, restartRequired, description }].
             config:      ()           => request("/admin/config"),
             setConfig:   (key, value) => request(`/admin/config/${encodeURIComponent(key)}`,

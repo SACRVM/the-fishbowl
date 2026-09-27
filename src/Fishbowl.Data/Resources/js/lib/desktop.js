@@ -30,6 +30,7 @@
         { key: "builtin:messages", hash: "#/messages",    name: "Messages", icon: "mail",     desc: "What Fishbowl has to tell you." },
         { key: "builtin:users",    hash: "#/admin/users", name: "Users",    icon: "users",    desc: "Approve and manage accounts.", admin: true, personal: true },
         { key: "builtin:settings", hash: "#/admin/settings", name: "System settings", icon: "settings", desc: "How this Fishbowl runs.", admin: true, personal: true },
+        { key: "builtin:system",   hash: "#/admin/system", name: "System", icon: "info", desc: "Version, data sizes, archives.", admin: true, personal: true },
     ];
 
     const SETTINGS = [

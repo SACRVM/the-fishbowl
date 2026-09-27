@@ -17,12 +17,14 @@ namespace Fishbowl.Api.Accounts;
 //                        every other /api and /mcp call is 403 {error:"pending"},
 //                        every other page redirects to /pending
 //   disabled / blocked → the cookie is dropped; /api and /mcp get 403
-//                        {error:"<state>"}, pages go to /login with the reason
+//   / deleted            {error:"<state>"}, pages go to /login with the reason
+//                        (a deleted account has no row, only a tombstone)
 //   active, or no row  → untouched (tests and tooling use unregistered ids)
 public sealed class AccountStateMiddleware
 {
     public const string PendingPath = "/pending";
 
+    private const string DeletedState = "deleted";
     private readonly RequestDelegate _next;
 
     public AccountStateMiddleware(RequestDelegate next)
@@ -30,7 +32,7 @@ public sealed class AccountStateMiddleware
         _next = next;
     }
 
-    public async Task InvokeAsync(HttpContext context, ISystemRepository system)
+    public async Task InvokeAsync(HttpContext context, ISystemRepository system, IUserAdminRepository admin)
     {
         var userId = context.User.Identity?.IsAuthenticated == true
             ? context.User.FindFirst(McpContextClaims.UserId)?.Value
@@ -43,6 +45,10 @@ public sealed class AccountStateMiddleware
 
         var user = await system.GetUserAsync(userId, context.RequestAborted);
         var state = user?.State ?? UserStates.Active;
+        // No row: fine for tooling and test principals — but not for an
+        // account an admin deleted while this session was alive.
+        if (user is null && await admin.IsDeletedAsync(userId, context.RequestAborted))
+            state = DeletedState;
         if (state == UserStates.Active)
         {
             await _next(context);

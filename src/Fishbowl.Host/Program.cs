@@ -179,6 +179,7 @@ builder.Services.AddScoped<IDesktopRepository, DesktopRepository>();
 builder.Services.AddScoped<AccountGate>();
 builder.Services.AddScoped<Fishbowl.Core.Files.IFileService, Fishbowl.Data.Files.FileService>();
 builder.Services.AddScoped<Fishbowl.Core.Files.ISpaceArchiveService, Fishbowl.Data.Files.SpaceArchiver>();
+builder.Services.AddScoped<Fishbowl.Core.Files.IUserArchiveService, Fishbowl.Data.Files.UserArchiver>();
 
 // Apps platform — the per-app .db registry + DDL generator + row CRUD.
 // All three repos sit at the same scope as the rest of the data-plane.

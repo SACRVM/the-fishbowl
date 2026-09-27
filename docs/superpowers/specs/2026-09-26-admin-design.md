@@ -1,9 +1,11 @@
 # Administration, approval and messages — design
 
-Status: **A1 and A2 done** (2026-09-26) — pending approval, sign-up policy,
-system messages with the chat fan-out, the Users app (add local user,
-reset, quota, admin, disable/enable), System settings and the admin log
-are built; A3 is next. Revised after the first review. Prompted by
+Status: **A1, A2 and A3 done** (2026-09-26/27) — pending approval, sign-up
+policy, system messages with the chat fan-out, the Users app (add local
+user, reset, quota, admin, disable/enable, delete with archive), System
+settings, the System page and the admin log are built. Restore of an
+archived account has no UI: unzip it into `users/<folder>/` and use the
+cold import. Revised after the first review. Prompted by
 the desktop's install policy (`2026-09-26-desktop-apps-design.md`): a policy
 needs someone who sets it.
 
@@ -256,7 +258,7 @@ Routes `#/admin/...` are personal-workspace only; in a space they show the
   - bot fan-out for messages
   - `quota.warning` (moved to the Files data-lifecycle phase, which
     enforces quotas)
-- **A3 — Lifecycle:**
+- **A3 — Lifecycle (done):**
   - delete with archive
   - archive + System app, shared with the space-archive work from Files
 - The admin apps become desktop tiles when **Desktop D1** lands. Until then

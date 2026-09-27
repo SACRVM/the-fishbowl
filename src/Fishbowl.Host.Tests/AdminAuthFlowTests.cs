@@ -88,6 +88,10 @@ public class AdminAuthFlowTests : IClassFixture<WebApplicationFactory<Program>>,
         Assert.Equal(HttpStatusCode.Forbidden, (await client.PatchAsJsonAsync("/api/v1/admin/users/p", new { quotaBytes = 1 }, Ct)).StatusCode);
         Assert.Equal(HttpStatusCode.Forbidden, (await client.PostAsJsonAsync("/api/v1/admin/users", new { username = "viakey" }, Ct)).StatusCode);
         Assert.Equal(HttpStatusCode.Forbidden, (await client.PutAsJsonAsync("/api/v1/admin/config/Digest:Enabled", new { value = "true" }, Ct)).StatusCode);
+        // A3: deleting accounts and the System page too.
+        Assert.Equal(HttpStatusCode.Forbidden, (await client.DeleteAsync("/api/v1/admin/users/p", Ct)).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await client.GetAsync("/api/v1/admin/users/p/delete-check", Ct)).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await client.GetAsync("/api/v1/admin/system", Ct)).StatusCode);
         Assert.Null(await _system.GetUserByLocalUsernameAsync("viakey", Ct));
         Assert.Equal(UserStates.Pending, (await _system.GetUserAsync("p", Ct))!.State);
     }
