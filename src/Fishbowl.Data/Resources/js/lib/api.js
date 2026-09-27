@@ -368,10 +368,17 @@
         body: JSON.stringify({ op, from: { workspace: from, paths }, to: { workspace: to, folder: folder || "" }, onConflict }),
     });
 
+    // Todos list: open ones only, unless { includeCompleted: true } — the
+    // server's default leaves completed todos out.
+    const todos = crud("todos");
+    todos.list = (opts) => request(opts?.includeCompleted
+        ? `${ctx("/todos")}?includeCompleted=true`
+        : ctx("/todos"));
+
     fb.api = {
         files,
         notes,
-        todos: crud("todos"),
+        todos,
         contacts,
         events,
         tags: {

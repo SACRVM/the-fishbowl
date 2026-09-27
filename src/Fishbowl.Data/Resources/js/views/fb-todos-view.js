@@ -42,6 +42,8 @@ class FbTodosView extends HTMLElement {
     }
 
     disconnectedCallback() {
+        for (const t of this._leaving?.values() || []) clearTimeout(t);
+        this._leaving?.clear();
         if (this._onIntent) window.removeEventListener("fb:intent", this._onIntent);
         this._sortable?.destroy();
         this.flushSave();
@@ -50,7 +52,8 @@ class FbTodosView extends HTMLElement {
 
     async loadTodos() {
         try {
-            this.todos = await fb.api.todos.list();
+            // Completed ones too: the list filters them itself ("Show completed").
+            this.todos = await fb.api.todos.list({ includeCompleted: true });
             this.renderList();
         } catch (err) {
             console.error("[fb-todos-view] list failed:", err);
@@ -231,6 +234,12 @@ class FbTodosView extends HTMLElement {
                     text-decoration: line-through;
                 }
                 fb-todos-view .tv-item.completed .tv-item-meta { opacity: 0.55; }
+                /* Ticked off while completed todos are hidden: it shows as
+                   done for a moment, then fades out (_leave). */
+                fb-todos-view .tv-item.leaving {
+                    opacity: 0;
+                    transition: opacity 0.3s ease;
+                }
 
                 /* Action row: delete only (the checkbox is always visible,
                    so it's not in this row). Quiet until hover/focus on a
@@ -281,23 +290,6 @@ class FbTodosView extends HTMLElement {
                     display: flex;
                     flex-direction: column;
                 }
-                fb-todos-view .tv-empty-state {
-                    flex: 1;
-                    display: flex;
-                    flex-direction: column;
-                    align-items: center;
-                    justify-content: center;
-                    color: var(--text-muted);
-                    gap: 12px;
-                }
-                fb-todos-view .tv-empty-state sac-icon {
-                    --icon-size: 72px;
-                    opacity: 0.2;
-                }
-                fb-todos-view .tv-empty-state p {
-                    margin: 0;
-                    font-size: 14px;
-                }
                 fb-todos-view .tv-title-input {
                     width: 100%;
                     font-family: 'Outfit', sans-serif;
@@ -335,17 +327,6 @@ class FbTodosView extends HTMLElement {
                     outline: none;
                     max-width: 260px;
                 }
-                fb-todos-view .tv-date-clear {
-                    background: none;
-                    border: none;
-                    color: var(--text-muted);
-                    cursor: pointer;
-                    font-size: 12px;
-                    padding: 4px 0;
-                    align-self: flex-start;
-                    text-decoration: underline;
-                }
-                fb-todos-view .tv-date-clear:hover { color: var(--text); }
                 fb-todos-view .tv-desc-input {
                     display: block;
                     width: 100%;
@@ -383,21 +364,36 @@ class FbTodosView extends HTMLElement {
                     flex-shrink: 0;
                 }
                 fb-todos-view .tv-editor-footer-spacer { flex: 1; }
-                fb-todos-view .tv-completed-pill {
-                    display: inline-flex;
-                    align-items: center;
-                    gap: 4px;
-                    padding: 2px 8px;
-                    border-radius: var(--radius-m);
-                    background: color-mix(in srgb, var(--ok) 12%, transparent);
-                    border: 1px solid color-mix(in srgb, var(--ok) 35%, transparent);
-                    color: var(--ok-text);
-                    font-size: 10px;
-                    font-weight: 600;
-                    text-transform: uppercase;
-                    letter-spacing: 0.08em;
+                fb-todos-view textarea.tv-title-input {
+                    display: block;
+                    resize: none;
+                    overflow: hidden;
+                    line-height: 1.2;
                 }
-                fb-todos-view .tv-completed-pill sac-icon { --icon-size: 10px; }
+                fb-todos-view .fb-date-wrap { display: inline-flex; align-items: center; gap: 8px; }
+                /* Mouse: nothing reserved — the title runs the full width; on
+                   hover / focus the delete lays over the row's right end on a
+                   fade of the row's own colour (as in the notes list). */
+                @media (hover: hover) and (pointer: fine) {
+                    fb-todos-view .tv-item-title { padding-right: 0; }
+                    fb-todos-view .tv-item { --tv-row-bg: var(--panel); }
+                    fb-todos-view .tv-item:hover { --tv-row-bg: var(--hover); }
+                    fb-todos-view .tv-item.selected { --tv-row-bg: var(--accent-tint); }
+                    fb-todos-view .tv-item-action { --icon-btn-size: 26px; --icon-btn-icon: 14px; }
+                    fb-todos-view .tv-item-actions {
+                        top: 5px;
+                        right: 4px;
+                        gap: 0;
+                        padding: 2px 0 6px 24px;
+                        border-radius: var(--radius-m);
+                        background:
+                            linear-gradient(to right, transparent, var(--tv-row-bg) 20px),
+                            linear-gradient(to right, transparent, var(--panel) 20px);
+                    }
+                    fb-todos-view .tv-item:not(:hover):not(:focus-within) .tv-item-actions { display: none; }
+                }
+                /* Nothing open: the kit's .empty-state, centred in the pane. */
+                fb-todos-view .tv-empty { flex: 1; justify-content: center; }
             </style>
 
             <sac-split class="tv-split" id="split" collapse show="start"
@@ -422,16 +418,18 @@ class FbTodosView extends HTMLElement {
 
                 <main class="tv-editor-pane" slot="end">
                     <div class="tv-editor-body">
-                        <div class="tv-empty-state" id="editor-empty">
+                        <div class="empty-state tv-empty" id="editor-empty">
                             <sac-icon name="check"></sac-icon>
-                            <p>Select a todo to edit</p>
+                            <h3>No todo open</h3>
+                            <p>Pick one from the list, or add a new one.</p>
+                            <button type="button" class="btn primary" id="empty-new-btn"><sac-icon name="plus"></sac-icon> New todo</button>
                         </div>
                         <div id="editor" hidden>
-                            <input id="title" class="tv-title-input" placeholder="What needs doing?"/>
+                            <textarea id="title" class="tv-title-input" rows="1" placeholder="What needs doing?"></textarea>
                             <div class="tv-field">
                                 <label for="due-at">Due</label>
                                 <input id="due-at" class="tv-date-input"/>
-                                <button class="tv-date-clear" id="due-clear" hidden>Clear due date</button>
+                                <button class="icon-btn tv-date-clear-btn" id="due-clear" title="Clear due date" aria-label="Clear due date" hidden><sac-icon name="close"></sac-icon></button>
                             </div>
                             <div class="tv-field">
                                 <label for="description">Notes</label>
@@ -443,9 +441,7 @@ class FbTodosView extends HTMLElement {
                         <span class="tv-editor-footer-meta">
                             Updated <span id="timestamp"></span>
                         </span>
-                        <span class="tv-completed-pill" id="completed-pill" hidden>
-                            <sac-icon name="check"></sac-icon> Completed
-                        </span>
+                        <sac-chip id="completed-pill" label="Completed" color="green" hidden></sac-chip>
                         <div class="tv-editor-footer-spacer"></div>
                     </footer>
                 </main>
@@ -471,6 +467,7 @@ class FbTodosView extends HTMLElement {
         split.addEventListener("sac:split-back", () => this.flushSave());
 
         this.querySelector("#new-btn").addEventListener("click", () => this.createTodo());
+        this.querySelector("#empty-new-btn").addEventListener("click", () => this.createTodo());
         this.querySelector("#toggle-completed-btn").addEventListener("click", () => {
             this.hideCompleted = !this.hideCompleted;
             this.querySelector("#toggle-completed-btn").classList.toggle("active", !this.hideCompleted);
@@ -484,7 +481,9 @@ class FbTodosView extends HTMLElement {
 
         const titleEl = this.querySelector("#title");
         titleEl.addEventListener("blur",  () => this.flushSave());
-        titleEl.addEventListener("input", () => this.scheduleAutoSave());
+        titleEl.addEventListener("input", () => { this.autosizeTitle(); this.scheduleAutoSave(); });
+        // A title is one line: Enter leaves it (no newline).
+        titleEl.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); titleEl.blur(); } });
 
         const descEl = this.querySelector("#description");
         descEl.addEventListener("blur",  () => this.flushSave());
@@ -494,6 +493,8 @@ class FbTodosView extends HTMLElement {
         });
 
         const dueEl = fb.format.attachInput(this.querySelector("#due-at"), { time: true });
+        // Clear sits in the field row, after the time.
+        dueEl.parentElement.append(this.querySelector("#due-clear"));
         dueEl.addEventListener("change", () => this.saveSelected());
         this.querySelector("#due-clear").addEventListener("click", () => {
             fb.format.writeInput(dueEl, null);
@@ -511,6 +512,13 @@ class FbTodosView extends HTMLElement {
         clearTimeout(this._saveDebounce);
         this._saveDebounce = null;
         await this.saveSelected();
+    }
+
+    autosizeTitle() {
+        const el = this.querySelector("#title");
+        if (!el) return;
+        el.style.height = "auto";
+        el.style.height = el.scrollHeight + "px";
     }
 
     autosizeDesc() {
@@ -575,7 +583,7 @@ class FbTodosView extends HTMLElement {
 
     renderList() {
         const filtered = this.todos.filter(t => {
-            if (this.hideCompleted && t.completedAt) return false;
+            if (this.hideCompleted && t.completedAt && !this._leaving?.has(t.id)) return false;
             if (this.searchQuery) {
                 const haystack = ((t.title || "") + " " + (t.description || "")).toLowerCase();
                 if (!haystack.includes(this.searchQuery)) return false;
@@ -586,7 +594,13 @@ class FbTodosView extends HTMLElement {
         // Sort: open before done, then the user's own order (position —
         // drag to change it; a new todo is appended). Ticking one off and
         // back never moves it. Due dates show on the row but don't reorder.
-        filtered.sort(FbTodosView._byOrder);
+        // A todo just ticked off keeps its place while it shows as done.
+        const leaving = this._leaving;
+        filtered.sort(leaving?.size
+            ? (a, b) => FbTodosView._byOrder(
+                leaving.has(a.id) ? { ...a, completedAt: null } : a,
+                leaving.has(b.id) ? { ...b, completedAt: null } : b)
+            : FbTodosView._byOrder);
 
         const list = this.querySelector("#todo-list");
         if (filtered.length === 0) {
@@ -665,7 +679,10 @@ class FbTodosView extends HTMLElement {
         const isTomorrow = due.toDateString() === tomorrow.toDateString();
 
         let text;
-        if (sameDay) {
+        if (isDone && diff < 0 && !sameDay) {
+            const sameYear = due.getFullYear() === now.getFullYear();
+            text = sameYear ? fb.format.dayMonth(due) : fb.format.date(due);
+        } else if (sameDay) {
             text = "Today · " + fb.format.time(due);
         } else if (isTomorrow) {
             text = "Tomorrow";
@@ -702,6 +719,7 @@ class FbTodosView extends HTMLElement {
         this.querySelector("#editor").hidden        = false;
         this.querySelector("#editor-footer").hidden = false;
         this.querySelector("#title").value       = todo.title       || "";
+        requestAnimationFrame(() => this.autosizeTitle());
         this.querySelector("#description").value = todo.description || "";
         fb.format.writeInput(this.querySelector("#due-at"), todo.dueAt ? new Date(todo.dueAt) : null);
         this.querySelector("#due-clear").hidden  = !todo.dueAt;
@@ -787,12 +805,17 @@ class FbTodosView extends HTMLElement {
         if (!todo) return;
         const was = todo.completedAt;
         todo.completedAt = was ? null : new Date().toISOString();
+        // Unticked again while it was still on its way out: it stays.
+        if (!todo.completedAt) this._stopLeaving(id);
+        // Ticked while completed todos are hidden: show it struck through
+        // first, then let it go (_leave).
+        if (todo.completedAt && this.hideCompleted) this._leave(id);
         try {
             await fb.api.todos.update(todo.id, todo);
             if (id === this.selectedId) {
                 this.querySelector("#completed-pill").hidden = !todo.completedAt;
                 this.updateToolbar(todo);
-                if (todo.completedAt && this.hideCompleted) {
+                if (todo.completedAt && this.hideCompleted && !this._leaving?.has(id)) {
                     this.clearSelection();
                 }
             }
@@ -800,7 +823,31 @@ class FbTodosView extends HTMLElement {
         } catch (err) {
             console.error("[fb-todos-view] toggle complete failed:", err);
             todo.completedAt = was;
+            this._stopLeaving(id);
+            this.renderList();
         }
+    }
+
+    /** A todo ticked off while completed ones are hidden stays in its row,
+     *  struck through, for a moment — then fades out and leaves the list. */
+    _leave(id) {
+        this._leaving ??= new Map();
+        clearTimeout(this._leaving.get(id));
+        this._leaving.set(id, setTimeout(() => {
+            this.querySelector(`#todo-list .tv-item[data-id="${id}"]`)?.classList.add("leaving");
+            this._leaving.set(id, setTimeout(() => {
+                this._leaving.delete(id);
+                const todo = this.todos.find(t => t.id === id);
+                if (id === this.selectedId && todo?.completedAt && this.hideCompleted) this.clearSelection();
+                this.renderList();
+            }, 300));
+        }, 1200));
+    }
+
+    _stopLeaving(id) {
+        if (!this._leaving?.has(id)) return;
+        clearTimeout(this._leaving.get(id));
+        this._leaving.delete(id);
     }
 
     async deleteById(id) {

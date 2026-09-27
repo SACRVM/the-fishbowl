@@ -324,6 +324,109 @@ public class UiSmokeTests
     }
 
     [Fact]
+    public async Task Todos_CompletedLoad_EmptyState_RowsAndTitle_Test()
+    {
+        var context = await _fixture.Browser!.NewContextAsync(new BrowserNewContextOptions
+        {
+            IgnoreHTTPSErrors = true,
+            ViewportSize = new ViewportSize { Width = 1400, Height = 900 },
+        });
+        var page = await context.NewPageAsync();
+        var tag = "tpol" + Guid.NewGuid().ToString("N")[..6];
+        var longTitle = $"{tag} renew the car insurance before the old policy runs out at the end of the month";
+        var doneTitle = $"{tag} done";
+        var tickTitle = $"{tag} tick me";
+        var pastDue = DateTime.UtcNow.AddDays(-3).ToString("o");
+        var ids = new List<string>();
+        try
+        {
+            foreach (var t in new[] { longTitle, doneTitle, tickTitle })
+            {
+                var r = await page.APIRequest.PostAsync(_fixture.BaseUrl + "/api/v1/todos", new APIRequestContextOptions
+                {
+                    DataObject = new { title = t, dueAt = pastDue },
+                });
+                ids.Add((await r.JsonAsync())!.Value.GetProperty("id").GetString()!);
+            }
+            var put = await page.APIRequest.PutAsync(_fixture.BaseUrl + $"/api/v1/todos/{ids[1]}", new APIRequestContextOptions
+            {
+                DataObject = new { id = ids[1], title = doneTitle, dueAt = pastDue, completedAt = DateTime.UtcNow.ToString("o") },
+            });
+            Assert.True(put.Ok, $"todo update failed: {put.Status}");
+
+            // A completed todo comes from the server on a fresh load: "Show
+            // completed" lists it, with its date instead of "overdue".
+            await page.GotoAsync(_fixture.BaseUrl + "/#/todos");
+            await Assertions.Expect(page.Locator(".tv-item", new PageLocatorOptions { HasText = longTitle[..30] })).ToBeVisibleAsync();
+            await page.Locator("#toggle-completed-btn").ClickAsync();
+            var done = page.Locator(".tv-item", new PageLocatorOptions { HasText = doneTitle });
+            await Assertions.Expect(done).ToBeVisibleAsync();
+            await Assertions.Expect(done.Locator(".tv-item-due")).Not.ToContainTextAsync("overdue");
+
+            // Ticking one off while completed todos are hidden: it shows as
+            // done (struck through) in its row first, then leaves the list.
+            await page.Locator("#toggle-completed-btn").ClickAsync();
+            var open = page.Locator(".tv-item", new PageLocatorOptions { HasText = tickTitle });
+            await open.Locator("[data-action='check']").ClickAsync();
+            await Assertions.Expect(page.Locator(".tv-item.completed", new PageLocatorOptions { HasText = tickTitle })).ToBeVisibleAsync();
+            await Assertions.Expect(open).ToHaveCountAsync(0, new() { Timeout = 5000 });
+            await page.Locator("#toggle-completed-btn").ClickAsync();
+
+            // Nothing open: the kit's empty state; its button starts a todo.
+            var empty = page.Locator("fb-todos-view #editor-empty");
+            await Assertions.Expect(empty.Locator("h3")).ToHaveTextAsync("No todo open");
+
+            // Mouse: the title runs the full width at rest; hover shows delete.
+            var row = page.Locator(".tv-item", new PageLocatorOptions { HasText = longTitle[..30] }).First;
+            await page.Mouse.MoveAsync(0, 0);
+            var rowBox = (await row.BoundingBoxAsync())!;
+            var titleBox = (await row.Locator(".tv-item-title").BoundingBoxAsync())!;
+            Assert.True(titleBox.X + titleBox.Width >= rowBox.X + rowBox.Width - 14,
+                $"title ends at {titleBox.X + titleBox.Width}, row at {rowBox.X + rowBox.Width}");
+            await Assertions.Expect(row.Locator(".tv-item-actions")).ToBeHiddenAsync();
+            await row.HoverAsync();
+            await Assertions.Expect(row.Locator(".tv-item-actions")).ToBeVisibleAsync();
+
+            await empty.Locator("#empty-new-btn").ClickAsync();
+            await Assertions.Expect(page.Locator("fb-todos-view #editor")).ToBeVisibleAsync();
+            var newId = await page.EvaluateAsync<string>("() => document.querySelector('fb-todos-view').selectedId");
+            if (!string.IsNullOrEmpty(newId)) ids.Add(newId);
+
+            // Phone: row actions as before (always shown, reserved), and a
+            // long title wraps in the editor instead of running off.
+            var phone = await _fixture.Browser!.NewContextAsync(new BrowserNewContextOptions
+            {
+                IgnoreHTTPSErrors = true,
+                ViewportSize = new ViewportSize { Width = 390, Height = 800 },
+                IsMobile = true,
+                HasTouch = true,
+            });
+            var pp = await phone.NewPageAsync();
+            await pp.GotoAsync(_fixture.BaseUrl + "/#/todos");
+            var prow = pp.Locator(".tv-item", new PageLocatorOptions { HasText = longTitle[..30] }).First;
+            // The title's text box (its padding keeps it clear of the button).
+            var pTextEnd = await prow.Locator(".tv-item-title").EvaluateAsync<double>(
+                "e => e.getBoundingClientRect().right - parseFloat(getComputedStyle(e).paddingRight)");
+            var pActions = (await prow.Locator(".tv-item-actions").BoundingBoxAsync())!;
+            await Assertions.Expect(prow.Locator(".tv-item-actions")).ToBeVisibleAsync();
+            Assert.True(pTextEnd <= pActions.X + 0.5,
+                $"phone: title text ends at {pTextEnd}, actions start at {pActions.X}");
+            await prow.Locator(".tv-item-title").ClickAsync();
+            var titleEl = pp.Locator("fb-todos-view #title");
+            await Assertions.Expect(titleEl).ToHaveValueAsync(longTitle);
+            var wraps = await titleEl.EvaluateAsync<bool>("e => e.scrollWidth <= e.clientWidth + 1 && e.clientHeight > parseFloat(getComputedStyle(e).lineHeight) * 1.5");
+            Assert.True(wraps, "the editor title should wrap on a phone");
+            await phone.CloseAsync();
+        }
+        finally
+        {
+            foreach (var id in ids)
+                await page.APIRequest.DeleteAsync(_fixture.BaseUrl + $"/api/v1/todos/{id}");
+            await context.CloseAsync();
+        }
+    }
+
+    [Fact]
     public async Task Notes_TagInput_CreatesAndSavesTag_Test()
     {
         var context = await _fixture.Browser!.NewContextAsync(new BrowserNewContextOptions { IgnoreHTTPSErrors = true });
