@@ -246,6 +246,31 @@ public class UiSmokeTests
         await context.CloseAsync();
     }
 
+    // The one-line list preview shows the words, not the markdown.
+    [Fact]
+    public async Task Notes_Snippet_IsPlainText_Test()
+    {
+        var context = await _fixture.Browser!.NewContextAsync(new BrowserNewContextOptions { IgnoreHTTPSErrors = true });
+        var page = await context.NewPageAsync();
+        var title = "Snippet " + Guid.NewGuid().ToString("N")[..8];
+        var res = await page.APIRequest.PostAsync(_fixture.BaseUrl + "/api/v1/notes", new APIRequestContextOptions
+        {
+            DataObject = new { title, content = $"# {title}\n\nSome **bold** text, a [link](https://example.com) and `code`.\n\n- one\n\n| a | b |\n|---|---|\n| 1 | 2 |\n" },
+        });
+        var id = (await res.JsonAsync())!.Value.GetProperty("id").GetString();
+        try
+        {
+            await page.GotoAsync(_fixture.BaseUrl + "/#/notes");
+            var snippet = page.Locator(".nv-item", new PageLocatorOptions { HasText = title }).First.Locator(".nv-item-snippet");
+            await Assertions.Expect(snippet).ToHaveTextAsync("Some bold text, a link and code. one a b 1 2");
+        }
+        finally
+        {
+            await page.APIRequest.DeleteAsync($"{_fixture.BaseUrl}/api/v1/notes/{id}");
+            await context.CloseAsync();
+        }
+    }
+
     [Fact]
     public async Task Notes_LongTitle_NeverRunsUnderRowActions_Test()
     {

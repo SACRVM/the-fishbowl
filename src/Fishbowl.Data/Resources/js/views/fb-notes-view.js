@@ -1402,7 +1402,29 @@ function snippetFor(note) {
     const rest = title && title === (note.title || "").trim() ? body : content;
     // A decrypted secret must not surface in the list preview — the editor
     // blurs secret bodies, a one-line snippet can't.
-    return maskSecrets(rest).replace(/\s+/g, " ").trim().slice(0, 80);
+    return plainText(maskSecrets(rest)).replace(/\s+/g, " ").trim().slice(0, 80);
+}
+
+/** Markdown → the words a reader sees, for the one-line list preview:
+ *  no heading/list/quote markers, emphasis, code ticks, link targets,
+ *  table pipes or fences. Text only — never HTML. */
+function plainText(md) {
+    return String(md || "")
+        .replace(/^[ \t]*(```|~~~)[^\n]*$/gm, "")                        // fence lines
+        .replace(/^[ \t]*\|?(?:[ \t]*:?-{3,}:?[ \t]*\|)+[ \t]*(?::?-{3,}:?)?[ \t]*$/gm, "") // table rule
+        .replace(/^[ \t]*([-*_])(?:[ \t]*\1){2,}[ \t]*$/gm, "")         // thematic break
+        .replace(/^[ \t]{0,3}#{1,6}[ \t]+/gm, "")                        // headings
+        .replace(/^[ \t]*>[ \t]?/gm, "")                                 // quotes
+        .replace(/^[ \t]*(?:[-*+]|\d+[.)])[ \t]+(?:\[[ xX]\][ \t]+)?/gm, "") // list items, tasks
+        .replace(/!\[([^\]]*)\]\([^)]*\)/g, "$1")                        // images → alt
+        .replace(/\[([^\]]+)\]\([^)]*\)/g, "$1")                         // links → text
+        .replace(/\[([^\]]+)\]\[[^\]]*\]/g, "$1")                        // reference links
+        .replace(/`+([^`]*)`+/g, "$1")                                   // inline code
+        .replace(/(\*\*|__)(.+?)\1/g, "$2")                              // bold
+        .replace(/(^|[^\w*])[*_](?=\S)([^*_\n]*?\S)[*_](?=[^\w*]|$)/g, "$1$2") // italic
+        .replace(/~~(.+?)~~/g, "$1")                                     // strike
+        .replace(/[ \t]*\|[ \t]*/g, " ")                                 // table cells
+        .replace(/&nbsp;/g, " ").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&");
 }
 
 const SECRET_BLOCK_RE  = /^[ \t]*:{2,3}secret(?:[ \t][^\n]*)?\n[\s\S]*?\n[ \t]*:{2,3}end[^\n]*$/gim;
