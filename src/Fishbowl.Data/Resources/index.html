@@ -75,6 +75,8 @@
          SACRVM/sac-md-editor (pinned commit in the VERSION file next to it).
          Never edit in place — fixes go upstream, updates replace the file. -->
     <script defer src="/js/vendor/sac-md-editor/sac-md-editor.js"></script>
+    <!-- :::secret is a block registration since 4f84f5d; load it after the editor. -->
+    <script defer src="/js/vendor/sac-md-editor/sac-md-secret.js"></script>
 
     <!-- views -->
     <script defer src="/js/views/fb-hub-view.js"></script>

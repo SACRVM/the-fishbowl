@@ -26,9 +26,16 @@
  * Properties:
  *   value - string; markdown source (getter + setter).
  *
- * Events (bubble out of host):
- *   input  - fires after every edit (keystroke, paste, toolbar action).
- *   change - fires when focus leaves the component after an edit.
+ * Events - the kit convention (CustomEvent, detail { value }, bubbles, NOT
+ * composed; never fired by a programmatic `value` set):
+ *   sac:input  - once after every edit (keystroke, paste, toolbar action,
+ *                undo/redo, table re-alignment); detail.value = the source.
+ *   sac:change - when focus leaves the component after an edit;
+ *                detail.value = the source.
+ * Legacy, still fired until the consumers have moved (see CLAUDE.md):
+ *   input  - native Event after every edit (may arrive more than once per
+ *            keystroke: the browser's own plus the editor's).
+ *   change - native Event when focus leaves after an edit.
  *
  * Methods:
  *   focus() - focus the editor surface.
@@ -44,32 +51,60 @@
  *
  * Keyboard:
  *   Ctrl/Cmd+B, Ctrl/Cmd+I, Ctrl/Cmd+K    bold / italic / link
- *   Enter                                  split; continues `- `/`* `/`1. ` lists
+ *   Enter                                  split; continues `- ` `* ` `+ ` `1. ` `1) `
+ *                                          lists with the same marker
  *   Enter on empty list item               exits the list
  *   Backspace at start of non-first line   merge with previous line
  *   Tab                                    two-space soft tab
  *
- * :::secret / :::end blocks (fenced-div style, `:{2,3}` accepted on read):
- * lines between the boundaries get the .secret-body class and a CSS blur so
- * the content isn't readable over someone's shoulder. A reveal toggle (eye
- * icon, contenteditable=false) sits on the :::secret boundary line —
- * clicking it flips .secret-revealed on every line of the block for
- * session-only unmasking. The active (caret) line inside a secret block
- * still flattens to raw text for editing.
+ * Tables (GFM pipe tables): rendered as a real grid on inactive lines, raw
+ * source on the caret line. The toolbar's Table button inserts a 2-column
+ * table with the first header cell selected. Inside a table:
+ *   Tab / Shift+Tab                        next / previous cell, content
+ *                                          selected; past the last cell a
+ *                                          new row is added
+ *   Enter                                  new empty row below; on an empty
+ *                                          row it leaves the table
+ * Leaving a table (caret moves out, or focus leaves the editor) lines its
+ * pipes up again. That rewrites source text, so it is an edit: `input`
+ * fires and it is undoable.
  *
- * SECURITY: this is a purely VISUAL layer. The plaintext stays in the DOM
- * and in whatever the host saves from `value`. Masking is a courtesy
- * against shoulder-surfing, never a security boundary — a host that needs
- * secrets kept from an index, an agent or a wire has to enforce that
- * server-side (the upstream app strips these blocks on every machine-facing
- * path; see the README). Do not build on the blur.
+ * Bounded blocks (registry): the editor knows no block names of its own. A
+ * host registers them, once per page, on the element class:
  *
- * ROADMAP — block-type registry: the masked region is one instance of a
- * general mechanic (spoiler, collapse, callout share the same bounded-block
- * parsing this file already does, fence-aware and line-state-tracked). The
- * planned shape is registerBlock({ match, masked, toggle, className }) so a
- * host registers its own block names and this file stops knowing what a
- * "secret" means. Until that lands, :::secret is the single built-in.
+ *   const Editor = customElements.get("sac-md-editor");
+ *   const off = Editor.registerBlock({
+ *       name:      "spoiler",                 // a-z 0-9 -, unique
+ *       open:      /^:::spoiler(\s|$)/,       // opening line, and
+ *       close:     /^:::end(\s|$)/,           // closing line - or instead:
+ *       match:     (src) => "open" | "close" | "line" | null,
+ *       masked:    true,     // body lines blurred until revealed
+ *       toggle:    true,     // eye button on the opening line
+ *       label:     "Spoiler" or () => "Spoiler",   // pill on the opening line
+ *       className: "",       // extra class on every line of the block
+ *       color:     "#8b5cf6",                 // card tint (default warm)
+ *       css:       ".line.block-spoiler.block-body { font-style: italic; }",
+ *   });
+ *   off();                                   // or Editor.unregisterBlock(name)
+ *   Editor.blocks                            // registered names
+ *
+ * match(src) is the general form: "open" / "close" bound a block, "line"
+ * makes one self-contained line a block (a marker form). open/close is the
+ * shorthand. Blocks are only recognised outside code fences, do not nest
+ * (inside a block only its own close counts) and render inline markdown in
+ * their body. Every line of a block gets .block-<part> (open, close, body,
+ * line) and .block-<name>; `css` is injected into every editor's shadow
+ * root, which is the only way a host can style them. Registering (or
+ * unregistering) re-renders every editor on the page.
+ *
+ * :::secret is not built in: js/sac-md-secret.js registers it (load it
+ * after this file). The demo does, and so does any host that wants it.
+ *
+ * SECURITY: masking is a purely VISUAL layer. The plaintext stays in the DOM
+ * and in whatever the host saves from `value`. The blur is a courtesy
+ * against shoulder-surfing, never a security boundary - a host that needs
+ * content kept from an index, an agent or a wire has to enforce that
+ * server-side. Do not build on the blur.
  *
  * Dependencies (loaded as globals before this script):
  *   marked     - CommonMark + GFM tokenizer. We only use marked.Lexer.lexInline
@@ -79,7 +114,7 @@
  */
 
 // Reveal-toggle SVG: open eye with a diagonal slash that's hidden by default
-// and surfaced via CSS when the block carries .secret-revealed. One-line so
+// and surfaced via CSS when the block carries .block-revealed. One-line so
 // no whitespace text nodes end up in line.textContent and break round-trip.
 const REVEAL_EYE_SVG =
     `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" ` +
@@ -121,10 +156,12 @@ function mdAddStrings() {
         "md-editor.quoteLabel":  "Zitat",
         "md-editor.hr":          "Trennlinie",
         "md-editor.hrLabel":     "Linie",
+        "md-editor.table":       "Tabelle",
+        "md-editor.tableLabel":  "Tabelle",
+        "md-editor.tableColumn": "Spalte",
         "md-editor.linkPrompt":  "Link-Adresse",
         "md-editor.linkText":    "Linktext",
-        "md-editor.secret":      "Geheim",
-        "md-editor.reveal":      "Geheimen Inhalt zeigen / verbergen",
+        "md-editor.reveal":      "Inhalt zeigen / verbergen",
     });
 }
 
@@ -143,6 +180,7 @@ const MD_TOOLBAR_TEXT = {
     ol:     ["ol",     "Numbered list",   "olLabel",    "1. List"],
     quote:  ["quote",  "Blockquote",      "quoteLabel", "Quote"],
     hr:     ["hr",     "Horizontal rule", "hrLabel",    "HR"],
+    table:  ["table",  "Table",           "tableLabel", "Table"],
 };
 
 class SacMdEditor extends HTMLElement {
@@ -168,9 +206,30 @@ class SacMdEditor extends HTMLElement {
         this._suppressHistory = false;
     }
 
+    // Block registry - see the header. Static: blocks are a page-wide
+    // vocabulary, like custom elements themselves.
+    static registerBlock(def) {
+        const block = compileBlock(def);
+        BLOCKS.delete(block.name);           // re-registering replaces
+        BLOCKS.set(block.name, block);
+        refreshBlocks();
+        return () => {
+            if (BLOCKS.get(block.name) !== block) return;
+            BLOCKS.delete(block.name);
+            refreshBlocks();
+        };
+    }
+    static unregisterBlock(name) {
+        if (BLOCKS.delete(name)) refreshBlocks();
+    }
+    static get blocks() { return [...BLOCKS.keys()]; }
+
     connectedCallback() {
         mdAddStrings();
         if (!this.shadowRoot.firstChild) this._render();
+        LIVE_EDITORS.add(this);
+        // Registrations made while this editor was detached.
+        if (this._blockGen !== blockGen) this._refreshBlocks();
         this._relabel();
         if (window.sac && window.sac.lang && !this._offLang) {
             this._offLang = window.sac.lang.onChange(() => this._relabel());
@@ -187,6 +246,42 @@ class SacMdEditor extends HTMLElement {
             this._onDocSelect = null;
         }
         if (this._offLang) { this._offLang(); this._offLang = null; }
+        LIVE_EDITORS.delete(this);
+    }
+
+    /** Kit value events: detail { value }, bubbles, not composed. */
+    _fireSac(type) {
+        this.dispatchEvent(new CustomEvent(type, {
+            detail: { value: this.value },
+            bubbles: true,
+            composed: false,
+        }));
+    }
+
+    /** One sac:input per edit. A keystroke reaches the host as the browser's
+     *  input AND the editor's synthetic one, and the browser runs microtasks
+     *  between the two listeners, so batching cannot merge them. Instead
+     *  sac:input fires only when the value differs from the last one it
+     *  carried (or from the last programmatic set) - an event that changes
+     *  nothing reports nothing. */
+    _queueSacInput() {
+        const value = this.value;
+        if (value === this._sacValue) return;
+        this._sacValue = value;
+        this.dispatchEvent(new CustomEvent("sac:input", {
+            detail: { value },
+            bubbles: true,
+            composed: false,
+        }));
+    }
+
+    /** The registry changed: new block CSS, and every line re-derived. */
+    _refreshBlocks() {
+        this._blockGen = blockGen;
+        if (!this._editor) return;
+        this._blockStyle.textContent = blockCss;
+        for (const line of this._editor.children) line._blockState = undefined;
+        this._syncBlockState();
     }
 
     /** Every editor-owned string in the current language, in place - no
@@ -201,10 +296,12 @@ class SacMdEditor extends HTMLElement {
             btn.setAttribute("aria-label", tip);
             if (spec[2]) btn.textContent = mdT(spec[2], spec[3]);
         });
-        // The :::secret badge is CSS generated content - its word travels as
-        // a custom property holding a CSS string (JSON quoting is valid CSS).
-        this._editor.style.setProperty("--sac-md-secret-label",
-            JSON.stringify(mdT("secret", "Secret")));
+        // Block pills are CSS generated content; a label may be a function
+        // of the page language, so every pill is re-read here.
+        this._editor.querySelectorAll(".line.block-open, .line.block-line").forEach((l) => {
+            const def = BLOCKS.get(l.dataset.blockName);
+            if (def) setBlockLabel(l, def);
+        });
         const reveal = this._revealLabel();
         this._editor.querySelectorAll(".sac-reveal-toggle").forEach((el) => {
             el.setAttribute("aria-label", reveal);
@@ -212,7 +309,7 @@ class SacMdEditor extends HTMLElement {
         });
     }
 
-    _revealLabel() { return mdT("reveal", "Show / hide secret body"); }
+    _revealLabel() { return mdT("reveal", "Show / hide content"); }
 
     get value() {
         if (!this._editor) return "";
@@ -223,6 +320,7 @@ class SacMdEditor extends HTMLElement {
 
     set value(v) {
         this._applyValue(v);
+        this._sacValue = this.value;      // the baseline for sac:input
         // External value-set is a "new document" - reset history so Ctrl+Z
         // can't restore the previous note's content into this one.
         this._resetHistory();
@@ -238,10 +336,19 @@ class SacMdEditor extends HTMLElement {
         // Always at least one line - an empty document still needs a caret target.
         if (lines.length === 0) lines.push("");
         this._activeLine = null;
-        const state = { inFence: false, inSecret: false };
-        this._editor.replaceChildren(
-            ...lines.map(src => this._buildRenderedLine(src, state))
-        );
+        // Plain lines first, then one sweep renders them all: a line's look
+        // can depend on lines BELOW it (a setext underline, a link
+        // definition), which a top-down build cannot see yet. Rendered while
+        // still detached, then inserted in one go - far cheaper than
+        // rewriting thousands of attached lines.
+        const built = lines.map((src) => {
+            const line = document.createElement("div");
+            line.className = "line";
+            line.textContent = src;
+            return line;
+        });
+        this._syncBlockState(built);
+        this._editor.replaceChildren(...built);
         this._dirty = false;
     }
 
@@ -275,6 +382,12 @@ class SacMdEditor extends HTMLElement {
 
     _render() {
         this.shadowRoot.innerHTML = TEMPLATE;
+        // Host CSS for registered blocks (registerBlock({ css })), after the
+        // template's own style so it can override it.
+        this._blockStyle = document.createElement("style");
+        this._blockStyle.textContent = blockCss;
+        this.shadowRoot.appendChild(this._blockStyle);
+        this._blockGen = blockGen;
 
         this._editor     = this.shadowRoot.querySelector(".editor");
         this._toolbar    = this.shadowRoot.querySelector(".toolbar");
@@ -289,14 +402,20 @@ class SacMdEditor extends HTMLElement {
         }
 
         // Seed with a single empty line so the caret has somewhere to go.
-        this._editor.replaceChildren(this._buildRenderedLine("", { inFence: false, inSecret: false }));
+        this._editor.replaceChildren(this._buildRenderedLine("", freshState()));
         this._resetHistory();
 
         // Host-level input listener: catches both the native input events
         // that bubble up from the internal contenteditable AND the synthetic
         // input events we dispatch from structural edits (toolbar, paste,
         // splitAt, etc.). One listener covers both paths.
-        this.addEventListener("input", () => this._scheduleHistorySnapshot());
+        this.addEventListener("input", (e) => {
+            // Our own sac:input is a CustomEvent named differently, so this
+            // only sees the native / synthetic "input" events.
+            this._syncBlockState();
+            this._scheduleHistorySnapshot();
+            this._queueSacInput();
+        });
 
         this._editor.addEventListener("input",       (e) => this._handleInput(e));
         this._editor.addEventListener("beforeinput", (e) => this._handleBeforeInput(e));
@@ -306,7 +425,7 @@ class SacMdEditor extends HTMLElement {
         this._editor.addEventListener("copy",        (e) => this._handleCopy(e));
         this._editor.addEventListener("focusout",    (e) => this._handleFocusOut(e));
 
-        // Reveal-toggle click (eye icon on :::secret lines). mousedown.prevent
+        // Reveal-toggle click (eye icon on a block's opening line). mousedown.prevent
         // keeps the caret in the surrounding line rather than leaping into
         // the non-editable span. Use closest() because the real click target
         // is the inner <svg> (or a path/circle/line) — classList on e.target
@@ -318,7 +437,7 @@ class SacMdEditor extends HTMLElement {
             const toggle = e.target.closest?.(".sac-reveal-toggle");
             if (!toggle) return;
             const line = this._lineContaining(toggle);
-            if (line) this._toggleSecretReveal(line);
+            if (line) this._toggleBlockReveal(line);
         });
 
         // Toolbar: mousedown.preventDefault keeps caret focus in the editor so
@@ -346,27 +465,25 @@ class SacMdEditor extends HTMLElement {
 
     /** Render a line's inner DOM from its source. Adds marker spans and
      *  inline wrappers while preserving textContent exactly. `state` carries
-     *  the cross-line trackers: inFence (``` group) and inSecret (:::secret
+     *  the cross-line trackers: inFence (``` / ~~~ group - the opening run) and inBlock (registered
      *  group) — each must advance on every line even when rendering wouldn't
      *  otherwise change the output. */
-    _renderLine(line, src = null, state = null) {
+    _renderLine(line, src = null, state = null, ahead) {
         if (src === null) src = line.textContent;
 
-        const isFenceBoundary = /^```/.test(src);
-        const insideFenceNow = state ? state.inFence : false;
-        if (isFenceBoundary && state) state.inFence = !state.inFence;
-
-        // Secret boundary: :::secret opens, :::end closes. Only honoured outside
-        // a code fence — inside a fence these are literal text.
-        const isSecretOpen  = !insideFenceNow && /^:{2,3}secret(\s|$)/.test(src);
-        const isSecretClose = !insideFenceNow && /^:{2,3}end(\s|$)/.test(src);
-        const insideSecretNow = state ? state.inSecret : false;
-        if (state && isSecretOpen)  state.inSecret = true;
-        if (state && isSecretClose) state.inSecret = false;
-        const isSecretBoundary = isSecretOpen || isSecretClose;
+        // No state passed = unknown context: render as a top-of-document
+        // line and leave the key unset, so the next sweep redoes it.
+        const known = !!state;
+        if (!state) state = freshState();
+        if (ahead === undefined) ahead = known ? this._aheadFor(line, state, src) : NO_AHEAD;
+        const block = classifyLine(src, state, ahead);
+        // Remember what this render assumed, for _syncBlockState.
+        line._blockState = known ? this._lineKey(state, ahead, src) : undefined;
+        advanceState(state, src, classifyLine(src, state).type);
 
         line.classList.remove("active");
-        this._applyBlockClass(line, src, insideFenceNow, isFenceBoundary, insideSecretNow, isSecretBoundary);
+        this._applyBlockClass(line, src, block);
+        const defs = this._linkDefs;
 
         const blockType = line.dataset.block || "";
         if (blockType === "fence-body") {
@@ -387,12 +504,12 @@ class SacMdEditor extends HTMLElement {
             if (m) {
                 const prefix = m[1];
                 const rest   = src.substring(prefix.length);
-                line.innerHTML = `<span class="block-marker">${escapeHtml(prefix)}</span>${renderInline(rest)}`;
+                line.innerHTML = `<span class="block-marker">${escapeHtml(prefix)}</span>${renderInline(rest, defs)}`;
                 return;
             }
         }
         if (blockType === "task") {
-            const m = src.match(/^(\s*[-*]\s+)\[([ xX])\](\s+)(.*)$/);
+            const m = src.match(TASK_RE);
             if (m) {
                 const checked = m[2] === "x" || m[2] === "X";
                 const boxClass = checked ? "task-box checked" : "task-box";
@@ -400,48 +517,65 @@ class SacMdEditor extends HTMLElement {
                     `<span class="block-marker">${escapeHtml(m[1])}</span>` +
                     `<span class="${boxClass}">[${m[2]}]</span>` +
                     `<span class="block-marker">${escapeHtml(m[3])}</span>` +
-                    renderInline(m[4]);
+                    renderInline(m[4], defs);
                 return;
             }
         }
-        if (blockType === "secret-open") {
+        if (blockType === "block-open" || blockType === "block-line") {
             // Reveal toggle is a contenteditable=false span carrying an
             // inline SVG eye. SVG shape children (path/circle/line) have no
             // text nodes, so line.textContent stays equal to the source —
             // critical for `value` round-trip, _flattenLine, etc. Slash
             // line is always rendered but hidden by CSS unless the block
-            // has .secret-revealed. All SVG attributes sit on one line so
+            // has .block-revealed. All SVG attributes sit on one line so
             // no whitespace text nodes creep in. The editor-level click
             // listener below wires the interaction.
             line.innerHTML =
                 `<span class="block-marker">${escapeHtml(src)}</span>` +
-                `<span class="sac-reveal-toggle" contenteditable="false" ` +
-                `      role="button" tabindex="-1" ` +
-                `      aria-label="${escapeAttr(this._revealLabel())}" ` +
-                `      title="${escapeAttr(this._revealLabel())}">` +
-                REVEAL_EYE_SVG +
-                `</span>`;
+                (block.def.toggle
+                    ? `<span class="sac-reveal-toggle" contenteditable="false" ` +
+                      `      role="button" tabindex="-1" ` +
+                      `      aria-label="${escapeAttr(this._revealLabel())}" ` +
+                      `      title="${escapeAttr(this._revealLabel())}">` +
+                      REVEAL_EYE_SVG +
+                      `</span>`
+                    : "");
             return;
         }
-        if (blockType === "secret-close") {
+        if (blockType === "block-close") {
             line.innerHTML = `<span class="block-marker">${escapeHtml(src)}</span>`;
             return;
         }
-        if (blockType === "secret-body") {
-            // Content wrapped in .secret-body-text so the blur can be applied
-            // to just the text — blurring the whole line would smear the
-            // card's left border too. Source is preserved (line.textContent
-            // still equals src).
-            const inner = src === "" ? "" : renderInline(src);
-            line.innerHTML = `<span class="secret-body-text">${inner}</span>`;
+        if (blockType === "block-body") {
+            // Content wrapped in .block-body-text so a mask blurs just the
+            // text - blurring the whole line would smear the card's left
+            // border too. Source is preserved (line.textContent equals src).
+            const inner = src === "" ? "" : renderInline(src, defs);
+            line.innerHTML = `<span class="block-body-text">${inner}</span>`;
             return;
         }
-        // Plain paragraph (or empty line).
+        if (TABLE_TYPES.has(blockType)) {
+            line.innerHTML = renderTableRow(src, blockType, block.aligns, defs);
+            return;
+        }
+        if (blockType === "indent-code") {
+            // The 4-space / tab indent is syntax, not code: a marker, hidden
+            // on inactive lines, so the card shows the code flush.
+            const indent = INDENT_CODE_RE.exec(src)[1];
+            line.innerHTML = `<span class="block-marker">${escapeHtml(indent)}</span>` +
+                `<span class="code-body">${escapeHtml(src.substring(indent.length))}</span>`;
+            return;
+        }
+        if (blockType === "setext" || blockType === "linkdef") {
+            line.innerHTML = `<span class="block-marker">${escapeHtml(src)}</span>`;
+            return;
+        }
+        // Plain paragraph (setext heading text included) or empty line.
         if (src === "") {
             line.innerHTML = "";
             return;
         }
-        line.innerHTML = renderInline(src);
+        line.innerHTML = renderInline(src, defs);
     }
 
     /** Flatten a line to a single text node, preserving the caret position
@@ -466,45 +600,78 @@ class SacMdEditor extends HTMLElement {
     _applyBlockClassFor(line, src = null) {
         if (src === null) src = line.textContent;
         const state = this._stateBefore(line);
-        const isFenceBoundary = /^```/.test(src);
-        const isSecretBoundary = !state.inFence &&
-            (/^:{2,3}secret(\s|$)/.test(src) || /^:{2,3}end(\s|$)/.test(src));
-        this._applyBlockClass(line, src, state.inFence, isFenceBoundary,
-                              state.inSecret, isSecretBoundary);
+        const ahead = this._aheadFor(line, state, src);
+        line._blockState = this._lineKey(state, ahead, src);
+        this._applyBlockClass(line, src, classifyLine(src, state, ahead));
+    }
+
+    /** The sweep key for a line: its state, its setext level and - for a
+     *  line that could hold a reference link - the link definitions. */
+    _lineKey(state, ahead, src) {
+        return stateKey(state, ahead) + (src.includes("]") ? "|" + (this._linkDefsKey || "") : "");
+    }
+
+    /** Lookahead for ONE line (the single-line edit paths; the sweep
+     *  computes it for all lines in one backward pass instead). A paragraph
+     *  line is a table header when the next line is a matching delimiter
+     *  row, and a setext heading when its paragraph ends in an underline. */
+    _aheadFor(line, state, src) {
+        if (classifyLine(src, state).type !== "paragraph") return NO_AHEAD;
+        const st = advanceState({ ...state }, src, "paragraph");
+        let first = true;
+        for (let cur = line.nextElementSibling; cur; cur = cur.nextElementSibling) {
+            const text = cur.textContent;
+            const type = classifyLine(text, st).type;
+            if (first && type === "table-delim") return { setext: 0, table: delimAligns(text) };
+            first = false;
+            if (type === "setext") return { setext: text.trim()[0] === "=" ? 1 : 2, table: "" };
+            if (type !== "paragraph") return NO_AHEAD;
+            advanceState(st, text, type);
+        }
+        return NO_AHEAD;
     }
 
     /** Recompute the line's block-level class without touching its inner DOM.
      *  Called on every keystroke so that as you type `# `, the font jumps to
      *  heading size live. Also stores the block type in dataset.block.
      *
-     *  Preserves the .secret-revealed class across re-classification so a
+     *  Preserves the .block-revealed class across re-classification so a
      *  keystroke on a revealed boundary line doesn't re-mask the block. */
-    _applyBlockClass(line, src, inFence, isFenceBoundary, inSecret, isSecretBoundary) {
+    _applyBlockClass(line, src, block) {
         const active   = line.classList.contains("active");
-        const revealed = line.classList.contains("secret-revealed");
-        const block = inFence && !isFenceBoundary
-            ? { type: "fence-body", classes: "fence-body" }
-            : isFenceBoundary
-                ? { type: "fence", classes: "fence" }
-                : inSecret && !isSecretBoundary
-                    ? { type: "secret-body", classes: "secret-body" }
-                    : parseLineBlock(src);
+        const revealed = line.classList.contains("block-revealed");
         const classes = ["line"];
         if (active)    classes.push("active");
-        if (revealed)  classes.push("secret-revealed");
+        if (revealed && block.def) classes.push("block-revealed");
         if (block.classes) classes.push(block.classes);
         if (src === "") classes.push("empty");
         line.className = classes.join(" ");
         line.dataset.block = block.type;
+        // Registered blocks carry their name, tint and pill label on the
+        // line itself (inline custom properties); anything else sheds them.
+        if (block.def) {
+            line.dataset.blockName = block.def.name;
+            line.style.setProperty("--mdb-color", block.def.color);
+            if (block.type === "block-open" || block.type === "block-line") setBlockLabel(line, block.def);
+            else line.style.removeProperty("--mdb-label");
+        } else if (line.dataset.blockName) {
+            delete line.dataset.blockName;
+            line.style.removeProperty("--mdb-color");
+            line.style.removeProperty("--mdb-label");
+        }
     }
 
     /** Rebuild classes + inner DOM for every line. Use after multi-line state
      *  may have shifted (blur, paste, programmatic value set). */
     _renderAllInactive() {
-        const state = { inFence: false, inSecret: false };
-        for (const line of Array.from(this._editor.children)) {
-            this._renderLine(line, null, state);
-        }
+        // Every line, the active one included, renders inactive; the sweep
+        // only skips this._activeLine, so hide it from the sweep. The field
+        // itself is the caller's business, exactly as before.
+        const active = this._activeLine;
+        this._activeLine = null;
+        for (const line of this._editor.children) line._blockState = undefined;
+        this._syncBlockState();
+        this._activeLine = active;
     }
 
     // -----------------------------------------------------------------------
@@ -557,7 +724,14 @@ class SacMdEditor extends HTMLElement {
         }
 
         if (newActive === this._activeLine) return;
+        const left = this._activeLine;
         this._activeLine = newActive;
+        // Leaving a table (not just moving between its rows) tidies it:
+        // the pipes line up again.
+        if (left && left.isConnected && TABLE_TYPES.has(left.dataset.block) &&
+            !(newActive && this._tableBlock(left).includes(newActive))) {
+            this._formatTableAt(left);
+        }
         if (newActive) this._flattenLine(newActive);
     }
 
@@ -747,7 +921,7 @@ class SacMdEditor extends HTMLElement {
         // Guard against the editor ever being emptied out completely - keep
         // at least one line so there's always a caret target.
         if (this._editor.children.length === 0) {
-            const line = this._buildRenderedLine("", { inFence: false });
+            const line = this._buildRenderedLine("", freshState());
             this._editor.appendChild(line);
             this._placeCaretInLine(line, 0);
         }
@@ -789,6 +963,9 @@ class SacMdEditor extends HTMLElement {
 
         if (e.key === "Enter" && !e.shiftKey && !(e.ctrlKey || e.metaKey)) {
             e.preventDefault();
+            // In a table Enter adds a row - it must not delete a selected
+            // cell (Tab selects the cell it moves to).
+            if (this._inTable()) { this._tableEnter(); return; }
             // Enter over a selection: delete the selection first (could span
             // multiple lines), then split at the now-collapsed caret. The
             // beforeinput listener is skipped for Enter because we
@@ -803,6 +980,7 @@ class SacMdEditor extends HTMLElement {
         }
         if (e.key === "Tab") {
             e.preventDefault();
+            if (this._inTable()) { this._tableTab(e.shiftKey); return; }
             // Tab with a selection: replace the selection with a tab stop
             // instead of expanding it.
             this._deleteSelection();
@@ -831,8 +1009,9 @@ class SacMdEditor extends HTMLElement {
         // Full re-render on blur. We used to just re-render active lines, but
         // that left cross-line state drift — e.g. typing :::secret on a line
         // doesn't mask the lines below until every subsequent line is re-
-        // classified with the new inSecret state. Doing it on blur is cheap
+        // classified with the new block state. Doing it on blur is cheap
         // and guarantees the "resting" view is always correct.
+        if (this._inTable()) this._formatTableAt(this._activeLine);
         this._renderAllInactive();
         // Drop the multi-line selection band too. The `:focus-within` CSS
         // already hides it, but clearing the class means the DOM is clean
@@ -844,6 +1023,7 @@ class SacMdEditor extends HTMLElement {
         if (this._dirty) {
             this._dirty = false;
             this.dispatchEvent(new Event("change", { bubbles: true }));
+            this._fireSac("sac:change");
         }
     }
 
@@ -859,12 +1039,20 @@ class SacMdEditor extends HTMLElement {
         const before = src.substring(0, offset);
         const after  = src.substring(offset);
 
-        // List continuation: detect a `- `/`* `/`1. ` prefix on the current
-        // line and duplicate it on the new line, unless the current prefix
-        // is all we had (empty item) - in which case exit the list.
-        const listMatch = before.match(/^(\s*)([-*]|(\d+)\.)\s+(.*)$/);
+        // List continuation: detect a `- `/`* `/`+ `/`1. `/`1) ` prefix on
+        // the current line and continue it on the new line with the same
+        // marker (ordered: next number, same delimiter), unless the current
+        // prefix is all we had (empty item) - in which case exit the list.
+        // Inside a code fence `- ` and `> ` are code, not structure: a plain
+        // split, no continuation.
+        if (line.dataset.block === "fence-body" || line.dataset.block === "indent-code") {
+            this._splitAt(line, before, after, 0);
+            return;
+        }
+
+        const listMatch = before.match(/^(\s*)([-*+]|(\d{1,9})([.)]))\s+(.*)$/);
         if (listMatch) {
-            const [, indent, marker, numStr, content] = listMatch;
+            const [, indent, marker, numStr, delim, content] = listMatch;
             if (!content && !after.trim()) {
                 // Empty item + nothing after = exit the list.
                 line.replaceChildren(document.createTextNode(""));
@@ -874,7 +1062,7 @@ class SacMdEditor extends HTMLElement {
                 this.dispatchEvent(new Event("input", { bubbles: true }));
                 return;
             }
-            const nextMarker = numStr ? `${parseInt(numStr) + 1}.` : marker;
+            const nextMarker = numStr ? `${parseInt(numStr, 10) + 1}${delim}` : marker;
             const newSrc = `${indent}${nextMarker} `;
             this._splitAt(line, before, newSrc + after, newSrc.length);
             return;
@@ -1030,6 +1218,7 @@ class SacMdEditor extends HTMLElement {
             case "ol":     return this._togglePrefixMulti("1. ");
             case "quote":  return this._togglePrefixMulti("> ");
             case "hr":     return this._insertHr(line);
+            case "table":  return this._insertTable(line);
             case "code": {
                 const selectedLines = this._getSelectedLines();
                 if (selectedLines.length > 1) return this._wrapAsCodeFence(selectedLines);
@@ -1095,7 +1284,8 @@ class SacMdEditor extends HTMLElement {
         if (target.length === 0) return;
 
         const isOrdered = /^\d+\.\s$/.test(prefix);
-        const prefixRe  = isOrdered ? /^\d+\.\s/ : null;
+        // Any existing number counts as "already ordered", `1)` included.
+        const prefixRe  = isOrdered ? /^\d{1,9}[.)]\s/ : null;
         const hasPrefix = (text) => prefixRe ? prefixRe.test(text) : text.startsWith(prefix);
         const stripPrefix = (text) => prefixRe
             ? text.replace(prefixRe, "")
@@ -1140,30 +1330,34 @@ class SacMdEditor extends HTMLElement {
     }
 
     /** Wrap a run of selected lines in a fenced code block by inserting
-     *  ``` markers before the first and after the last. The enclosed lines
+     *  fence markers before the first and after the last. The fence is ```
+     *  unless a selected line starts with a backtick run itself - then one
+     *  backtick longer, so the inner run cannot close it. The enclosed lines
      *  re-render as fence-body (monospace + background). */
     _wrapAsCodeFence(lines) {
         if (lines.length === 0) return;
         const first = lines[0];
         const last  = lines[lines.length - 1];
+        const inner = Math.max(0, ...lines.map(l => (/^`*/.exec(l.textContent) || [""])[0].length));
+        const marker = "`".repeat(Math.max(3, inner + 1));
 
         const open = document.createElement("div");
         open.className = "line";
-        open.textContent = "```";
+        open.textContent = marker;
         first.before(open);
-        this._renderLine(open, "```", this._stateBefore(open));
+        this._renderLine(open, marker, this._stateBefore(open));
 
         const close = document.createElement("div");
         close.className = "line";
-        close.textContent = "```";
+        close.textContent = marker;
         last.after(close);
-        this._renderLine(close, "```", this._stateBefore(close));
+        this._renderLine(close, marker, this._stateBefore(close));
 
         // Re-render the enclosed inactive lines so they pick up fence-body.
         // The active line stays flat but gets its class updated.
         for (const line of lines) {
             if (line === this._activeLine) {
-                this._applyBlockClass(line, line.textContent, true, false);
+                this._applyBlockClassFor(line);
             } else {
                 this._renderLine(line, null, this._stateBefore(line));
             }
@@ -1197,6 +1391,155 @@ class SacMdEditor extends HTMLElement {
         this._applyBlockClassFor(line, next);
         const delta = has ? -prefix.length : prefix.length;
         this._placeCaretInLine(line, Math.max(0, caret + delta));
+        this._dirty = true;
+        this.dispatchEvent(new Event("input", { bubbles: true }));
+    }
+
+    // -----------------------------------------------------------------------
+    // Tables
+    // -----------------------------------------------------------------------
+
+    _inTable() {
+        return !!(this._activeLine && TABLE_TYPES.has(this._activeLine.dataset.block));
+    }
+
+    /** The table block around a table line: header, delimiter, rows. */
+    _tableBlock(line) {
+        let first = line;
+        while (first.previousElementSibling && TABLE_TYPES.has(first.previousElementSibling.dataset.block) &&
+               first.dataset.block !== "table-head") {
+            first = first.previousElementSibling;
+        }
+        const rows = [first];
+        for (let cur = first.nextElementSibling; cur && (cur.dataset.block === "table-delim" ||
+             cur.dataset.block === "table-row"); cur = cur.nextElementSibling) rows.push(cur);
+        return rows;
+    }
+
+    /** Make `target` the active (raw) line and put the caret, or a
+     *  selection, in it. The old active line renders back first. */
+    _activateLine(target, start, end = start) {
+        const old = this._activeLine;
+        if (old && old !== target && old.isConnected) this._renderLine(old, null, this._stateBefore(old));
+        target.replaceChildren(document.createTextNode(target.textContent));
+        target.classList.add("active");
+        this._activeLine = target;
+        this._applyBlockClassFor(target);
+        if (end === start) this._placeCaretInLine(target, start);
+        else this._selectInLine(target, start, end);
+    }
+
+    /** Line up the pipes of the table around `line`. Rewrites only lines
+     *  whose text changes; an edit like any other (input event, undoable). */
+    _formatTableAt(line) {
+        const rows = this._tableBlock(line);
+        if (rows.length < 2 || rows[0].dataset.block !== "table-head") return;
+        const texts = rows.map((l) => l.textContent);
+        const next  = formatTable(texts);
+        let changed = false;
+        rows.forEach((l, i) => {
+            if (next[i] === texts[i]) return;
+            changed = true;
+            if (l === this._activeLine) l.replaceChildren(document.createTextNode(next[i]));
+            else l.textContent = next[i];
+            l._blockState = undefined;
+        });
+        if (!changed) return;
+        this._dirty = true;
+        this.dispatchEvent(new Event("input", { bubbles: true }));
+    }
+
+    /** Tab / Shift+Tab: next / previous cell, selecting its content; past
+     *  the last cell of the last row a new row is added. The delimiter row
+     *  is skipped. */
+    _tableTab(back) {
+        const line  = this._activeLine;
+        const rows  = this._tableBlock(line).filter((l) => l.dataset.block !== "table-delim");
+        const cellsOf = (text) => splitTableRow(text).filter((g) => g.kind === "cell");
+        const caret = this._caretOffsetInLine(line) ?? 0;
+        const cells = cellsOf(line.textContent);
+        // The cell the caret is in: the last one starting at or before it
+        // (its leading padding counts as inside).
+        let idx = 0;
+        cells.forEach((c, i) => { if (c.start - 1 <= caret) idx = i; });
+        let row = rows.indexOf(line);
+        if (row < 0) row = 0;            // on the delimiter row: treat as header
+        let target = idx + (back ? -1 : 1);
+        if (target < 0 || target >= cells.length) {
+            row += back ? -1 : 1;
+            if (row < 0) return;
+            if (row >= rows.length) {
+                this._tableAddRow(rows[rows.length - 1]);
+                return;
+            }
+            const len = cellsOf(rows[row].textContent).length;
+            target = back ? len - 1 : 0;
+        }
+        const dest = cellsOf(rows[row].textContent)[target];
+        if (!dest) return;
+        this._activateLine(rows[row], dest.start, dest.start + dest.text.length);
+    }
+
+    /** Enter in a table: a new empty row below (below the delimiter when
+     *  on the header). Enter on an empty row leaves the table, like an
+     *  empty list item leaves a list. */
+    _tableEnter() {
+        const line = this._activeLine;
+        const type = line.dataset.block;
+        if (type === "table-row" && tableCells(line.textContent).every((c) => c === "")) {
+            const above = line.previousElementSibling;
+            line.replaceChildren(document.createTextNode(""));
+            this._applyBlockClassFor(line, "");
+            this._placeCaretInLine(line, 0);
+            if (above && TABLE_TYPES.has(above.dataset.block)) this._formatTableAt(above);
+            this._dirty = true;
+            this.dispatchEvent(new Event("input", { bubbles: true }));
+            return;
+        }
+        const anchor = type === "table-head" && line.nextElementSibling ? line.nextElementSibling : line;
+        this._tableAddRow(anchor);
+    }
+
+    /** Insert an empty row after `anchor` and put the caret in its first cell. */
+    _tableAddRow(anchor) {
+        const n = tableCells(this._tableBlock(anchor)[0].textContent).length;
+        const row = document.createElement("div");
+        row.className = "line";
+        row.textContent = "|" + "  |".repeat(n);
+        anchor.after(row);
+        this._activateLine(row, 2);
+        this._dirty = true;
+        this.dispatchEvent(new Event("input", { bubbles: true }));
+    }
+
+    /** Toolbar: a 2-column table with one empty row, header cell selected. */
+    _insertTable(line) {
+        const col = mdT("tableColumn", "Column");
+        const texts = formatTable([`| ${col} 1 | ${col} 2 |`, "| --- | --- |", "|  |  |"]);
+        let first;
+        if (line.textContent === "") {
+            first = line;
+            line.textContent = texts[0];
+        } else {
+            // A table after text needs its own block: a blank line first.
+            const blank = document.createElement("div");
+            blank.className = "line";
+            line.after(blank);
+            first = document.createElement("div");
+            first.className = "line";
+            first.textContent = texts[0];
+            blank.after(first);
+        }
+        let prev = first;
+        for (const t of texts.slice(1)) {
+            const l = document.createElement("div");
+            l.className = "line";
+            l.textContent = t;
+            prev.after(l);
+            prev = l;
+        }
+        const head = splitTableRow(texts[0]).find((g) => g.kind === "cell");
+        this._activateLine(first, head.start, head.start + head.text.length);
         this._dirty = true;
         this.dispatchEvent(new Event("input", { bubbles: true }));
     }
@@ -1468,32 +1811,80 @@ class SacMdEditor extends HTMLElement {
         }));
     }
 
-    /** Compute the fence + secret state just before a given line — lets us
+    /** Compute the fence + block state just before a given line - lets us
      *  render a single line correctly without re-rendering the whole document. */
     _stateBefore(line) {
-        const state = { inFence: false, inSecret: false };
+        const state = freshState();
         for (const sib of Array.from(this._editor.children)) {
             if (sib === line) return state;
-            const text = sib.textContent;
-            if (/^```/.test(text)) state.inFence = !state.inFence;
-            else if (!state.inFence) {
-                if (/^:{2,3}secret(\s|$)/.test(text)) state.inSecret = true;
-                else if (/^:{2,3}end(\s|$)/.test(text)) state.inSecret = false;
-            }
+            advanceState(state, sib.textContent);
         }
         return state;
     }
 
-    /** Reveal-toggle click handler. Finds the bounded block from the :::secret
-     *  line the eye icon lives on, walks forward until :::end (or end of doc),
-     *  and flips .secret-revealed on every line in the range. Session-only —
-     *  any full re-render (paste, value set) drops the class. */
-    _toggleSecretReveal(openLine) {
-        const reveal = !openLine.classList.contains("secret-revealed");
-        openLine.classList.toggle("secret-revealed", reveal);
+    /** Cross-line consistency sweep, run after every edit. A keystroke can
+     *  change the state of every line below it (type ``` or :::secret on a
+     *  line), but the edit paths only re-render the line they touch. Each
+     *  line remembers the state it was rendered with (_blockState); this
+     *  walks the document once and re-renders exactly the lines whose state
+     *  no longer matches. Typing plain text changes no state, so the walk
+     *  re-renders nothing - one regex pass per line. */
+    _syncBlockState(lines = null) {
+        if (!this._editor) return;
+        if (!lines) lines = Array.from(this._editor.children);
+        const texts = lines.map((l) => l.textContent);
+        // Pass 1, top-down: the state before each line, its type, and the
+        // link definitions (anywhere in the document, like CommonMark).
+        const states = [], types = [], defs = {};
+        const state = freshState();
+        for (const text of texts) {
+            states.push({ ...state });
+            const type = classifyLine(text, state).type;
+            types.push(type);
+            if (type === "linkdef") addLinkDef(defs, text);
+            advanceState(state, text, type);
+        }
+        // Pass 2, bottom-up: which paragraph lines an underline turns into a
+        // setext heading (the whole paragraph above it, like CommonMark),
+        // and which are table headers.
+        // A paragraph line directly above a delimiter row is a table header.
+        const ahead = new Array(lines.length).fill(NO_AHEAD);
+        let carry = 0;
+        for (let i = lines.length - 1; i >= 0; i--) {
+            if (types[i] === "setext") carry = texts[i].trim()[0] === "=" ? 1 : 2;
+            else if (types[i] === "paragraph") {
+                if (types[i + 1] === "table-delim") { ahead[i] = { setext: 0, table: delimAligns(texts[i + 1]) }; carry = 0; }
+                else if (carry) ahead[i] = { setext: carry, table: "" };
+            }
+            else carry = 0;
+        }
+        this._linkDefs = defs;
+        this._linkDefsKey = JSON.stringify(defs);
+        // Pass 3: re-render exactly the lines whose context changed.
+        for (let i = 0; i < lines.length; i++) {
+            const line = lines[i];
+            if (line._blockState === this._lineKey(states[i], ahead[i], texts[i])) continue;
+            if (line === this._activeLine) {
+                line._blockState = this._lineKey(states[i], ahead[i], texts[i]);
+                this._applyBlockClass(line, texts[i], classifyLine(texts[i], states[i], ahead[i]));
+            } else {
+                this._renderLine(line, texts[i], { ...states[i] }, ahead[i]);
+            }
+        }
+    }
+
+    /** Reveal-toggle click handler. From the opening line the eye icon
+     *  lives on, walks forward to the block's close (or end of document) and
+     *  flips .block-revealed on every line in the range; a one-line block
+     *  flips just itself. Session-only - a value set drops it. */
+    _toggleBlockReveal(openLine) {
+        const reveal = !openLine.classList.contains("block-revealed");
+        openLine.classList.toggle("block-revealed", reveal);
+        if (openLine.dataset.block === "block-line") return;
         for (let cur = openLine.nextElementSibling; cur; cur = cur.nextElementSibling) {
-            cur.classList.toggle("secret-revealed", reveal);
-            if (cur.dataset.block === "secret-close") break;
+            if (cur.dataset.block !== "block-body" && cur.dataset.block !== "block-close") break;
+            cur.classList.toggle("block-revealed", reveal);
+            if (cur.dataset.block === "block-close") break;
         }
     }
 }
@@ -1504,28 +1895,343 @@ class SacMdEditor extends HTMLElement {
 
 const BLOCK_PREFIX_RE = {
     heading: /^(#{1,6}\s)/,
-    ul:      /^(\s*[-*]\s)/,
-    ol:      /^(\s*\d+\.\s)/,
+    ul:      /^(\s*[-*+]\s)/,
+    ol:      /^(\s*\d{1,9}[.)]\s)/,
     quote:   /^(>\s?)/,
 };
+
+// List item prefixes (CommonMark): bullets `-` `*` `+`; ordered `1.` or
+// `1)` with at most 9 digits. TASK_RE captures prefix, box state, gap, rest.
+const TASK_RE = /^(\s*(?:[-*+]|\d{1,9}[.)])\s+)\[([ xX])\](\s+)(.*)$/;
+// Thematic break (CommonMark): up to 3 leading spaces, then 3 or more of
+// the same `-` `*` `_`, spaces and tabs allowed between them.
+const HR_RE = /^ {0,3}([-*_])(?:[ \t]*\1){2,}[ \t]*$/;
+
+/** Code fence step (CommonMark). Outside a fence (`open` false) a line
+ *  opens one with 3+ backticks or 3+ tildes, info string allowed. Inside,
+ *  only the SAME character, at least as many of it and nothing else on the
+ *  line closes it - so ~~~ can quote ``` and ```` can quote ```, and a
+ *  fence documenting fences stays text. Returns { boundary, open } where
+ *  `open` is the opening run while inside a fence, false outside. */
+function fenceStep(src, open) {
+    if (!open) {
+        const m = /^(`{3,}|~{3,})/.exec(src);
+        return m ? { boundary: true, open: m[1] } : { boundary: false, open: false };
+    }
+    const m = /^(`{3,}|~{3,})[ \t]*$/.exec(src);
+    if (m && m[1][0] === open[0] && m[1].length >= open.length) return { boundary: true, open: false };
+    return { boundary: false, open };
+}
+
+// Setext heading underline (CommonMark): `=` for h1, `-` for h2, up to 3
+// leading spaces. Deviation: a dash underline needs 2+ dashes, so starting
+// a list ("- ") under a paragraph line does not flash the line above into
+// an h2 while you type.
+const SETEXT_RE = /^ {0,3}(=+|-{2,})[ \t]*$/;
+// Indented code block: 4 spaces or a tab.
+const INDENT_CODE_RE = /^( {4}|\t)/;
+// Link reference definition: [label]: url "optional title".
+const LINKDEF_RE = /^ {0,3}\[([^\]]+)\]:[ \t]*(<[^>]*>|\S+)(?:[ \t]+("[^"]*"|'[^']*'|\([^)]*\)))?[ \t]*$/;
+
+// GFM table delimiter row: cells of dashes with optional alignment colons.
+const TABLE_DELIM_RE = /^\s*\|?\s*:?-+:?\s*(\|\s*:?-+:?\s*)*\|?\s*$/;
+const TABLE_TYPES = new Set(["table-head", "table-delim", "table-row"]);
+
+/** Split a table row into segments that cover `src` exactly, in order:
+ *  { kind: "pipe" | "ws" | "cell", text, start }. Pipes escaped with a
+ *  backslash do not split (GFM). A leading or trailing blank segment is
+ *  padding, not a cell. Rendering and formatting both use this, so the
+ *  two can never disagree about where a cell is. */
+function splitTableRow(src) {
+    const pipes = [];
+    for (let i = 0; i < src.length; i++) {
+        if (src[i] === "\\") { i++; continue; }
+        if (src[i] === "|") pipes.push(i);
+    }
+    const out = [];
+    let start = 0;
+    for (let k = 0; k <= pipes.length; k++) {
+        const end  = k < pipes.length ? pipes[k] : src.length;
+        const part = src.slice(start, end);
+        const edge = k === 0 || k === pipes.length;
+        if (edge && part.trim() === "") {
+            if (part) out.push({ kind: "ws", text: part, start });
+        } else {
+            const lead  = /^\s*/.exec(part)[0];
+            const body  = part.slice(lead.length).replace(/\s+$/, "");
+            const trail = part.slice(lead.length + body.length);
+            if (lead)  out.push({ kind: "ws", text: lead, start });
+            // An empty cell's caret spot is one space in, not against the
+            // closing pipe, so typing there reads "| x |".
+            const at = body ? start + lead.length : start + Math.min(1, lead.length);
+            out.push({ kind: "cell", text: body, start: at });
+            if (trail) out.push({ kind: "ws", text: trail, start: start + lead.length + body.length });
+        }
+        if (k < pipes.length) out.push({ kind: "pipe", text: "|", start: end });
+        start = end + 1;
+    }
+    return out;
+}
+const tableCells = (src) => splitTableRow(src).filter((g) => g.kind === "cell").map((g) => g.text);
+
+/** Column alignments from a delimiter row: one char per column,
+ *  l / c / r, or "-" for none. */
+function delimAligns(src) {
+    return tableCells(src).map((c) => {
+        const l = c.startsWith(":"), r = c.endsWith(":");
+        return l && r ? "c" : r ? "r" : l ? "l" : "-";
+    }).join("");
+}
+
+/** Pretty-print a table block (header, delimiter, rows) so the pipes line
+ *  up: every cell padded to its column's width, delimiter dashes to match,
+ *  alignment colons kept. Cells beyond the header's count are kept
+ *  verbatim at the end of their row - formatting never drops content.
+ *  Returns the new line texts, same length as `texts`. */
+function formatTable(texts) {
+    const rows   = texts.map(tableCells);
+    const n      = rows[0].length;
+    const aligns = delimAligns(texts[1]);
+    const width  = Array.from({ length: n }, (_, c) =>
+        Math.max(3, ...rows.map((r, i) => (i === 1 ? 0 : (r[c] || "").length))));
+    const pad = (t, w, a) => {
+        const gap = w - t.length;
+        if (a === "r") return " ".repeat(gap) + t;
+        if (a === "c") return " ".repeat(Math.floor(gap / 2)) + t + " ".repeat(Math.ceil(gap / 2));
+        return t + " ".repeat(gap);
+    };
+    return rows.map((r, i) => {
+        if (i === 1) {
+            return "| " + width.map((w, c) => {
+                const a = aligns[c] || "-";
+                const dashes = "-".repeat(w - (a === "c" ? 2 : a === "-" ? 0 : 1));
+                return a === "c" ? ":" + dashes + ":" : a === "l" ? ":" + dashes : a === "r" ? dashes + ":" : dashes;
+            }).join(" | ") + " |";
+        }
+        const cells = width.map((w, c) => pad(r[c] || "", w, aligns[c]));
+        return "| " + cells.concat(r.slice(n)).join(" | ") + " |";
+    });
+}
+
+/** Render a table line: pipes and padding become hidden markers, each cell
+ *  a .tcell (CSS display: table-cell). The line itself is display:
+ *  table-row, so consecutive rows form one anonymous table and the columns
+ *  line up with no measuring. textContent stays the source. */
+function renderTableRow(src, kind, aligns, defs) {
+    let col = 0;
+    return splitTableRow(src).map((g) => {
+        if (g.kind !== "cell") return `<span class="block-marker">${escapeHtml(g.text)}</span>`;
+        const a = (aligns && aligns[col++]) || "-";
+        if (kind === "table-delim") {
+            return `<span class="tcell tdelim"><span class="block-marker">${escapeHtml(g.text)}</span></span>`;
+        }
+        return `<span class="tcell ta-${a}">${renderInline(g.text, defs)}</span>`;
+    }).join("");
+}
+
+// ---------------------------------------------------------------------------
+// Block registry (static API on the element class - see the header)
+// ---------------------------------------------------------------------------
+
+const BLOCKS = new Map();          // name -> compiled definition, in order
+const LIVE_EDITORS = new Set();    // connected editors, refreshed on changes
+let blockCss = "";                 // every definition's css, concatenated
+let blockGen = 0;                  // bumps on every change
+
+function compileBlock(def) {
+    if (!def || typeof def.name !== "string" || !/^[a-z][a-z0-9-]*$/.test(def.name)) {
+        throw new TypeError("sac-md-editor registerBlock: name must be a-z, 0-9 and dashes");
+    }
+    // A /g or /y RegExp keeps lastIndex between test() calls - strip them.
+    const plain = (re) => new RegExp(re.source, re.flags.replace(/[gy]/g, ""));
+    let match = def.match;
+    if (typeof match !== "function") {
+        if (!(def.open instanceof RegExp) || !(def.close instanceof RegExp)) {
+            throw new TypeError(`sac-md-editor registerBlock("${def.name}"): give match(src), or open and close RegExps`);
+        }
+        const open = plain(def.open), close = plain(def.close);
+        match = (src) => open.test(src) ? "open" : close.test(src) ? "close" : null;
+    }
+    return {
+        name:      def.name,
+        match,
+        masked:    !!def.masked,
+        toggle:    !!def.toggle,
+        label:     def.label == null ? null : def.label,
+        className: def.className ? String(def.className).trim() : "",
+        color:     def.color ? String(def.color) : "",
+        css:       def.css ? String(def.css) : "",
+    };
+}
+
+/** A host's match() is foreign code: a throw must not break rendering. */
+function blockMatch(def, src) {
+    try { return def.match(src); } catch { return null; }
+}
+
+function blockClasses(def, part) {
+    return `block-${part} block-${def.name}` +
+        (def.masked ? " block-masked" : "") + (def.className ? " " + def.className : "");
+}
+
+/** The pill text travels as a CSS string in a custom property (JSON quoting
+ *  is valid CSS); no label means no pill. */
+function setBlockLabel(line, def) {
+    let label = def.label;
+    if (typeof label === "function") { try { label = label(); } catch { label = null; } }
+    if (label == null || label === "") line.style.removeProperty("--mdb-label");
+    else line.style.setProperty("--mdb-label", JSON.stringify(String(label)));
+}
+
+function refreshBlocks() {
+    blockCss = [...BLOCKS.values()].map((d) => d.css).filter(Boolean).join("\n");
+    blockGen++;
+    for (const editor of LIVE_EDITORS) editor._refreshBlocks();
+}
+
+/** Cross-line state at the top of a document. `inFence` and `inBlock` (the
+ *  open registered block's name, "" outside one) as before; `prev` is what the previous line was ("blank", "para",
+ *  "quote", "list", "code", "other") and `listCtx` whether a list is still
+ *  open (a blank line keeps it, an unindented non-list line ends it).
+ *  `table` is the open table's alignments ("" outside one) and `pipeCols`
+ *  the cell count of the line above if it could be a table header. */
+function freshState() {
+    return { inFence: false, inBlock: "", prev: "blank", listCtx: false, table: "", pipeCols: 0 };
+}
+
+// Lookahead facts about a line: its setext level and, for a table header,
+// the alignments of the delimiter row below it.
+const NO_AHEAD = Object.freeze({ setext: 0, table: "" });
+
+/** THE line classifier. Everything that decides what a line is lives here:
+ *  fences first (inside one nothing else counts), then registered blocks
+ *  (bounds, bodies, one-line markers), tables, setext underlines, indented code, link definitions and
+ *  finally the single-line syntax (parseLineBlock). `ahead` carries what
+ *  only the lines BELOW can tell: the setext level (1/2) when an underline
+ *  turns this paragraph into a heading, and the table alignments when a
+ *  delimiter row makes it a table header. Never part of `state`. */
+function classifyLine(src, state, ahead = NO_AHEAD) {
+    const fence = fenceStep(src, state.inFence);
+    if (state.inFence) {
+        return fence.boundary ? { type: "fence", classes: "fence" }
+                              : { type: "fence-body", classes: "fence-body" };
+    }
+    if (fence.boundary) return { type: "fence", classes: "fence" };
+    // Registered blocks. Inside one only its own close counts - no nesting,
+    // and another block's opener is body text.
+    if (state.inBlock) {
+        const def = BLOCKS.get(state.inBlock);
+        if (def) {
+            return blockMatch(def, src) === "close"
+                ? { type: "block-close", classes: blockClasses(def, "close"), def }
+                : { type: "block-body",  classes: blockClasses(def, "body"),  def };
+        }
+    }
+    for (const def of BLOCKS.values()) {
+        const m = blockMatch(def, src);
+        if (m === "open") return { type: "block-open", classes: blockClasses(def, "open"), def };
+        if (m === "line") return { type: "block-line", classes: blockClasses(def, "line"), def };
+    }
+    // Tables (GFM): body rows continue while lines hold a pipe and start no
+    // other block; the delimiter row must match the header's cell count.
+    const hasPipe = src.includes("|");
+    if (state.table && hasPipe && parseLineBlock(src).type === "paragraph") {
+        return { type: "table-row", classes: "table-row", aligns: state.table };
+    }
+    if (state.pipeCols && hasPipe && TABLE_DELIM_RE.test(src) && tableCells(src).length === state.pipeCols) {
+        return { type: "table-delim", classes: "table-delim", aligns: delimAligns(src) };
+    }
+    // An underline only counts directly under paragraph text.
+    if (state.prev === "para" && SETEXT_RE.test(src)) {
+        const level = src.trim()[0] === "=" ? 1 : 2;
+        return { type: "setext", classes: `setext-underline setext-${level}` };
+    }
+    // Indented code cannot interrupt a paragraph, and inside a list an
+    // indented line is the item's continuation, not code.
+    if (INDENT_CODE_RE.test(src) && src.trim() !== "" &&
+        state.prev !== "para" && state.prev !== "quote" && !state.listCtx) {
+        return { type: "indent-code", classes: "fence-body indent-code" };
+    }
+    // A definition cannot interrupt a paragraph either.
+    if (state.prev !== "para" && LINKDEF_RE.test(src)) return { type: "linkdef", classes: "linkdef" };
+    const base = parseLineBlock(src);
+    if (base.type === "paragraph" && ahead.table) {
+        return { type: "table-head", classes: "table-head", aligns: ahead.table };
+    }
+    if (base.type === "paragraph" && ahead.setext) {
+        return { type: "heading", classes: `heading h${ahead.setext} setext-heading` };
+    }
+    return base;
+}
+
+/** Advance the cross-line state past one line whose type is already known
+ *  (classifyLine with setext 0). Mutates and returns `state`. The ONE
+ *  definition of how state flows downward - _stateBefore and
+ *  _syncBlockState both walk with it. */
+function advanceState(state, text, type = classifyLine(text, state).type) {
+    if (type === "fence") state.inFence = fenceStep(text, state.inFence).open;
+    else if (type === "block-open") {
+        state.inBlock = "";
+        for (const def of BLOCKS.values()) {
+            if (blockMatch(def, text) === "open") { state.inBlock = def.name; break; }
+        }
+    }
+    else if (type === "block-close") state.inBlock = "";
+
+    const isList = type === "ul" || type === "ol" || type === "task";
+    if (isList) state.listCtx = true;
+    else if (type === "empty") { /* a blank line keeps the list open */ }
+    else if (!(state.listCtx && /^\s/.test(text))) state.listCtx = false;
+
+    state.table = type === "table-delim" ? delimAligns(text)
+        : type === "table-row" ? state.table : "";
+    state.pipeCols = type === "paragraph" && text.includes("|") ? tableCells(text).length : 0;
+
+    state.prev = type === "empty" ? "blank"
+        : type === "paragraph" ? "para"
+        : type === "quote" ? "quote"
+        : isList ? "list"
+        : type === "indent-code" ? "code"
+        : "other";
+    return state;
+}
+
+/** What a line's rendering depends on besides its own text: the parts of
+ *  the state classifyLine reads, plus the lookahead facts. */
+function stateKey(state, ahead = NO_AHEAD) {
+    const prev = state.prev === "para" ? "p" : state.prev === "quote" ? "q" : "";
+    return `${state.inFence || ""}|${state.inBlock}|${prev}|${state.listCtx ? "l" : ""}` +
+           `|${state.table}|${state.pipeCols || ""}|${ahead.setext || ""}|${ahead.table}`;
+}
+
+/** Collect a link reference definition into `defs` (first one wins, labels
+ *  normalised the way marked looks them up). */
+function addLinkDef(defs, src) {
+    const m = LINKDEF_RE.exec(src);
+    if (!m) return;
+    const label = m[1].trim().replace(/\s+/g, " ").toLowerCase();
+    if (!label || Object.prototype.hasOwnProperty.call(defs, label)) return;
+    const href = m[2].replace(/^<|>$/g, "");
+    const title = m[3] ? m[3].slice(1, -1) : null;
+    defs[label] = { href, title };
+}
 
 function parseLineBlock(src) {
     if (src === "") return { type: "empty", classes: "" };
     const h = src.match(/^(#{1,6})\s+/);
     if (h) return { type: "heading", classes: `heading h${h[1].length}` };
+    // Before lists: `- - -` and `* * *` would otherwise read as bullets.
+    if (HR_RE.test(src))            return { type: "hr", classes: "hr" };
     // Task lists get their own type so the `[ ]`/`[x]` render as a checkbox.
     // Tested before plain lists because the pattern is a strict superset.
-    if (/^\s*[-*]\s+\[[ xX]\]\s+/.test(src)) {
-        const checked = /\[[xX]\]/.test(src);
+    const task = TASK_RE.exec(src);
+    if (task) {
+        const checked = task[2] !== " ";
         return { type: "task", classes: checked ? "task task-done" : "task" };
     }
-    if (/^\s*[-*]\s+/.test(src))    return { type: "ul",    classes: "list ul" };
-    if (/^\s*\d+\.\s+/.test(src))   return { type: "ol",    classes: "list ol" };
+    if (/^\s*[-*+]\s+/.test(src))        return { type: "ul",    classes: "list ul" };
+    if (/^\s*\d{1,9}[.)]\s+/.test(src))  return { type: "ol",    classes: "list ol" };
     if (/^>\s?/.test(src))          return { type: "quote", classes: "quote" };
-    if (/^\s*(---|\*\*\*|___)\s*$/.test(src)) return { type: "hr", classes: "hr" };
-    if (/^```/.test(src))           return { type: "fence", classes: "fence" };
-    if (/^:{2,3}secret(\s|$)/.test(src)) return { type: "secret-open",  classes: "secret-marker secret-open" };
-    if (/^:{2,3}end(\s|$)/.test(src))    return { type: "secret-close", classes: "secret-marker secret-close" };
     return { type: "paragraph", classes: "" };
 }
 
@@ -1553,7 +2259,7 @@ function parseLineBlock(src) {
 const PURIFY_CONFIG = {
     ALLOWED_TAGS: ["span", "strong", "em", "del", "code", "a", "br", "img"],
     ALLOWED_ATTR: ["class", "href", "target", "rel", "src", "alt", "title",
-                   "loading", "referrerpolicy"],
+                   "loading", "referrerpolicy", "data-glyph"],
     ALLOW_DATA_ATTR: false,
     KEEP_CONTENT: true,
 };
@@ -1563,7 +2269,9 @@ const SAFE_HREF_RE = /^(https?:|mailto:|#)/i;
 // javascript:, and anything else that could exfil or execute.
 const SAFE_IMG_SRC_RE = /^https?:/i;
 
-function renderInline(text) {
+/** `defs`: the document's link reference definitions ({ label: { href,
+ *  title } }), so [text][id], [text][] and [text] resolve. */
+function renderInline(text, defs = null) {
     if (!text) return "";
     // Graceful degradation if vendor scripts haven't loaded yet (e.g. in a
     // unit test harness that imports just the component file).
@@ -1572,9 +2280,55 @@ function renderInline(text) {
     }
     let tokens;
     try {
-        tokens = marked.Lexer.lexInline(text, { gfm: true, breaks: false });
+        if (defs && Object.keys(defs).length) {
+            const lexer = new marked.Lexer({ gfm: true, breaks: false });
+            lexer.tokens.links = defs;
+            tokens = lexer.inlineTokens(text);
+        } else {
+            tokens = marked.Lexer.lexInline(text, { gfm: true, breaks: false });
+        }
     } catch { return escapeHtml(text); }
     return DOMPurify.sanitize(walkInlineTokens(tokens), PURIFY_CONFIG);
+}
+
+// HTML entity: named, decimal or hex. Rendered as its character via CSS
+// generated content while the source stays in the DOM as a marker - the
+// line's textContent never changes.
+const ENTITY_RE = /&(?:#[0-9]{1,7}|#[xX][0-9a-fA-F]{1,6}|[A-Za-z][A-Za-z0-9]{1,31});/g;
+let entityDecoder = null;
+const entityCache = new Map();
+function decodeEntity(ent) {
+    let glyph = entityCache.get(ent);
+    if (glyph === undefined) {
+        glyph = decodeEntityUncached(ent);
+        if (entityCache.size < 512) entityCache.set(ent, glyph);
+    }
+    return glyph;
+}
+function decodeEntityUncached(ent) {
+    if (ent[1] === "#") {
+        const hex = ent[2] === "x" || ent[2] === "X";
+        const cp = parseInt(ent.slice(hex ? 3 : 2, -1), hex ? 16 : 10);
+        // CommonMark: 0 and invalid code points become U+FFFD.
+        if (!(cp > 0 && cp <= 0x10ffff) || (cp >= 0xd800 && cp <= 0xdfff)) return "\ufffd";
+        return String.fromCodePoint(cp);
+    }
+    // Named: let the HTML parser decode it. A <textarea> never runs markup.
+    if (!entityDecoder) entityDecoder = document.createElement("textarea");
+    entityDecoder.innerHTML = ent;
+    return entityDecoder.value;
+}
+function renderText(text) {
+    if (!text.includes("&")) return escapeHtml(text);
+    let out = "", last = 0;
+    for (const m of text.matchAll(ENTITY_RE)) {
+        const glyph = decodeEntity(m[0]);
+        if (glyph === m[0]) continue;             // unknown name: plain text
+        out += escapeHtml(text.slice(last, m.index)) +
+               `<span class="entity" data-glyph="${escapeAttr(glyph)}"><span class="marker">${escapeHtml(m[0])}</span></span>`;
+        last = m.index + m[0].length;
+    }
+    return out + escapeHtml(text.slice(last));
 }
 
 function walkInlineTokens(tokens) {
@@ -1586,7 +2340,7 @@ function walkInlineTokens(tokens) {
 function renderInlineToken(t) {
     switch (t.type) {
         case "text":
-            return escapeHtml(t.text);
+            return renderText(t.text);
         case "escape":
             // raw like "\\*" — keep the backslash visible as a marker so
             // textContent round-trips; show the escaped char as content.
@@ -1619,10 +2373,18 @@ function renderInlineToken(t) {
                 return `<a href="${escapeAttr(safe)}" target="_blank" rel="noopener noreferrer">${escapeHtml(t.raw)}</a>`;
             }
             // Inline link [label](href) — preserve the `](...)` tail literally.
-            const tailIdx = t.raw.lastIndexOf("](");
-            if (tailIdx < 0) return escapeHtml(t.raw);
-            const tail = t.raw.substring(tailIdx);
-            return `<span class="marker">[</span><a href="${escapeAttr(safe)}" target="_blank" rel="noopener noreferrer">${walkInlineTokens(t.tokens || [])}</a><span class="marker">${escapeHtml(tail)}</span>`;
+            // Reference link [label][id] / [label][] / [label]: the tail is
+            // `][id]`, `][]` or `]`. Either way "[" + label + tail must BE the
+            // raw source, or we render it as plain text rather than risk the
+            // textContent invariant.
+            const inlineIdx = t.raw.lastIndexOf("](");
+            const refIdx    = t.raw.lastIndexOf("][");
+            const tail = inlineIdx >= 0 ? t.raw.substring(inlineIdx)
+                : refIdx >= 0 ? t.raw.substring(refIdx)
+                : "]";
+            if ("[" + t.text + tail !== t.raw) return escapeHtml(t.raw);
+            const titleAttr = t.title ? ` title="${escapeAttr(t.title)}"` : "";
+            return `<span class="marker">[</span><a href="${escapeAttr(safe)}"${titleAttr} target="_blank" rel="noopener noreferrer">${walkInlineTokens(t.tokens || [])}</a><span class="marker">${escapeHtml(tail)}</span>`;
         }
         case "image": {
             // Preserve the raw source as a marker span (hidden on inactive
@@ -1669,12 +2431,12 @@ const TEMPLATE = `
            affordance at all. Focus pulls the border toward the accent. */
         background: var(--field, rgba(0, 0, 0, 0.18));
         border: 1px solid var(--border, color-mix(in srgb, var(--fg, #fff) 8%, transparent));
-        border-radius: 12px;
+        border-radius: var(--radius-l, 6px);   /* a surface */
         transition: border-color 0.15s, box-shadow 0.15s;
     }
     :host(:focus-within) {
-        border-color: rgba(59, 130, 246, 0.5);
-        box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+        border-color: color-mix(in srgb, var(--accent, #3b82f6) 50%, transparent);
+        box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent, #3b82f6) 10%, transparent);
     }
     :host(.is-readonly) .toolbar { display: none; }
     :host(.is-readonly) {
@@ -1689,13 +2451,15 @@ const TEMPLATE = `
         padding: 8px 12px;
         background: color-mix(in srgb, var(--fg, #fff) 2%, transparent);
         border-bottom: 1px solid var(--border, color-mix(in srgb, var(--fg, #fff) 8%, transparent));
-        border-radius: 12px 12px 0 0;
+        border-radius: inherit;   /* the host's top corners - cannot drift */
+        border-bottom-left-radius: 0;
+        border-bottom-right-radius: 0;
     }
     .toolbar button {
         padding: 5px 9px;
         min-width: 30px;
         height: 28px;
-        border-radius: 6px;
+        border-radius: var(--radius-m, 4px);   /* a control */
         background: transparent;
         border: 1px solid transparent;
         color: var(--text-muted, #888);
@@ -1752,7 +2516,7 @@ const TEMPLATE = `
         min-height: 1.6em;
         padding: 2px 10px;
         margin: 0 -10px;
-        border-radius: 4px;
+        border-radius: var(--radius-m, 4px);
         white-space: pre-wrap;
         word-break: break-word;
         transition: background-color 0.12s ease;
@@ -1772,7 +2536,7 @@ const TEMPLATE = `
        at low opacity - keeps the "exactly-these-chars-are-selected"
        affordance without the default bright system blue. */
     .editor ::selection {
-        background: rgba(59, 130, 246, 0.28);
+        background: color-mix(in srgb, var(--accent, #3b82f6) 28%, transparent);
         color: inherit;
     }
 
@@ -1936,8 +2700,8 @@ const TEMPLATE = `
 
     /* Opening fence: rounded top + top border for the code-card look. */
     .line.fence:not(.active):has(+ .line.fence-body) {
-        border-top-left-radius: 6px;
-        border-top-right-radius: 6px;
+        border-top-left-radius: var(--radius-m, 4px);
+        border-top-right-radius: var(--radius-m, 4px);
         min-height: 10px;
         padding-top: 6px;
         box-shadow: inset 0 1px 0 color-mix(in srgb, var(--fg, #fff) 8%, transparent),
@@ -1946,8 +2710,8 @@ const TEMPLATE = `
     }
     /* Closing fence: rounded bottom + bottom border. */
     .line.fence-body + .line.fence:not(.active) {
-        border-bottom-left-radius: 6px;
-        border-bottom-right-radius: 6px;
+        border-bottom-left-radius: var(--radius-m, 4px);
+        border-bottom-right-radius: var(--radius-m, 4px);
         min-height: 10px;
         padding-bottom: 6px;
         box-shadow: inset 0 -1px 0 color-mix(in srgb, var(--fg, #fff) 8%, transparent),
@@ -1959,6 +2723,73 @@ const TEMPLATE = `
         box-shadow: inset 1px 0 0 color-mix(in srgb, var(--fg, #fff) 8%, transparent),
                     inset -1px 0 0 color-mix(in srgb, var(--fg, #fff) 8%, transparent);
     }
+
+    /* Indented code (4 spaces / tab): the lines carry .fence-body, so they
+       get the code card above; with no fence lines around it, its own
+       first and last lines cap the card. */
+    .line.indent-code:not(.active) .block-marker { display: none; }
+    .line.indent-code:not(.line.indent-code + .line.indent-code) {
+        border-top-left-radius: var(--radius-m, 4px);
+        border-top-right-radius: var(--radius-m, 4px);
+        box-shadow: inset 0 1px 0 color-mix(in srgb, var(--fg, #fff) 8%, transparent),
+                    inset 1px 0 0 color-mix(in srgb, var(--fg, #fff) 8%, transparent),
+                    inset -1px 0 0 color-mix(in srgb, var(--fg, #fff) 8%, transparent);
+    }
+    .line.indent-code:not(:has(+ .line.indent-code)) {
+        border-bottom-left-radius: var(--radius-m, 4px);
+        border-bottom-right-radius: var(--radius-m, 4px);
+        box-shadow: inset 0 -1px 0 color-mix(in srgb, var(--fg, #fff) 8%, transparent),
+                    inset 1px 0 0 color-mix(in srgb, var(--fg, #fff) 8%, transparent),
+                    inset -1px 0 0 color-mix(in srgb, var(--fg, #fff) 8%, transparent);
+    }
+    .line.indent-code:not(.line.indent-code + .line.indent-code):not(:has(+ .line.indent-code)) {
+        box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--fg, #fff) 8%, transparent);
+    }
+
+    /* Setext underline (=== / --- under paragraph text): the paragraph
+       renders as the heading, the underline collapses to a sliver. */
+    .line.setext-underline:not(.active) {
+        min-height: 0;
+        height: 4px;
+        padding: 0;
+        overflow: hidden;
+    }
+    .line.setext-underline:not(.active) .block-marker { display: none; }
+    .line.setext-underline.active { color: var(--text-muted, #888); }
+
+    /* Link reference definition ([id]: url): metadata, not prose. */
+    .line.linkdef {
+        color: var(--text-muted, #888);
+        font-size: 0.85em;
+    }
+
+    /* Tables: every row line is a table-row, so consecutive rows form
+       one anonymous CSS table and the columns align by themselves. Pipes
+       and padding are hidden markers; the active row shows its raw
+       source like every other line. */
+    .line.table-head:not(.active),
+    .line.table-row:not(.active),
+    .line.table-delim:not(.active) { display: table-row; }
+    .line.table-head:not(.active) .block-marker,
+    .line.table-row:not(.active) .block-marker,
+    .line.table-delim:not(.active) .block-marker { display: none; }
+    .line .tcell {
+        display: table-cell;
+        padding: 4px 12px;
+        border-bottom: 1px solid var(--border, color-mix(in srgb, var(--fg, #fff) 12%, transparent));
+    }
+    .line.table-head .tcell { font-weight: 600; }
+    .line.table-delim .tcell {
+        padding: 0;
+        height: 0;
+        border-bottom-width: 2px;
+    }
+    .line .tcell.ta-c { text-align: center; }
+    .line .tcell.ta-r { text-align: right; }
+
+    /* HTML entity (&copy;): the source stays in the DOM as a marker
+       (hidden on inactive lines), the character is generated content. */
+    .line:not(.active) .entity::before { content: attr(data-glyph); }
 
     /* Active fence marker (user is editing the fence boundary line):
        dim the raw markers so they read as syntax, keep the card bg. */
@@ -1981,58 +2812,64 @@ const TEMPLATE = `
         background: color-mix(in srgb, var(--fg, #fff) 9%, transparent);
     }
 
-    /* Secret block — a warm-tinted card (same visual vocabulary as code
-       fence, but orange). Applies to the two boundary lines + every
-       secret-body line, so a multi-line block reads as one shape. When a
-       boundary line goes active, the card treatment stays but the raw
-       :::secret / :::end chars come back (like fence active). */
-    .line.secret-marker,
-    .line.secret-body {
-        background: rgba(245, 158, 11, 0.045);
+    /* Registered blocks (registerBlock) - a tinted card in the block's
+       colour (--mdb-color on the line, warm by default) across the opening
+       line, the body lines and the closing line, so a multi-line block
+       reads as one shape. When a boundary line goes active the card stays
+       and its raw marker chars come back (like a fence). */
+    .line.block-open,
+    .line.block-close,
+    .line.block-body,
+    .line.block-line {
+        --mdb-c: var(--mdb-color, var(--accent-warm, #f59e0b));
+        background: color-mix(in srgb, var(--mdb-c) 4.5%, transparent);
         margin: 0 -10px;
         padding-left: 14px;
         padding-right: 14px;
-        border-left: 3px solid rgba(245, 158, 11, 0.35);
+        border-left: 3px solid color-mix(in srgb, var(--mdb-c) 35%, transparent);
         border-radius: 0;
     }
-    .line.secret-marker {
-        color: var(--accent-warm, #f59e0b);
-        font-family: 'Inter', sans-serif;
+    .line.block-open,
+    .line.block-close,
+    .line.block-line {
+        color: var(--mdb-c);
         font-size: 0.9em;
     }
 
-    /* Inactive boundaries: hide the literal ':::secret' / ':::end' chars so
-       they don't look like code. Chars stay in textContent (font-size: 0),
-       so the round-trip invariant holds. */
-    .line.secret-marker:not(.active) .block-marker {
+    /* Inactive boundaries: hide the literal marker chars. They stay in
+       textContent (font-size: 0), so the round-trip invariant holds. */
+    .line.block-open:not(.active) .block-marker,
+    .line.block-close:not(.active) .block-marker,
+    .line.block-line:not(.active):not(.block-revealed) .block-marker {
         color: transparent;
         font-size: 0;
     }
 
-    /* Open boundary (inactive): "🔒 Secret" pill via ::before. Pseudo
-       content is invisible to textContent, safe to use for labels. */
-    .line.secret-open:not(.active) {
+    /* Opening (or one-line) block, inactive: the label pill via ::before.
+       Pseudo content is invisible to textContent, safe for labels; no
+       label, no pill. */
+    .line.block-open:not(.active),
+    .line.block-line:not(.active) {
         padding-top: 6px;
         padding-bottom: 4px;
     }
-    .line.secret-open:not(.active)::before {
-        /* The word comes from _relabel() (page language); the fallback
-           keeps the editor English without the kit. */
-        content: "\\1F512  " var(--sac-md-secret-label, "Secret");
+    .line.block-open:not(.active)::before,
+    .line.block-line:not(.active)::before {
+        content: var(--mdb-label, none);
         display: inline-block;
         padding: 2px 10px;
-        font-size: 0.78em;
+        font-size: 0.86em;
         font-weight: 600;
         letter-spacing: 0.02em;
-        color: var(--accent-warm, #f59e0b);
-        background: rgba(245, 158, 11, 0.12);
-        border: 1px solid rgba(245, 158, 11, 0.25);
+        color: var(--mdb-c);
+        background: color-mix(in srgb, var(--mdb-c) 12%, transparent);
+        border: 1px solid color-mix(in srgb, var(--mdb-c) 25%, transparent);
         border-radius: 999px;
     }
 
-    /* Close boundary (inactive): collapse to a thin footer — the card's
-       visual "bottom edge" with no visible ':::end' text. */
-    .line.secret-close:not(.active) {
+    /* Close boundary (inactive): collapse to a thin footer - the card's
+       bottom edge with no visible marker text. */
+    .line.block-close:not(.active) {
         min-height: 6px;
         height: 6px;
         padding-top: 0;
@@ -2040,41 +2877,35 @@ const TEMPLATE = `
         overflow: hidden;
     }
 
-    /* Active boundaries drop the caret-ready padding. The card bg + border
-       remain (consistency with fence active). */
-    .line.secret-marker.active {
+    /* Active boundaries drop the caret-ready padding. The card stays. */
+    .line.block-open.active,
+    .line.block-close.active,
+    .line.block-line.active {
         padding-top: 2px;
         padding-bottom: 2px;
     }
 
-    /* Body lines: inline markdown still renders, but a CSS blur on the
-       inner .secret-body-text span prevents incidental over-the-shoulder
-       reads. Blurring the whole line would smear the card's left border
-       too — applying it to a child leaves the chrome sharp. Active (caret)
-       line drops the mask so it's editable. Reveal-toggle click adds
-       .secret-revealed to every line in the block for session-only
-       unmasking. */
-    .line.secret-body {
-        color: var(--accent-warm, #f59e0b);
-        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-        font-size: 0.9em;
-    }
-    .line.secret-body:not(.active):not(.secret-revealed) .secret-body-text {
+    /* Masked bodies: inline markdown still renders, but a CSS blur on the
+       inner .block-body-text span prevents incidental over-the-shoulder
+       reads. Blurring the whole line would smear the card's left border -
+       a child keeps the chrome sharp. The active (caret) line drops the
+       mask so it's editable; the reveal toggle adds .block-revealed to
+       every line of the block for session-only unmasking. */
+    .line.block-masked.block-body:not(.active):not(.block-revealed) .block-body-text {
         filter: blur(4px);
         user-select: none;
         transition: filter 0.15s ease;
         display: inline-block;
     }
-    .line.secret-body:not(.active):not(.secret-revealed):hover .secret-body-text {
+    .line.block-masked.block-body:not(.active):not(.block-revealed):hover .block-body-text {
         filter: blur(3px);
     }
 
-    /* Reveal toggle — inline SVG eye on the :::secret boundary. SVG shape
+    /* Reveal toggle - inline SVG eye on a block's opening line. SVG shape
        children have no text nodes, so line.textContent stays equal to the
        source (the whole editor model depends on that invariant).
-       contenteditable=false on the span keeps the caret from landing in
-       it. The diagonal slash is always rendered; we hide it unless the
-       block carries .secret-revealed. */
+       contenteditable=false keeps the caret out of it. The diagonal slash
+       is always rendered; hidden unless the block carries .block-revealed. */
     .sac-reveal-toggle {
         display: inline-flex;
         align-items: center;
@@ -2084,13 +2915,13 @@ const TEMPLATE = `
         opacity: 0.6;
         cursor: pointer;
         user-select: none;
-        border-radius: 3px;
+        border-radius: var(--radius-m, 4px);
         transition: opacity 0.12s, background 0.12s;
         vertical-align: middle;
-        color: var(--accent-warm, #f59e0b);
+        color: var(--mdb-c);
     }
-    /* Scaled to sit alongside the "Secret" pill text — slightly taller than
-       the pill glyph so the icon reads with matching visual weight. */
+    /* Slightly taller than the pill glyph so the icon reads with matching
+       visual weight. */
     .sac-reveal-toggle svg {
         width: 14px;
         height: 14px;
@@ -2099,11 +2930,11 @@ const TEMPLATE = `
     .sac-reveal-toggle .sac-eye-slash { visibility: hidden; }
     .sac-reveal-toggle:hover {
         opacity: 1;
-        background: rgba(245, 158, 11, 0.14);
+        background: color-mix(in srgb, var(--mdb-c) 14%, transparent);
     }
     /* Revealed state: surface the slash through the eye. */
-    .line.secret-revealed .sac-reveal-toggle { opacity: 0.95; }
-    .line.secret-revealed .sac-reveal-toggle .sac-eye-slash { visibility: visible; }
+    .line.block-revealed .sac-reveal-toggle { opacity: 0.95; }
+    .line.block-revealed .sac-reveal-toggle .sac-eye-slash { visibility: visible; }
 
     /* Task list: render [ ] / [x] as a visual checkbox while inactive. The
        bracket characters stay in textContent (font-size: 0 hides them
@@ -2113,9 +2944,12 @@ const TEMPLATE = `
         display: inline-block;
         width: 14px;
         height: 14px;
-        vertical-align: -3px;
+        /* middle, not a pixel offset: the box's own text is font-size 0,
+           so its baseline sits at the TOP of the box and any baseline
+           offset hangs the whole box below the text line. */
+        vertical-align: middle;
         border: 1.5px solid var(--border, color-mix(in srgb, var(--fg, #fff) 30%, transparent));
-        border-radius: 3px;
+        border-radius: var(--radius-s, 2px);
         position: relative;
         color: transparent;
         font-size: 0;
@@ -2131,6 +2965,8 @@ const TEMPLATE = `
         font-size: inherit;
         vertical-align: baseline;
     }
+    /* The hidden gap marker leaves the box touching the text. */
+    .line.task:not(.active) .task-box { margin-right: 6px; }
     .line.task .task-box.checked {
         background: var(--accent, #3b82f6);
         border-color: var(--accent, #3b82f6);
@@ -2159,14 +2995,14 @@ const TEMPLATE = `
     .line code {
         background: color-mix(in srgb, var(--fg, #fff) 8%, transparent);
         padding: 1px 5px;
-        border-radius: 3px;
+        border-radius: var(--radius-s, 2px);
         font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
         font-size: 0.9em;
     }
     .line a {
         color: var(--accent, #3b82f6);
         text-decoration: underline;
-        text-decoration-color: rgba(59, 130, 246, 0.4);
+        text-decoration-color: color-mix(in srgb, var(--accent, #3b82f6) 40%, transparent);
         text-underline-offset: 2px;
     }
     .line a:hover { text-decoration-color: var(--accent, #3b82f6); }
@@ -2178,7 +3014,7 @@ const TEMPLATE = `
         max-width: 100%;
         max-height: 320px;
         height: auto;
-        border-radius: 4px;
+        border-radius: var(--radius-m, 4px);
         vertical-align: middle;
         display: inline-block;
     }
@@ -2201,6 +3037,7 @@ const TEMPLATE = `
     <button type="button" data-fmt="ol"     title="Numbered list">1. List</button>
     <button type="button" data-fmt="quote"  title="Blockquote">Quote</button>
     <button type="button" data-fmt="hr"     title="Horizontal rule">HR</button>
+    <button type="button" data-fmt="table"  title="Table">Table</button>
 </div>
 <div class="editor" part="editor" contenteditable="plaintext-only" spellcheck="true"></div>
 `;

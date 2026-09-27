@@ -82,7 +82,7 @@ public class MdEditorTests
         }");
 
         // Exactly one masked body line (the real block), zero from the fence.
-        var masked = page.Locator("#pw-editor .secret-body");
+        var masked = page.Locator("#pw-editor .block-body");
         await masked.First.WaitForAsync(new LocatorWaitForOptions { Timeout = 3000 });
         Assert.Equal(1, await masked.CountAsync());
         Assert.Equal("hidden line", (await masked.First.TextContentAsync())?.Trim());
