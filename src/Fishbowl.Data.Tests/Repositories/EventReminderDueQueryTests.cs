@@ -42,6 +42,39 @@ public class EventReminderDueQueryTests : IDisposable
             new Event { Title = title, StartAt = startAt, ReminderMinutes = reminderMinutes }, ct);
     }
 
+    // A weekly 18:00 Lisbon series with a 15-minute reminder: after the
+    // October DST switch the reminder fires at 17:45 local = 17:45 UTC
+    // (it was 16:45 UTC while summer time applied).
+    [Fact]
+    public async Task RecurringWithTimeZone_FiresAtLocalWallClockAfterDst()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        await _events.CreateAsync(TestUser, new Event
+        {
+            Title = "yoga",
+            StartAt = new DateTime(2026, 10, 20, 17, 0, 0, DateTimeKind.Utc), // 18:00 WEST
+            ReminderMinutes = 15,
+            RRule = "FREQ=WEEKLY",
+            TimeZone = "Europe/Lisbon",
+        }, ct);
+
+        var trigger = new DateTime(2026, 10, 27, 17, 45, 0, DateTimeKind.Utc);
+        var due = await _events.ListDueRemindersAsync(
+            ContextRef.User(TestUser),
+            from: trigger.AddMinutes(-1), to: trigger.AddMinutes(1),
+            notAncient: trigger.AddDays(-1), ct);
+
+        var occ = Assert.Single(due);
+        Assert.Equal(new DateTime(2026, 10, 27, 18, 0, 0, DateTimeKind.Utc), occ.StartAt);
+
+        // The old UTC-based expansion would have fired an hour earlier.
+        var early = await _events.ListDueRemindersAsync(
+            ContextRef.User(TestUser),
+            from: trigger.AddHours(-1).AddMinutes(-1), to: trigger.AddHours(-1).AddMinutes(1),
+            notAncient: trigger.AddDays(-1), ct);
+        Assert.Empty(early);
+    }
+
     [Fact]
     public async Task IgnoresEventsWithoutReminderMinutes()
     {

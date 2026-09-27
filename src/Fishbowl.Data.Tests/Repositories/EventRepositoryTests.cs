@@ -236,6 +236,57 @@ public class EventRepositoryTests : IDisposable
     }
 
     [Fact]
+    public async Task GetRange_IncludesMultiDayEventStartedBeforeWindow()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var start = new DateTime(2026, 9, 30, 9, 0, 0, DateTimeKind.Utc);
+        await _repo.CreateAsync(TestUserId, new Event
+        {
+            Title = "conference",
+            StartAt = start,
+            EndAt = start.AddDays(2),
+        }, ct);
+        await _repo.CreateAsync(TestUserId, new Event
+        {
+            Title = "over-before",
+            StartAt = start.AddHours(-2),
+            EndAt = start.AddHours(-1),
+        }, ct);
+
+        var october = (await _repo.GetRangeAsync(TestUserId,
+            new DateTime(2026, 10, 1, 0, 0, 0, DateTimeKind.Utc),
+            new DateTime(2026, 11, 1, 0, 0, 0, DateTimeKind.Utc), ct)).ToList();
+
+        Assert.Equal(new[] { "conference" }, october.Select(e => e.Title).ToArray());
+    }
+
+    [Fact]
+    public async Task GetRange_RecurringWithTimeZone_KeepsWallClockAcrossDst()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        // Weekly Tue 18:00 Europe/Lisbon, created in summer time (17:00 UTC).
+        var start = new DateTime(2026, 9, 22, 17, 0, 0, DateTimeKind.Utc);
+        await _repo.CreateAsync(TestUserId, new Event
+        {
+            Title = "yoga",
+            StartAt = start,
+            EndAt = start.AddHours(1),
+            RRule = "FREQ=WEEKLY",
+            TimeZone = "Europe/Lisbon",
+        }, ct);
+
+        var december = (await _repo.GetRangeAsync(TestUserId,
+            new DateTime(2026, 12, 1, 0, 0, 0, DateTimeKind.Utc),
+            new DateTime(2026, 12, 8, 0, 0, 0, DateTimeKind.Utc), ct)).ToList();
+
+        var occ = Assert.Single(december);
+        // Tue 1 Dec 18:00 WET = 18:00 UTC; the zone rides along on the instance.
+        Assert.Equal(new DateTime(2026, 12, 1, 18, 0, 0, DateTimeKind.Utc), occ.StartAt);
+        Assert.Equal(TimeSpan.FromHours(1), occ.EndAt - occ.StartAt);
+        Assert.Equal("Europe/Lisbon", occ.TimeZone);
+    }
+
+    [Fact]
     public async Task GetRange_UnsupportedRule_DegradesToMasterOnly()
     {
         var ct = TestContext.Current.CancellationToken;

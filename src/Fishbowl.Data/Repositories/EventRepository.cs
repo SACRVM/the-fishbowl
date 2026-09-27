@@ -48,10 +48,13 @@ public class EventRepository : IEventRepository
 
         // start_at is stored as ISO-8601, which sorts lexicographically in
         // the same order as DateTime — string comparison gives the right
-        // answer without needing SQLite's date() functions.
+        // answer without needing SQLite's date() functions. An event that
+        // starts before the window but is still running inside it (a
+        // multi-day event) belongs to the window too.
         var plain = (await db.QueryAsync<Event>(new CommandDefinition(@"
             SELECT * FROM events
-            WHERE start_at >= @from AND start_at < @to
+            WHERE (start_at >= @from OR (end_at IS NOT NULL AND end_at > @from))
+              AND start_at < @to
               AND (rrule IS NULL OR rrule = '')
             ORDER BY start_at ASC",
             new
@@ -90,7 +93,8 @@ public class EventRepository : IEventRepository
             }
 
             var duration = ev.EndAt is DateTime end ? end - ev.StartAt : (TimeSpan?)null;
-            foreach (var occ in RRule.Expand(ev.StartAt, spec, fromUtc, toUtc))
+            var zone = RRule.ResolveZone(ev.TimeZone);
+            foreach (var occ in RRule.Expand(ev.StartAt, spec, fromUtc, toUtc, zone))
                 results.Add(CloneAt(ev, occ, duration));
         }
 
@@ -107,6 +111,7 @@ public class EventRepository : IEventRepository
         EndAt = duration is TimeSpan d ? occStart + d : null,
         AllDay = ev.AllDay,
         RRule = ev.RRule,
+        TimeZone = ev.TimeZone,
         Location = ev.Location,
         ReminderMinutes = ev.ReminderMinutes,
         ExternalId = ev.ExternalId,
@@ -150,11 +155,11 @@ public class EventRepository : IEventRepository
         using var db = _dbFactory.CreateContextConnection(ctx);
         await db.ExecuteAsync(new CommandDefinition(@"
             INSERT INTO events (id, title, description, start_at, end_at, all_day,
-                                rrule, location, reminder_minutes,
+                                rrule, time_zone, location, reminder_minutes,
                                 external_id, external_source,
                                 created_by, created_at, updated_at)
             VALUES (@Id, @Title, @Description, @StartAt, @EndAt, @AllDay,
-                    @RRule, @Location, @ReminderMinutes,
+                    @RRule, @TimeZone, @Location, @ReminderMinutes,
                     @ExternalId, @ExternalSource,
                     @CreatedBy, @CreatedAt, @UpdatedAt)",
             new
@@ -166,6 +171,7 @@ public class EventRepository : IEventRepository
                 EndAt = evt.EndAt?.ToString("o"),
                 AllDay = evt.AllDay ? 1 : 0,
                 evt.RRule,
+                evt.TimeZone,
                 evt.Location,
                 evt.ReminderMinutes,
                 evt.ExternalId,
@@ -195,7 +201,7 @@ public class EventRepository : IEventRepository
             UPDATE events
             SET title = @Title, description = @Description,
                 start_at = @StartAt, end_at = @EndAt, all_day = @AllDay,
-                rrule = @RRule, location = @Location,
+                rrule = @RRule, time_zone = @TimeZone, location = @Location,
                 reminder_minutes = @ReminderMinutes,
                 external_id = @ExternalId, external_source = @ExternalSource,
                 updated_at = @UpdatedAt
@@ -208,6 +214,7 @@ public class EventRepository : IEventRepository
                 EndAt = evt.EndAt?.ToString("o"),
                 AllDay = evt.AllDay ? 1 : 0,
                 evt.RRule,
+                evt.TimeZone,
                 evt.Location,
                 evt.ReminderMinutes,
                 evt.ExternalId,
@@ -284,8 +291,9 @@ public class EventRepository : IEventRepository
 
             // occurrence ∈ [from + minutes, to + minutes) ⇔ trigger ∈ [from, to)
             var duration = ev.EndAt is DateTime end ? end - ev.StartAt : (TimeSpan?)null;
+            var zone = RRule.ResolveZone(ev.TimeZone);
             foreach (var occ in RRule.Expand(
-                ev.StartAt, spec, fromUtc.AddMinutes(minutes), toUtc.AddMinutes(minutes)))
+                ev.StartAt, spec, fromUtc.AddMinutes(minutes), toUtc.AddMinutes(minutes), zone))
                 results.Add(CloneAt(ev, occ, duration));
         }
 

@@ -142,6 +142,8 @@ class FbCalendarView extends HTMLElement {
                     color: var(--text-muted);
                 }
                 fb-calendar-view .cv-agenda-day-header.today { color: var(--accent); }
+                fb-calendar-view .cv-chip.cont,
+                fb-calendar-view .cv-agenda-item.cont { opacity: 0.8; }
                 fb-calendar-view .cv-agenda-item {
                     display: flex;
                     align-items: baseline;
@@ -383,6 +385,11 @@ class FbCalendarView extends HTMLElement {
                     gap: 20px;
                     flex-wrap: wrap;
                 }
+                /* Phone: the row wraps into a column; the fields' own bottom
+                   margin is the spacing, no row gap on top of it. */
+                @media (max-width: 768px) {
+                    fb-calendar-view .cv-field-row { row-gap: 0; }
+                }
                 /* Field look (16px on touch) and the select chevron come from
                    the kit's global form rules — only sizing lives here. */
                 fb-calendar-view .cv-date-input,
@@ -390,23 +397,14 @@ class FbCalendarView extends HTMLElement {
                     outline: none;
                     max-width: 260px;
                 }
-                fb-calendar-view .cv-select { max-width: 260px; }
+                fb-calendar-view .cv-select-wrap { max-width: 260px; }
                 fb-calendar-view .cv-text-input { max-width: 420px; width: 100%; }
-                fb-calendar-view .cv-allday-label {
+                /* The kit's switch sizes to its label; a gap keeps the
+                   switch off the text. */
+                fb-calendar-view .cv-allday-toggle {
                     display: inline-flex;
-                    align-items: center;
-                    gap: 8px;
-                    font-size: 13px;
-                    color: var(--text);
-                    cursor: pointer;
-                    user-select: none;
+                    gap: 12px;
                     margin-bottom: 16px;
-                }
-                fb-calendar-view .cv-allday-label input {
-                    accent-color: var(--accent);
-                    width: 15px;
-                    height: 15px;
-                    cursor: pointer;
                 }
                 fb-calendar-view .cv-desc-input {
                     display: block;
@@ -479,9 +477,7 @@ class FbCalendarView extends HTMLElement {
                                 <sac-icon name="chevron-left"></sac-icon> Back to calendar
                             </button>
                             <input id="cv-title" class="cv-title-input" placeholder="What's happening?"/>
-                            <label class="cv-allday-label">
-                                <input type="checkbox" id="cv-allday"/> All day
-                            </label>
+                            <sac-toggle id="cv-allday" class="cv-allday-toggle" label="All day"></sac-toggle>
                             <div class="cv-field-row">
                                 <div class="cv-field">
                                     <label for="cv-start">Starts</label>
@@ -493,7 +489,7 @@ class FbCalendarView extends HTMLElement {
                                 </div>
                                 <div class="cv-field">
                                     <label for="cv-reminder">Reminder</label>
-                                    <select id="cv-reminder" class="cv-select">
+                                    <span class="select cv-select-wrap"><select id="cv-reminder" class="cv-select">
                                         <option value="">No reminder</option>
                                         <option value="0">At start</option>
                                         <option value="5">5 minutes before</option>
@@ -502,18 +498,18 @@ class FbCalendarView extends HTMLElement {
                                         <option value="60">1 hour before</option>
                                         <option value="120">2 hours before</option>
                                         <option value="1440">1 day before</option>
-                                    </select>
+                                    </select></span>
                                 </div>
                                 <div class="cv-field">
                                     <label for="cv-repeat">Repeat</label>
-                                    <select id="cv-repeat" class="cv-select">
+                                    <span class="select cv-select-wrap"><select id="cv-repeat" class="cv-select">
                                         <option value="">Never</option>
                                         <option value="FREQ=DAILY">Daily</option>
                                         <option value="FREQ=WEEKLY">Weekly</option>
                                         <option value="FREQ=WEEKLY;INTERVAL=2">Every 2 weeks</option>
                                         <option value="FREQ=MONTHLY">Monthly</option>
                                         <option value="FREQ=YEARLY">Yearly</option>
-                                    </select>
+                                    </select></span>
                                 </div>
                             </div>
                             <div class="cv-field">
@@ -573,8 +569,8 @@ class FbCalendarView extends HTMLElement {
         this.querySelector("#cv-end").addEventListener("change", () => this.saveEditing());
         this.querySelector("#cv-reminder").addEventListener("change", () => this.saveEditing());
         this.querySelector("#cv-repeat").addEventListener("change", () => this.saveEditing());
-        this.querySelector("#cv-allday").addEventListener("change", (e) => {
-            this._applyAllDayMode(e.target.checked);
+        this.querySelector("#cv-allday").addEventListener("sac:change", (e) => {
+            this._applyAllDayMode(e.detail.value);
             this.saveEditing();
         });
     }
@@ -594,9 +590,18 @@ class FbCalendarView extends HTMLElement {
     _eventsByDay() {
         const map = new Map();
         for (const e of this.events) {
-            const key = FbCalendarView.dayKey(new Date(e.startAt));
-            if (!map.has(key)) map.set(key, []);
-            map.get(key).push(e);
+            // Every day the event touches: the first carries it as is, the
+            // following ones a `_cont` copy (no start time, dimmed).
+            const s = new Date(e.startAt);
+            const end = e.endAt ? new Date(e.endAt) : s;
+            // A timed event ending at midnight doesn't touch that day.
+            const last = new Date(end.getTime() - (e.allDay || end.getTime() === s.getTime() ? 0 : 1));
+            const d = new Date(s.getFullYear(), s.getMonth(), s.getDate());
+            for (let i = 0; d <= last && i < 62; i++, d.setDate(d.getDate() + 1)) {
+                const key = FbCalendarView.dayKey(d);
+                if (!map.has(key)) map.set(key, []);
+                map.get(key).push(i === 0 ? e : { ...e, _cont: true });
+            }
         }
         return map;
     }
@@ -636,9 +641,9 @@ class FbCalendarView extends HTMLElement {
             ].filter(Boolean).join(" ");
 
             const chips = dayEvents.slice(0, MAX_CHIPS).map(e => {
-                const time = e.allDay ? "" : fb.format.time(e.startAt);
+                const time = e.allDay || e._cont ? "" : fb.format.time(e.startAt);
                 const repeat = e.rRule ? `<span class="cv-repeat-mark" title="Repeats">&#8635;</span>` : "";
-                return `<div class="cv-chip ${e.allDay ? "all-day" : ""}" data-id="${e.id}" title="${escapeHtml(e.title || "Untitled")}">
+                return `<div class="cv-chip ${e.allDay ? "all-day" : ""} ${e._cont ? "cont" : ""}" data-id="${e.id}" title="${escapeHtml(e.title || "Untitled")}">
                             ${time ? `<span class="cv-chip-time">${time}</span>` : ""}${repeat}${escapeHtml(e.title || "Untitled")}
                         </div>`;
             }).join("");
@@ -696,10 +701,12 @@ class FbCalendarView extends HTMLElement {
             const d = new Date(key + "T00:00");
             const header = `${fb.format.weekday(d)} ${fb.format.dayMonth(d)}`;
             const rows = byDay.get(key).map(e => {
-                const time = e.allDay ? "all day" : fb.format.time(e.startAt);
+                // A multi-day event's following days: no start time again,
+                // dimmed like its grid chip.
+                const time = e.allDay || e._cont ? "all day" : fb.format.time(e.startAt);
                 const repeat = e.rRule ? ` <span class="cv-repeat-mark" title="Repeats">&#8635;</span>` : "";
                 return `
-                    <div class="cv-agenda-item ${e.id === this.editing?.id ? "selected" : ""}" data-id="${e.id}">
+                    <div class="cv-agenda-item ${e.id === this.editing?.id ? "selected" : ""} ${e._cont ? "cont" : ""}" data-id="${e.id}">
                         <span class="cv-agenda-time">${time}</span>
                         <span class="cv-agenda-title">${escapeHtml(e.title || "Untitled")}${repeat}</span>
                         ${e.location ? `<span class="cv-agenda-loc">${escapeHtml(e.location)}</span>` : ""}
@@ -893,16 +900,30 @@ class FbCalendarView extends HTMLElement {
             reminderMinutes: reminderVal === "" ? null : parseInt(reminderVal, 10),
             rRule: this.querySelector("#cv-repeat").value || null,
             description: this.querySelector("#cv-desc").value || null,
+            // The zone the series repeats in: its wall-clock time holds
+            // across DST (the server expands recurring events in it).
+            timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone || null,
         };
     }
 
-    async saveEditing() {
-        if (!this.editing) return;
+    /** Saves run one after another: a second change while a new event's
+     *  first save is still in flight must PUT to the id that save gets back,
+     *  never POST a second event. The form is read now; the write waits for
+     *  the save ahead of it. */
+    saveEditing() {
+        if (!this.editing) return Promise.resolve();
         clearTimeout(this._saveDebounce);
         this._saveDebounce = null;
+        const e = this.editing;
         const form = this._collectForm();
-        if (!form) return; // invalid — hint shown, keep local state untouched
+        if (!form) return Promise.resolve(); // invalid — hint shown, keep local state untouched
+        const run = () => this._writeEvent(e, form);
+        const next = (this._saving || Promise.resolve()).then(run, run);
+        this._saving = next.catch(() => {});
+        return next;
+    }
 
+    async _writeEvent(e, form) {
         // ISO formats differ between server ("o", 7 fractional digits) and
         // toISOString (3 digits) — compare instants, not strings, so an
         // open-then-close without edits doesn't fire a no-op PUT.
@@ -911,7 +932,6 @@ class FbCalendarView extends HTMLElement {
             if (!a || !b) return false;
             return new Date(a).getTime() === new Date(b).getTime();
         };
-        const e = this.editing;
         const unchanged = e.id
             && form.title === e.title
             && form.allDay === !!e.allDay

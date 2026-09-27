@@ -151,6 +151,59 @@ public class RRuleTests
         Assert.Equal(new[] { Utc(2024, 2, 29, 8, 0), Utc(2028, 2, 29, 8, 0) }, occs);
     }
 
+    // ── Time zones: wall-clock time holds across DST ──────────────────
+
+    // Europe/Lisbon: WEST (UTC+1) until 2026-10-25 01:00 UTC, then WET (UTC+0).
+    private static TimeZoneInfo Lisbon => RRule.ResolveZone("Europe/Lisbon")!;
+
+    [Fact]
+    public void Expand_WithZone_WeeklyKeepsLocalTimeAcrossDstEnd()
+    {
+        Assert.True(RRule.TryParse("FREQ=WEEKLY", out var spec));
+        // Tue 2026-10-20 18:00 Lisbon (WEST) = 17:00 UTC.
+        var start = Utc(2026, 10, 20, 17, 0);
+
+        var occs = RRule.Expand(start, spec, Utc(2026, 10, 1), Utc(2026, 11, 1), Lisbon).ToList();
+
+        // Tue 27th is after the switch: 18:00 WET = 18:00 UTC.
+        Assert.Equal(new[] { Utc(2026, 10, 20, 17, 0), Utc(2026, 10, 27, 18, 0) }, occs);
+        foreach (var o in occs)
+            Assert.Equal(18, TimeZoneInfo.ConvertTimeFromUtc(o, Lisbon).Hour);
+    }
+
+    [Fact]
+    public void Expand_WithoutZone_KeepsUtcTimeOfDay()
+    {
+        Assert.True(RRule.TryParse("FREQ=WEEKLY", out var spec));
+        var start = Utc(2026, 10, 20, 17, 0);
+
+        var occs = RRule.Expand(start, spec, Utc(2026, 10, 1), Utc(2026, 11, 1)).ToList();
+
+        Assert.Equal(new[] { Utc(2026, 10, 20, 17, 0), Utc(2026, 10, 27, 17, 0) }, occs);
+    }
+
+    [Fact]
+    public void Expand_WithZone_DailyInSpringGapMovesForward()
+    {
+        Assert.True(RRule.TryParse("FREQ=DAILY", out var spec));
+        // 01:30 Lisbon (WET = UTC) daily; 2027-03-28 01:00 WET jumps to 02:00 WEST,
+        // so 01:30 doesn't exist that day and lands on 02:30 WEST = 01:30 UTC.
+        var start = Utc(2027, 3, 27, 1, 30);
+
+        var occs = RRule.Expand(start, spec, Utc(2027, 3, 27), Utc(2027, 3, 30), Lisbon).ToList();
+
+        Assert.Equal(new[] { Utc(2027, 3, 27, 1, 30), Utc(2027, 3, 28, 1, 30), Utc(2027, 3, 29, 0, 30) }, occs);
+    }
+
+    [Fact]
+    public void ResolveZone_UnknownOrEmpty_IsNull()
+    {
+        Assert.Null(RRule.ResolveZone(null));
+        Assert.Null(RRule.ResolveZone(""));
+        Assert.Null(RRule.ResolveZone("Mars/Olympus_Mons"));
+        Assert.NotNull(RRule.ResolveZone("Europe/Berlin"));
+    }
+
     [Fact]
     public void Expand_WindowBeforeSeriesStart_IsEmpty()
     {

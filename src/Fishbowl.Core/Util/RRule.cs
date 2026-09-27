@@ -9,10 +9,12 @@ namespace Fishbowl.Core.Util;
 // non-recurring (single occurrence at DTSTART) — the pre-expansion
 // behavior, so an exotic imported rule never silences reminders entirely.
 //
-// All expansion math runs on UTC instants: occurrences carry DTSTART's UTC
-// time-of-day. A "09:00 local" weekly event therefore shifts by an hour
-// across DST changes — known MVP limitation, matching how values are
-// stored (ISO-8601 UTC, no timezone identifiers on events).
+// Expansion runs in the event's own time zone when it has one (events carry
+// the IANA zone they were written in, user schema v11): occurrences keep
+// DTSTART's wall-clock time there, so a "09:00" weekly event stays 09:00
+// across DST, and each occurrence converts back to a UTC instant. Without a
+// zone (older rows, clients that send none) the math runs on UTC instants,
+// so occurrences carry DTSTART's UTC time-of-day.
 
 public enum RRuleFreq { Daily, Weekly, Monthly, Yearly }
 
@@ -144,16 +146,39 @@ public static class RRule
         return true;
     }
 
+    // An event's IANA (or Windows) zone id to a TimeZoneInfo; null when
+    // absent or unknown on this host, which means UTC expansion.
+    public static TimeZoneInfo? ResolveZone(string? id)
+    {
+        if (string.IsNullOrWhiteSpace(id)) return null;
+        return TimeZoneInfo.TryFindSystemTimeZoneById(id.Trim(), out var zone) ? zone : null;
+    }
+
     // Occurrence starts within the half-open window [windowStart, windowEnd),
-    // chronological. COUNT is honored from the series start, so occurrences
-    // before the window still consume it.
+    // chronological, as UTC instants. COUNT is honored from the series
+    // start, so occurrences before the window still consume it. With a
+    // zone, occurrences are generated in its wall-clock time.
     public static IEnumerable<DateTime> Expand(
-        DateTime dtStart, RRuleSpec spec, DateTime windowStart, DateTime windowEnd)
+        DateTime dtStart, RRuleSpec spec, DateTime windowStart, DateTime windowEnd,
+        TimeZoneInfo? zone = null)
     {
         if (windowEnd <= windowStart) yield break;
 
+        IEnumerable<DateTime> stream;
+        if (zone is null || zone.BaseUtcOffset == TimeSpan.Zero && !zone.SupportsDaylightSavingTime)
+        {
+            stream = Occurrences(dtStart, spec);
+        }
+        else
+        {
+            var utcStart = DateTime.SpecifyKind(TimeUtil.AsUtc(dtStart), DateTimeKind.Utc);
+            var localStart = DateTime.SpecifyKind(
+                TimeZoneInfo.ConvertTimeFromUtc(utcStart, zone), DateTimeKind.Unspecified);
+            stream = Occurrences(localStart, spec).Select(local => ToUtc(local, zone));
+        }
+
         var produced = 0;
-        foreach (var occ in Occurrences(dtStart, spec))
+        foreach (var occ in stream)
         {
             if (spec.Count is int c && produced >= c) yield break;
             if (spec.Until is DateTime u && occ > u) yield break;
@@ -245,6 +270,25 @@ public static class RRule
                     break;
                 }
         }
+    }
+
+    // A wall-clock time in `zone` to UTC. A time that doesn't exist (the
+    // spring-forward gap) moves forward by the gap; an ambiguous one (the
+    // fall-back hour) takes its first, daylight, occurrence (RFC 5545).
+    private static DateTime ToUtc(DateTime local, TimeZoneInfo zone)
+    {
+        if (zone.IsInvalidTime(local))
+        {
+            var before = zone.GetUtcOffset(local.AddHours(-3));
+            var after = zone.GetUtcOffset(local.AddHours(3));
+            local = local.Add(after - before);
+        }
+        if (zone.IsAmbiguousTime(local))
+        {
+            var offset = zone.GetAmbiguousTimeOffsets(local).Max();
+            return DateTime.SpecifyKind(local - offset, DateTimeKind.Utc);
+        }
+        return DateTime.SpecifyKind(TimeZoneInfo.ConvertTimeToUtc(local, zone), DateTimeKind.Utc);
     }
 
     private static int MondayOffset(DayOfWeek d) => ((int)d + 6) % 7;

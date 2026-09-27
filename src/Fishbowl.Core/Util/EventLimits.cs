@@ -26,6 +26,9 @@ public static class EventLimits
     public const int MaxExternalIdLength = 512;
     public const int MaxExternalSourceLength = 64;
 
+    // IANA zone ids are short; the longest is around 32 characters.
+    public const int MaxTimeZoneLength = 64;
+
     public static ResourceValidationError? Validate(Event evt)
     {
         if (evt.Title is { Length: > MaxTitleLength })
@@ -45,6 +48,9 @@ public static class EventLimits
 
         if (evt.ExternalSource is { Length: > MaxExternalSourceLength })
             return new ResourceValidationError(Resource, "externalSource", $"exceeds {MaxExternalSourceLength} characters");
+
+        if (evt.TimeZone is { Length: > MaxTimeZoneLength })
+            return new ResourceValidationError(Resource, "timeZone", $"exceeds {MaxTimeZoneLength} characters");
 
         return null;
     }

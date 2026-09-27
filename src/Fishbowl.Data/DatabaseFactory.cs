@@ -438,6 +438,14 @@ public class DatabaseFactory
             ApplyUserV10(connection);
             connection.Execute("PRAGMA user_version = 10");
             _logger.LogInformation("Applied user schema v10 to {DbPath}", ((SqliteConnection)connection).DataSource);
+            version = 10;
+        }
+
+        if (version < 11)
+        {
+            ApplyUserV11(connection);
+            connection.Execute("PRAGMA user_version = 11");
+            _logger.LogInformation("Applied user schema v11 to {DbPath}", ((SqliteConnection)connection).DataSource);
         }
     }
 
@@ -1371,6 +1379,18 @@ public class DatabaseFactory
             transaction.Rollback();
             throw;
         }
+    }
+
+    // v11: events.time_zone, the IANA zone the event was written in. A
+    // recurring series expands in that zone's wall-clock time, so "every
+    // Tuesday 18:00" stays 18:00 across DST. Null (older rows, API clients
+    // that send none) keeps the pre-v11 UTC expansion.
+    private void ApplyUserV11(IDbConnection connection)
+    {
+        // A hand-seeded test DB may have no events table at all; nothing to widen then.
+        var cols = connection.Query<string>("SELECT name FROM pragma_table_info('events')").ToList();
+        if (cols.Count > 0 && !cols.Contains("time_zone"))
+            connection.Execute("ALTER TABLE events ADD COLUMN time_zone TEXT");
     }
 
     // V10: how long the secret vault stays unlocked without a secret

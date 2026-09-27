@@ -11,6 +11,9 @@ public class Event
     public DateTime? EndAt { get; set; }
     public bool AllDay { get; set; }
     public string? RRule { get; set; } // iCal RRULE
+    // IANA zone the event was written in (the browser's). A recurring series
+    // expands in its wall-clock time; null = expand in UTC.
+    public string? TimeZone { get; set; }
     public string? Location { get; set; }
     public int? ReminderMinutes { get; set; }
     public string? ExternalId { get; set; }
