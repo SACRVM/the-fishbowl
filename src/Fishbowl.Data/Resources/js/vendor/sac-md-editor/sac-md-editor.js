@@ -65,6 +65,14 @@
  *                                          new row is added
  *   Enter                                  new empty row below; on an empty
  *                                          row it leaves the table
+ *   Esc                                    leaves the table: an empty row
+ *                                          goes, else the caret moves to the
+ *                                          (empty) line after the table
+ * With the caret in a table the Table button (highlighted then) opens a
+ * dialog instead: a grid to add, delete and move columns and rows and set
+ * each column's alignment. Enter or Apply writes the table back formatted
+ * (an undoable edit); Esc or Cancel changes nothing. Pipes typed in a
+ * cell are escaped (\|) on the way back.
  * Leaving a table (caret moves out, or focus leaves the editor) lines its
  * pipes up again. That rewrites source text, so it is an edit: `input`
  * fires and it is undoable.
@@ -87,6 +95,10 @@
  *   });
  *   off();                                   // or Editor.unregisterBlock(name)
  *   Editor.blocks                            // registered names
+ *
+ * In read-only mode (no caret) a click or tap on any line of a masked
+ * block reveals / hides the whole block, like its eye; not when the click
+ * ends a text selection or hits a link.
  *
  * match(src) is the general form: "open" / "close" bound a block, "line"
  * makes one self-contained line a block (a marker form). open/close is the
@@ -156,12 +168,31 @@ function mdAddStrings() {
         "md-editor.quoteLabel":  "Zitat",
         "md-editor.hr":          "Trennlinie",
         "md-editor.hrLabel":     "Linie",
-        "md-editor.table":       "Tabelle",
         "md-editor.tableLabel":  "Tabelle",
         "md-editor.tableColumn": "Spalte",
+        "md-editor.table":       "Tabelle einf\u00fcgen oder bearbeiten",
+        "md-editor.tdTitle":     "Tabelle bearbeiten",
+        "md-editor.tdAddRow":    "Zeile hinzuf\u00fcgen",
+        "md-editor.tdAddCol":    "Spalte hinzuf\u00fcgen",
+        "md-editor.tdCancel":    "Abbrechen",
+        "md-editor.tdApply":     "\u00dcbernehmen",
+        "md-editor.tdLeft":      "Spalte nach links",
+        "md-editor.tdRight":     "Spalte nach rechts",
+        "md-editor.tdDelCol":    "Spalte l\u00f6schen",
+        "md-editor.tdUp":        "Zeile nach oben",
+        "md-editor.tdDown":      "Zeile nach unten",
+        "md-editor.tdDelRow":    "Zeile l\u00f6schen",
+        "md-editor.tdAlign":     "Ausrichtung",
+        "md-editor.tdAl-":       "keine",
+        "md-editor.tdAll":       "links",
+        "md-editor.tdAlc":       "zentriert",
+        "md-editor.tdAlr":       "rechts",
+        "md-editor.tdHeader":    "Kopf",
+        "md-editor.tdCell":      "Zelle",
         "md-editor.linkPrompt":  "Link-Adresse",
         "md-editor.linkText":    "Linktext",
         "md-editor.reveal":      "Inhalt zeigen / verbergen",
+        "md-editor.revealHint":  "Klicken zum Zeigen oder Verbergen",
     });
 }
 
@@ -180,7 +211,7 @@ const MD_TOOLBAR_TEXT = {
     ol:     ["ol",     "Numbered list",   "olLabel",    "1. List"],
     quote:  ["quote",  "Blockquote",      "quoteLabel", "Quote"],
     hr:     ["hr",     "Horizontal rule", "hrLabel",    "HR"],
-    table:  ["table",  "Table",           "tableLabel", "Table"],
+    table:  ["table",  "Insert a table, or edit the one at the caret", "tableLabel", "Table"],
 };
 
 class SacMdEditor extends HTMLElement {
@@ -302,6 +333,11 @@ class SacMdEditor extends HTMLElement {
             const def = BLOCKS.get(l.dataset.blockName);
             if (def) setBlockLabel(l, def);
         });
+        if (this._tdlg) {
+            this._tdLabels();
+            if (this._tdlg.open) this._tdRender();
+        }
+        this._syncRevealHints();
         const reveal = this._revealLabel();
         this._editor.querySelectorAll(".sac-reveal-toggle").forEach((el) => {
             el.setAttribute("aria-label", reveal);
@@ -373,6 +409,7 @@ class SacMdEditor extends HTMLElement {
                 this._renderAllInactive();
                 this._activeLine = null;
             }
+            this._syncRevealHints();
         }
     }
 
@@ -415,6 +452,7 @@ class SacMdEditor extends HTMLElement {
             this._syncBlockState();
             this._scheduleHistorySnapshot();
             this._queueSacInput();
+            this._syncTableButton();
         });
 
         this._editor.addEventListener("input",       (e) => this._handleInput(e));
@@ -435,9 +473,23 @@ class SacMdEditor extends HTMLElement {
         });
         this._editor.addEventListener("click", (e) => {
             const toggle = e.target.closest?.(".sac-reveal-toggle");
-            if (!toggle) return;
-            const line = this._lineContaining(toggle);
-            if (line) this._toggleBlockReveal(line);
+            if (toggle) {
+                const line = this._lineContaining(toggle);
+                if (line) this._toggleBlockReveal(line);
+                return;
+            }
+            // Read-only has no caret, so no active line shows a masked body
+            // sharp - the eye would be the only way in. A click (or tap) on
+            // any line of a masked block toggles it instead. Not when the
+            // click ends a text selection (copying) or lands on a link.
+            if (!this.hasAttribute("readonly")) return;
+            if (e.target.closest?.("a")) return;
+            const sel = this._currentSelection();
+            if (sel && sel.rangeCount && !sel.getRangeAt(0).collapsed) return;
+            const line = this._lineContaining(e.target);
+            if (!line || !line.classList.contains("block-masked")) return;
+            const open = this._blockOpenLine(line);
+            if (open) this._toggleBlockReveal(open);
         });
 
         // Toolbar: mousedown.preventDefault keeps caret focus in the editor so
@@ -647,6 +699,7 @@ class SacMdEditor extends HTMLElement {
         if (src === "") classes.push("empty");
         line.className = classes.join(" ");
         line.dataset.block = block.type;
+        this._revealHint(line);
         // Registered blocks carry their name, tint and pill label on the
         // line itself (inline custom properties); anything else sheds them.
         if (block.def) {
@@ -733,6 +786,7 @@ class SacMdEditor extends HTMLElement {
             this._formatTableAt(left);
         }
         if (newActive) this._flattenLine(newActive);
+        this._syncTableButton();
     }
 
     /** Intercept destructive edits that cross a multi-line selection.
@@ -961,6 +1015,15 @@ class SacMdEditor extends HTMLElement {
             }
         }
 
+        // Esc in a table: out of it. Stopped here so no host binding for
+        // Escape (a panel, a dialog) fires as well.
+        if (e.key === "Escape" && this._inTable()) {
+            e.preventDefault();
+            e.stopPropagation();
+            this._tableEscape();
+            return;
+        }
+
         if (e.key === "Enter" && !e.shiftKey && !(e.ctrlKey || e.metaKey)) {
             e.preventDefault();
             // In a table Enter adds a row - it must not delete a selected
@@ -1006,6 +1069,9 @@ class SacMdEditor extends HTMLElement {
         // relatedTarget is null when focus leaves the whole page OR the shadow
         // boundary. If it's still inside our component, ignore.
         if (e.relatedTarget && this.contains(e.relatedTarget)) return;
+        // Nor is focus moving into our own table dialog (shadow DOM, so
+        // this.contains() cannot see it) - or anything while it is open.
+        if (this._tdlg && (this._tdlg.open || this._tdlg.contains(e.relatedTarget))) return;
         // Full re-render on blur. We used to just re-render active lines, but
         // that left cross-line state drift — e.g. typing :::secret on a line
         // doesn't mask the lines below until every subsequent line is re-
@@ -1218,7 +1284,7 @@ class SacMdEditor extends HTMLElement {
             case "ol":     return this._togglePrefixMulti("1. ");
             case "quote":  return this._togglePrefixMulti("> ");
             case "hr":     return this._insertHr(line);
-            case "table":  return this._insertTable(line);
+            case "table":  return this._inTable() ? this._openTableDialog(line) : this._insertTable(line);
             case "code": {
                 const selectedLines = this._getSelectedLines();
                 if (selectedLines.length > 1) return this._wrapAsCodeFence(selectedLines);
@@ -1486,18 +1552,54 @@ class SacMdEditor extends HTMLElement {
     _tableEnter() {
         const line = this._activeLine;
         const type = line.dataset.block;
-        if (type === "table-row" && tableCells(line.textContent).every((c) => c === "")) {
-            const above = line.previousElementSibling;
-            line.replaceChildren(document.createTextNode(""));
-            this._applyBlockClassFor(line, "");
-            this._placeCaretInLine(line, 0);
-            if (above && TABLE_TYPES.has(above.dataset.block)) this._formatTableAt(above);
-            this._dirty = true;
-            this.dispatchEvent(new Event("input", { bubbles: true }));
+        if (this._isEmptyRow(line)) {
+            this._tableExitRow(line);
             return;
         }
         const anchor = type === "table-head" && line.nextElementSibling ? line.nextElementSibling : line;
         this._tableAddRow(anchor);
+    }
+
+    _isEmptyRow(line) {
+        return line.dataset.block === "table-row" && tableCells(line.textContent).every((c) => c === "");
+    }
+
+    /** An empty body row leaves the table: it becomes the plain empty line
+     *  under it, caret there, and the table's pipes line up. */
+    _tableExitRow(line) {
+        const above = line.previousElementSibling;
+        line.replaceChildren(document.createTextNode(""));
+        this._applyBlockClassFor(line, "");
+        this._placeCaretInLine(line, 0);
+        if (above && TABLE_TYPES.has(above.dataset.block)) this._formatTableAt(above);
+        this._dirty = true;
+        this.dispatchEvent(new Event("input", { bubbles: true }));
+    }
+
+    /** Esc in a table. On an empty row it is Enter's exit (the row goes);
+     *  anywhere else the caret moves to the line after the table - a new
+     *  empty one when that line holds text or the table ends the document. */
+    _tableEscape() {
+        const line = this._activeLine;
+        if (this._isEmptyRow(line)) {
+            this._tableExitRow(line);
+            return;
+        }
+        const rows = this._tableBlock(line);
+        const last = rows[rows.length - 1];
+        let after = last.nextElementSibling;
+        const added = !after || after.textContent !== "";
+        if (added) {
+            after = document.createElement("div");
+            after.className = "line";
+            last.after(after);
+        }
+        this._activateLine(after, 0);
+        this._formatTableAt(rows[0]);
+        if (added) {
+            this._dirty = true;
+            this.dispatchEvent(new Event("input", { bubbles: true }));
+        }
     }
 
     /** Insert an empty row after `anchor` and put the caret in its first cell. */
@@ -1508,6 +1610,224 @@ class SacMdEditor extends HTMLElement {
         row.textContent = "|" + "  |".repeat(n);
         anchor.after(row);
         this._activateLine(row, 2);
+        this._dirty = true;
+        this.dispatchEvent(new Event("input", { bubbles: true }));
+    }
+
+    _syncTableButton() {
+        const btn = this._toolbar && this._toolbar.querySelector('button[data-fmt="table"]');
+        if (btn) btn.classList.toggle("ctx", this._inTable());
+    }
+
+    // ---------------------------------------------------------------------
+    // Table dialog: the grid for what is tedious in pipe source - columns
+    // and rows added, removed, moved; alignment. Opened by the Table
+    // button while the caret is in a table. Native <dialog> in the shadow
+    // root, so it needs no kit. Apply rewrites the table block (formatted,
+    // an undoable edit); Esc or Cancel changes nothing.
+    // ---------------------------------------------------------------------
+
+    _openTableDialog(line) {
+        const rows = this._tableBlock(line);
+        if (rows.length < 2 || rows[0].dataset.block !== "table-head") return;
+        const texts = rows.map((l) => l.textContent);
+        const cells = texts.map(tableCells).filter((_, i) => i !== 1);
+        // Cells beyond the header's count exist in the source; the grid
+        // shows them as columns rather than hide them.
+        const width = Math.max(1, ...cells.map((r) => r.length));
+        const aligns = delimAligns(texts[1]).padEnd(width, "-").slice(0, width).split("");
+        const data = cells.map((r) => Array.from({ length: width }, (_, c) => unescapePipes(r[c] || "")));
+        this._td = { rows, aligns, data, caret: line };
+        this._tdEnsure();
+        this._tdLabels();
+        this._tdRender();
+        this._tdlg.returnValue = "";
+        this._tdlg.showModal();
+        this._tdFocus('input[data-r="0"][data-c="0"]');
+    }
+
+    _tdEnsure() {
+        if (this._tdlg) return;
+        const d = document.createElement("dialog");
+        d.className = "tdlg";
+        d.setAttribute("part", "table-dialog");
+        d.innerHTML =
+            `<form method="dialog">` +
+            `<div class="tdlg-title"></div>` +
+            `<div class="tdlg-scroll"><table class="tdlg-grid"></table></div>` +
+            `<div class="tdlg-actions">` +
+            `<button type="button" class="tdlg-btn" data-td="add-row"></button>` +
+            `<button type="button" class="tdlg-btn" data-td="add-col"></button>` +
+            `<span class="tdlg-gap"></span>` +
+            `<button type="button" class="tdlg-btn" data-td="cancel"></button>` +
+            `<button type="submit" class="tdlg-btn primary" value="apply" data-td="apply"></button>` +
+            `</div></form>`;
+        this.shadowRoot.appendChild(d);
+        this._tdlg = d;
+        d.addEventListener("click", (e) => {
+            const b = e.target.closest("button[data-td]");
+            if (!b || b.type === "submit" || b.disabled) return;
+            this._tdAction(b.dataset.td, Number(b.dataset.col), Number(b.dataset.row));
+        });
+        // The grid's own input events are not edits of the document: keep
+        // them inside, or a host listening for input would see them.
+        d.addEventListener("input", (e) => {
+            e.stopPropagation();
+            const i = e.target;
+            if (i.dataset && i.dataset.r !== undefined) this._td.data[Number(i.dataset.r)][Number(i.dataset.c)] = i.value;
+        });
+        d.addEventListener("change", (e) => e.stopPropagation());
+        // Esc cancels the dialog (native) and goes no further.
+        d.addEventListener("keydown", (e) => { if (e.key === "Escape") e.stopPropagation(); });
+        // Enter in a cell submits the form = Apply; so does the button.
+        d.addEventListener("close", () => this._tdClosed());
+    }
+
+    _tdLabels() {
+        const d = this._tdlg;
+        d.querySelector(".tdlg-title").textContent = mdT("tdTitle", "Edit table");
+        const set = (td, key, en) => { d.querySelector(`[data-td="${td}"]`).textContent = mdT(key, en); };
+        set("add-row", "tdAddRow", "Add row");
+        set("add-col", "tdAddCol", "Add column");
+        set("cancel",  "tdCancel", "Cancel");
+        set("apply",   "tdApply",  "Apply");
+    }
+
+    _tdRender() {
+        const { data, aligns } = this._td;
+        const w = aligns.length, last = data.length - 1;
+        const alName = { "-": ["tdAl-", "none"], l: ["tdAll", "left"], c: ["tdAlc", "center"], r: ["tdAlr", "right"] };
+        const btn = (td, col, row, icon, label, disabled = false) =>
+            `<button type="button" class="tdlg-ic" data-td="${td}"` +
+            (col === null ? "" : ` data-col="${col}"`) + (row === null ? "" : ` data-row="${row}"`) +
+            ` title="${escapeAttr(label)}" aria-label="${escapeAttr(label)}"${disabled ? " disabled" : ""}>` +
+            TD_ICONS[icon] + `</button>`;
+        let h = `<thead><tr><th></th>`;
+        aligns.forEach((a, c) => {
+            const al = `${mdT("tdAlign", "Alignment")}: ${mdT(alName[a][0], alName[a][1])}`;
+            h += `<th><div class="tdlg-ctl">` +
+                btn("col-left",  c, null, "left",  mdT("tdLeft", "Move column left"), c === 0) +
+                btn("col-align", c, null, "al" + a, al) +
+                btn("col-right", c, null, "right", mdT("tdRight", "Move column right"), c === w - 1) +
+                btn("col-del",   c, null, "del",   mdT("tdDelCol", "Delete column"), w === 1) +
+                `</div></th>`;
+        });
+        h += `</tr></thead><tbody>`;
+        data.forEach((row, r) => {
+            h += `<tr${r === 0 ? ' class="tdlg-head"' : ""}><td><div class="tdlg-ctl">` +
+                (r === 0
+                    ? `<span class="tdlg-tag">${escapeHtml(mdT("tdHeader", "Header"))}</span>`
+                    : btn("row-up",   null, r, "up",   mdT("tdUp", "Move row up"), r === 1) +
+                      btn("row-down", null, r, "down", mdT("tdDown", "Move row down"), r === last) +
+                      btn("row-del",  null, r, "del",  mdT("tdDelRow", "Delete row"))) +
+                `</div></td>`;
+            row.forEach((v, c) => {
+                h += `<td><input type="text" class="ta-${aligns[c]}" data-r="${r}" data-c="${c}" ` +
+                     `value="${escapeAttr(v)}" aria-label="${escapeAttr(`${mdT("tdCell", "Cell")} ${r + 1}/${c + 1}`)}"></td>`;
+            });
+            h += `</tr>`;
+        });
+        this._tdlg.querySelector(".tdlg-grid").innerHTML = h + `</tbody>`;
+    }
+
+    _tdFocus(selector) {
+        const el = this._tdlg.querySelector(selector);
+        if (el && !el.disabled) el.focus();
+    }
+
+    _tdAction(kind, col, row) {
+        const td = this._td, { data, aligns } = td;
+        const swap = (arr, i, j) => { [arr[i], arr[j]] = [arr[j], arr[i]]; };
+        let focus = null;
+        switch (kind) {
+            case "cancel": this._tdlg.close("cancel"); return;
+            case "add-row":
+                data.push(aligns.map(() => ""));
+                focus = `input[data-r="${data.length - 1}"][data-c="0"]`;
+                break;
+            case "add-col":
+                data.forEach((r) => r.push(""));
+                aligns.push("-");
+                focus = `input[data-r="0"][data-c="${aligns.length - 1}"]`;
+                break;
+            case "col-left": case "col-right": {
+                const to = col + (kind === "col-left" ? -1 : 1);
+                if (to < 0 || to >= aligns.length) return;
+                data.forEach((r) => swap(r, col, to));
+                swap(aligns, col, to);
+                focus = `[data-td="${kind}"][data-col="${to}"]`;
+                break;
+            }
+            case "col-align":
+                aligns[col] = { "-": "l", l: "c", c: "r", r: "-" }[aligns[col]];
+                focus = `[data-td="col-align"][data-col="${col}"]`;
+                break;
+            case "col-del":
+                if (aligns.length < 2) return;
+                data.forEach((r) => r.splice(col, 1));
+                aligns.splice(col, 1);
+                focus = `[data-td="col-del"][data-col="${Math.min(col, aligns.length - 1)}"]`;
+                break;
+            case "row-up": case "row-down": {
+                const to = row + (kind === "row-up" ? -1 : 1);
+                if (to < 1 || to >= data.length) return;      // the header stays first
+                swap(data, row, to);
+                focus = `[data-td="${kind}"][data-row="${to}"]`;
+                break;
+            }
+            case "row-del":
+                if (row < 1) return;
+                data.splice(row, 1);
+                focus = data.length > 1 ? `[data-td="row-del"][data-row="${Math.min(row, data.length - 1)}"]`
+                                        : `[data-td="add-row"]`;
+                break;
+            default: return;
+        }
+        this._tdRender();
+        if (focus) this._tdFocus(focus);
+    }
+
+    _tdClosed() {
+        const td = this._td;
+        this._td = null;
+        if (!td) return;
+        this._editor.focus();
+        if (this._tdlg.returnValue === "apply" && td.rows[0].isConnected) {
+            this._tdApply(td);
+            return;
+        }
+        // Cancelled: back where the caret was, nothing changed.
+        const back = td.caret.isConnected ? td.caret : null;
+        if (back) this._activateLine(back, 0);
+    }
+
+    /** Write the grid back: pipes escaped, formatted, replacing the table's
+     *  lines in place (reusing line elements where it can). An edit like
+     *  any other - input fires, undoable. */
+    _tdApply(td) {
+        const rowText = (r) => "| " + r.map((c) => escapePipes(c.trim())).join(" | ") + " |";
+        const delim = "| " + td.aligns.map((a) => ({ "-": "---", l: ":--", c: ":-:", r: "--:" })[a]).join(" | ") + " |";
+        const texts = formatTable([rowText(td.data[0]), delim, ...td.data.slice(1).map(rowText)]);
+        const old = td.rows;
+        let last = null;
+        texts.forEach((t, i) => {
+            let l = old[i];
+            if (!l) {
+                l = document.createElement("div");
+                l.className = "line";
+                last.after(l);
+            }
+            if (l.textContent !== t || !old[i]) {
+                if (l === this._activeLine) l.replaceChildren(document.createTextNode(t));
+                else l.textContent = t;
+                l._blockState = undefined;
+            }
+            last = l;
+        });
+        for (const l of old.slice(texts.length)) l.remove();
+        const head = old[0];
+        const first = splitTableRow(texts[0]).find((g) => g.kind === "cell");
+        this._activateLine(head, first ? first.start : 0);
         this._dirty = true;
         this.dispatchEvent(new Event("input", { bubbles: true }));
     }
@@ -1873,6 +2193,31 @@ class SacMdEditor extends HTMLElement {
         }
     }
 
+    /** The opening line of the block `line` belongs to (itself for an
+     *  opening line), or null. */
+    _blockOpenLine(line) {
+        for (let cur = line; cur; cur = cur.previousElementSibling) {
+            const b = cur.dataset.block;
+            if (b === "block-open") return cur;
+            if (b !== "block-body" && b !== "block-close") return null;
+        }
+        return null;
+    }
+
+    /** Read-only: masked block lines say they can be clicked (a tooltip; the
+     *  cursor is CSS). Editable: no tooltip - the caret reveals there. */
+    _revealHint(line) {
+        if (this.hasAttribute("readonly") && line.classList.contains("block-masked")) {
+            line.title = mdT("revealHint", "Click to show or hide");
+        } else if (line.hasAttribute("title")) {
+            line.removeAttribute("title");
+        }
+    }
+    _syncRevealHints() {
+        if (!this._editor) return;
+        for (const line of this._editor.querySelectorAll(".line.block-masked, .line[title]")) this._revealHint(line);
+    }
+
     /** Reveal-toggle click handler. From the opening line the eye icon
      *  lives on, walks forward to the block's close (or end of document) and
      *  flips .block-revealed on every line in the range; a one-line block
@@ -1982,6 +2327,27 @@ function delimAligns(src) {
         return l && r ? "c" : r ? "r" : l ? "l" : "-";
     }).join("");
 }
+
+// A cell's pipes: the source keeps them escaped (\|, or they would split
+// the cell); the dialog shows and takes them plain.
+const unescapePipes = (s) => s.replace(/\\\|/g, "|");
+const escapePipes   = (s) => s.replace(/\|/g, "\\|");
+
+// Table dialog icons: one-line SVGs, stroke only, currentColor.
+const tdIcon = (d) =>
+    `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" ` +
+    `stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="${d}"/></svg>`;
+const TD_ICONS = {
+    left:  tdIcon("M15 18l-6-6 6-6"),
+    right: tdIcon("M9 18l6-6-6-6"),
+    up:    tdIcon("M18 15l-6-6-6 6"),
+    down:  tdIcon("M6 9l6 6 6-6"),
+    del:   tdIcon("M18 6L6 18M6 6l12 12"),
+    "al-": tdIcon("M4 6h16M4 12h16M4 18h16"),
+    all:   tdIcon("M4 6h16M4 12h10M4 18h14"),
+    alc:   tdIcon("M4 6h16M7 12h10M5 18h14"),
+    alr:   tdIcon("M4 6h16M10 12h10M6 18h14"),
+};
 
 /** Pretty-print a table block (header, delimiter, rows) so the pipes line
  *  up: every cell padded to its column's width, delimiter dashes to match,
@@ -2439,6 +2805,8 @@ const TEMPLATE = `
         box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent, #3b82f6) 10%, transparent);
     }
     :host(.is-readonly) .toolbar { display: none; }
+    /* Read-only: a masked block reveals on click (no caret to do it). */
+    :host(.is-readonly) .line.block-masked { cursor: pointer; }
     :host(.is-readonly) {
         background: transparent;
         border-color: transparent;
@@ -2786,6 +3154,94 @@ const TEMPLATE = `
     }
     .line .tcell.ta-c { text-align: center; }
     .line .tcell.ta-r { text-align: right; }
+
+    /* The Table button while the caret is in a table: it edits, not
+       inserts - say so. */
+    .toolbar button.ctx {
+        color: var(--accent, #3b82f6);
+        background: color-mix(in srgb, var(--accent, #3b82f6) 14%, transparent);
+    }
+
+    /* Table dialog (native <dialog>, top layer). */
+    .tdlg {
+        padding: 0;
+        max-width: min(92vw, 960px);
+        color: var(--text, #fff);
+        background: var(--panel, #161b26);
+        border: 1px solid var(--border-strong, color-mix(in srgb, var(--fg, #fff) 16%, transparent));
+        border-radius: var(--radius-l, 6px);
+        box-shadow: 0 16px 48px color-mix(in srgb, var(--sink, #000) 45%, transparent);
+    }
+    .tdlg::backdrop { background: color-mix(in srgb, var(--sink, #000) 45%, transparent); }
+    .tdlg form {
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+        padding: 16px;
+        max-height: 80vh;
+        box-sizing: border-box;
+    }
+    .tdlg-title { font-weight: 700; }
+    .tdlg-scroll { overflow: auto; min-height: 0; }
+    .tdlg-grid { border-collapse: collapse; }
+    .tdlg-grid th, .tdlg-grid td { padding: 2px; vertical-align: middle; }
+    .tdlg-ctl { display: flex; gap: 1px; justify-content: center; align-items: center; }
+    .tdlg-tag { font-size: 0.75em; color: var(--text-muted, #888); padding: 0 4px; }
+    .tdlg input {
+        width: 10em;
+        min-width: 6em;
+        box-sizing: border-box;
+        font: inherit;
+        color: inherit;
+        background: var(--field, color-mix(in srgb, var(--fg, #fff) 4%, transparent));
+        border: 1px solid var(--border, color-mix(in srgb, var(--fg, #fff) 8%, transparent));
+        border-radius: var(--radius-m, 4px);
+        padding: 5px 8px;
+    }
+    .tdlg input:focus {
+        outline: 2px solid color-mix(in srgb, var(--accent, #3b82f6) 60%, transparent);
+        outline-offset: -1px;
+    }
+    .tdlg-head input { font-weight: 600; }
+    .tdlg input.ta-c { text-align: center; }
+    .tdlg input.ta-r { text-align: right; }
+    .tdlg-ic {
+        appearance: none;
+        display: inline-flex;
+        padding: 3px;
+        border: none;
+        background: none;
+        color: var(--text-muted, #888);
+        border-radius: var(--radius-m, 4px);
+        cursor: pointer;
+    }
+    .tdlg-ic svg { width: 14px; height: 14px; display: block; }
+    .tdlg-ic:hover:not(:disabled) { background: var(--hover, color-mix(in srgb, var(--fg, #fff) 8%, transparent)); color: var(--text, #fff); }
+    .tdlg-ic:disabled { opacity: 0.3; cursor: default; }
+    .tdlg-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+    .tdlg-gap { flex: 1; }
+    .tdlg-btn {
+        appearance: none;
+        font: inherit;
+        font-size: 0.85em;
+        font-weight: 600;
+        padding: 6px 12px;
+        color: var(--text, #fff);
+        background: color-mix(in srgb, var(--fg, #fff) 5%, transparent);
+        border: 1px solid var(--border, color-mix(in srgb, var(--fg, #fff) 8%, transparent));
+        border-radius: var(--radius-m, 4px);
+        cursor: pointer;
+    }
+    .tdlg-btn:hover { background: var(--hover, color-mix(in srgb, var(--fg, #fff) 8%, transparent)); }
+    .tdlg-btn.primary {
+        color: var(--on-accent, #fff);
+        background: var(--accent-fill, var(--accent, #3b82f6));
+        border-color: transparent;
+    }
+    .tdlg-btn:focus-visible, .tdlg-ic:focus-visible {
+        outline: 2px solid var(--accent, #3b82f6);
+        outline-offset: 1px;
+    }
 
     /* HTML entity (&copy;): the source stays in the DOM as a marker
        (hidden on inactive lines), the character is generated content. */

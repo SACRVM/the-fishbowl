@@ -283,6 +283,15 @@ public class VaultTests
             await page.WaitForFunctionAsync(
                 "() => document.querySelector('fb-notes-view #content').value.includes('" + Secret + "')",
                 null, new PageWaitForFunctionOptions { Timeout = 5000 });
+
+            // Read-only (archived): a click on the masked block shows it, a
+            // second hides it again (sac-md-editor #3) — no caret needed.
+            var body = page.Locator("fb-notes-view #content .line.block-body").First;
+            await Assertions.Expect(body).Not.ToHaveClassAsync(new Regex(@"block-revealed"));
+            await body.ClickAsync();
+            await Assertions.Expect(body).ToHaveClassAsync(new Regex(@"block-revealed"));
+            await body.ClickAsync();
+            await Assertions.Expect(body).Not.ToHaveClassAsync(new Regex(@"block-revealed"));
         }
         finally
         {
