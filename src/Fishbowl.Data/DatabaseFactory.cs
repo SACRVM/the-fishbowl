@@ -459,7 +459,35 @@ public class DatabaseFactory
             ApplyUserV12(connection);
             connection.Execute("PRAGMA user_version = 12");
             _logger.LogInformation("Applied user schema v12 to {DbPath}", ((SqliteConnection)connection).DataSource);
+            version = 12;
         }
+
+        if (version < 13)
+        {
+            ApplyUserV13(connection);
+            connection.Execute("PRAGMA user_version = 13");
+            _logger.LogInformation("Applied user schema v13 to {DbPath}", ((SqliteConnection)connection).DataSource);
+        }
+    }
+
+    // One trash for everything (space-apps spec, decision 13): a deleted
+    // note, todo, event or contact leaves its row as a JSON snapshot here —
+    // the row itself is really gone, so unique values are free again.
+    // Restore puts the snapshot back or refuses. Files keep their own
+    // file_trash (the bytes live on disk); the Trash app shows both.
+    private void ApplyUserV13(IDbConnection connection)
+    {
+        connection.Execute(@"
+            CREATE TABLE IF NOT EXISTS trash (
+                id          TEXT PRIMARY KEY,
+                kind        TEXT NOT NULL,
+                item_id     TEXT NOT NULL,
+                title       TEXT,
+                data        TEXT NOT NULL,
+                deleted_by  TEXT,
+                deleted_at  TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_trash_deleted_at ON trash(deleted_at);");
     }
 
     private void EnsureSystemInitialized(IDbConnection connection)

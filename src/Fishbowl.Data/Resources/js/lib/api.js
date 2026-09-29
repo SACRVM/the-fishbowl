@@ -359,6 +359,15 @@
 
     // Todos list: open ones only, unless { includeCompleted: true } — the
     // server's default leaves completed todos out.
+    // The workspace's record trash (deleted notes, todos, events, contacts);
+    // files keep theirs under fb.api.files (trashList/restore/purge).
+    const trash = {
+        list:    ()   => request(ctx("/trash")),
+        restore: (id) => request(ctx(`/trash/${encodeURIComponent(id)}/restore`), { method: "POST" }),
+        remove:  (id) => request(ctx(`/trash/${encodeURIComponent(id)}`), { method: "DELETE" }),
+        empty:   ()   => request(ctx("/trash"), { method: "DELETE" }),
+    };
+
     const todos = crud("todos");
     todos.list = (opts) => request(opts?.includeCompleted
         ? `${ctx("/todos")}?includeCompleted=true`
@@ -368,6 +377,7 @@
         files,
         notes,
         todos,
+        trash,
         contacts,
         events,
         tags: {

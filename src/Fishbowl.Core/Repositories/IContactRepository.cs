@@ -19,7 +19,9 @@ public interface IContactRepository
 
     Task<string> CreateAsync(ContextRef ctx, string actorUserId, Contact contact, CancellationToken ct = default);
     Task<bool> UpdateAsync(ContextRef ctx, Contact contact, CancellationToken ct = default);
-    Task<bool> DeleteAsync(ContextRef ctx, string id, CancellationToken ct = default);
+    // The row goes to the workspace trash (TrashSnapshots) in the same
+    // transaction. `deletedBy` defaults to the personal workspace's owner.
+    Task<bool> DeleteAsync(ContextRef ctx, string id, CancellationToken ct = default, string? deletedBy = null);
 
     // Legacy personal-context aliases. Cookie-auth callers that only hold
     // a userId keep a one-line signature.

@@ -101,6 +101,7 @@
         "member_above_you": "That member's role is above yours.",
         "owner_cannot_leave": "The owner can't leave the space — delete it instead.",
         "invite_days": "An invitation is valid for 1 to {max} days.",
+        "restore_conflict": "It can't come back: its place is taken, or something it needs is gone.",
         "is_folder": "That's a folder.",
         "not_a_folder": "That isn't a folder.",
         "into_own_subtree": "A folder can't go into itself.",

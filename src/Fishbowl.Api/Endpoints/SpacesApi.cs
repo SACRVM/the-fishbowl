@@ -251,7 +251,7 @@ public static class SpacesApi
             var (space, role) = (resolved.Space!, resolved.Role!.Value);
             if (!role.CanWrite()) return Results.Forbid();
 
-            var ok = await notes.DeleteAsync(ContextRef.Space(space.Id), id, ct);
+            var ok = await notes.DeleteAsync(ContextRef.Space(space.Id), id, ct, deletedBy: user.FindFirst(McpContextClaims.UserId)?.Value);
             return ok ? Results.NoContent() : Results.NotFound();
         })
         .WithName("DeleteSpaceNote")
@@ -415,7 +415,7 @@ public static class SpacesApi
             if (resolved.Error is not null) return resolved.Error;
             if (!resolved.Role!.Value.CanWrite()) return Results.Forbid();
 
-            var ok = await todos.DeleteAsync(ContextRef.Space(resolved.Space!.Id), id, ct);
+            var ok = await todos.DeleteAsync(ContextRef.Space(resolved.Space!.Id), id, ct, deletedBy: user.FindFirst(McpContextClaims.UserId)?.Value);
             return ok ? Results.NoContent() : Results.NotFound();
         })
         .WithName("DeleteSpaceTodo")
@@ -523,7 +523,7 @@ public static class SpacesApi
             if (resolved.Error is not null) return resolved.Error;
             if (!resolved.Role!.Value.CanWrite()) return Results.Forbid();
 
-            var ok = await contacts.DeleteAsync(ContextRef.Space(resolved.Space!.Id), id, ct);
+            var ok = await contacts.DeleteAsync(ContextRef.Space(resolved.Space!.Id), id, ct, deletedBy: user.FindFirst(McpContextClaims.UserId)?.Value);
             return ok ? Results.NoContent() : Results.NotFound();
         })
         .WithName("DeleteSpaceContact")
@@ -684,7 +684,7 @@ public static class SpacesApi
             if (resolved.Error is not null) return resolved.Error;
             if (!resolved.Role!.Value.CanWrite()) return Results.Forbid();
 
-            var ok = await events.DeleteAsync(ContextRef.Space(resolved.Space!.Id), id, ct);
+            var ok = await events.DeleteAsync(ContextRef.Space(resolved.Space!.Id), id, ct, deletedBy: user.FindFirst(McpContextClaims.UserId)?.Value);
             return ok ? Results.NoContent() : Results.NotFound();
         })
         .WithName("DeleteSpaceEvent")

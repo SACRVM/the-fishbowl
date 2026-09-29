@@ -209,10 +209,12 @@ public class NoteRepository : INoteRepository
         }, ct);
     }
 
-    public async Task<bool> DeleteAsync(ContextRef ctx, string id, CancellationToken ct = default)
+    public async Task<bool> DeleteAsync(ContextRef ctx, string id, CancellationToken ct = default, string? deletedBy = null)
     {
         return await _dbFactory.WithContextTransactionAsync<bool>(ctx, async (db, tx, token) =>
         {
+            await TrashSnapshots.TakeAsync(db, tx, ctx, TrashKinds.Note, id, deletedBy, token);
+
             // Delete from the two index tables before the authoritative `notes`
             // row disappears — same pattern notes_fts already uses. `vec_notes`
             // has no FK, but a stale row there would surface as a phantom hit
@@ -230,6 +232,24 @@ public class NoteRepository : INoteRepository
                 new { id }, transaction: tx, cancellationToken: token));
 
             return affected > 0;
+        }, ct);
+    }
+
+    public async Task ReindexAsync(ContextRef ctx, string id, CancellationToken ct = default)
+    {
+        await _dbFactory.WithContextTransactionAsync(ctx, async (db, tx, token) =>
+        {
+            var note = await db.QuerySingleOrDefaultAsync<Note>(new CommandDefinition(
+                "SELECT * FROM notes WHERE id = @id", new { id }, transaction: tx, cancellationToken: token));
+            if (note is null) return;
+            await db.ExecuteAsync(new CommandDefinition(
+                "DELETE FROM notes_fts WHERE rowid = (SELECT rowid FROM notes WHERE id = @id)",
+                new { id }, transaction: tx, cancellationToken: token));
+            await db.ExecuteAsync(new CommandDefinition(
+                "INSERT INTO notes_fts (rowid, title, content, tags) VALUES ((SELECT rowid FROM notes WHERE id = @Id), @Title, @Content, @TagsFlat)",
+                new { note.Id, note.Title, note.Content, TagsFlat = string.Join(' ', note.Tags) },
+                transaction: tx, cancellationToken: token));
+            await UpsertEmbeddingAsync(db, tx, note, token);
         }, ct);
     }
 

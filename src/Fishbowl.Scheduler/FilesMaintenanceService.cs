@@ -1,5 +1,6 @@
 using Fishbowl.Core;
 using Fishbowl.Core.Files;
+using Fishbowl.Core.Repositories;
 using Fishbowl.Data;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -51,6 +52,43 @@ public class FilesMaintenanceService : BackgroundService
         }
     }
 
+    // The record trash (deleted notes, todos, events, contacts) keeps the
+    // same retention as the file trash — one trash, one rule.
+    private async Task PurgeRecordTrashAsync(CancellationToken ct)
+    {
+        try
+        {
+            using var scope = _scopes.CreateScope();
+            var sp = scope.ServiceProvider;
+            var system = sp.GetRequiredService<ISystemRepository>();
+            var raw = await system.GetConfigAsync(FileLimits.TrashRetentionDaysKey, ct);
+            var days = long.TryParse(raw, out var d) ? d : FileLimits.DefaultTrashRetentionDays;
+            if (days <= 0) return;   // 0 = keep forever
+            var cutoff = DateTime.UtcNow.AddDays(-days);
+            var trash = sp.GetRequiredService<ITrashRepository>();
+            var purged = 0;
+            foreach (var (root, file, make) in new (string, string, Func<string, ContextRef>)[]
+                     {
+                         (_dbFactory.UsersRoot, "personal.db", ContextRef.User),
+                         (_dbFactory.SpacesRoot, "space.db", ContextRef.Space),
+                     })
+            {
+                if (!Directory.Exists(root)) continue;
+                foreach (var dir in Directory.EnumerateDirectories(root))
+                {
+                    ct.ThrowIfCancellationRequested();
+                    if (Path.GetFileName(dir).StartsWith('.') || !File.Exists(Path.Combine(dir, file))) continue;
+                    try { purged += await trash.PurgeAsync(make(Path.GetFileName(dir)), cutoff, ct); }
+                    catch (OperationCanceledException) { throw; }
+                    catch (Exception ex) { _logger.LogDebug(ex, "Trash purge skipped {Dir}", Path.GetFileName(dir)); }
+                }
+            }
+            if (purged > 0) _logger.LogInformation("Purged {Count} items from the record trash", purged);
+        }
+        catch (OperationCanceledException) { throw; }
+        catch (Exception ex) { _logger.LogWarning(ex, "Record trash purge failed — will retry next interval"); }
+    }
+
     // Visible for tests. Returns how many contexts were maintained.
     public async Task<int> RunOnceAsync(CancellationToken ct)
     {
@@ -82,6 +120,8 @@ public class FilesMaintenanceService : BackgroundService
             }
         }
         if (done > 0) _logger.LogInformation("Files maintenance ran for {Count} workspaces", done);
+
+        await PurgeRecordTrashAsync(ct);
 
         // Archived spaces and accounts past Archive:RetentionDays, and
         // leftover folders.

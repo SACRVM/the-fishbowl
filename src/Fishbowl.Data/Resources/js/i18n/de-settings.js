@@ -549,6 +549,7 @@ window.sac?.i18n?.add?.("de", {
     "fb.errors.member_above_you": "Die Rolle dieses Mitglieds steht über deiner.",
     "fb.errors.owner_cannot_leave": "Der Besitzer kann den Space nicht verlassen — lösch ihn stattdessen.",
     "fb.errors.invite_days": "Eine Einladung gilt 1 bis {max} Tage.",
+    "fb.errors.restore_conflict": "Das kann nicht zurück: Sein Platz ist belegt, oder etwas, das es braucht, fehlt.",
     "fb.errors.is_folder": "Das ist ein Ordner.",
     "fb.errors.not_a_folder": "Das ist kein Ordner.",
     "fb.errors.into_own_subtree": "Ein Ordner kann nicht in sich selbst.",

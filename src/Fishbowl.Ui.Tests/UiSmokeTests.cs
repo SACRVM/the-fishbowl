@@ -690,6 +690,44 @@ public class UiSmokeTests
         await context.CloseAsync();
     }
 
+    // One trash: a deleted note and a deleted file show up together in the
+    // Trash app (a desktop tile); restore brings the note back, delete for
+    // good asks and removes the file's entry.
+    [Fact]
+    public async Task Trash_ShowsRecordsAndFiles_RestoreAndDeleteForGood_Test()
+    {
+        var context = await _fixture.Browser!.NewContextAsync(new BrowserNewContextOptions { IgnoreHTTPSErrors = true, BypassCSP = true });
+        var page = await context.NewPageAsync();
+        var title = "Trashed " + Guid.NewGuid().ToString("N")[..6];
+        var created = await page.APIRequest.PostAsync(_fixture.BaseUrl + "/api/v1/notes", new APIRequestContextOptions { DataObject = new { title, content = "x" } });
+        var id = (await created.JsonAsync())!.Value.GetProperty("id").GetString()!;
+        Assert.True((await page.APIRequest.DeleteAsync(_fixture.BaseUrl + $"/api/v1/notes/{id}")).Ok);
+        var file = title + ".txt";
+        await page.APIRequest.PutAsync(_fixture.BaseUrl + "/api/v1/files/content?path=" + Uri.EscapeDataString(file), new APIRequestContextOptions
+        {
+            Headers = new Dictionary<string, string> { ["X-Fishbowl-Upload"] = "1", ["If-None-Match"] = "*", ["Content-Type"] = "text/plain" },
+            Data = "hello",
+        });
+        Assert.True((await page.APIRequest.DeleteAsync(_fixture.BaseUrl + "/api/v1/files?path=" + Uri.EscapeDataString(file))).Ok);
+
+        await page.GotoAsync(_fixture.BaseUrl + "/#/");
+        await page.Locator("a.tile[href$='#/trash']").ClickAsync();
+        var noteRow = page.Locator(".fb-trash-row[data-kind='note']", new PageLocatorOptions { HasText = title });
+        var fileRow = page.Locator(".fb-trash-row[data-kind='file']", new PageLocatorOptions { HasText = file });
+        await Assertions.Expect(noteRow).ToHaveCountAsync(1);
+        await Assertions.Expect(fileRow).ToHaveCountAsync(1);
+
+        await noteRow.Locator(".restore-btn").ClickAsync();
+        await Assertions.Expect(noteRow).ToHaveCountAsync(0);
+        Assert.True((await page.APIRequest.GetAsync(_fixture.BaseUrl + $"/api/v1/notes/{id}")).Ok);
+
+        await fileRow.Locator(".delete-btn").ClickAsync();
+        await page.Locator("sac-dialog[open]").GetByRole(AriaRole.Button, new() { Name = "Delete for good" }).ClickAsync();
+        await Assertions.Expect(fileRow).ToHaveCountAsync(0);
+
+        await context.CloseAsync();
+    }
+
     [Fact]
     public async Task TagManager_RecoloursAndProtectsSystemTags_Test()
     {

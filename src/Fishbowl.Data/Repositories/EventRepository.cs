@@ -405,23 +405,24 @@ public class EventRepository : IEventRepository
         }
     }
 
-    public async Task<bool> DeleteAsync(ContextRef ctx, string id, CancellationToken ct = default)
+    public async Task<bool> DeleteAsync(ContextRef ctx, string id, CancellationToken ct = default, string? deletedBy = null)
     {
-        using var db = _dbFactory.CreateContextConnection(ctx);
+        return await _dbFactory.WithContextTransactionAsync<bool>(ctx, async (db, tx, token) =>
+        {
+            await TrashSnapshots.TakeAsync(db, tx, ctx, TrashKinds.Event, id, deletedBy, token);
 
-        // reminders FK references events(id) — cascade the reminder rows
-        // here rather than letting SQLite error out. Reminder delivery is
-        // purely ephemeral state, not worth trying to preserve when the
-        // underlying event is gone.
-        await db.ExecuteAsync(new CommandDefinition(
-            "DELETE FROM reminders WHERE event_id = @id",
-            new { id }, cancellationToken: ct));
+            // reminders FK references events(id) — cascade the reminder rows
+            // here rather than letting SQLite error out. Reminder delivery is
+            // purely ephemeral state, not worth trying to preserve when the
+            // underlying event is gone (nor to restore with it).
+            await db.ExecuteAsync(new CommandDefinition(
+                "DELETE FROM reminders WHERE event_id = @id",
+                new { id }, transaction: tx, cancellationToken: token));
 
-        var affected = await db.ExecuteAsync(new CommandDefinition(
-            "DELETE FROM events WHERE id = @id",
-            new { id }, cancellationToken: ct));
-
-        return affected > 0;
+            return await db.ExecuteAsync(new CommandDefinition(
+                "DELETE FROM events WHERE id = @id",
+                new { id }, transaction: tx, cancellationToken: token)) > 0;
+        }, ct);
     }
 
     private static void EnforceLimits(Event evt)

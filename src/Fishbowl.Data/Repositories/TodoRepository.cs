@@ -121,12 +121,14 @@ public class TodoRepository : ITodoRepository
         return affected > 0;
     }
 
-    public async Task<bool> DeleteAsync(ContextRef ctx, string id, CancellationToken ct = default)
+    public async Task<bool> DeleteAsync(ContextRef ctx, string id, CancellationToken ct = default, string? deletedBy = null)
     {
-        using var db = _dbFactory.CreateContextConnection(ctx);
-        var affected = await db.ExecuteAsync(new CommandDefinition(
-            "DELETE FROM todos WHERE id = @id", new { id }, cancellationToken: ct));
-        return affected > 0;
+        return await _dbFactory.WithContextTransactionAsync<bool>(ctx, async (db, tx, token) =>
+        {
+            await TrashSnapshots.TakeAsync(db, tx, ctx, TrashKinds.Todo, id, deletedBy, token);
+            return await db.ExecuteAsync(new CommandDefinition(
+                "DELETE FROM todos WHERE id = @id", new { id }, transaction: tx, cancellationToken: token)) > 0;
+        }, ct);
     }
 
     private static void EnforceLimits(TodoItem item)

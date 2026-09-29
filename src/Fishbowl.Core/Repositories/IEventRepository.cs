@@ -26,7 +26,9 @@ public interface IEventRepository
 
     Task<string> CreateAsync(ContextRef ctx, string actorUserId, Event evt, CancellationToken ct = default);
     Task<bool> UpdateAsync(ContextRef ctx, Event evt, CancellationToken ct = default);
-    Task<bool> DeleteAsync(ContextRef ctx, string id, CancellationToken ct = default);
+    // The row goes to the workspace trash (TrashSnapshots) in the same
+    // transaction. `deletedBy` defaults to the personal workspace's owner.
+    Task<bool> DeleteAsync(ContextRef ctx, string id, CancellationToken ct = default, string? deletedBy = null);
 
     // Events whose reminder *trigger time* (start_at − reminder_minutes)
     // falls in the half-open window [from, to). Used by the scheduler to

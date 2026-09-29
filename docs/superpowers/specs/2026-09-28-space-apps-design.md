@@ -218,7 +218,8 @@ in the implementation plan; the shape:
 1. **Roles & invitations** — Designer role, staircase checks, Global Admin
    naming, invitation links. *Built 2026-09-28.*
 2. **Trash for everything** — the trash app, snapshots for notes/todos/events/
-   contacts, restore rules.
+   contacts, restore rules. *Built 2026-09-29* (table rows and app code join
+   the same `trash` in phases 3 and 4).
 3. **Tables in spaces** — re-home, types, links as foreign keys, aggregates,
    own-rows, searchable columns, descriptions, `table_*` MCP tools, the
    Tables app.

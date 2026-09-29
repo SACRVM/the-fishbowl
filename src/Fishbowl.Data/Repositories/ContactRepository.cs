@@ -158,10 +158,12 @@ public class ContactRepository : IContactRepository
         }, ct);
     }
 
-    public async Task<bool> DeleteAsync(ContextRef ctx, string id, CancellationToken ct = default)
+    public async Task<bool> DeleteAsync(ContextRef ctx, string id, CancellationToken ct = default, string? deletedBy = null)
     {
         return await _dbFactory.WithContextTransactionAsync<bool>(ctx, async (db, tx, token) =>
         {
+            await TrashSnapshots.TakeAsync(db, tx, ctx, TrashKinds.Contact, id, deletedBy, token);
+
             // FTS row first — same ordering rule as NoteRepository: strip
             // derived indexes before the authoritative row is gone so we
             // can still resolve rowid via a sub-select.

@@ -41,7 +41,13 @@ public interface INoteRepository
     Task<string> CreateAsync(ContextRef ctx, string actorUserId, Note note, NoteSource source, CancellationToken ct = default);
     Task<bool> UpdateAsync(ContextRef ctx, Note note, CancellationToken ct = default);
     Task<bool> UpdateAsync(ContextRef ctx, Note note, NoteSource source, CancellationToken ct = default);
-    Task<bool> DeleteAsync(ContextRef ctx, string id, CancellationToken ct = default);
+    // The row goes to the workspace trash (TrashSnapshots) in the same
+    // transaction. `deletedBy` defaults to the personal workspace's owner.
+    Task<bool> DeleteAsync(ContextRef ctx, string id, CancellationToken ct = default, string? deletedBy = null);
+
+    // Rebuilds one note's full-text row and vector — after a restore from
+    // the trash put the notes row back.
+    Task ReindexAsync(ContextRef ctx, string id, CancellationToken ct = default);
 
     // Bulk re-embed: iterates every note in the context and re-runs the
     // vec_notes upsert. Returns a result with processed + failed counts.
