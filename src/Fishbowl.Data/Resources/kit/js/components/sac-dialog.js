@@ -18,9 +18,18 @@
  *   dlg.open();
  *
  * Keyboard:
- *   - Escape            → close with action=null.
+ *   - Escape            → close with action=null. Something inside the dialog
+ *                         that handles Escape itself goes first: an open field
+ *                         popover (sac-select list, sac-date-field calendar),
+ *                         a menu, a field reverting its typing. It consumes
+ *                         the key (stopPropagation or preventDefault) and the
+ *                         dialog stays; the next Escape closes it.
  *   - Enter             → activates focused button (native).
- *   - Tab / Shift-Tab   → cycles between buttons (focus trap).
+ *   - Tab / Shift-Tab   → focus trap over everything focusable in the body,
+ *                         then the buttons, in document order — including
+ *                         the inputs inside kit fields' shadow roots, and
+ *                         from inside another component's shadow root.
+ *   Only the topmost open dialog handles keys.
  *
  * Arming:
  *   - A button with armAfterMs waits N ms, then receives focus so Enter acts.
@@ -56,6 +65,8 @@ class SacDialog extends HTMLElement {
         this._armTimer = null;
         this._resolved = false;
         this._onKeydown = this._onKeydown.bind(this);
+        // Escape from inside the dialog, bubble phase: see _onKeydown.
+        this.addEventListener("keydown", (e) => this._onInnerEscape(e));
     }
 
     static get observedAttributes() { return ["title"]; }
@@ -67,6 +78,10 @@ class SacDialog extends HTMLElement {
 
     disconnectedCallback() {
         if (this._offLang) { this._offLang(); this._offLang = null; }
+        // Removed while open, without close(): stop trapping keys.
+        const at = SacDialog._open.indexOf(this);
+        if (at >= 0) SacDialog._open.splice(at, 1);
+        document.removeEventListener("keydown", this._onKeydown, true);
     }
 
     /** A button's text: its labelKey through sac.t (label = the English
@@ -99,6 +114,7 @@ class SacDialog extends HTMLElement {
         // Host focus so keydown routes here even before any button is focused.
         this.focus();
         document.addEventListener("keydown", this._onKeydown, true);
+        if (!SacDialog._open.includes(this)) SacDialog._open.push(this);
         this._startArmTimer();
         this.dispatchEvent(new CustomEvent("sac:open", { bubbles: true, composed: true }));
     }
@@ -108,6 +124,8 @@ class SacDialog extends HTMLElement {
         this._resolved = true;
         this._cancelArmTimer();
         document.removeEventListener("keydown", this._onKeydown, true);
+        const at = SacDialog._open.indexOf(this);
+        if (at >= 0) SacDialog._open.splice(at, 1);
         this.removeAttribute("open");
         // Return focus to the element that opened us — a modal that drops focus
         // on the body strands keyboard and screen-reader users.
@@ -119,39 +137,72 @@ class SacDialog extends HTMLElement {
         this.dispatchEvent(new CustomEvent("sac:action", { detail: { action }, bubbles: true, composed: true }));
     }
 
-    /** Everything Tab should cycle: slotted interactive content (links, inputs
-     *  in the message) first, then the dialog's own action buttons. The old
-     *  trap saw only the buttons, so a link in the body was unreachable. */
+    /** Everything Tab should cycle, in composed order: the body's content
+     *  (slots followed, shadow roots walked, so a kit field's inner input is
+     *  listed) and then the dialog's own action buttons. A host that holds
+     *  focusables of its own is left out — its insides are the stops. */
     _focusables() {
-        const sel = 'a[href], button:not([disabled]), input:not([disabled]), ' +
-            'select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
-        return [
-            ...Array.from(this.querySelectorAll(sel)),
-            ...Array.from(this.shadowRoot.querySelectorAll(".btn")),
-        ];
+        const sel = 'a[href], button:not([disabled]), input:not([disabled]):not([type="hidden"]), ' +
+            'select:not([disabled]), textarea:not([disabled]), [contenteditable="true"], ' +
+            '[tabindex]:not([tabindex="-1"])';
+        const out = [];
+        const walk = (el) => {
+            if (el.hidden || el.inert) return;
+            if (el.localName === "slot") {
+                const assigned = el.assignedElements({ flatten: true });
+                (assigned.length ? assigned : Array.from(el.children)).forEach(walk);
+                return;
+            }
+            const at = out.length;
+            const self = el.matches(sel) && el.getClientRects().length > 0;
+            if (self) out.push(el);
+            Array.from((el.shadowRoot || el).children).forEach(walk);
+            if (self && el.shadowRoot && out.length > at + 1) out.splice(at, 1);
+        };
+        Array.from(this.shadowRoot.children).forEach(walk);
+        return out;
+    }
+
+    /** The focused element itself, down through every open shadow root —
+     *  document.activeElement only names the outermost host. */
+    static _deepActive() {
+        let a = document.activeElement;
+        while (a && a.shadowRoot && a.shadowRoot.activeElement) a = a.shadowRoot.activeElement;
+        return a;
     }
 
     _onKeydown(e) {
+        if (SacDialog._open[SacDialog._open.length - 1] !== this) return;
         if (e.key === "Escape") {
+            // From inside the dialog: the target gets its say first (an open
+            // popover, a field reverting) — _onInnerEscape decides on the way
+            // back up. From outside (focus on the page): close right here.
+            if (e.composedPath().includes(this)) return;
             e.stopPropagation();
             e.preventDefault();
             this.close(null);
             return;
         }
         if (e.key === "Tab") {
-            // Focus trap across ALL focusables — slotted content and buttons.
             const items = this._focusables();
             if (items.length === 0) return;
-            // A shadow button reads from shadowRoot.activeElement; a focused
-            // slotted (light-DOM) element does not, so fall back to document.
-            const active = this.shadowRoot.activeElement || document.activeElement;
-            const idx = items.indexOf(active);
+            const idx = items.indexOf(SacDialog._deepActive());
             let next;
             if (e.shiftKey) next = items[(idx <= 0 ? items.length : idx) - 1];
             else            next = items[(idx + 1) % items.length];
             e.preventDefault();
             next.focus();
         }
+    }
+
+    /** Escape that bubbled out of the dialog's content unconsumed closes it.
+     *  preventDefault here keeps sac.hotkeys (document, bubble) out of it. */
+    _onInnerEscape(e) {
+        if (e.key !== "Escape" || e.defaultPrevented || this._resolved) return;
+        if (!this.hasAttribute("open") || SacDialog._open[SacDialog._open.length - 1] !== this) return;
+        e.stopPropagation();
+        e.preventDefault();
+        this.close(null);
     }
 
     /** Run a button's action as if clicked: ask beforeAction, then close. */
@@ -456,5 +507,8 @@ class SacDialog extends HTMLElement {
         });
     }
 }
+
+/** Open dialogs, oldest first: only the last one handles keys. */
+SacDialog._open = [];
 
 customElements.define("sac-dialog", SacDialog);

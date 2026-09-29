@@ -33,11 +33,15 @@
  *   size        — "compact" (default, sac-date-field's compact row) or
  *                 "regular" (the metrics of a plain kit <input>, the UI font
  *                 with tabular digits) — set the same size on a date + time
- *                 pair. Touch sizing is the same for both.
+ *                 pair. Touch sizing is the same for both. "cell" = the
+ *                 cell-editor contract (borderless, fills its container, no
+ *                 label, only the hour segment in the tab order; Enter /
+ *                 Escape / Tab per style guide → Cell editors).
  *
  * Properties:
  *   value — get/set, normalized "HH:MM" or "". Setting is programmatic:
  *           the segments update in place, NO event fires.
+ *   focus() — focuses the hour segment.
  *
  * Events:
  *   sac:change — detail { value } — "HH:MM", or "" when the user cleared it.
@@ -45,6 +49,7 @@
  *                field, or Enter. Stepping and typing inside the field
  *                update the segments live but fire once, on commit — the
  *                same contract as <sac-date-field>. Bubbles, not composed.
+ *   sac:commit / sac:cancel — size="cell" only (style guide → Cell editors).
  *
  * Keyboard (on a segment):
  *   ↑ / ↓        step the segment (wraps; minutes by `step`); on an empty
@@ -93,7 +98,7 @@
 
 class SacTimeField extends HTMLElement {
     static get observedAttributes() {
-        return ["value", "hour-cycle", "step", "min", "max", "label", "placeholder", "disabled"];
+        return ["value", "hour-cycle", "step", "min", "max", "label", "placeholder", "disabled", "size"];
     }
 
     constructor() {
@@ -104,6 +109,8 @@ class SacTimeField extends HTMLElement {
         this._m = null;              // 0–59
         this._buffer = "";           // digits typed into the focused segment
         this._reflecting = false;
+        this._snapshot = "";         // value when focus entered (size="cell" cancel)
+        this._inside = false;
     }
 
     connectedCallback() {
@@ -137,6 +144,7 @@ class SacTimeField extends HTMLElement {
             case "label":       this._syncLabel(); break;
             case "placeholder": this._syncSegments(); break;
             case "disabled":    this._syncDisabled(); break;
+            case "size":        this._syncDisabled(); break;
         }
     }
 
@@ -145,6 +153,13 @@ class SacTimeField extends HTMLElement {
 
     get disabled() { return this.hasAttribute("disabled"); }
     set disabled(v) { this.toggleAttribute("disabled", !!v); }
+
+    focus(opts) {
+        if (!this._segs) return super.focus(opts);
+        this._segs.h.focus(opts);
+    }
+
+    _cell() { return this.getAttribute("size") === "cell"; }
 
     /* ------------------------------------------------------------- state */
 
@@ -318,6 +333,36 @@ class SacTimeField extends HTMLElement {
                     .field, :host([size="regular"]) .field { min-height: 44px; font-size: max(16px, 1rem); padding: 0 0.25rem; }
                     .seg { min-width: 44px; min-height: 40px; }
                 }
+                /* size="cell" — the cell-editor contract: borderless, fills
+                   the cell, the cell's font, no label, no own focus ring. */
+                :host([size="cell"]) {
+                    display: block;
+                    width: 100%;
+                    height: 100%;
+                    font: inherit;
+                    color: inherit;
+                }
+                :host([size="cell"]) .label { display: none; }
+                :host([size="cell"]) .row { height: 100%; min-height: 0; }
+                :host([size="cell"]) .field,
+                :host([size="cell"]) .field:hover,
+                :host([size="cell"]) .field:focus-within {
+                    width: 100%;
+                    height: 100%;
+                    min-height: 0;
+                    padding: 0 var(--cell-padding-inline, 8px);
+                    font: inherit;
+                    color: inherit;
+                    background: transparent;
+                    border: 0;
+                    border-radius: 0;
+                    box-shadow: none;
+                }
+                :host([size="cell"]) .seg { width: 2.4ch; min-width: 0; min-height: 0; }
+                :host([size="cell"]) .seg.period { width: 3.2ch; }
+                @media (pointer: coarse) {
+                    :host([size="cell"]) .field { font-size: max(16px, 1em); }
+                }
                 @media (prefers-reduced-motion: reduce) { .field { transition: none; } }
             </style>
             <label class="label" part="label" hidden></label>
@@ -377,6 +422,15 @@ class SacTimeField extends HTMLElement {
             if (e.relatedTarget && this.shadowRoot.contains(e.relatedTarget)) return;
             this._commit();
         });
+        // Cell contract: remember the value focus arrived with.
+        this.addEventListener("focusin", () => {
+            if (this._inside) return;
+            this._inside = true;
+            this._snapshot = this._value;
+        });
+        this.addEventListener("focusout", (e) => {
+            if (e.relatedTarget !== this) this._inside = false;
+        });
     }
 
     _select(el) {
@@ -401,6 +455,24 @@ class SacTimeField extends HTMLElement {
 
     _onKeydown(e, key) {
         if (this.disabled) return;
+        if (this._cell() && (e.key === "Enter" || e.key === "Escape" || e.key === "Tab")) {
+            if (e.key === "Tab") { this._commit(); return; }        // never swallowed
+            e.preventDefault();
+            e.stopPropagation();
+            if (e.key === "Enter") {
+                this._commit();
+                this.dispatchEvent(new CustomEvent("sac:commit", {
+                    detail: { value: this._value, shiftKey: e.shiftKey }, bubbles: true, composed: true,
+                }));
+            } else {
+                this._buffer = "";
+                this._setCommitted(this._snapshot);
+                this.dispatchEvent(new CustomEvent("sac:cancel", {
+                    detail: { value: this._value }, bubbles: true, composed: true,
+                }));
+            }
+            return;
+        }
         switch (e.key) {
             case "ArrowUp":    e.preventDefault(); this._stepSeg(key, 1); break;
             case "ArrowDown":  e.preventDefault(); this._stepSeg(key, -1); break;
@@ -563,7 +635,13 @@ class SacTimeField extends HTMLElement {
 
     _syncDisabled() {
         const off = this.disabled;
-        for (const el of Object.values(this._segs)) el.disabled = off;
+        const cell = this._cell();
+        for (const [key, el] of Object.entries(this._segs)) {
+            el.disabled = off;
+            // Cell editors: Tab leaves the field; ← / → still reach every segment.
+            if (cell && key !== "h") el.tabIndex = -1;
+            else el.removeAttribute("tabindex");
+        }
     }
 }
 

@@ -27,17 +27,23 @@
  *              label line at all. Also becomes the hex input's accessible name.
  *   disabled — greys the row out, blocks both the well and the input, and
  *              closes the popover if it was open.
+ *   size     — absent = the form row above; "cell" = the cell-editor
+ *              contract (borderless, fills its container, no label; a
+ *              small swatch + the hex text; Alt+↓ opens the picker; Enter /
+ *              Escape / Tab per style guide → Cell editors).
  *
  * Properties:
  *   value — get/set, normalized lowercase hex. Setting is programmatic: the
  *           well, the hex input and an open popover update in place and NO
  *           event is fired (events mean "the user did this").
+ *   focus({ select }) — focuses the hex input; select: true selects its text.
  *
  * Events:
  *   sac:change — detail { value } — the normalized hex, on USER changes
  *                      only: a committed hex entry, or any picker interaction.
  *                      Bubbles + composed. The picker's own event is stopped at
  *                      the boundary, so apps see exactly one.
+ *   sac:commit / sac:cancel — size="cell" only (style guide → Cell editors).
  *
  * Keyboard:
  *   on the well     — Enter / Space / ArrowDown open the popover, focus moves
@@ -65,7 +71,7 @@
         (window.sac && window.sac.t) ? window.sac.t(key, fallback) : fallback;
 
 class SacColorField extends HTMLElement {
-    static get observedAttributes() { return ["value", "alpha", "label", "disabled"]; }
+    static get observedAttributes() { return ["value", "alpha", "label", "disabled", "size"]; }
 
     constructor() {
         super();
@@ -79,6 +85,8 @@ class SacColorField extends HTMLElement {
         this._popover = null;
         this._picker = null;
         this._lowerTimer = null;   // top-layer exit, delayed past the fade
+        this._snapshot = "";       // value when focus entered (size="cell" cancel)
+        this._inside = false;
 
         this._onDocPointer = this._onDocPointer.bind(this);
         this._onDocKeydown = this._onDocKeydown.bind(this);
@@ -120,6 +128,7 @@ class SacColorField extends HTMLElement {
             case "alpha":    this._onAlphaAttr();  break;
             case "label":    this._syncLabel();    break;
             case "disabled": this._syncDisabled(); break;
+            case "size":     this._syncSize();     break;
         }
     }
 
@@ -130,6 +139,20 @@ class SacColorField extends HTMLElement {
 
     get disabled() { return this.hasAttribute("disabled"); }
     set disabled(v) { if (v) this.setAttribute("disabled", ""); else this.removeAttribute("disabled"); }
+
+    focus(opts) {
+        if (!this._input) return super.focus(opts);
+        this._input.focus(opts);
+        if (opts && opts.select) this._input.select();
+    }
+
+    _cell() { return this.getAttribute("size") === "cell"; }
+
+    /** Cell editors keep the well out of the tab order: Tab leaves the field. */
+    _syncSize() {
+        if (this._cell()) this._well.tabIndex = -1;
+        else this._well.removeAttribute("tabindex");
+    }
 
     /* ------------------------------------------------------------ color math */
 
@@ -173,6 +196,7 @@ class SacColorField extends HTMLElement {
         if (!this.hasAttribute("alpha")) this._rgba.a = 1;
         this._syncLabel();
         this._syncDisabled();
+        this._syncSize();
         this._reflect();
         this._syncUI();
     }
@@ -454,6 +478,49 @@ class SacColorField extends HTMLElement {
                    case at 240px. */
                 .popover sac-color-picker { --picker-width: inherit; }
 
+                /* size="cell" — the cell-editor contract: borderless, fills
+                   the cell, the cell's font, no label, no own focus ring. */
+                :host([size="cell"]) {
+                    display: block;
+                    width: 100%;
+                    height: 100%;
+                    font: inherit;
+                    color: inherit;
+                }
+                :host([size="cell"]) .label { display: none; }
+                :host([size="cell"]) .row {
+                    height: 100%;
+                    gap: 6px;
+                    padding-left: var(--cell-padding-inline, 8px);
+                }
+                :host([size="cell"]) .well,
+                :host([size="cell"]) .well:hover {
+                    width: 1.15em;
+                    height: 1.15em;
+                    border-color: var(--border-strong);
+                    border-radius: var(--radius-s);
+                }
+                :host([size="cell"]) .well:focus-visible { outline-offset: 1px; }
+                :host([size="cell"]) .hex,
+                :host([size="cell"]) .hex:hover,
+                :host([size="cell"]) .hex:focus {
+                    width: 100%;
+                    height: 100%;
+                    padding: 0 var(--cell-padding-inline, 8px) 0 0;
+                    font: inherit;
+                    font-family: var(--font-mono);
+                    color: inherit;
+                    background: transparent;
+                    border: 0;
+                    border-radius: 0;
+                    box-shadow: none;
+                }
+                :host([size="cell"]) .hex.invalid { color: var(--danger-text); }
+                @media (pointer: coarse) {
+                    :host([size="cell"]) .well { width: 1.15em; height: 1.15em; }
+                    :host([size="cell"]) .hex { height: 100%; font-size: max(16px, 1em); }
+                }
+
                 @media (prefers-reduced-motion: reduce) {
                     .popover,
                     .popover.open {
@@ -498,6 +565,54 @@ class SacColorField extends HTMLElement {
         this._input.addEventListener("change", (e) => e.stopPropagation());
         this._input.addEventListener("keydown", (e) => this._onInputKeydown(e));
         this._input.addEventListener("blur", () => this._commit(true));
+
+        // Cell contract: remember the value focus arrived with, and stop
+        // the keys the field acted on at the boundary.
+        this.addEventListener("focusin", () => {
+            if (this._inside) return;
+            this._inside = true;
+            this._snapshot = this._format();
+        });
+        this.addEventListener("focusout", (e) => {
+            if (e.relatedTarget !== this) this._inside = false;
+        });
+        this.addEventListener("keydown", (e) => this._onCellKeydown(e));
+    }
+
+    /** size="cell", on the host (after the inner handlers ran). Enter/Escape
+     *  from the hex input are handled in _onInputKeydown; here: the well and
+     *  the popover's keys, and Tab from anywhere. */
+    _onCellKeydown(e) {
+        if (!this._cell()) return;
+        const path = e.composedPath();
+        const inPopover = this._popover && path.includes(this._popover);
+        if (e.key === "Tab") {                    // never swallowed
+            this._closePopover(false);
+            this._commit(true);
+        } else if (e.key === "Enter" && inPopover) {
+            e.stopPropagation();                  // the picker took it — close; the NEXT Enter commits
+            this._closePopover(false);
+            this._input.focus();
+        } else if (e.key === "Enter" && path.includes(this._well)) {
+            e.stopPropagation();                  // the well's click toggled the popover
+        } else if (e.key === "Escape" && path.includes(this._well)) {
+            e.preventDefault();
+            e.stopPropagation();
+            this._cancel();
+        }
+    }
+
+    _cancel() {
+        this._dirty = false;
+        this._closePopover(false);
+        const parsed = this._parse(this._snapshot);
+        if (parsed) this._apply(parsed, false);
+        this._input.classList.remove("invalid");
+        this._input.value = this._format();
+        this._input.focus();
+        this.dispatchEvent(new CustomEvent("sac:cancel", {
+            detail: { value: this._format() }, bubbles: true, composed: true,
+        }));
     }
 
     /* ---------------------------------------------------------- hex input */
@@ -510,6 +625,25 @@ class SacColorField extends HTMLElement {
     }
 
     _onInputKeydown(e) {
+        if (this._cell()) {
+            if (e.key === "Enter") {
+                e.preventDefault();
+                e.stopPropagation();
+                if (this._commit(false)) {
+                    this.dispatchEvent(new CustomEvent("sac:commit", {
+                        detail: { value: this._format(), shiftKey: e.shiftKey }, bubbles: true, composed: true,
+                    }));
+                }
+            } else if (e.key === "Escape" && !this._open) {
+                e.preventDefault();
+                e.stopPropagation();
+                this._cancel();
+            } else if (e.key === "ArrowDown" && e.altKey) {
+                e.preventDefault();
+                this._openPopover();
+            }
+            return;
+        }
         if (e.key === "Enter") {
             e.preventDefault();
             this._commit(false);
@@ -522,16 +656,17 @@ class SacColorField extends HTMLElement {
     /** @param {boolean} revertOnInvalid — true on blur, false on Enter (the
      *  user is still editing; leave the red text standing). */
     _commit(revertOnInvalid) {
-        if (!this._dirty) return;                 // nothing typed → never re-fire the old value
+        if (!this._dirty) return true;            // nothing typed → never re-fire the old value
         const parsed = this._parse(this._input.value);
         if (!parsed) {
             if (revertOnInvalid) this._revertInput();
-            return;
+            return false;
         }
         if (!this.hasAttribute("alpha")) parsed.a = 1;
         this._dirty = false;
         this._input.classList.remove("invalid");
         this._apply(parsed, true);
+        return true;
     }
 
     _revertInput() {
@@ -609,7 +744,7 @@ class SacColorField extends HTMLElement {
         this._popover.classList.remove("open");
         this._lower();
         this._well.setAttribute("aria-expanded", "false");
-        if (restoreFocus && document.activeElement === this) this._well.focus();
+        if (restoreFocus && document.activeElement === this) (this._cell() ? this._input : this._well).focus();
     }
 
     /* Top layer, exactly as sac-menu: a transformed or clipping ancestor would

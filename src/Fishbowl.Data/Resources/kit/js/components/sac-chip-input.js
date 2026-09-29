@@ -19,11 +19,26 @@
  * Attributes:
  *   add-label    — ghost-button text when empty (default "Add")
  *   allow-create — presence enables creating unknown entries
+ *   size         — absent = the inline row above; "cell" = the cell-editor
+ *                  contract (style guide → Cell editors): one line that fills
+ *                  its container, the text entry always shown (no ghost
+ *                  button), the list opens on typing or ↓ — not on focus —
+ *                  and closes after each pick. Enter picks from an open
+ *                  list, else commits (sac:commit); Escape closes the list,
+ *                  else cancels (sac:cancel); Tab takes a typed match and
+ *                  moves on (never swallowed).
  *
  * Properties:
  *   value        — string[]; current normalised names. Reading returns a copy.
- *   suggestions  — array of { name, color, count? }; color is a palette slot
- *                  name ("blue", "orange", … — see --palette-* tokens).
+ *   suggestions  — array of { name, color, count?, label?, labelKey? }; color
+ *                  is a palette slot name ("blue", "orange", … — see
+ *                  --palette-* tokens). label is the text SHOWN for the name
+ *                  (chips and list): capitals, spaces, umlauts, e.g.
+ *                  { name: "fragile", label: "Fragile" }. labelKey makes
+ *                  label the English fallback of sac.t(labelKey), so the
+ *                  text follows a runtime language switch. Typing matches
+ *                  label and name alike; value stays the list of names.
+ *   focus({ select }) — reveals and focuses the text entry.
  *
  * Events:
  *   sac:change  — e.detail = { value: string[] } (new list, normalised, deduped).
@@ -57,14 +72,25 @@
 
 class SacChipInput extends HTMLElement {
     static PALETTE_SLOTS = ["blue", "orange", "red", "green", "purple", "pink", "yellow", "teal", "gray", "indigo"];
-    static get observedAttributes() { return ["disabled"]; }
+    static get observedAttributes() { return ["disabled", "size"]; }
 
     get disabled() { return this.hasAttribute("disabled"); }
     set disabled(v) { if (v) this.setAttribute("disabled", ""); else this.removeAttribute("disabled"); }
 
     attributeChangedCallback(name) {
         if (name === "disabled" && this._entry) this._entry.disabled = this.disabled;
+        if (name === "size") this._refreshAddButton();
     }
+
+    focus(opts) {
+        if (!this._entry) return super.focus(opts);
+        this._addBtn.hidden = true;
+        this._entry.hidden = false;
+        this._entry.focus(opts);
+        if (opts && opts.select) this._entry.select();
+    }
+
+    _cell() { return this.getAttribute("size") === "cell"; }
 
     constructor() {
         super();
@@ -72,9 +98,12 @@ class SacChipInput extends HTMLElement {
         this._value = [];
         this._suggestions = [];
         this._colors = new Map();    // name → slot (from suggestions + created)
+        this._labels = new Map();    // name → suggestion with a label / labelKey
         this._open = false;
         this._highlight = 0;
         this._creating = null;       // pending name awaiting color choice
+        this._snapshot = [];         // value when focus entered (size="cell" cancel)
+        this._inside = false;
         this._onDocPointer = this._onDocPointer.bind(this);
     }
 
@@ -113,8 +142,10 @@ class SacChipInput extends HTMLElement {
     get suggestions() { return [...this._suggestions]; }
     set suggestions(list) {
         this._suggestions = Array.isArray(list) ? list.filter(s => s && s.name) : [];
+        this._labels.clear();
         for (const s of this._suggestions) {
             if (s.color) this._colors.set(s.name, s.color);
+            if (s.label || s.labelKey) this._labels.set(s.name, s);
         }
         if (this._open) this._renderDropdown();
         this._renderChips(); // colors may have changed
@@ -122,6 +153,15 @@ class SacChipInput extends HTMLElement {
 
     _colorFor(name) {
         return this._colors.get(name) || "gray";
+    }
+
+    /** The text shown for a name: its suggestion's labelKey through sac.t
+     *  (label = the fallback), its label, else the name itself. */
+    _labelFor(name) {
+        const s = this._labels.get(name);
+        if (!s) return name;
+        const fallback = s.label ? String(s.label) : name;
+        return s.labelKey ? t(s.labelKey, fallback) : fallback;
     }
 
     _normalize(raw) {
@@ -141,6 +181,7 @@ class SacChipInput extends HTMLElement {
     _relabel() {
         if (!this._addText) return;
         this._addText.textContent = this._addLabel();
+        if (this._labels.size) this._renderChips();          // labelKey'd names
         if (this._open) {
             const top = this._dropdown.scrollTop;
             this._renderDropdown();
@@ -323,6 +364,39 @@ class SacChipInput extends HTMLElement {
                     .swatch-btn:hover { transform: none; border-color: transparent; }
                 }
 
+                /* size="cell" — the cell-editor contract: one line that
+                   fills the cell, the cell's font, no own focus ring. */
+                :host([size="cell"]) {
+                    display: block;
+                    width: 100%;
+                    height: 100%;
+                    font: inherit;
+                    color: inherit;
+                }
+                :host([size="cell"]) .row {
+                    display: flex;
+                    flex-wrap: nowrap;
+                    width: 100%;
+                    height: 100%;
+                    padding: 0 var(--cell-padding-inline, 8px);
+                    box-sizing: border-box;
+                    overflow-x: auto;
+                    scrollbar-width: none;
+                }
+                :host([size="cell"]) .row::-webkit-scrollbar { display: none; }
+                :host([size="cell"]) .row sac-chip { flex: none; }
+                :host([size="cell"]) input.entry {
+                    flex: 1 0 60px;
+                    min-width: 60px;
+                    height: 100%;
+                    min-height: 0;
+                    padding: 0 2px;
+                }
+                @media (pointer: coarse) {
+                    :host([size="cell"]) .row { gap: 6px; }
+                    :host([size="cell"]) input.entry { font-size: max(16px, 1em); min-height: 0; }
+                }
+
                 /* Scrollbar theme — duplicated because the global rule in
                    ui.css doesn't pierce Shadow DOM. */
                 .dropdown::-webkit-scrollbar { width: 6px; }
@@ -354,8 +428,22 @@ class SacChipInput extends HTMLElement {
             this._entry.focus();
         });
 
-        this._entry.addEventListener("focus", () => this._openDropdown());
-        this._entry.addEventListener("input", () => { this._highlight = 0; this._renderDropdown(); });
+        // A cell editor opens the list on typing / ↓ only: an Enter or Esc
+        // straight after focus then belongs to the grid, not to a list.
+        this._entry.addEventListener("focus", () => { if (!this._cell()) this._openDropdown(); });
+        this._entry.addEventListener("input", () => {
+            this._highlight = 0;
+            if (this._cell() && !this._open) this._openDropdown();
+            else this._renderDropdown();
+        });
+        this.addEventListener("focusin", () => {
+            if (this._inside) return;
+            this._inside = true;
+            this._snapshot = [...this._value];
+        });
+        this.addEventListener("focusout", (e) => {
+            if (e.relatedTarget !== this) this._inside = false;
+        });
         this._entry.addEventListener("keydown", (e) => this._onKey(e));
         this._entry.addEventListener("blur", () => {
             // After the dropdown closes via outside-click, snap back to the
@@ -373,7 +461,7 @@ class SacChipInput extends HTMLElement {
         if (!this._addBtn || !this._entry) return;
         const empty = this._value.length === 0;
         const inputFocused = this.shadowRoot.activeElement === this._entry;
-        const showButton = empty && !inputFocused && !this._open && this._entry.value === "";
+        const showButton = empty && !inputFocused && !this._open && this._entry.value === "" && !this._cell();
         this._addBtn.hidden = !showButton;
         this._entry.hidden = showButton;
     }
@@ -387,10 +475,10 @@ class SacChipInput extends HTMLElement {
         }
         for (const name of this._value) {
             const chip = document.createElement("sac-chip");
-            chip.setAttribute("label", name);
+            chip.setAttribute("label", this._labelFor(name));
             chip.setAttribute("color", this._colorFor(name));
             chip.setAttribute("removable", "");
-            chip.addEventListener("sac:remove", (e) => this._removeChip(e.detail.label));
+            chip.addEventListener("sac:remove", () => this._removeChip(name));
             this._chipsRoot.insertBefore(chip, this._addBtn);
         }
     }
@@ -470,13 +558,16 @@ class SacChipInput extends HTMLElement {
             return;
         }
 
+        // Match the name and the shown label alike ("zer" finds a "fragile"
+        // labelled "Zerbrechlich").
         const q = this._entry.value.trim().toLowerCase();
-        const matches = this._suggestions.filter(t =>
-            !this._value.includes(t.name) &&
-            (q === "" || t.name.includes(q))
+        const shown = (s) => this._labelFor(s.name).toLowerCase();
+        const matches = this._suggestions.filter(s =>
+            !this._value.includes(s.name) &&
+            (q === "" || s.name.includes(q) || shown(s).includes(q))
         );
 
-        const exact = q && matches.find(t => t.name === q);
+        const exact = q && matches.find(s => s.name === q || shown(s) === q);
         const canCreate = this.hasAttribute("allow-create");
         const showCreate = canCreate && q && !exact && this._normalize(q);
 
@@ -513,7 +604,7 @@ class SacChipInput extends HTMLElement {
             const count = o.entry.count > 0 ? `<span class="count">${esc(String(o.entry.count))}</span>` : "";
             return `<div class="opt ${i === this._highlight ? "hl" : ""}" data-idx="${i}">
                         <span class="swatch" style="background:${color}"></span>
-                        <span>${esc(o.entry.name)}</span>${count}
+                        <span>${esc(this._labelFor(o.entry.name))}</span>${count}
                     </div>`;
         }).join("");
 
@@ -565,11 +656,13 @@ class SacChipInput extends HTMLElement {
                 this._entry.value = "";
                 this._renderDropdown();
                 this._entry.focus();
+                if (this._cell()) this._closeDropdown();
             });
         });
     }
 
     _onKey(e) {
+        if (this._cell() && this._onCellKey(e)) return;
         if (this._creating) {
             if (e.key === "Escape") { this._creating = null; this._renderDropdown(); e.preventDefault(); }
             return;
@@ -614,6 +707,50 @@ class SacChipInput extends HTMLElement {
         }
     }
 
+    /** size="cell": Enter / Escape / Tab per the cell-editor contract.
+     *  Returns true when the key was handled here. */
+    _onCellKey(e) {
+        const k = e.key;
+        if (k !== "Enter" && k !== "Escape" && k !== "Tab") return false;
+        const opts = this._currentOpts || [];
+        const typed = this._entry.value.trim() !== "";
+        if (k === "Tab") {                                   // never swallowed
+            const opt = opts[this._highlight];
+            if (this._open && typed && opt && opt.kind === "existing") this._addChip(opt.entry.name);
+            if (this._open) this._closeDropdown();
+            return true;
+        }
+        if (this._creating) { e.stopPropagation(); return false; }   // the colour step keeps its own keys
+        e.preventDefault();
+        e.stopPropagation();
+        if (k === "Escape") {
+            if (this._open) { this._closeDropdown(); return true; }
+            this.value = this._snapshot;
+            this._emitCell("sac:cancel");
+            return true;
+        }
+        // Enter: an open list takes it (pick / create), else it commits.
+        if (this._open) {
+            if (opts.length) this._commit();
+            else if (this.hasAttribute("allow-create") && this._normalize(this._entry.value)) {
+                this._creating = this._normalize(this._entry.value);
+                this._renderDropdown();
+            }
+            if (!this._creating) this._closeDropdown();
+            return true;
+        }
+        this._emitCell("sac:commit", e.shiftKey);
+        return true;
+    }
+
+    _emitCell(type, shiftKey) {
+        const detail = { value: [...this._value] };
+        if (type === "sac:commit") detail.shiftKey = !!shiftKey;
+        this.dispatchEvent(new CustomEvent(type, {
+            detail, bubbles: true, composed: true,
+        }));
+    }
+
     _commit() {
         const opt = this._currentOpts?.[this._highlight];
         if (!opt) return;
@@ -626,6 +763,7 @@ class SacChipInput extends HTMLElement {
         this._entry.value = "";
         this._highlight = 0;
         this._renderDropdown();
+        if (this._cell()) this._closeDropdown();             // a cell editor: one pick, list gone
     }
 
     _addChip(name) {

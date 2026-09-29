@@ -544,6 +544,29 @@ input[type="checkbox"], input[type="radio"] {
     accent-color: var(--accent);
 }
 
+/* .cell-input — a plain <input> / <textarea> as a cell editor (the
+   size="cell" look of the kit fields): borderless, fills its cell, the
+   cell's font, no own focus ring — the grid draws the cell's. A plain input
+   fires no sac:commit / sac:cancel; its host reads Enter / Escape / Tab
+   itself. Style guide → Components → Cell editors. */
+.cell-input,
+.cell-input:hover:not(:disabled),
+.cell-input:focus {
+    display: block;
+    width: 100%;
+    height: 100%;
+    margin: 0;
+    padding: 0 var(--cell-padding-inline, 8px);
+    font: inherit;
+    color: inherit;
+    background: transparent;
+    border: 0;
+    border-radius: 0;
+    box-shadow: none;
+    outline: none;
+}
+textarea.cell-input { padding-block: 6px; resize: none; }
+
 /* Table & kbd baseline — plain markup, no class required. */
 table {
     width: 100%;
@@ -1516,6 +1539,11 @@ canvas.natural {
     input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]),
     select { min-height: 44px; }
     input[type="checkbox"], input[type="radio"] { width: 20px; height: 20px; }
+    /* A cell editor stays in its cell (16px type, but no 44px floor). */
+    .cell-input:is(input, textarea):not([type="checkbox"]):not([type="radio"]):not([type="range"]) {
+        min-height: 0;
+        font-size: max(16px, 1em);
+    }
 }
 
 @media (max-width: 768px), (max-height: 480px) and (pointer: coarse) {

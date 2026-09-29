@@ -46,7 +46,9 @@
  *
  * Events:
  *   sac:select — detail { action } — the clicked item's data-action.
- *                     Bubbles + composed. The menu closes right after.
+ *                     Bubbles + composed. Fired after the menu has closed
+ *                     (and, if focus was in the menu, handed it back), so a
+ *                     dialog opened from the handler returns focus there.
  *
  * Slots:
  *   trigger — the element that opens the menu (a .btn, an icon button, …).
@@ -56,6 +58,7 @@
  * Keyboard (while open):
  *   ArrowDown / ArrowUp — move focus between items (wraps, skips [disabled])
  *   Enter               — activates the focused item (native button click)
+ *                         and returns focus to the trigger
  *   Escape              — closes and returns focus to the trigger
  *   Tab                 — closes and lets focus move on
  *
@@ -135,7 +138,7 @@ class SacMenu extends HTMLElement {
     openAt(point) {
         const x = Number(point && point.clientX), y = Number(point && point.clientY);
         if (!Number.isFinite(x) || !Number.isFinite(y)) { this.open(); return; }
-        if (!this.hasAttribute("open")) this._restoreFocus = document.activeElement;
+        if (!this.hasAttribute("open")) this._restoreFocus = SacMenu._deepActive();
         this._point = { x, y };
         if (this.hasAttribute("open")) this._position();   // re-open elsewhere
         else this.setAttribute("open", "");
@@ -418,10 +421,19 @@ class SacMenu extends HTMLElement {
         if (el) el.classList.add("hl");
     }
 
+    /** The focused element itself, down through open shadow roots —
+     *  document.activeElement only names the outermost host, so inside
+     *  another component's shadow root it is never one of our items. */
+    static _deepActive() {
+        let a = document.activeElement;
+        while (a && a.shadowRoot && a.shadowRoot.activeElement) a = a.shadowRoot.activeElement;
+        return a;
+    }
+
     _moveFocus(delta) {
         const items = this._items();
         if (items.length === 0) return;
-        const current = items.indexOf(document.activeElement);
+        const current = items.indexOf(SacMenu._deepActive());
         const next = current === -1
             ? (delta > 0 ? 0 : items.length - 1)
             : (current + delta + items.length) % items.length;
@@ -445,12 +457,20 @@ class SacMenu extends HTMLElement {
             n.getAttribute("slot") !== "trigger"
         );
         if (!btn || btn.disabled) return;
+        // Focus on a (soon hidden) item goes back where it came from, as on
+        // Escape. Before the event: a dialog opened by the handler then
+        // remembers the trigger, not a hidden item.
+        const active = SacMenu._deepActive();
+        const hadFocus = !!active && (active === this || this.contains(active) ||
+            this.shadowRoot.contains(active));
+        this.close();
+        if (hadFocus) this._focusTrigger();
+        else this._restoreFocus = null;
         this.dispatchEvent(new CustomEvent("sac:select", {
             detail: { action: btn.dataset.action },
             bubbles: true,
             composed: true,
         }));
-        this.close();
     }
 
     /* ----------------------------------------------------------- listeners */

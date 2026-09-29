@@ -204,6 +204,8 @@
         "nav.more": "Mehr",
         "nav.no-sections": "Noch keine Bereiche.",
 
+        "number-field.number": "Zahl",
+
         "palette.commands": "Befehle",
         "palette.empty": "Keine passenden Befehle",
         "palette.group-apps": "Apps",
@@ -237,6 +239,11 @@
         "scene.expand": "Auf- / zuklappen",
         "scene.unnamed": "Unbenannt",
         "scene.visibility": "Sichtbarkeit umschalten",
+
+        "select.clear": "Leeren",
+        "select.no-matches": "Keine Treffer",
+        "select.options": "Optionen",
+        "select.placeholder": "Auswählen …",
 
         "shortcutbar.label": "Tastenkürzel",
 

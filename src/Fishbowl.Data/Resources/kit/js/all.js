@@ -74,6 +74,8 @@
         "components/sac-calendar.js",
         "components/sac-date-field.js",
         "components/sac-time-field.js",
+        "components/sac-number-field.js",
+        "components/sac-select.js",
 
         "components/sac-collapsible.js",
         "components/sac-drop-zone.js",
