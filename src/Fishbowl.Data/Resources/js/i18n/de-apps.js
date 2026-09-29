@@ -44,8 +44,9 @@ window.sac?.i18n?.add?.("de", {
     "fb.notes.save-failed": "Die Notiz konnte nicht gespeichert werden.",
     "fb.notes.not-saved": "Nicht gespeichert",
     "fb.notes.delete-title": "Diese Notiz löschen?",
-    "fb.notes.delete-msg": "Die Notiz wird endgültig gelöscht.",
-    "fb.notes.delete-msg-archive": "Die Notiz wird endgültig gelöscht. Archiviere sie stattdessen, dann ist sie versteckt, aber wiederherstellbar.",
+    "fb.notes.delete-msg": "Die Notiz kommt in den Papierkorb — dort kannst du sie wiederherstellen.",
+    "fb.notes.delete-failed": "Die Notiz ließ sich nicht löschen.",
+    "fb.notes.delete-msg-archive": "Die Notiz kommt in den Papierkorb — dort kannst du sie wiederherstellen. Archiviere sie stattdessen, dann ist sie hier aus dem Blick.",
     "fb.notes.locked-placeholder": "gesperrt — zum Anzeigen entsperren",
     // Tag manager (Notes → Tags verwalten)
     "fb.notes.tags.system": "System-Tag",
@@ -84,7 +85,7 @@ window.sac?.i18n?.add?.("de", {
     "fb.todos.overdue-1": "1 Tag überfällig",
     "fb.todos.overdue": "{n} Tage überfällig",
     "fb.todos.delete-title": "Diese Aufgabe löschen?",
-    "fb.todos.delete-msg": "Die Aufgabe wird endgültig gelöscht.",
+    "fb.todos.delete-msg": "Die Aufgabe kommt in den Papierkorb — dort kannst du sie wiederherstellen.",
 
     // --- Calendar -------------------------------------------------------------
     "fb.calendar.resize": "Breite der Agenda ändern",
@@ -131,8 +132,8 @@ window.sac?.i18n?.add?.("de", {
     "fb.calendar.updated": "Geändert {when}",
     "fb.calendar.series-note": " · Serie — Änderungen gelten für alle Termine",
     "fb.calendar.delete-title": "Diesen Termin löschen?",
-    "fb.calendar.delete-msg-series": "Der Termin wiederholt sich — die ganze Serie und ihre Erinnerungen werden endgültig gelöscht.",
-    "fb.calendar.delete-msg": "Der Termin und seine Erinnerungen werden endgültig gelöscht.",
+    "fb.calendar.delete-msg-series": "Der Termin wiederholt sich — die ganze Serie kommt in den Papierkorb, ihre Erinnerungen entfallen.",
+    "fb.calendar.delete-msg": "Der Termin kommt in den Papierkorb, seine Erinnerungen entfallen.",
 
     // --- Files (Dateien) ------------------------------------------------------
     "fb.files.group": "Dateien",

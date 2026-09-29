@@ -1102,8 +1102,8 @@ class FbCalendarView extends HTMLElement {
         const result = await sac.dialog.confirm({
             title:   fb.t("fb.calendar.delete-title", "Delete this event?"),
             message: e.rRule
-                ? fb.t("fb.calendar.delete-msg-series", "This event repeats — the whole series and its reminders will be permanently deleted.")
-                : fb.t("fb.calendar.delete-msg", "This event and its reminders will be permanently deleted."),
+                ? fb.t("fb.calendar.delete-msg-series", "This event repeats — the whole series moves to the trash; its reminders are dropped.")
+                : fb.t("fb.calendar.delete-msg", "This event moves to the trash; its reminders are dropped."),
             buttons: [
                 { action: "cancel", label: fb.t("fb.common.cancel", "Cancel"), kind: "default" },
                 { action: "delete", label: fb.t("fb.common.delete", "Delete"), kind: "destructive", armAfterMs: 2000 },

@@ -6,14 +6,15 @@ namespace Fishbowl.Core.Tests;
 public class ScopeCatalogTests
 {
     [Fact]
-    public void All_ContainsFifteenCanonicalScopes()
+    public void All_ContainsEighteenCanonicalScopes()
     {
         // Lock the count so adding a scope is a deliberate act — anyone
         // bumping this number must also remember to wire the matching MCP
         // tool and API endpoint, per the comment on ScopeCatalog. Apps
         // platform added app:read/app:write/app:admin on top of the original
-        // ten resource scopes; the Files app read:files/write:files.
-        Assert.Equal(15, ScopeCatalog.All.Count);
+        // ten resource scopes; the Files app read:files/write:files; space
+        // tables read:/write:/design:tables.
+        Assert.Equal(18, ScopeCatalog.All.Count);
     }
 
     [Theory]

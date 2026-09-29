@@ -467,7 +467,46 @@ public class DatabaseFactory
             ApplyUserV13(connection);
             connection.Execute("PRAGMA user_version = 13");
             _logger.LogInformation("Applied user schema v13 to {DbPath}", ((SqliteConnection)connection).DataSource);
+            version = 13;
         }
+
+        if (version < 14)
+        {
+            ApplyUserV14(connection);
+            connection.Execute("PRAGMA user_version = 14");
+            _logger.LogInformation("Applied user schema v14 to {DbPath}", ((SqliteConnection)connection).DataSource);
+        }
+    }
+
+    // Space tables (space-apps spec, phase 3): what a space's own tables are
+    // — their description, the columns' types, options and links. The rows
+    // live in t_<name> tables (Fishbowl.Data.Tables.TableRepository). The
+    // same schema as every context DB; only spaces use it.
+    private void ApplyUserV14(IDbConnection connection)
+    {
+        connection.Execute(@"
+            CREATE TABLE IF NOT EXISTS db_tables (
+                name         TEXT PRIMARY KEY,
+                description  TEXT,
+                own_rows     INTEGER NOT NULL DEFAULT 0,
+                created_by   TEXT,
+                created_at   TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS db_columns (
+                table_name    TEXT NOT NULL,
+                name          TEXT NOT NULL,
+                kind          TEXT NOT NULL,
+                description   TEXT,
+                required      INTEGER NOT NULL DEFAULT 0,
+                default_value TEXT,
+                is_unique     INTEGER NOT NULL DEFAULT 0,
+                options       TEXT,
+                multiple      INTEGER NOT NULL DEFAULT 0,
+                link_target   TEXT,
+                position      INTEGER NOT NULL,
+                PRIMARY KEY (table_name, name)
+            );
+            CREATE INDEX IF NOT EXISTS idx_db_columns_link ON db_columns(link_target);");
     }
 
     // One trash for everything (space-apps spec, decision 13): a deleted

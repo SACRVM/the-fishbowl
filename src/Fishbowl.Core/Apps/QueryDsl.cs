@@ -50,7 +50,9 @@ public static class QueryDsl
           .Append(" FROM \"").Append(tableName).Append('"');
 
         var wherePieces = new List<string>();
-        if (!spec.IncludeDeleted)
+        // Old app tables soft-delete; space tables have no such column (a
+        // deleted row is in the trash).
+        if (!spec.IncludeDeleted && byName.ContainsKey("is_deleted"))
             wherePieces.Add("\"is_deleted\" = 0");
 
         if (spec.Where.HasValue && spec.Where.Value.ValueKind != JsonValueKind.Null

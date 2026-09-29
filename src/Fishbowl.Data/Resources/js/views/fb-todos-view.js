@@ -864,7 +864,7 @@ class FbTodosView extends HTMLElement {
         ];
         const result = await sac.dialog.confirm({
             title:   fb.t("fb.todos.delete-title", "Delete this todo?"),
-            message: fb.t("fb.todos.delete-msg", "This todo will be permanently deleted."),
+            message: fb.t("fb.todos.delete-msg", "This todo moves to the trash — you can restore it there."),
             buttons,
         });
         if (result !== "delete") return;

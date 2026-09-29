@@ -5,6 +5,7 @@ using System.Text;
 using System.Text.Json;
 using Dapper;
 using Fishbowl.Core;
+using Fishbowl.Core.Models;
 using Fishbowl.Data;
 using Fishbowl.Data.Repositories;
 using Microsoft.AspNetCore.Hosting;
@@ -204,6 +205,53 @@ public class McpEndpointTests : IClassFixture<WebApplicationFactory<Program>>, I
         var doc = JsonDocument.Parse(
             await resp.Content.ReadAsStringAsync(TestContext.Current.CancellationToken));
         return doc.RootElement.Clone();
+    }
+
+    // An agent with a space key builds a table and fills it; the web UI's
+    // space.db (by id) holds the same rows — and a Member's key can't change
+    // the schema whatever its scopes.
+    [Fact]
+    public async Task Mcp_SpaceKey_TablesLandInTheSpacesOwnDb()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var spaces = new SpaceRepository(_dbFactory);
+        var space = await spaces.CreateAsync(AliceId, "Agent Club", ct);
+        var scopes = new[] { "read:tables", "write:tables", "design:tables", "read:notes", "write:notes" };
+        var issued = await _keys.IssueAsync(AliceId, ContextRef.Space(space.Slug), "agent", scopes, ct);
+        var client = _factory.CreateClient();
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", issued.RawToken);
+
+        string Text(JsonElement r) => r.GetProperty("result").GetProperty("content")[0].GetProperty("text").GetString()!;
+        var created = await CallToolAsync(client, "table_create", new
+        {
+            name = "inventory",
+            description = "What the club owns",
+            columns = new object[] { new { name = "qty", type = "integer", required = true, description = "How many" } },
+        });
+        Assert.Contains("| qty | integer | required; How many |", Text(created));
+        await CallToolAsync(client, "row_insert", new { table = "inventory", values = new { title = "Chairs", qty = 40 } });
+        var bad = await CallToolAsync(client, "row_insert", new { table = "inventory", values = new { title = "Tables" } });
+        Assert.Equal(-32602, bad.GetProperty("error").GetProperty("code").GetInt32());
+        Assert.Contains("'qty' is required", bad.GetProperty("error").GetProperty("message").GetString());
+
+        // The same rows through the UI's path (space id), and a note too.
+        var rows = await new Fishbowl.Data.Tables.TableRepository(_dbFactory, spaces)
+            .QueryAsync(ContextRef.Space(space.Id), "inventory", new Fishbowl.Core.Apps.QuerySpec(), ct);
+        Assert.Equal("Chairs", Assert.Single(rows).GetProperty("title").GetString());
+        await CallToolAsync(client, "remember", new { title = "agent note", content = "x" });
+        Assert.Contains((await new NoteRepository(_dbFactory, new TagRepository(_dbFactory)).GetAllAsync(ContextRef.Space(space.Id), ct: ct)),
+            n => n.Title == "agent note");
+
+        // A Member's key: rows yes, schema no.
+        await _dbFactory.CreateSystemConnection().ExecuteAsync(
+            "INSERT OR IGNORE INTO users(id, name, email, created_at) VALUES ('mcp_bob', 'B', 'b@b', @now)", new { now = DateTime.UtcNow.ToString("o") });
+        await spaces.AddMemberAsync(space.Id, "mcp_bob", SpaceRole.Member, ct);
+        var bobKey = await _keys.IssueAsync("mcp_bob", ContextRef.Space(space.Slug), "bob", scopes, ct);
+        var bob = _factory.CreateClient();
+        bob.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", bobKey.RawToken);
+        Assert.Contains("Designer", (await CallToolAsync(bob, "table_drop", new { table = "inventory" })).GetProperty("error").GetProperty("message").GetString());
+        var agg = await CallToolAsync(bob, "row_aggregate", new { table = "inventory", fn = "sum", column = "qty" });
+        Assert.Contains("40", Text(agg));
     }
 
     [Fact]

@@ -1297,8 +1297,8 @@ class FbNotesView extends HTMLElement {
         buttons.push({ action: "delete", label: fb.t("fb.common.delete", "Delete"), kind: "destructive", armAfterMs: 2000 });
 
         const message = note.archived
-            ? fb.t("fb.notes.delete-msg", "This note will be permanently deleted.")
-            : fb.t("fb.notes.delete-msg-archive", "This note will be permanently deleted. Archive it instead to keep it hidden but recoverable.");
+            ? fb.t("fb.notes.delete-msg", "This note moves to the trash — you can restore it there.")
+            : fb.t("fb.notes.delete-msg-archive", "This note moves to the trash — you can restore it there. Archive it instead to keep it out of sight here.");
 
         const result = await sac.dialog.confirm({ title: fb.t("fb.notes.delete-title", "Delete this note?"), message, buttons });
 
@@ -1318,6 +1318,7 @@ class FbNotesView extends HTMLElement {
             this.renderList();
         } catch (err) {
             console.error("[fb-notes-view] delete failed:", err);
+            window.sac?.toast?.(fb.errors.text(err, fb.t("fb.notes.delete-failed", "Couldn't delete the note.")), { kind: "error" });
         }
     }
 

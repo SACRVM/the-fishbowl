@@ -165,6 +165,7 @@ builder.Services.AddScoped<IEventRepository, EventRepository>();
 builder.Services.AddScoped<ISpaceRepository, SpaceRepository>();
 builder.Services.AddScoped<ISpaceInviteRepository, SpaceInviteRepository>();
 builder.Services.AddScoped<ITrashRepository, TrashRepository>();
+builder.Services.AddScoped<ITableRepository, Fishbowl.Data.Tables.TableRepository>();
 builder.Services.AddScoped<IApiKeyRepository, ApiKeyRepository>();
 builder.Services.AddScoped<INotificationChannelRepository, NotificationChannelRepository>();
 builder.Services.AddScoped<IDiscordLinkRepository, DiscordLinkRepository>();
@@ -221,6 +222,19 @@ builder.Services.AddScoped<IMcpTool, ListPendingTool>();
 builder.Services.AddScoped<IMcpTool, ListContactsTool>();
 builder.Services.AddScoped<IMcpTool, FindContactTool>();
 builder.Services.AddScoped<IMcpTool, ListEventsTool>();
+// Space tables (space-apps spec, phase 3).
+builder.Services.AddScoped<IMcpTool, Fishbowl.Mcp.Tools.Tables.TableListTool>();
+builder.Services.AddScoped<IMcpTool, Fishbowl.Mcp.Tools.Tables.TableDescribeTool>();
+builder.Services.AddScoped<IMcpTool, Fishbowl.Mcp.Tools.Tables.TableCreateTool>();
+builder.Services.AddScoped<IMcpTool, Fishbowl.Mcp.Tools.Tables.TableAlterTool>();
+builder.Services.AddScoped<IMcpTool, Fishbowl.Mcp.Tools.Tables.TableDropTool>();
+builder.Services.AddScoped<IMcpTool, Fishbowl.Mcp.Tools.Tables.RowInsertTool>();
+builder.Services.AddScoped<IMcpTool, Fishbowl.Mcp.Tools.Tables.RowGetTool>();
+builder.Services.AddScoped<IMcpTool, Fishbowl.Mcp.Tools.Tables.RowUpdateTool>();
+builder.Services.AddScoped<IMcpTool, Fishbowl.Mcp.Tools.Tables.RowDeleteTool>();
+builder.Services.AddScoped<IMcpTool, Fishbowl.Mcp.Tools.Tables.RowQueryTool>();
+builder.Services.AddScoped<IMcpTool, Fishbowl.Mcp.Tools.Tables.RowCountTool>();
+builder.Services.AddScoped<IMcpTool, Fishbowl.Mcp.Tools.Tables.RowAggregateTool>();
 
 // Apps platform — 13 tools join the existing registry. The dispatcher
 // surfaces all of them in tools/list; per-tool scope claims keep CRUD and
@@ -516,6 +530,7 @@ app.UseAccountState();
 // Every HTML page gets a Content-Security-Policy (PageCsp) unless it sets its own.
 app.UsePageCsp();
 app.UseAuthorization();
+app.UseTableErrors();
 
 app.MapOpenApi("/api/openapi.json");
 
@@ -817,6 +832,7 @@ app.MapEventsApi();
 app.MapSpacesApi();
 app.MapSpaceMembersApi();
 app.MapTrashApi();
+app.MapTablesApi();
 app.MapApiKeysApi();
 app.MapAppsApi();
 app.MapAccountApi();

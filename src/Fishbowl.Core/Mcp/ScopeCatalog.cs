@@ -28,6 +28,13 @@ public static class ScopeCatalog
     public const string ReadFiles = "read:files";
     public const string WriteFiles = "write:files";
 
+    // Space tables (space-apps spec, phase 3). Opt-in per key, space keys
+    // only. `design:tables` changes the schema — and still needs the key
+    // owner's Designer role in the space; write needs Member.
+    public const string ReadTables = "read:tables";
+    public const string WriteTables = "write:tables";
+    public const string DesignTables = "design:tables";
+
     // Apps platform — single-app-wide trio. `app:admin` gates DDL
     // (create/alter/drop table, create index); read/write gate row CRUD.
     // No per-table or per-row scopes in MVP — the bearer token *is* the
@@ -44,6 +51,7 @@ public static class ScopeCatalog
         ReadContacts, WriteContacts,
         ReadEvents, WriteEvents,
         ReadFiles, WriteFiles,
+        ReadTables, WriteTables, DesignTables,
         AppRead, AppWrite, AppAdmin,
     };
 

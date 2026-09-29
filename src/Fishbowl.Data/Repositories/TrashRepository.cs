@@ -8,6 +8,7 @@ using Fishbowl.Core.Repositories;
 using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
+using Fishbowl.Data.Tables;
 
 namespace Fishbowl.Data.Repositories;
 
@@ -32,6 +33,8 @@ public static class TrashSnapshots
         IDbConnection db, IDbTransaction tx, ContextRef ctx, string kind, string id, string? deletedBy, CancellationToken ct)
     {
         var (table, titleColumn) = Kinds[kind];
+        // Links are foreign keys: a note a table row links to stays.
+        await LinkGuard.EnsureUnlinkedAsync(db, tx, table, id, ct);
         using var reader = await ((SqliteConnection)db).ExecuteReaderAsync(new CommandDefinition(
             $"SELECT * FROM {table} WHERE id = @id", new { id }, transaction: tx, cancellationToken: ct));
         if (!reader.Read()) return;
@@ -52,7 +55,14 @@ public static class TrashSnapshots
             if (name == titleColumn) title = value?.ToString();
         }
         reader.Close();
+        await PutAsync(db, tx, ctx, kind, id, title, row, deletedBy, ct);
+    }
 
+    // Any snapshot into the trash — also a table row's ("row", with
+    // "$table") and a whole dropped table's ("table").
+    public static async Task PutAsync(
+        IDbConnection db, IDbTransaction tx, ContextRef ctx, string kind, string id, string? title, JsonObject row, string? deletedBy, CancellationToken ct)
+    {
         await db.ExecuteAsync(new CommandDefinition(@"
             INSERT INTO trash(id, kind, item_id, title, data, deleted_by, deleted_at)
             VALUES (@tid, @kind, @id, @title, @data, @by, @at)",
@@ -99,48 +109,65 @@ public class TrashRepository : ITrashRepository
     public async Task<(TrashRestore Result, TrashItem? Item)> RestoreAsync(ContextRef ctx, string id, CancellationToken ct = default)
     {
         TrashRow? item = null;
-        var result = await _dbFactory.WithContextTransactionAsync<TrashRestore>(ctx, async (db, tx, token) =>
+        TrashRestore result;
+        try
         {
-            item = await db.QuerySingleOrDefaultAsync<TrashRow>(new CommandDefinition(
-                "SELECT * FROM trash WHERE id = @id", new { id }, transaction: tx, cancellationToken: token));
-            if (item is null || !TrashSnapshots.Kinds.TryGetValue(item.Kind, out var kind)) return TrashRestore.NotFound;
+            result = await _dbFactory.WithContextTransactionAsync<TrashRestore>(ctx, async (db, tx, token) =>
+            {
+                item = await db.QuerySingleOrDefaultAsync<TrashRow>(new CommandDefinition(
+                    "SELECT * FROM trash WHERE id = @id", new { id }, transaction: tx, cancellationToken: token));
+                if (item is null) return TrashRestore.NotFound;
+                if (item.Kind is "row" or "table")
+                {
+                    var data = JsonNode.Parse(item.Data)!.AsObject();
+                    var back = item.Kind == "row"
+                        ? await TableRepository.RestoreRowAsync(db, tx, data["$table"]!.GetValue<string>(), data, token)
+                        : await TableRepository.RestoreTableAsync(db, tx, data, token);
+                    if (!back) throw new RestoreRefused();   // roll back what was put back so far
+                    await db.ExecuteAsync(new CommandDefinition(
+                        "DELETE FROM trash WHERE id = @id", new { id }, transaction: tx, cancellationToken: token));
+                    return TrashRestore.Restored;
+                }
+                if (!TrashSnapshots.Kinds.TryGetValue(item.Kind, out var kind)) return TrashRestore.NotFound;
 
-            var columns = (await db.QueryAsync<string>(new CommandDefinition(
-                $"SELECT name FROM pragma_table_info('{kind.Table}')", transaction: tx, cancellationToken: token))).ToHashSet();
-            var snapshot = JsonNode.Parse(item.Data)!.AsObject();
-            var values = new DynamicParameters();
-            var names = new List<string>();
-            foreach (var (name, node) in snapshot)
-            {
-                if (!columns.Contains(name)) continue;   // a column dropped since
-                names.Add(name);
-                values.Add("p" + names.Count, ValueOf(node));
-            }
-            if (await db.ExecuteScalarAsync<long>(new CommandDefinition(
-                    $"SELECT COUNT(*) FROM {kind.Table} WHERE id = @id", new { id = item.ItemId },
-                    transaction: tx, cancellationToken: token)) > 0)
-                return TrashRestore.Conflict;
-            try
-            {
-                await db.ExecuteAsync(new CommandDefinition(
-                    $"INSERT INTO {kind.Table} ({string.Join(", ", names)}) VALUES ({string.Join(", ", names.Select((_, i) => "@p" + (i + 1)))})",
-                    values, transaction: tx, cancellationToken: token));
-            }
-            catch (SqliteException ex) when (ex.SqliteErrorCode == 19)   // a unique value or a link that is gone
-            {
-                return TrashRestore.Conflict;
-            }
+                var columns = (await db.QueryAsync<string>(new CommandDefinition(
+                    $"SELECT name FROM pragma_table_info('{kind.Table}')", transaction: tx, cancellationToken: token))).ToHashSet();
+                var snapshot = JsonNode.Parse(item.Data)!.AsObject();
+                var values = new DynamicParameters();
+                var names = new List<string>();
+                foreach (var (name, node) in snapshot)
+                {
+                    if (!columns.Contains(name)) continue;   // a column dropped since
+                    names.Add(name);
+                    values.Add("p" + names.Count, ValueOf(node));
+                }
+                if (await db.ExecuteScalarAsync<long>(new CommandDefinition(
+                        $"SELECT COUNT(*) FROM {kind.Table} WHERE id = @id", new { id = item.ItemId },
+                        transaction: tx, cancellationToken: token)) > 0)
+                    return TrashRestore.Conflict;
+                try
+                {
+                    await db.ExecuteAsync(new CommandDefinition(
+                        $"INSERT INTO {kind.Table} ({string.Join(", ", names)}) VALUES ({string.Join(", ", names.Select((_, i) => "@p" + (i + 1)))})",
+                        values, transaction: tx, cancellationToken: token));
+                }
+                catch (SqliteException ex) when (ex.SqliteErrorCode == 19)   // a unique value or a link that is gone
+                {
+                    return TrashRestore.Conflict;
+                }
 
-            if (item.Kind == TrashKinds.Contact)
-                await db.ExecuteAsync(new CommandDefinition(@"
+                if (item.Kind == TrashKinds.Contact)
+                    await db.ExecuteAsync(new CommandDefinition(@"
                     INSERT INTO contacts_fts (rowid, name, email, phone, notes)
                     SELECT rowid, name, email, phone, notes FROM contacts WHERE id = @id",
-                    new { id = item.ItemId }, transaction: tx, cancellationToken: token));
+                        new { id = item.ItemId }, transaction: tx, cancellationToken: token));
 
-            await db.ExecuteAsync(new CommandDefinition(
-                "DELETE FROM trash WHERE id = @id", new { id }, transaction: tx, cancellationToken: token));
-            return TrashRestore.Restored;
-        }, ct);
+                await db.ExecuteAsync(new CommandDefinition(
+                    "DELETE FROM trash WHERE id = @id", new { id }, transaction: tx, cancellationToken: token));
+                return TrashRestore.Restored;
+            }, ct);
+        }
+        catch (RestoreRefused) { result = TrashRestore.Conflict; }
 
         // Notes also need their search index (full text + vector) back.
         if (result == TrashRestore.Restored && item!.Kind == TrashKinds.Note)
@@ -179,3 +206,5 @@ public class TrashRepository : ITrashRepository
             "DELETE FROM trash WHERE deleted_at < @cutoff", new { cutoff = cutoff.ToUniversalTime().ToString("o") }, cancellationToken: ct));
     }
 }
+
+internal sealed class RestoreRefused : Exception { }
