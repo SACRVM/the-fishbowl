@@ -567,7 +567,56 @@ public class DatabaseFactory
             ApplySystemV13(connection);
             connection.Execute("PRAGMA user_version = 13");
             _logger.LogInformation("Applied system schema v13");
+            version = 13;
         }
+
+        if (version < 14)
+        {
+            ApplySystemV14(connection);
+            connection.Execute("PRAGMA user_version = 14");
+            _logger.LogInformation("Applied system schema v14");
+        }
+    }
+
+    // Space roles become a staircase (space-apps spec § Roles): 'readonly' is
+    // renamed 'reader' and 'designer' joins between member and admin. SQLite
+    // can't alter a CHECK, so the table is rebuilt. Plus invitation links:
+    // one-time, expiring, with a role; only the token's SHA-256 is stored.
+    private void ApplySystemV14(IDbConnection connection)
+    {
+        using var tx = connection.BeginTransaction();
+        var hasMembers = connection.ExecuteScalar<long>(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'space_members'", transaction: tx) > 0;
+        // (Every real system.db has it since v2; only trimmed test fixtures don't.)
+        if (hasMembers)
+            connection.Execute(@"
+            CREATE TABLE space_members_new (
+                space_id   TEXT NOT NULL REFERENCES spaces(id),
+                user_id    TEXT NOT NULL REFERENCES users(id),
+                role       TEXT NOT NULL CHECK(role IN ('reader','member','designer','admin','owner')),
+                joined_at  TEXT NOT NULL,
+                PRIMARY KEY (space_id, user_id)
+            );
+            INSERT INTO space_members_new(space_id, user_id, role, joined_at)
+                SELECT space_id, user_id, CASE role WHEN 'readonly' THEN 'reader' ELSE role END, joined_at
+                FROM space_members;
+            DROP TABLE space_members;
+            ALTER TABLE space_members_new RENAME TO space_members;
+            CREATE INDEX IF NOT EXISTS idx_space_members_user ON space_members(user_id);", transaction: tx);
+        connection.Execute(@"
+            CREATE TABLE IF NOT EXISTS space_invites (
+                id          TEXT PRIMARY KEY,
+                space_id    TEXT NOT NULL,
+                token_hash  TEXT NOT NULL UNIQUE,
+                role        TEXT NOT NULL CHECK(role IN ('reader','member','designer','admin')),
+                created_by  TEXT NOT NULL,
+                created_at  TEXT NOT NULL,
+                expires_at  TEXT NOT NULL,
+                used_by     TEXT,
+                used_at     TEXT
+            );
+            CREATE INDEX IF NOT EXISTS idx_space_invites_space ON space_invites(space_id);", transaction: tx);
+        tx.Commit();
     }
 
     // UI language: a Languages code ("en", "de") or NULL = automatic (the

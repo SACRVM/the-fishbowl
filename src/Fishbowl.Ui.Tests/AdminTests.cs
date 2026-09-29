@@ -98,7 +98,7 @@ public class AdminTests
             await Assertions.Expect(pending.GetByRole(AriaRole.Button, new() { Name = "Approve" })).ToBeVisibleAsync();
 
             var me = view.Locator("[data-section='accounts'] .user-row").Filter(new() { HasText = "Playwright" });
-            await Assertions.Expect(me.Locator(".tag[label='Admin']")).ToHaveCountAsync(1);
+            await Assertions.Expect(me.Locator(".tag[label='Global admin']")).ToHaveCountAsync(1);
             await Assertions.Expect(me.Locator(".tag[label='You']")).ToHaveCountAsync(1);
             // Nothing in your own menu locks you out.
             await Assertions.Expect(me.Locator("button[data-action='block'], button[data-action='disable']")).ToHaveCountAsync(0);
@@ -213,12 +213,12 @@ public class AdminTests
             await Assertions.Expect(row).ToHaveCountAsync(1, new() { Timeout = 5000 });
 
             await ChooseAsync(page, row, "admin-on");
-            await page.Locator("sac-dialog[open]").GetByRole(AriaRole.Button, new() { Name = "Make admin" }).ClickAsync();
-            await Assertions.Expect(row.Locator(".tag[label='Admin']")).ToHaveCountAsync(1, new() { Timeout = 5000 });
+            await page.Locator("sac-dialog[open]").GetByRole(AriaRole.Button, new() { Name = "Make global admin" }).ClickAsync();
+            await Assertions.Expect(row.Locator(".tag[label='Global admin']")).ToHaveCountAsync(1, new() { Timeout = 5000 });
             Assert.True((await system.GetUserAsync(id, Ct))!.IsAdmin);
 
             await ChooseAsync(page, row, "admin-off");
-            await page.Locator("sac-dialog[open]").GetByRole(AriaRole.Button, new() { Name = "Remove admin" }).ClickAsync();
+            await page.Locator("sac-dialog[open]").GetByRole(AriaRole.Button, new() { Name = "Remove global admin" }).ClickAsync();
             await Assertions.Expect(row.Locator(".tag")).ToHaveCountAsync(0, new() { Timeout = 5000 });
 
             await ChooseAsync(page, row, "disable");

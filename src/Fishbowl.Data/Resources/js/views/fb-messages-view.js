@@ -103,6 +103,12 @@ class FbMessagesView extends HTMLElement {
                 meta.textContent = when;
                 body.appendChild(this._pendingActions(u, defaultQuota));
             }
+        } else if (m.kind === "user.invited") {
+            const u = m.subject || {};
+            const label = u.name && u.email ? `${u.name} (${u.email})` : (u.name || u.email || fb.t("fb.messages.someone", "Someone"));
+            icon.setAttribute("name", "user");
+            text.textContent = fb.t("fb.messages.joined-by-invite", "{who} joined this Fishbowl through a space invitation.", { who: label });
+            meta.textContent = when;
         } else if (m.kind === "user.approved") {
             icon.setAttribute("name", "success");
             text.textContent = fb.t("fb.messages.welcome", "Your account was approved. Welcome to this Fishbowl.");

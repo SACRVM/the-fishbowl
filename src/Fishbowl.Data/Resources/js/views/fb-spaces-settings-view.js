@@ -2,6 +2,7 @@
  * <fb-spaces-settings-view>  (mounted at #/spaces)
  *
  * Minimal management surface for space workspaces — list, create, delete,
+ * members (fb.spaceMembers: roles, invitation links, leaving),
  * and the archived spaces a delete left behind (Files phase 3): deleting asks
  * "Archive before deleting" (checked by default); archives are listed with
  * Download / Restore / Delete and the days left before the purge.
@@ -181,6 +182,9 @@ class FbSpacesSettingsView extends HTMLElement {
                         <code title="spaces/${escapeAttr(t.id)}/space.db">${escapeHtml(t.id)}</code>
                     </div>
                 </div>
+                <button type="button" class="icon-btn members-btn" title="${fb.t("fb.spaces.members", "Members")}" aria-label="${fb.t("fb.spaces.members", "Members")}">
+                    <sac-icon name="users"></sac-icon>
+                </button>
                 <button type="button" class="icon-btn open-btn" title="${fb.t("fb.spaces.open", "Open this space")}" aria-label="${fb.t("fb.spaces.open-aria", "Open")}">
                     <sac-icon name="chevron-right"></sac-icon>
                 </button>
@@ -196,6 +200,14 @@ class FbSpacesSettingsView extends HTMLElement {
             btn.addEventListener("click", (e) => {
                 const slug = e.currentTarget.closest(".space-row")?.dataset.slug;
                 if (slug) this._pickColor(slug);
+            });
+        });
+
+        list.querySelectorAll(".members-btn").forEach(btn => {
+            btn.addEventListener("click", (e) => {
+                const slug = e.currentTarget.closest(".space-row")?.dataset.slug;
+                const space = this.spaces.find(t => t.slug === slug);
+                if (space) fb.spaceMembers.open(space, { onChanged: () => this.refresh() });
             });
         });
 
@@ -429,10 +441,7 @@ function escapeHtml(s) {
     return String(s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));
 }
 function escapeAttr(s) { return escapeHtml(s); }
-function roleLabel(role) {
-    return { owner: fb.t("fb.spaces.role-owner", "owner"), member: fb.t("fb.spaces.role-member", "member"),
-             readonly: fb.t("fb.spaces.role-readonly", "readonly") }[role] || role;
-}
+function roleLabel(role) { return fb.spaceMembers.roleLabel(role); }
 function fmtSize(n) { return fb.format.bytes(n); }
 
 customElements.define("fb-spaces-settings-view", FbSpacesSettingsView);

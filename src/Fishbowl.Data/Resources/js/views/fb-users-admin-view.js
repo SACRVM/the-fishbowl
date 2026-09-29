@@ -201,7 +201,7 @@ class FbUsersAdminView extends HTMLElement {
 
     _userRow(u) {
         const row = this._head(u);
-        if (u.isAdmin) this._tag(row, fb.t("fb.admin.tag-admin", "Admin"));
+        if (u.isAdmin) this._tag(row, fb.t("fb.admin.tag-admin", "Global admin"));
         if (u.self) this._tag(row, fb.t("fb.admin.tag-you", "You"));
         if (u.state === "blocked") this._tag(row, fb.t("fb.admin.tag-blocked", "Blocked"), true);
         if (u.state === "disabled") this._tag(row, fb.t("fb.admin.tag-disabled", "Disabled"), true);
@@ -244,8 +244,8 @@ class FbUsersAdminView extends HTMLElement {
         const active = u.state === "active";
         item("quota", fb.t("fb.admin.menu-storage", "Storage…"), "backup");
         if ((u.providers || []).includes("local") && u.state !== "blocked") item("reset", fb.t("fb.admin.menu-reset", "Reset password"), "key");
-        if (active && !u.isAdmin) item("admin-on", fb.t("fb.admin.menu-admin-on", "Make admin"), "star");
-        if (u.isAdmin) item("admin-off", fb.t("fb.admin.menu-admin-off", "Remove admin"), "star");
+        if (active && !u.isAdmin) item("admin-on", fb.t("fb.admin.menu-admin-on", "Make global admin"), "star");
+        if (u.isAdmin) item("admin-off", fb.t("fb.admin.menu-admin-off", "Remove global admin"), "star");
         if (!u.self) {
             menu.appendChild(document.createElement("hr"));
             if (active) item("disable", fb.t("fb.admin.menu-disable", "Disable"), "lock", true);

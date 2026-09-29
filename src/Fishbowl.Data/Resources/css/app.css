@@ -354,3 +354,12 @@ label.fb-quota-field input { width: 6em; }
 @media (pointer: coarse) {
     #fb-nav > a.fb-home-link { min-height: 44px; box-sizing: border-box; }
 }
+
+/* Space members window (fb.spaceMembers) and its invitation dialogs. */
+.fb-members { display: flex; flex-direction: column; gap: 12px; padding: 12px; }
+.fb-members-bar:empty { display: none; }
+.fb-invite-form { display: flex; flex-direction: column; gap: 12px; }
+.fb-invite-field { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.fb-invite-hint { margin: 0; color: var(--text-muted); font-size: 13px; }
+.fb-invite-link-row { display: flex; gap: 8px; }
+.fb-invite-link-row input { flex: 1; min-width: 0; }

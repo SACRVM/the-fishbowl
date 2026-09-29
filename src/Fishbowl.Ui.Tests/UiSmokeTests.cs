@@ -636,6 +636,60 @@ public class UiSmokeTests
         await context.CloseAsync();
     }
 
+    // Members window: the owner sees themselves, makes a one-time invitation
+    // link (shown once), sees it under open invitations and withdraws it; a
+    // second link, opened, lands in the space and is spent.
+    [Fact]
+    public async Task Spaces_Members_InviteLink_ShownOnce_Revoke_Open_Test()
+    {
+        var context = await _fixture.Browser!.NewContextAsync(new BrowserNewContextOptions { IgnoreHTTPSErrors = true, BypassCSP = true });
+        var page = await context.NewPageAsync();
+        var name = "Club " + Guid.NewGuid().ToString("N")[..6];
+        var created = await page.APIRequest.PostAsync(_fixture.BaseUrl + "/api/v1/spaces", new APIRequestContextOptions { DataObject = new { name } });
+        var slug = (await created.JsonAsync())!.Value.GetProperty("slug").GetString()!;
+
+        await page.GotoAsync(_fixture.BaseUrl + "/#/spaces");
+        await page.Locator(".space-row", new PageLocatorOptions { HasText = name }).Locator(".members-btn").ClickAsync();
+        var win = page.Locator("#fb-space-members");
+        var me = win.Locator(".fb-member-row");
+        await Assertions.Expect(me).ToHaveCountAsync(1);
+        await Assertions.Expect(me.Locator("sac-chip")).ToHaveAttributeAsync("label", "owner");
+
+        async Task<string> InviteAsync(string role)
+        {
+            await win.Locator(".fb-members-invite").ClickAsync();
+            var ask = page.Locator("#fb-invite-dialog");
+            await ask.Locator("select[name=role]").SelectOptionAsync(role);
+            await ask.Locator("button[data-action='create']").ClickAsync();
+            var shown = page.Locator("#fb-invite-link");
+            var url = await shown.Locator("input.fb-invite-url").InputValueAsync();
+            await shown.Locator("button[data-action='close']").ClickAsync();
+            return url;
+        }
+
+        var first = await InviteAsync("designer");
+        Assert.Contains("/invite/", first);
+        var open = win.Locator(".fb-invite-row");
+        await Assertions.Expect(open).ToHaveCountAsync(1);
+        await Assertions.Expect(open).ToContainTextAsync("designer");
+        await open.Locator("button").ClickAsync();
+        await Assertions.Expect(open).ToHaveCountAsync(0);
+
+        var second = await InviteAsync("reader");
+        await page.GotoAsync(second);
+        await page.WaitForURLAsync(u => u.Contains($"#/space/{slug}/notes"), new PageWaitForURLOptions { Timeout = 5000 });
+        // Spent: opening it again says so.
+        await page.GotoAsync(second);
+        await page.WaitForURLAsync(u => u.Contains("#/spaces"), new PageWaitForURLOptions { Timeout = 5000 });
+        await Assertions.Expect(page.Locator("#sac-toast-stack").GetByText("used already").First)
+            .ToBeVisibleAsync(new() { Timeout = 5000 });
+        // The withdrawn link doesn't work either.
+        var withdrawn = await page.APIRequest.GetAsync(first, new APIRequestContextOptions { MaxRedirects = 0 });
+        Assert.Contains("invite=invite-unknown", withdrawn.Headers["location"]);
+
+        await context.CloseAsync();
+    }
+
     [Fact]
     public async Task TagManager_RecoloursAndProtectsSystemTags_Test()
     {

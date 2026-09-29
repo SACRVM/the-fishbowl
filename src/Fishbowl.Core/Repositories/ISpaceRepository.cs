@@ -4,6 +4,10 @@ namespace Fishbowl.Core.Repositories;
 
 public record SpaceMembership(Space Space, SpaceRole Role);
 
+// One member of a space as the other members see them: a name and a
+// picture, never an e-mail address.
+public record SpaceMemberRow(string UserId, string? Name, string? AvatarUrl, SpaceRole Role, DateTime JoinedAt);
+
 public interface ISpaceRepository
 {
     // Creates a space owned by the given user. Slug is derived from `name` and
@@ -28,4 +32,19 @@ public interface ISpaceRepository
     // Owner-only. `color` is a TagPalette slot or null (default). Returns
     // false if the user isn't the owner. Callers validate the slot.
     Task<bool> SetColorAsync(string spaceId, string actingUserId, string? color, CancellationToken ct = default);
+
+    // Everyone in the space, owner first, then by role (highest first) and name.
+    Task<IReadOnlyList<SpaceMemberRow>> ListMembersAsync(string spaceId, CancellationToken ct = default);
+
+    // Adds a member, or raises an existing member to `role` — never lowers
+    // one and never touches the owner. Returns the role the user now has.
+    Task<SpaceRole> AddMemberAsync(string spaceId, string userId, SpaceRole role, CancellationToken ct = default);
+
+    // Changes a member's role. False when the user isn't a member or is the
+    // owner (a space has exactly one; ownership doesn't move this way).
+    // Callers check who may hand out which role (SpaceRole.CanGrant).
+    Task<bool> SetRoleAsync(string spaceId, string userId, SpaceRole role, CancellationToken ct = default);
+
+    // Removes a member. False when the user isn't one or is the owner.
+    Task<bool> RemoveMemberAsync(string spaceId, string userId, CancellationToken ct = default);
 }

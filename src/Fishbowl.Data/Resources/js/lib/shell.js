@@ -470,5 +470,19 @@
         window.addEventListener("hashchange", () => fb.toolbar.clear());
         sac.router.mount("#app-root");
         syncTitle();
+        noticeInvite();
     });
+
+    // /invite/<token> sends a signed-in account back here with ?invite=<why>
+    // when the link can't be used — say why once, then drop it from the URL.
+    function noticeInvite() {
+        const why = new URLSearchParams(window.location.search).get("invite");
+        if (!why) return;
+        history.replaceState(null, "", window.location.pathname + window.location.hash);
+        const text = {
+            "invite-used": fb.t("fb.spaces.invite-used", "This invitation link was used already. Ask for a new one."),
+            "invite-expired": fb.t("fb.spaces.invite-expired", "This invitation link has expired. Ask for a new one."),
+        }[why] || fb.t("fb.spaces.invite-unknown", "This invitation link doesn't work. Ask for a new one.");
+        window.sac?.toast?.(text, { kind: "error" });
+    }
 })();

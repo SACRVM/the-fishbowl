@@ -98,6 +98,7 @@ public sealed class AccountStateMiddleware
         var path = request.Path;
         if (path.Equals(PendingPath, StringComparison.OrdinalIgnoreCase)) return true;
         if (path.Equals("/logout", StringComparison.OrdinalIgnoreCase)) return true;
+        if (path.StartsWithSegments("/invite")) return true;   // an invitation activates the account
         if (path.Equals("/api/v1/auth/logout", StringComparison.OrdinalIgnoreCase)) return true;
         if (path.Equals("/api/v1/me", StringComparison.OrdinalIgnoreCase) && HttpMethods.IsGet(request.Method)) return true;
         if (path.StartsWithSegments("/api") || path.StartsWithSegments("/mcp")) return false;

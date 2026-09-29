@@ -338,7 +338,7 @@ public class ContactsApiTests : IClassFixture<WebApplicationFactory<Program>>, I
                 "SELECT id FROM spaces WHERE slug = 'readonly-zone'");
             var now = DateTime.UtcNow.ToString("o");
             sys.Execute(
-                "INSERT INTO space_members(space_id, user_id, role, joined_at) VALUES (@t, @u, 'readonly', @j)",
+                "INSERT INTO space_members(space_id, user_id, role, joined_at) VALUES (@t, @u, 'reader', @j)",
                 new { t = spaceId, u = UserB, j = now });
         }
 

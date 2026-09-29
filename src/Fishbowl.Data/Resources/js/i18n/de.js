@@ -178,6 +178,7 @@ window.sac?.i18n?.add?.("de", {
     "fb.messages.blocked": "gesperrt",
     "fb.messages.handled": "erledigt",
     "fb.messages.welcome": "Dein Konto wurde freigegeben. Willkommen in diesem Fishbowl.",
+    "fb.messages.joined-by-invite": "{who} ist über eine Space-Einladung zu diesem Fishbowl dazugekommen.",
     "fb.messages.quota": "Dein Speicher ist fast voll: {used} von {quota}.",
     "fb.messages.see-data": "Deine Daten ansehen",
     "fb.messages.unknown": "Eine Nachricht, die diese Version noch nicht anzeigen kann.",

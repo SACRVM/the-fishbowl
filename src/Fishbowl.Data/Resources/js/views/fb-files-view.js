@@ -489,7 +489,7 @@
 
         _writable(pane) {
             const space = this._spaceOf(pane.workspace);
-            return !space || space.role !== "readonly";
+            return !space || space.role !== "reader";
         }
 
         /** Point a pane at a workspace (and folder). */
@@ -1086,7 +1086,7 @@
                 dlg.setAttribute("title", op === "move" ? t("fb.files.move-to", "Move to…") : t("fb.files.copy-to", "Copy to…"));
                 dlg.style.setProperty("--dialog-width", "560px");
                 const writable = [["personal", t("fb.files.personal", "Personal")],
-                    ...this._spaces.filter((s) => s.role !== "readonly").map((s) => [`space:${s.slug}`, s.name])];
+                    ...this._spaces.filter((s) => s.role !== "reader").map((s) => [`space:${s.slug}`, s.name])];
                 const wrap = document.createElement("div");
                 wrap.className = "fv-pick";
                 const select = document.createElement("select");

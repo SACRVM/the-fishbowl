@@ -163,6 +163,7 @@ builder.Services.AddScoped<ITodoRepository, TodoRepository>();
 builder.Services.AddScoped<IContactRepository, ContactRepository>();
 builder.Services.AddScoped<IEventRepository, EventRepository>();
 builder.Services.AddScoped<ISpaceRepository, SpaceRepository>();
+builder.Services.AddScoped<ISpaceInviteRepository, SpaceInviteRepository>();
 builder.Services.AddScoped<IApiKeyRepository, ApiKeyRepository>();
 builder.Services.AddScoped<INotificationChannelRepository, NotificationChannelRepository>();
 builder.Services.AddScoped<IDiscordLinkRepository, DiscordLinkRepository>();
@@ -311,7 +312,11 @@ authBuilder.AddGoogle(options =>
         // local login. A new account under `approval` comes back pending:
         // it still gets a cookie, and the request gate keeps it to /pending.
         var gate = context.HttpContext.RequestServices.GetRequiredService<Fishbowl.Api.Accounts.AccountGate>();
-        var decision = await gate.SignInExternalAsync(provider, providerId, name, email, avatar, context.HttpContext.RequestAborted);
+        // A pending invitation (the fb_invite cookie /invite/<token> set)
+        // goes along: it lets a new identity in whatever the policy says.
+        var decision = await gate.SignInExternalAsync(provider, providerId, name, email, avatar,
+            Fishbowl.Api.Accounts.InviteCookie.Read(context.HttpContext), context.HttpContext.RequestAborted);
+        Fishbowl.Api.Accounts.InviteCookie.Clear(context.HttpContext);
         if (!decision.Allowed)
         {
             context.Response.Redirect("/login?authError=" + Uri.EscapeDataString(
@@ -323,6 +328,8 @@ authBuilder.AddGoogle(options =>
         // Add internal ID as a claim - this is what our APIs will use
         var identity = (ClaimsIdentity)context.Principal!.Identity!;
         identity.AddClaim(new Claim("fishbowl_user_id", decision.UserId!));
+        if (decision.JoinedSpace is { } joined)
+            context.ReturnUri = "/#/space/" + Uri.EscapeDataString(joined) + "/notes";
     };
 
     // Log Google-side failures server-side so we can see the actual error
@@ -807,6 +814,7 @@ app.MapTodoApi();
 app.MapContactsApi();
 app.MapEventsApi();
 app.MapSpacesApi();
+app.MapSpaceMembersApi();
 app.MapApiKeysApi();
 app.MapAppsApi();
 app.MapAccountApi();

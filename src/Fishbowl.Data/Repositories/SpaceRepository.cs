@@ -148,7 +148,7 @@ public class SpaceRepository : ISpaceRepository
         if (role != SpaceRole.Owner.ToDbValue()) return false;
 
         await db.ExecuteAsync(new CommandDefinition(
-            "DELETE FROM space_members WHERE space_id = @spaceId",
+            "DELETE FROM space_members WHERE space_id = @spaceId; DELETE FROM space_invites WHERE space_id = @spaceId;",
             new { spaceId }, transaction: tx, cancellationToken: ct));
 
         var affected = await db.ExecuteAsync(new CommandDefinition(
@@ -158,5 +158,59 @@ public class SpaceRepository : ISpaceRepository
         tx.Commit();
         _logger.LogInformation("Deleted space {SpaceId} by owner {UserId}", spaceId, actingUserId);
         return affected > 0;
+    }
+
+    private sealed record MemberDbRow(string UserId, string? Name, string? AvatarUrl, string Role, string JoinedAt);
+
+    public async Task<IReadOnlyList<SpaceMemberRow>> ListMembersAsync(string spaceId, CancellationToken ct = default)
+    {
+        using var db = _dbFactory.CreateSystemConnection();
+        var rows = await db.QueryAsync<MemberDbRow>(new CommandDefinition(@"
+            SELECT m.user_id AS UserId, u.name AS Name, u.avatar_url AS AvatarUrl, m.role AS Role, m.joined_at AS JoinedAt
+            FROM space_members m JOIN users u ON u.id = m.user_id
+            WHERE m.space_id = @spaceId",
+            new { spaceId }, cancellationToken: ct));
+        return rows
+            .Select(r => new SpaceMemberRow(r.UserId, r.Name, r.AvatarUrl, SpaceRoleExtensions.FromDbValue(r.Role),
+                DateTime.Parse(r.JoinedAt, null, System.Globalization.DateTimeStyles.RoundtripKind)))
+            .OrderByDescending(r => r.Role)
+            .ThenBy(r => r.Name ?? "", StringComparer.CurrentCultureIgnoreCase)
+            .ToList();
+    }
+
+    public async Task<SpaceRole> AddMemberAsync(string spaceId, string userId, SpaceRole role, CancellationToken ct = default)
+    {
+        if (role == SpaceRole.Owner) throw new ArgumentException("A space has one owner.", nameof(role));
+        using var db = _dbFactory.CreateSystemConnection();
+        using var tx = db.BeginTransaction();
+        var current = await db.QuerySingleOrDefaultAsync<string?>(new CommandDefinition(
+            "SELECT role FROM space_members WHERE space_id = @spaceId AND user_id = @userId",
+            new { spaceId, userId }, transaction: tx, cancellationToken: ct));
+        var existing = current is null ? (SpaceRole?)null : SpaceRoleExtensions.FromDbValue(current);
+        if (existing is { } had && had >= role) return had;
+        await db.ExecuteAsync(new CommandDefinition(existing is null
+                ? "INSERT INTO space_members(space_id, user_id, role, joined_at) VALUES (@spaceId, @userId, @role, @now)"
+                : "UPDATE space_members SET role = @role WHERE space_id = @spaceId AND user_id = @userId",
+            new { spaceId, userId, role = role.ToDbValue(), now = DateTime.UtcNow.ToString("o") },
+            transaction: tx, cancellationToken: ct));
+        tx.Commit();
+        return role;
+    }
+
+    public async Task<bool> SetRoleAsync(string spaceId, string userId, SpaceRole role, CancellationToken ct = default)
+    {
+        if (role == SpaceRole.Owner) return false;
+        using var db = _dbFactory.CreateSystemConnection();
+        return await db.ExecuteAsync(new CommandDefinition(
+            "UPDATE space_members SET role = @role WHERE space_id = @spaceId AND user_id = @userId AND role <> 'owner'",
+            new { spaceId, userId, role = role.ToDbValue() }, cancellationToken: ct)) > 0;
+    }
+
+    public async Task<bool> RemoveMemberAsync(string spaceId, string userId, CancellationToken ct = default)
+    {
+        using var db = _dbFactory.CreateSystemConnection();
+        return await db.ExecuteAsync(new CommandDefinition(
+            "DELETE FROM space_members WHERE space_id = @spaceId AND user_id = @userId AND role <> 'owner'",
+            new { spaceId, userId }, cancellationToken: ct)) > 0;
     }
 }

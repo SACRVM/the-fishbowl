@@ -62,7 +62,7 @@ public class AccountAdminRepositoryTests : IDisposable
 
         var factory = new DatabaseFactory(dir);
         using var db = factory.CreateSystemConnection();
-        Assert.Equal(13, db.ExecuteScalar<long>("PRAGMA user_version"));
+        Assert.Equal(14, db.ExecuteScalar<long>("PRAGMA user_version"));
         Assert.Equal("active", db.ExecuteScalar<string>("SELECT state FROM users WHERE id = 'old'"));
         Assert.Equal(1, db.ExecuteScalar<long>("SELECT COUNT(*) FROM sqlite_master WHERE name = 'messages'"));
         Assert.Equal(1, db.ExecuteScalar<long>("SELECT COUNT(*) FROM sqlite_master WHERE name = 'admin_audit'"));

@@ -108,7 +108,7 @@ public class FilesTests
         var space = await new SpaceRepository(db).CreateAsync(ownerId, "Read only " + Guid.NewGuid().ToString("N")[..6], ct);
         using var conn = db.CreateSystemConnection();
         await conn.ExecuteAsync(
-            "INSERT INTO space_members(space_id, user_id, role, joined_at) VALUES (@s, @u, 'readonly', @t)",
+            "INSERT INTO space_members(space_id, user_id, role, joined_at) VALUES (@s, @u, 'reader', @t)",
             new { s = space.Id, u = "test-internal-id", t = DateTime.UtcNow.ToString("o") });
         return space.Slug;
     }

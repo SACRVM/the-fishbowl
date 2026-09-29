@@ -253,20 +253,20 @@
 
     async function setAdmin(user, on) {
         const answer = await sac.dialog.confirm(on ? {
-            title: fb.t("fb.admin.make-admin-title", "Make {who} an admin?", { who: who(user) }),
-            message: fb.t("fb.admin.make-admin-body", "Admins approve and manage accounts and change this Fishbowl's settings. They still can't see anyone's notes or files."),
-            buttons: [{ action: "cancel", label: fb.t("fb.common.cancel", "Cancel") }, { action: "ok", label: fb.t("fb.admin.menu-admin-on", "Make admin"), kind: "primary" }],
+            title: fb.t("fb.admin.make-admin-title", "Make {who} a global admin?", { who: who(user) }),
+            message: fb.t("fb.admin.make-admin-body", "Global admins approve and manage accounts and change this Fishbowl's settings. They still can't see anyone's notes, files or spaces."),
+            buttons: [{ action: "cancel", label: fb.t("fb.common.cancel", "Cancel") }, { action: "ok", label: fb.t("fb.admin.menu-admin-on", "Make global admin"), kind: "primary" }],
         } : {
-            title: fb.t("fb.admin.remove-admin-title", "Remove {who} as an admin?", { who: who(user) }),
+            title: fb.t("fb.admin.remove-admin-title", "Remove {who} as a global admin?", { who: who(user) }),
             message: user.self
                 ? fb.t("fb.admin.remove-admin-self", "You lose access to Users and System settings at once.")
                 : fb.t("fb.admin.remove-admin-body", "They keep their account and their data, just not the admin tools."),
-            buttons: [{ action: "cancel", label: fb.t("fb.common.cancel", "Cancel") }, { action: "ok", label: fb.t("fb.admin.menu-admin-off", "Remove admin"), kind: "destructive" }],
+            buttons: [{ action: "cancel", label: fb.t("fb.common.cancel", "Cancel") }, { action: "ok", label: fb.t("fb.admin.menu-admin-off", "Remove global admin"), kind: "destructive" }],
         });
         if (answer !== "ok") return false;
         try {
             await fb.api.admin.updateUser(user.id, { isAdmin: on });
-            window.sac?.toast?.(on ? fb.t("fb.admin.is-admin", "{who} is an admin now.", { who: who(user) }) : fb.t("fb.admin.no-longer-admin", "{who} is no longer an admin.", { who: who(user) }), { kind: "success" });
+            window.sac?.toast?.(on ? fb.t("fb.admin.is-admin", "{who} is a global admin now.", { who: who(user) }) : fb.t("fb.admin.no-longer-admin", "{who} is no longer a global admin.", { who: who(user) }), { kind: "success" });
             if (!on && user.self) window.location.hash = "#/";
             return true;
         } catch (err) {

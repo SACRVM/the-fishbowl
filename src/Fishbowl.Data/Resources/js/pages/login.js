@@ -35,6 +35,9 @@ const DE = {
     "This account can't sign in to this Fishbowl.": "Dieses Konto kann sich bei diesem Fishbowl nicht anmelden.",
     "This account is disabled. Ask the admin of this Fishbowl.": "Dieses Konto ist deaktiviert. Frag den Admin dieses Fishbowl.",
     "This account was deleted.": "Dieses Konto wurde gelöscht.",
+    "This invitation link was used already. Ask for a new one.": "Dieser Einladungslink wurde schon benutzt. Bitte um einen neuen.",
+    "This invitation link has expired. Ask for a new one.": "Dieser Einladungslink ist abgelaufen. Bitte um einen neuen.",
+    "This invitation link doesn't work. Ask for a new one.": "Dieser Einladungslink funktioniert nicht. Bitte um einen neuen.",
     "Sign-in refused.": "Anmeldung abgelehnt.",
 };
 // T(key, english, vars): the German text when German, else the English.

@@ -234,7 +234,7 @@ public class FilesApiTests : IClassFixture<WebApplicationFactory<Program>>, IDis
     {
         var space = await new SpaceRepository(_db).CreateAsync(Alice, "Shared Files", Ct);
         using (var sys = _db.CreateSystemConnection())
-            sys.Execute("INSERT INTO space_members(space_id, user_id, role, joined_at) VALUES (@s, @u, 'readonly', @now)",
+            sys.Execute("INSERT INTO space_members(space_id, user_id, role, joined_at) VALUES (@s, @u, 'reader', @now)",
                 new { s = space.Id, u = Bob, now = DateTime.UtcNow.ToString("o") });
         var prefix = $"/api/v1/spaces/{space.Slug}/files";
 

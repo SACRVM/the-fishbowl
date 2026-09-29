@@ -19,6 +19,8 @@ public class AccountGateTests : IDisposable
     private readonly SystemRepository _system;
     private readonly UserAdminRepository _admin;
     private readonly MessageRepository _messages;
+    private readonly SpaceInviteRepository _invites;
+    private readonly SpaceRepository _spaces;
     private readonly AccountGate _gate;
 
     public AccountGateTests()
@@ -29,7 +31,9 @@ public class AccountGateTests : IDisposable
         _system = new SystemRepository(_factory);
         _admin = new UserAdminRepository(_factory);
         _messages = new MessageRepository(_factory);
-        _gate = new AccountGate(_system, _admin, _messages);
+        _invites = new SpaceInviteRepository(_factory);
+        _spaces = new SpaceRepository(_factory);
+        _gate = new AccountGate(_system, _admin, _messages, _invites, _spaces);
     }
 
     public void Dispose()
@@ -41,7 +45,7 @@ public class AccountGateTests : IDisposable
     private static CancellationToken Ct => TestContext.Current.CancellationToken;
 
     private Task<SignInDecision> Google(string id, string? email = null) =>
-        _gate.SignInExternalAsync("google", id, "Name " + id, email ?? $"{id}@example.com", null, Ct);
+        _gate.SignInExternalAsync("google", id, "Name " + id, email ?? $"{id}@example.com", null, ct: Ct);
 
     [Fact]
     public async Task FirstSignIn_OnAnInstanceWithoutAdmin_BecomesActiveAdmin()
@@ -60,7 +64,7 @@ public class AccountGateTests : IDisposable
     public async Task NewSignIn_UnderDefaultPolicy_IsPending_AndEveryAdminIsTold()
     {
         var admin1 = (await Google("admin1")).UserId!;
-        await _system.CreateUserAsync("admin2", "A2", null, null, Ct);
+        await _system.CreateUserAsync("admin2", "A2", null, null, ct: Ct);
         await _system.SetAdminAsync("admin2", true, Ct);
 
         var d = await Google("newbie");
@@ -83,6 +87,71 @@ public class AccountGateTests : IDisposable
         Assert.Equal(d.UserId, again.UserId);
         Assert.Equal(UserStates.Pending, again.State);
         Assert.Single(await _messages.ListAsync(admin1, ct: Ct));
+    }
+
+    private async Task<(string Slug, string Token)> InviteAsync(string ownerId, SpaceRole role = SpaceRole.Member, TimeSpan? valid = null)
+    {
+        var space = await _spaces.CreateAsync(ownerId, "Club " + Guid.NewGuid().ToString("N")[..6], Ct);
+        var (_, token) = await _invites.CreateAsync(space.Id, role, ownerId, valid ?? TimeSpan.FromDays(7), Ct);
+        return (space.Slug, token);
+    }
+
+    // An invitation is an invitation: closed sign-up and the domain list don't
+    // apply, the account starts active in the space, the admins are told.
+    [Fact]
+    public async Task Invitation_LetsANewAccountIn_WhateverThePolicy()
+    {
+        var admin = (await Google("admin")).UserId!;
+        await _system.SetConfigAsync(SignUpPolicy.ModeKey, "closed", Ct);
+        await _system.SetConfigAsync(SignUpPolicy.AllowedDomainsKey, "club.example", Ct);
+        var (slug, token) = await InviteAsync(admin, SpaceRole.Designer);
+
+        var d = await _gate.SignInExternalAsync("google", "guest", "Guest", "guest@elsewhere.example", null, token, Ct);
+        Assert.True(d.Allowed);
+        Assert.Equal(UserStates.Active, d.State);
+        Assert.Equal(slug, d.JoinedSpace);
+        var space = await _spaces.GetBySlugAsync(slug, Ct);
+        Assert.Equal(SpaceRole.Designer, await _spaces.GetMembershipAsync(space!.Id, d.UserId!, Ct));
+        var msg = Assert.Single(await _messages.ListAsync(admin, ct: Ct));
+        Assert.Equal(MessageKinds.UserInvited, msg.Kind);
+        Assert.Equal(d.UserId, msg.SubjectId);
+
+        // One use: the next stranger with the same link is refused again.
+        var second = await _gate.SignInExternalAsync("google", "guest2", "G2", "g2@elsewhere.example", null, token, Ct);
+        Assert.False(second.Allowed);
+    }
+
+    [Fact]
+    public async Task Invitation_ActivatesAPendingAccount_AndResolvesItsRequest()
+    {
+        var admin = (await Google("admin")).UserId!;
+        var pending = await Google("waiting");
+        Assert.Equal(UserStates.Pending, pending.State);
+        var (slug, token) = await InviteAsync(admin);
+
+        Assert.Equal(slug, await _gate.AcceptInviteAsync(pending.UserId!, token, Ct));
+        Assert.Equal(UserStates.Active, (await _system.GetUserAsync(pending.UserId!, Ct))!.State);
+        var messages = await _messages.ListAsync(admin, ct: Ct);
+        Assert.NotNull(messages.Single(m => m.Kind == MessageKinds.UserPending).DoneAt);
+        Assert.Single(messages, m => m.Kind == MessageKinds.UserInvited);
+        Assert.Null(await _gate.AcceptInviteAsync(pending.UserId!, token, Ct));   // spent
+    }
+
+    [Fact]
+    public async Task Invitation_Expired_OrBlocked_DoesNothing()
+    {
+        var admin = (await Google("admin")).UserId!;
+        await _system.SetConfigAsync(SignUpPolicy.ModeKey, "closed", Ct);
+        var (_, old) = await InviteAsync(admin, valid: TimeSpan.FromSeconds(-1));
+        Assert.False((await _gate.SignInExternalAsync("google", "late", "L", "l@x.example", null, old, Ct)).Allowed);
+
+        var member = (await Google("admin2")).UserId;   // closed: refused, no row
+        Assert.Null(member);
+        await _system.CreateUserAsync("blocked", "B", null, null, ct: Ct);
+        await _admin.SetStateAsync("blocked", UserStates.Blocked, Ct);
+        var (_, token) = await InviteAsync(admin);
+        Assert.Null(await _gate.AcceptInviteAsync("blocked", token, Ct));
+        Assert.Equal(InviteProblem.None, (await _invites.CheckAsync(token, Ct)).Problem);   // not spent
     }
 
     [Fact]
@@ -140,7 +209,7 @@ public class AccountGateTests : IDisposable
         Assert.Equal(state, again.Refusal);
 
         var local = await _system.GetUserAsync(d.UserId!, Ct);
-        var viaLocal = await _gate.SignInExistingAsync(local!, Ct);
+        var viaLocal = await _gate.SignInExistingAsync(local!, ct: Ct);
         Assert.False(viaLocal.Allowed);
     }
 
@@ -148,7 +217,7 @@ public class AccountGateTests : IDisposable
     public async Task ExistingInstallWithoutAdmin_FirstExistingSignInBecomesAdmin()
     {
         // A pre-v11 Google-only install: users, no admin.
-        await _system.CreateUserAsync("old", "Old", "old@example.com", null, Ct);
+        await _system.CreateUserAsync("old", "Old", "old@example.com", null, ct: Ct);
         await _system.CreateUserMappingAsync("old", "google", "old-google", Ct);
 
         var d = await Google("old-google", "old@example.com");

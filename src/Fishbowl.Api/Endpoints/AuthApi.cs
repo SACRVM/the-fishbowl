@@ -47,10 +47,11 @@ public static class AuthApi
 
             // Blocked / disabled accounts are refused even with the right
             // password — after the check, so the refusal isn't an oracle.
-            var decision = await gate.SignInExistingAsync(user!, ct);
+            var decision = await gate.SignInExistingAsync(user!, InviteCookie.Read(context), ct);
             if (!decision.Allowed)
                 return Results.Json(new { error = decision.Refusal, message = SignInRefusals.Describe(decision.Refusal!) },
                     statusCode: StatusCodes.Status403Forbidden);
+            InviteCookie.Clear(context);
 
             // Force-rotate path: temp password is correct, but the user must
             // pick their own before we issue a session cookie. Returning 200
@@ -108,10 +109,11 @@ public static class AuthApi
             if (!VerifyOrSpendDummyTime(hasher, user, request.CurrentPassword))
                 return Results.Unauthorized();
 
-            var decision = await gate.SignInExistingAsync(user!, ct);
+            var decision = await gate.SignInExistingAsync(user!, InviteCookie.Read(context), ct);
             if (!decision.Allowed)
                 return Results.Json(new { error = decision.Refusal, message = SignInRefusals.Describe(decision.Refusal!) },
                     statusCode: StatusCodes.Status403Forbidden);
+            InviteCookie.Clear(context);
 
             var fresh = hasher.Hash(request.NewPassword);
             await system.SetPasswordAsync(user!.Id, fresh.Hash, fresh.Salt, mustChange: false, ct);

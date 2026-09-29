@@ -268,7 +268,7 @@ public class DesktopApiTests : IClassFixture<WebApplicationFactory<Program>>, ID
         {
             var now = DateTime.UtcNow.ToString("o");
             sys.Execute("INSERT INTO space_members(space_id, user_id, role, joined_at) VALUES (@s, @u, @r, @now)",
-                new[] { new { s = space.Id, u = Bob, r = "member", now }, new { s = space.Id, u = Carol, r = "readonly", now } });
+                new[] { new { s = space.Id, u = Bob, r = "member", now }, new { s = space.Id, u = Carol, r = "reader", now } });
         }
         var prefix = $"/api/v1/spaces/{space.Slug}/desktop";
         Assert.Equal(HttpStatusCode.Created, (await As(Alice).PostAsJsonAsync(prefix + "/apps", Install(), Ct)).StatusCode);

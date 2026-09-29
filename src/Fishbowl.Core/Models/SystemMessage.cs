@@ -26,6 +26,10 @@ public static class MessageKinds
     // To the user: an admin approved the account.
     public const string UserApproved = "user.approved";
 
+    // To every admin: an account came in through a space invitation, which
+    // skips the sign-up policy. Info only. Subject: the user.
+    public const string UserInvited = "user.invited";
+
     // To the user: their storage crossed 90% of the quota. Data:
     // { usedBytes, quotaBytes }. Once per crossing.
     public const string QuotaWarning = "quota.warning";

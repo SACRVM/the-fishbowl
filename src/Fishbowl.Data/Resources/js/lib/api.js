@@ -423,6 +423,25 @@
             // Owner-only. `color` is a palette slot name or null (default).
             update: (slug, { color }) => request(`/spaces/${encodeURIComponent(slug)}`, { method: "PATCH", body: JSON.stringify({ color }) })
                 .then(spacesChanged),
+            // Who is in a space: { role, canManage, items: [{ userId, name, avatarUrl, role, joinedAt, you }] }.
+            members: (slug) => request(`/spaces/${encodeURIComponent(slug)}/members`),
+            setRole: (slug, userId, role) =>
+                request(`/spaces/${encodeURIComponent(slug)}/members/${encodeURIComponent(userId)}`, { method: "PATCH", body: JSON.stringify({ role }) }),
+            // Removing yourself = leaving the space.
+            removeMember: (slug, userId) =>
+                request(`/spaces/${encodeURIComponent(slug)}/members/${encodeURIComponent(userId)}`, { method: "DELETE" }),
+            leave: (slug, userId) =>
+                request(`/spaces/${encodeURIComponent(slug)}/members/${encodeURIComponent(userId)}`, { method: "DELETE" })
+                .then(spacesChanged),
+            // Invitation links. create() resolves to { id, role, expiresAt, url } —
+            // the only moment the link exists; list() never has it.
+            invites: {
+                list:   (slug) => request(`/spaces/${encodeURIComponent(slug)}/invites`),
+                create: (slug, { role, days }) =>
+                    request(`/spaces/${encodeURIComponent(slug)}/invites`, { method: "POST", body: JSON.stringify({ role, days }) }),
+                revoke: (slug, id) =>
+                    request(`/spaces/${encodeURIComponent(slug)}/invites/${encodeURIComponent(id)}`, { method: "DELETE" }),
+            },
         },
         // API keys — the create() response is the ONLY moment the raw token
         // exists on the client. Store nothing; surface it to the user with a

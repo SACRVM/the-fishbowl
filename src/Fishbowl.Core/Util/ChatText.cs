@@ -19,6 +19,7 @@ public static class ChatText
         // System-message subject lines — fixed per kind, never data.
         ["subject.user.pending"] = "Fishbowl: a new account is waiting for your approval.",
         ["subject.user.approved"] = "Fishbowl: your account is approved — you can start now.",
+        ["subject.user.invited"] = "Fishbowl: someone joined through a space invitation.",
         ["subject.quota.warning"] = "Fishbowl: your storage is almost full.",
         ["subject.space.added"] = "Fishbowl: you were added to a space.",
         ["subject.app.update"] = "Fishbowl: an app on your desktop has an update to confirm.",
@@ -104,6 +105,7 @@ public static class ChatText
     {
         ["subject.user.pending"] = "Fishbowl: ein neues Konto wartet auf deine Freigabe.",
         ["subject.user.approved"] = "Fishbowl: dein Konto ist freigegeben — du kannst loslegen.",
+        ["subject.user.invited"] = "Fishbowl: jemand ist über eine Space-Einladung dazugekommen.",
         ["subject.quota.warning"] = "Fishbowl: dein Speicher ist fast voll.",
         ["subject.space.added"] = "Fishbowl: du wurdest zu einem Space hinzugefügt.",
         ["subject.app.update"] = "Fishbowl: eine App auf deinem Desktop hat ein Update, das du bestätigen musst.",
