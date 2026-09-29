@@ -136,6 +136,7 @@ public class ApiKeyAuthTests : IClassFixture<WebApplicationFactory<Program>>, ID
     [Fact]
     public async Task ValidTokenSpaceContext_PrincipalHasSpaceClaims()
     {
+        await new SpaceRepository(_dbFactory).CreateAsync(AliceId, "Fishbowl Dev", TestContext.Current.CancellationToken);
         var issued = await _keys.IssueAsync(AliceId, ContextRef.Space("fishbowl-dev"),
             "space-key", new[] { "read:notes" }, TestContext.Current.CancellationToken);
 
@@ -272,7 +273,8 @@ public class ApiKeyAuthTests : IClassFixture<WebApplicationFactory<Program>>, ID
         var spaceRepo = new SpaceRepository(_dbFactory);
         var space = await spaceRepo.CreateAsync(AliceId, "Space Context Test",
             TestContext.Current.CancellationToken);
-        await _notes.CreateAsync(ContextRef.Space(space.Slug), AliceId,
+        // The web UI's space.db: the folder is keyed by the space's id.
+        await _notes.CreateAsync(ContextRef.Space(space.Id), AliceId,
             new Note { Title = "space-shared" }, TestContext.Current.CancellationToken);
 
         var issued = await _keys.IssueAsync(AliceId, ContextRef.Space(space.Slug), "space-key",
@@ -285,6 +287,21 @@ public class ApiKeyAuthTests : IClassFixture<WebApplicationFactory<Program>>, ID
 
         Assert.Contains("space-shared", raw);
         Assert.DoesNotContain("alice-personal", raw);
+    }
+
+    // A key whose owner left the space stops working.
+    [Fact]
+    public async Task SpaceBearer_OwnerNoLongerMember_IsRefused()
+    {
+        var spaces = new SpaceRepository(_dbFactory);
+        var space = await spaces.CreateAsync(BobId, "Bob Club", TestContext.Current.CancellationToken);
+        await spaces.AddMemberAsync(space.Id, AliceId, SpaceRole.Member, TestContext.Current.CancellationToken);
+        var issued = await _keys.IssueAsync(AliceId, ContextRef.Space(space.Slug), "club-key",
+            new[] { "read:notes" }, TestContext.Current.CancellationToken);
+        var client = ClientWithToken(issued.RawToken);
+        Assert.Equal(HttpStatusCode.OK, (await client.GetAsync("/api/v1/notes", TestContext.Current.CancellationToken)).StatusCode);
+        await spaces.RemoveMemberAsync(space.Id, AliceId, TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.Unauthorized, (await client.GetAsync("/api/v1/notes", TestContext.Current.CancellationToken)).StatusCode);
     }
 
     [Fact]

@@ -11,6 +11,10 @@ public static class McpContextClaims
     public const string UserId = "fishbowl_user_id";
     public const string ContextType = "fishbowl_context_type";
     public const string ContextId = "fishbowl_context_id";
+    // A space key's space as its folder id (the ContextId claim stays the
+    // slug the key was issued for). Set by the key handler, which resolves
+    // the slug once per request and checks the owner is still a member.
+    public const string SpaceId = "fishbowl_space_id";
     public const string Scope = "scope";
 
     // App-bearer keys carry the owner pair (the user or space that owns the
@@ -37,8 +41,9 @@ public static class McpContextClaims
         var id = user.FindFirst(ContextId)?.Value;
         if (!string.IsNullOrEmpty(id))
         {
+            // The DB lives in spaces/<id>/ — never open it by slug.
             if (string.Equals(type, "space", StringComparison.Ordinal))
-                return ContextRef.Space(id);
+                return ContextRef.Space(user.FindFirst(SpaceId)?.Value ?? id);
             if (string.Equals(type, "app", StringComparison.Ordinal))
                 return ContextRef.App(id);
         }

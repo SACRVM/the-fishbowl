@@ -19,15 +19,18 @@ public class ApiKeyAuthenticationHandler : AuthenticationHandler<ApiKeyAuthentic
     private const string FishbowlTokenPrefix = "fb_";
 
     private readonly IApiKeyRepository _repo;
+    private readonly ISpaceRepository _spaces;
 
     public ApiKeyAuthenticationHandler(
         IOptionsMonitor<ApiKeyAuthenticationOptions> options,
         ILoggerFactory logger,
         UrlEncoder encoder,
-        IApiKeyRepository repo)
+        IApiKeyRepository repo,
+        ISpaceRepository spaces)
         : base(options, logger, encoder)
     {
         _repo = repo;
+        _spaces = spaces;
     }
 
     protected override async Task<AuthenticateResult> HandleAuthenticateAsync()
@@ -57,6 +60,16 @@ public class ApiKeyAuthenticationHandler : AuthenticationHandler<ApiKeyAuthentic
             new(McpContextClaims.ContextType, key.ContextType),
             new(McpContextClaims.ContextId, key.ContextId),
         };
+        // Space keys: the space's DB folder is keyed by id, the key by slug.
+        // Resolve it here, once, for every consumer (REST and MCP alike) —
+        // and refuse a key whose owner has left the space.
+        if (string.Equals(key.ContextType, "space", StringComparison.Ordinal))
+        {
+            var space = await _spaces.GetBySlugAsync(key.ContextId, Context.RequestAborted);
+            if (space is null || await _spaces.GetMembershipAsync(space.Id, key.UserId, Context.RequestAborted) is null)
+                return AuthenticateResult.Fail("This key's space is gone, or its owner is no longer a member.");
+            claims.Add(new Claim(McpContextClaims.SpaceId, space.Id));
+        }
         // App-keys carry the owner pair so downstream code can build a full
         // AppRef from claims alone (no second DB lookup on the hot path).
         if (string.Equals(key.ContextType, "app", StringComparison.Ordinal))
