@@ -228,6 +228,7 @@ builder.Services.AddScoped<IMcpTool, Fishbowl.Mcp.Tools.Tables.RowDeleteTool>();
 builder.Services.AddScoped<IMcpTool, Fishbowl.Mcp.Tools.Tables.RowQueryTool>();
 builder.Services.AddScoped<IMcpTool, Fishbowl.Mcp.Tools.Tables.RowCountTool>();
 builder.Services.AddScoped<IMcpTool, Fishbowl.Mcp.Tools.Tables.RowAggregateTool>();
+builder.Services.AddScoped<IMcpTool, Fishbowl.Mcp.Tools.Tables.RowSearchTool>();
 
 builder.Services.AddScoped<ToolRegistry>();
 

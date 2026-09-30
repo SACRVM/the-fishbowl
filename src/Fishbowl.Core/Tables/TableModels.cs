@@ -76,7 +76,8 @@ public sealed record ColumnDef(
     bool Unique = false,
     IReadOnlyList<string>? Options = null,
     bool Multiple = false,
-    string? LinkTarget = null);
+    string? LinkTarget = null,
+    bool Searchable = false);
 
 public sealed record TableDef(
     string Name,
@@ -124,6 +125,9 @@ public static class TableNames
     // What a link may point at besides the space's own tables: the space's
     // built-ins, by their table names.
     public static readonly IReadOnlyList<string> BuiltIns = new[] { "notes", "events", "todos", "contacts" };
+
+    // Names a table can't have: the built-ins, and "search" (the REST route).
+    public static bool IsReserved(string name) => BuiltIns.Contains(name, StringComparer.Ordinal) || name == "search";
 
     private static readonly Regex Valid = new("^[a-z][a-z0-9_]{0,39}$", RegexOptions.Compiled);
 

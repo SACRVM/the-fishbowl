@@ -46,6 +46,14 @@ public static class TablesApi
             return Results.Ok(list);
         }).RequireScope(ScopeCatalog.ReadTables).WithSummary("The space's tables with their columns and row counts.");
 
+        g.MapGet("/search", async (string slug, string? q, string? table, int? limit, ClaimsPrincipal user, ISpaceRepository spaces, ITableRepository tables, CancellationToken ct) =>
+        {
+            var (ctx, _, err) = await ResolveAsync(slug, user, spaces, ct);
+            if (err is not null) return err;
+            var (hits, degraded) = await tables.SearchAsync(ctx, q ?? "", table, limit ?? 20, ct);
+            return Results.Ok(new { hits = hits.Select(h => new { table = h.Table, row = h.Row, score = h.Score }), degraded });
+        }).RequireScope(ScopeCatalog.ReadTables).WithSummary("Hybrid search over rows of tables with searchable columns (?q=, ?table=, ?limit=).");
+
         g.MapPost("/", async (string slug, JsonElement body, ClaimsPrincipal user, ISpaceRepository spaces, ITableRepository tables, CancellationToken ct) =>
         {
             var (ctx, actor, err) = await ResolveAsync(slug, user, spaces, ct);

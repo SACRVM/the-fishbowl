@@ -437,7 +437,32 @@ public class DatabaseFactory
             ApplyUserV14(connection);
             connection.Execute("PRAGMA user_version = 14");
             _logger.LogInformation("Applied user schema v14 to {DbPath}", ((SqliteConnection)connection).DataSource);
+            version = 14;
         }
+
+        if (version < 15)
+        {
+            ApplyUserV15(connection);
+            connection.Execute("PRAGMA user_version = 15");
+            _logger.LogInformation("Applied user schema v15 to {DbPath}", ((SqliteConnection)connection).DataSource);
+        }
+    }
+
+    // Searchable table columns: a row of a table with searchable columns is
+    // indexed by its title + those values — full text in rows_fts, a vector
+    // in vec_rows — keyed "<table>/<row id>". Same model, same 70/30 blend
+    // as notes (TableRepository.SearchAsync).
+    private void ApplyUserV15(IDbConnection connection)
+    {
+        var cols = connection.Query<string>("SELECT name FROM pragma_table_info('db_columns')").ToList();
+        if (!cols.Contains("searchable"))
+            connection.Execute("ALTER TABLE db_columns ADD COLUMN searchable INTEGER NOT NULL DEFAULT 0;");
+        connection.Execute(@"
+            CREATE VIRTUAL TABLE IF NOT EXISTS rows_fts USING fts5(row_key UNINDEXED, text);
+            CREATE VIRTUAL TABLE IF NOT EXISTS vec_rows USING vec0(
+                id TEXT PRIMARY KEY,
+                embedding FLOAT[384]
+            );");
     }
 
     // Space tables (space-apps spec, phase 3): what a space's own tables are

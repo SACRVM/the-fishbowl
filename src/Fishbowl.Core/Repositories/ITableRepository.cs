@@ -30,6 +30,15 @@ public interface ITableRepository
 
     Task<IReadOnlyList<JsonElement>> QueryAsync(ContextRef ctx, string table, QuerySpec spec, CancellationToken ct = default);
     Task<long> CountAsync(ContextRef ctx, string table, QuerySpec spec, CancellationToken ct = default);
+    // Hybrid search over the rows of tables with searchable columns (title +
+    // those values), optionally in one table. Degraded = the embedding model
+    // isn't ready and ranking fell back to full text.
+    Task<(IReadOnlyList<RowSearchHit> Hits, bool Degraded)> SearchAsync(
+        ContextRef ctx, string query, string? table, int limit, CancellationToken ct = default);
+
+    // Rebuilds the search index of one row, or of every row of a table.
+    Task ReindexAsync(ContextRef ctx, string table, string? id = null, CancellationToken ct = default);
+
     // count / sum / min / max / avg over `column` (count needs none), grouped
     // by one column or not at all.
     Task<IReadOnlyList<AggregateResult>> AggregateAsync(
@@ -46,4 +55,7 @@ public sealed record TableChange(
     IReadOnlyDictionary<string, ColumnUpdate>? UpdateColumns = null);
 
 // What may change on an existing column without rebuilding it.
-public sealed record ColumnUpdate(string? Description = null, IReadOnlyList<string>? AddOptions = null, bool? Required = null);
+public sealed record ColumnUpdate(string? Description = null, IReadOnlyList<string>? AddOptions = null, bool? Required = null, bool? Searchable = null);
+
+// One hit of a row search: which table, the row, how well it matched.
+public sealed record RowSearchHit(string Table, JsonElement Row, double Score);

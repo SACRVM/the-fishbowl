@@ -21,7 +21,7 @@ public static class TableJson
         if (el.TryGetProperty("options", out var o) && o.ValueKind == JsonValueKind.Array)
             options = o.EnumerateArray().Select(x => x.ValueKind == JsonValueKind.String ? x.GetString()! : x.ToString()).ToList();
         JsonElement? dflt = el.TryGetProperty("default", out var d) && d.ValueKind != JsonValueKind.Null ? d.Clone() : null;
-        return new ColumnDef(name, kind, Str("description"), Bool("required"), dflt, Bool("unique"), options, Bool("multiple"), Str("link"));
+        return new ColumnDef(name, kind, Str("description"), Bool("required"), dflt, Bool("unique"), options, Bool("multiple"), Str("link"), Bool("searchable"));
     }
 
     public static List<ColumnDef> ParseColumns(JsonElement arr) =>
@@ -48,6 +48,7 @@ public static class TableJson
         options = c.Options,
         multiple = c.Multiple,
         link = c.LinkTarget,
+        searchable = c.Searchable,
     };
 
     // One table as a short markdown block — what a small agent reads first.
@@ -65,6 +66,7 @@ public static class TableJson
             var notes = new List<string>();
             if (c.Required) notes.Add("required");
             if (c.Unique) notes.Add("unique");
+            if (c.Searchable) notes.Add("searchable");
             if (c.Options is { Count: > 0 }) notes.Add("one of: " + string.Join(", ", c.Options));
             if (c.Default is { } d) notes.Add("default " + d.GetRawText());
             if (!string.IsNullOrWhiteSpace(c.Description)) notes.Add(c.Description!);
@@ -94,7 +96,8 @@ public static class TableJson
                 Str(p.Value, "description"),
                 p.Value.TryGetProperty("addOptions", out var ao) && ao.ValueKind == JsonValueKind.Array
                     ? ao.EnumerateArray().Select(x => x.GetString() ?? "").ToList() : null,
-                p.Value.TryGetProperty("required", out var rq) && rq.ValueKind is JsonValueKind.True or JsonValueKind.False ? rq.GetBoolean() : null));
+                p.Value.TryGetProperty("required", out var rq) && rq.ValueKind is JsonValueKind.True or JsonValueKind.False ? rq.GetBoolean() : null,
+                p.Value.TryGetProperty("searchable", out var sr) && sr.ValueKind is JsonValueKind.True or JsonValueKind.False ? sr.GetBoolean() : null));
         return new Fishbowl.Core.Repositories.TableChange(Str(b, "description"), ownRows, add, drop, rename, update);
     }
 

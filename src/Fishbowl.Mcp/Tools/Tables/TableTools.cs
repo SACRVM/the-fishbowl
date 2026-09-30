@@ -68,6 +68,7 @@ public abstract class TableToolBase : IMcpTool
             options = new { type = "array", items = new { type = "string" }, description = "choice columns: the allowed values" },
             multiple = new { type = "boolean", description = "choice/link: several values" },
             link = new { type = "string", description = "link columns: a table of this space, or notes, events, todos, contacts" },
+            searchable = new { type = "boolean", description = "text/longtext/choice: rows are found by row_search on this column" },
         },
         required = new[] { "name", "type" },
     };
@@ -263,6 +264,28 @@ public sealed class RowCountTool(ITableRepository t, ISpaceRepository s) : Table
 
     protected override async Task<object> RunAsync(ContextRef ctx, TableActor actor, JsonElement args, CancellationToken ct) =>
         new { count = await Tables.CountAsync(ctx, Table(args), AppJsonParsers.ParseQuerySpec(args), ct) };
+}
+
+public sealed class RowSearchTool(ITableRepository t, ISpaceRepository s) : TableToolBase(t, s)
+{
+    public override string Name => "row_search";
+    public override string Description =>
+        "Finds rows by meaning and words across the space's tables (or one table) — only tables with searchable columns take part (title + those columns). " +
+        "degraded: true means the embedding model isn't ready and only words matched.";
+    public override string RequiredScope => ScopeCatalog.ReadTables;
+    public override object InputSchema => new
+    {
+        type = "object",
+        properties = new { query = new { type = "string" }, table = new { type = "string", description = "Optional: search one table." }, limit = new { type = "integer" } },
+        required = new[] { "query" },
+    };
+
+    protected override async Task<object> RunAsync(ContextRef ctx, TableActor actor, JsonElement args, CancellationToken ct)
+    {
+        var (hits, degraded) = await Tables.SearchAsync(ctx, AppJsonParsers.RequireString(args, "query"),
+            AppJsonParsers.OptionalString(args, "table"), AppJsonParsers.OptionalInt(args, "limit") ?? 10, ct);
+        return new { hits = hits.Select(h => new { table = h.Table, row = h.Row, score = h.Score }), degraded };
+    }
 }
 
 public sealed class RowAggregateTool(ITableRepository t, ISpaceRepository s) : TableToolBase(t, s)

@@ -226,6 +226,42 @@ public class TablesApiTests : IClassFixture<WebApplicationFactory<Program>>, IDi
         Assert.Equal(3, (await Ok(await As(Reader).GetAsync($"{t}/rooms", Ct))).GetProperty("rows").GetInt64());
     }
 
+    // Searchable columns: rows are found by title + those values; a deleted
+    // row leaves the index, a restored one comes back; switching a column to
+    // searchable indexes the rows already there.
+    [Fact]
+    public async Task SearchableColumns_FindRows()
+    {
+        var space = await ClubAsync();
+        var t = $"/api/v1/spaces/{space.Slug}/tables";
+        await Ok(await As(Designer).PostAsync(t, Body("""
+            { "name": "recipes", "columns": [
+                { "name": "body", "type": "longtext", "searchable": true },
+                { "name": "secret_tip", "type": "text" } ] }
+            """), Ct));
+        Assert.Equal("column_searchable", await Error(await As(Designer).PostAsync(t, Body("""{ "name": "x", "columns": [ { "name": "n", "type": "integer", "searchable": true } ] }"""), Ct)));
+        var soup = await Ok(await As(Member).PostAsync($"{t}/recipes/rows", Body("""{ "title": "Pumpkin soup", "body": "Roast the squash with ginger.", "secret_tip": "cardamom" }"""), Ct));
+        await Ok(await As(Member).PostAsync($"{t}/recipes/rows", Body("""{ "title": "Apple pie", "body": "Butter, flour, apples." }"""), Ct));
+
+        async Task<List<string?>> Find(string q) =>
+            (await Ok(await As(Reader).GetAsync($"{t}/search?q={Uri.EscapeDataString(q)}", Ct))).GetProperty("hits")
+                .EnumerateArray().Select(h => h.GetProperty("row").GetProperty("title").GetString()).ToList();
+
+        // Hybrid ranking: the word match leads (semantic neighbours may follow).
+        Assert.Equal("Pumpkin soup", (await Find("ginger"))[0]);
+        Assert.Equal("Apple pie", (await Find("apple"))[0]);
+
+        await Ok(await As(Designer).PatchAsync($"{t}/recipes", Body("""{ "updateColumns": { "secret_tip": { "searchable": true } } }"""), Ct));
+        Assert.Equal("Pumpkin soup", (await Find("cardamom"))[0]);
+
+        var id = soup.GetProperty("id").GetString();
+        await Ok(await As(Member).DeleteAsync($"{t}/recipes/rows/{id}", Ct));
+        Assert.DoesNotContain("Pumpkin soup", await Find("ginger"));
+        var item = (await Ok(await As(Member).GetAsync($"/api/v1/spaces/{space.Slug}/trash", Ct))).EnumerateArray().Single();
+        await Ok(await As(Member).PostAsync($"/api/v1/spaces/{space.Slug}/trash/{item.GetProperty("id").GetString()}/restore", null, Ct));
+        Assert.Equal("Pumpkin soup", (await Find("ginger"))[0]);
+    }
+
     [Fact]
     public async Task PersonalWorkspace_HasNoTables()
     {

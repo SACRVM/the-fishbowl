@@ -1,3 +1,5 @@
+> **Superseded** by `2026-09-28-space-apps-design.md`: the per-app databases were retired (2026-09-30); their tables are space tables now.
+
 # Apps platform — implementation plan
 
 **Status:** Plan for review.

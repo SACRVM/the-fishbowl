@@ -83,12 +83,14 @@ public class TrashRepository : ITrashRepository
 {
     private readonly DatabaseFactory _dbFactory;
     private readonly INoteRepository _notes;
+    private readonly ITableRepository? _tables;
     private readonly ILogger<TrashRepository> _logger;
 
-    public TrashRepository(DatabaseFactory dbFactory, INoteRepository notes, ILogger<TrashRepository>? logger = null)
+    public TrashRepository(DatabaseFactory dbFactory, INoteRepository notes, ITableRepository? tables = null, ILogger<TrashRepository>? logger = null)
     {
         _dbFactory = dbFactory;
         _notes = notes;
+        _tables = tables;
         _logger = logger ?? NullLogger<TrashRepository>.Instance;
     }
 
@@ -172,6 +174,15 @@ public class TrashRepository : ITrashRepository
         // Notes also need their search index (full text + vector) back.
         if (result == TrashRestore.Restored && item!.Kind == TrashKinds.Note)
             await _notes.ReindexAsync(ctx, item.ItemId, ct);
+        // Table rows get their search index back the same way.
+        if (result == TrashRestore.Restored && _tables is not null && item!.Kind is TrashKinds.Row or TrashKinds.Table)
+        {
+            var data = JsonNode.Parse(item.Data)!.AsObject();
+            if (item.Kind == TrashKinds.Row)
+                await _tables.ReindexAsync(ctx, data["$table"]!.GetValue<string>(), item.ItemId, ct);
+            else
+                await _tables.ReindexAsync(ctx, item.ItemId, null, ct);
+        }
         if (result == TrashRestore.Restored)
             _logger.LogInformation("Restored {Kind} {ItemId} from the trash in {CtxType}:{CtxId}", item!.Kind, item.ItemId, ctx.Type, ctx.Id);
         return (result, item);

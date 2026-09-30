@@ -7,8 +7,10 @@ using Fishbowl.Core;
 using Fishbowl.Core.Apps;
 using Fishbowl.Core.Models;
 using Fishbowl.Core.Repositories;
+using Fishbowl.Core.Search;
 using Fishbowl.Core.Tables;
 using Fishbowl.Data.Repositories;
+using Fishbowl.Data.Search;
 using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -34,12 +36,14 @@ public class TableRepository : ITableRepository
 
     private readonly DatabaseFactory _db;
     private readonly ISpaceRepository _spaces;
+    private readonly IEmbeddingService? _embeddings;
     private readonly ILogger<TableRepository> _logger;
 
-    public TableRepository(DatabaseFactory db, ISpaceRepository spaces, ILogger<TableRepository>? logger = null)
+    public TableRepository(DatabaseFactory db, ISpaceRepository spaces, IEmbeddingService? embeddings = null, ILogger<TableRepository>? logger = null)
     {
         _db = db;
         _spaces = spaces;
+        _embeddings = embeddings;
         _logger = logger ?? NullLogger<TableRepository>.Instance;
     }
 
@@ -67,6 +71,7 @@ public class TableRepository : ITableRepository
         public long Multiple { get; set; }
         public string? LinkTarget { get; set; }
         public long Position { get; set; }
+        public long Searchable { get; set; }
     }
 
     private static ColumnDef FromRow(ColumnRow r) => new(
@@ -78,7 +83,8 @@ public class TableRepository : ITableRepository
         r.IsUnique != 0,
         r.Options is null ? null : JsonSerializer.Deserialize<List<string>>(r.Options),
         r.Multiple != 0,
-        r.LinkTarget);
+        r.LinkTarget,
+        r.Searchable != 0);
 
     internal static async Task<TableDef?> LoadAsync(IDbConnection db, IDbTransaction? tx, string name, CancellationToken ct)
     {
@@ -154,7 +160,7 @@ public class TableRepository : ITableRepository
     // way back for a dropped table).
     internal static async Task CreateInAsync(IDbConnection db, IDbTransaction tx, TableDef def, CancellationToken ct)
     {
-        if (!TableNames.IsValid(def.Name) || TableNames.BuiltIns.Contains(def.Name))
+        if (!TableNames.IsValid(def.Name) || TableNames.IsReserved(def.Name))
             throw new TableException("table_name", $"'{def.Name}' can't be a table name: lowercase letters, digits and _, starting with a letter, up to 40.", args: new { table = def.Name });
         if (await LoadAsync(db, tx, def.Name, ct) is not null)
             throw TableException.Conflict("table_exists", $"There is already a table '{def.Name}'.", new { table = def.Name });
@@ -180,8 +186,8 @@ public class TableRepository : ITableRepository
     private static async Task AddColumnMetaAsync(IDbConnection db, IDbTransaction tx, string table, ColumnDef c, int position, CancellationToken ct)
     {
         await db.ExecuteAsync(new CommandDefinition(@"
-            INSERT INTO db_columns(table_name, name, kind, description, required, default_value, is_unique, options, multiple, link_target, position)
-            VALUES (@table, @Name, @kind, @Description, @req, @dflt, @uniq, @opts, @multi, @LinkTarget, @position)",
+            INSERT INTO db_columns(table_name, name, kind, description, required, default_value, is_unique, options, multiple, link_target, position, searchable)
+            VALUES (@table, @Name, @kind, @Description, @req, @dflt, @uniq, @opts, @multi, @LinkTarget, @position, @search)",
             new
             {
                 table,
@@ -195,6 +201,7 @@ public class TableRepository : ITableRepository
                 multi = c.Multiple ? 1 : 0,
                 c.LinkTarget,
                 position,
+                search = c.Searchable ? 1 : 0,
             }, transaction: tx, cancellationToken: ct));
         await CreateColumnStructuresAsync(db, tx, table, c, ct);
     }
@@ -257,6 +264,8 @@ public class TableRepository : ITableRepository
         }
         else if (c.LinkTarget is not null)
             throw new TableException("column_link", $"Only link columns have a `link` target ('{c.Name}').", args: Args());
+        if (c.Searchable && c.Kind is not (ColumnKind.Text or ColumnKind.LongText or ColumnKind.Choice))
+            throw new TableException("column_searchable", $"Only text, long text and choice columns can be searchable ('{c.Name}').", args: Args());
         if (c.Unique && (c.Multiple || c.Kind is ColumnKind.LongText or ColumnKind.YesNo))
             throw new TableException("column_unique", $"Column '{c.Name}' can't be unique (several values, long text or yes/no).", args: Args());
         if (c.Default is { } d)
@@ -364,6 +373,13 @@ public class TableRepository : ITableRepository
                     await db.ExecuteAsync(new CommandDefinition("UPDATE db_columns SET options = @o WHERE table_name = @table AND name = @name",
                         new { o = JsonSerializer.Serialize(options), table, name }, transaction: tx, cancellationToken: token));
                 }
+                if (update.Searchable is { } search)
+                {
+                    if (search && c.Kind is not (ColumnKind.Text or ColumnKind.LongText or ColumnKind.Choice))
+                        throw new TableException("column_searchable", $"Only text, long text and choice columns can be searchable ('{name}').", args: new { table, column = name });
+                    await db.ExecuteAsync(new CommandDefinition("UPDATE db_columns SET searchable = @s WHERE table_name = @table AND name = @name",
+                        new { s = search ? 1 : 0, table, name }, transaction: tx, cancellationToken: token));
+                }
                 if (update.Required is { } req)
                 {
                     if (req && !(c.Kind == ColumnKind.Link && c.Multiple) && await db.ExecuteScalarAsync<long>(new CommandDefinition(
@@ -373,9 +389,16 @@ public class TableRepository : ITableRepository
                         new { r = req ? 1 : 0, table, name }, transaction: tx, cancellationToken: token));
                 }
             }
-            return (await LoadAsync(db, tx, table, token))!;
+            var after = (await LoadAsync(db, tx, table, token))!;
+            // What a row's search text is made of changed: index the table again.
+            if (!SearchText(def).SequenceEqual(SearchText(after)))
+                foreach (var id in await db.QueryAsync<string>(new CommandDefinition($"SELECT id FROM \"{physical}\"", transaction: tx, cancellationToken: token)))
+                    await IndexRowAsync(db, tx, after, id, token);
+            return after;
         }, ct);
     }
+
+    private static IEnumerable<string> SearchText(TableDef def) => def.Columns.Where(c => c.Searchable).Select(c => c.Name);
 
     public async Task DropAsync(ContextRef ctx, TableActor actor, string table, CancellationToken ct = default)
     {
@@ -401,6 +424,7 @@ public class TableRepository : ITableRepository
             };
             await TrashSnapshots.PutAsync(db, tx, ctx, "table", table, table, data, actor.UserId, token);
 
+            foreach (var row in rows) await UnindexRowAsync(db, tx, table, row!["row"]!["id"]!.GetValue<string>(), token);
             foreach (var c in def.Columns) await DropColumnStructuresAsync(db, tx, table, c, token);
             await db.ExecuteAsync(new CommandDefinition(
                 $"DROP TABLE \"{TableNames.Physical(table)}\"; DELETE FROM db_columns WHERE table_name = @table; DELETE FROM db_tables WHERE name = @table;",
@@ -440,6 +464,7 @@ public class TableRepository : ITableRepository
                 string.Concat(cols.Select(c => $", \"{c}\"")) + ") VALUES (@id, @title, @author, @now, @now, 1, @extra" +
                 string.Concat(cols.Select((_, i) => ", @c" + (i + 1))) + ")", p, transaction: tx, cancellationToken: token));
             await WriteLinksAsync(db, tx, table, id, parsed.Links, token);
+            await IndexRowAsync(db, tx, def, id, token);
         }, ct);
         return (await GetAsync(ctx, table, id, ct))!.Value;
     }
@@ -477,6 +502,7 @@ public class TableRepository : ITableRepository
             await db.ExecuteAsync(new CommandDefinition(
                 $"UPDATE \"{TableNames.Physical(table)}\" SET {string.Join(", ", sets)} WHERE id = @id", p, transaction: tx, cancellationToken: token));
             await WriteLinksAsync(db, tx, table, id, parsed.Links, token);
+            await IndexRowAsync(db, tx, def, id, token);
         }, ct);
         return (await GetAsync(ctx, table, id, ct))!.Value;
     }
@@ -494,6 +520,7 @@ public class TableRepository : ITableRepository
             var data = await SnapshotRowAsync(db, tx, def, row, token);
             data["$table"] = table;
             await TrashSnapshots.PutAsync(db, tx, ctx, "row", id, row["title"]?.ToString(), data, actor.UserId, token);
+            await UnindexRowAsync(db, tx, table, id, token);
             foreach (var c in def.Columns.Where(c => c.Kind == ColumnKind.Link && c.Multiple))
                 await db.ExecuteAsync(new CommandDefinition($"DELETE FROM \"{TableNames.Join(table, c.Name)}\" WHERE row_id = @id",
                     new { id }, transaction: tx, cancellationToken: token));
@@ -569,6 +596,110 @@ public class TableRepository : ITableRepository
         return rows.Select(r => new AggregateResult(
             group is null ? null : Present(group, r["g"]),
             r["v"] is null ? null : Convert.ToDouble(r["v"], CultureInfo.InvariantCulture))).ToList();
+    }
+
+    // ────────── Search ──────────
+
+    private static string RowKey(string table, string id) => table + "/" + id;
+
+    private async Task IndexRowAsync(IDbConnection db, IDbTransaction tx, TableDef def, string id, CancellationToken ct)
+    {
+        var key = RowKey(def.Name, id);
+        await UnindexRowAsync(db, tx, def.Name, id, ct);
+        var cols = def.Columns.Where(c => c.Searchable).ToList();
+        if (cols.Count == 0) return;
+        var rows = await ReadRowsAsync(db, tx, $"SELECT * FROM \"{TableNames.Physical(def.Name)}\" WHERE id = @id", new { id }, ct);
+        if (rows.Count == 0) return;
+        var row = rows[0];
+        var parts = new List<string> { row["title"]?.ToString() ?? "" };
+        foreach (var c in cols)
+            if (row.GetValueOrDefault(c.Name) is { } v)
+                parts.Add(c.Multiple ? string.Join(", ", JsonSerializer.Deserialize<List<string>>(v.ToString()!) ?? new()) : v.ToString()!);
+        var text = string.Join("\n", parts.Where(p => p.Length > 0));
+        await db.ExecuteAsync(new CommandDefinition("INSERT INTO rows_fts(row_key, text) VALUES (@key, @text)",
+            new { key, text }, transaction: tx, cancellationToken: ct));
+        if (_embeddings is null) return;
+        try
+        {
+            var vec = await _embeddings.EmbedAsync(text, ct);
+            var blob = new byte[vec.Length * sizeof(float)];
+            Buffer.BlockCopy(vec, 0, blob, 0, blob.Length);
+            await db.ExecuteAsync(new CommandDefinition("INSERT INTO vec_rows(id, embedding) VALUES (@key, @blob)",
+                new { key, blob }, transaction: tx, cancellationToken: ct));
+        }
+        catch (EmbeddingUnavailableException)
+        {
+            // Full text still finds it; a reindex adds the vector later.
+        }
+    }
+
+    private static async Task UnindexRowAsync(IDbConnection db, IDbTransaction tx, string table, string id, CancellationToken ct)
+    {
+        var key = RowKey(table, id);
+        await db.ExecuteAsync(new CommandDefinition("DELETE FROM rows_fts WHERE row_key = @key; DELETE FROM vec_rows WHERE id = @key;",
+            new { key }, transaction: tx, cancellationToken: ct));
+    }
+
+    public async Task ReindexAsync(ContextRef ctx, string table, string? id = null, CancellationToken ct = default)
+    {
+        RequireSpace(ctx);
+        await _db.WithContextTransactionAsync(ctx, async (db, tx, token) =>
+        {
+            var def = await RequireAsync(db, tx, table, token);
+            var ids = id is not null ? new[] { id }
+                : (await db.QueryAsync<string>(new CommandDefinition($"SELECT id FROM \"{TableNames.Physical(table)}\"", transaction: tx, cancellationToken: token))).ToArray();
+            foreach (var rowId in ids) await IndexRowAsync(db, tx, def, rowId, token);
+        }, ct);
+    }
+
+    public async Task<(IReadOnlyList<RowSearchHit> Hits, bool Degraded)> SearchAsync(
+        ContextRef ctx, string query, string? table, int limit, CancellationToken ct = default)
+    {
+        RequireSpace(ctx);
+        limit = Math.Clamp(limit, 1, 100);
+        query = (query ?? "").Trim();
+        if (query.Length > HybridSearchService.MaxQueryLength) query = query[..HybridSearchService.MaxQueryLength];
+        if (query.Length == 0) return (Array.Empty<RowSearchHit>(), false);
+        using var db = _db.CreateContextConnection(ctx);
+        if (table is not null) await RequireAsync(db, null, table, ct);
+        const int pool = 50;
+
+        var fts = new List<(string Id, double Bm25)>();
+        if (HybridSearchService.FtsQuery(query) is { } match)
+            fts = (await db.QueryAsync<(string Id, double Bm25)>(new CommandDefinition(
+                "SELECT row_key AS Id, bm25(rows_fts) AS Bm25 FROM rows_fts WHERE rows_fts MATCH @match ORDER BY bm25(rows_fts) LIMIT @pool",
+                new { match, pool }, cancellationToken: ct))).ToList();
+        var vec = new List<(string Id, double Distance)>();
+        var degraded = _embeddings is null;
+        if (_embeddings is not null)
+        {
+            try
+            {
+                var q = await _embeddings.EmbedAsync(query, ct);
+                var blob = new byte[q.Length * sizeof(float)];
+                Buffer.BlockCopy(q, 0, blob, 0, blob.Length);
+                vec = (await db.QueryAsync<(string Id, double Distance)>(new CommandDefinition(
+                    "SELECT id AS Id, distance AS Distance FROM vec_rows WHERE embedding MATCH @blob AND k = @pool ORDER BY distance",
+                    new { blob, pool }, cancellationToken: ct))).ToList();
+            }
+            catch (EmbeddingUnavailableException) { degraded = true; }
+        }
+
+        var hits = new List<RowSearchHit>();
+        var defs = new Dictionary<string, TableDef?>(StringComparer.Ordinal);
+        foreach (var (key, score) in HybridSearchService.MergeScores(vec, fts, degraded))
+        {
+            if (hits.Count >= limit) break;
+            var slash = key.IndexOf('/');
+            var name = key[..slash];
+            if (table is not null && name != table) continue;
+            if (!defs.TryGetValue(name, out var def)) defs[name] = def = await LoadAsync(db, null, name, ct);
+            if (def is null) continue;
+            var rows = await ReadRowsAsync(db, null, $"SELECT * FROM \"{TableNames.Physical(name)}\" WHERE id = @id", new { id = key[(slash + 1)..] }, ct);
+            if (rows.Count == 0) continue;
+            hits.Add(new RowSearchHit(name, (await ToJsonAsync(db, null, def, rows, ct))[0], score));
+        }
+        return (hits, degraded);
     }
 
     private static IReadOnlyList<AppColumn> QuerySchema(TableDef def) =>

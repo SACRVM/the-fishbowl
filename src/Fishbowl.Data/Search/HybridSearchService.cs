@@ -128,6 +128,16 @@ public sealed class HybridSearchService : ISearchService
         return false;
     }
 
+    // The FTS5 MATCH expression for a free-text query (null = no tokens).
+    internal static string? FtsQuery(string query)
+    {
+        var tokens = System.Text.RegularExpressions.Regex
+            .Matches(query, @"\w+")
+            .Select(m => m.Value.ToLowerInvariant() + "*")
+            .ToList();
+        return tokens.Count == 0 ? null : string.Join(" AND ", tokens);
+    }
+
     private static async Task<List<(string Id, double Bm25)>> RunFtsAsync(
         System.Data.IDbConnection db, string query, CancellationToken ct)
     {
@@ -186,7 +196,7 @@ public sealed class HybridSearchService : ISearchService
     // When degraded (no vec hits), FTS carries the full signal; its
     // effective weight becomes 1.0 so the absolute numeric scores stay
     // comparable to the hybrid case at the top of the ranking.
-    private static IEnumerable<(string Id, double Score)> MergeScores(
+    internal static IEnumerable<(string Id, double Score)> MergeScores(
         List<(string Id, double Distance)> vec,
         List<(string Id, double Bm25)> fts,
         bool degraded)
