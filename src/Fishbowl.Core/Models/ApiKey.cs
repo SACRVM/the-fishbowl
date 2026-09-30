@@ -7,7 +7,7 @@ public class ApiKey
 {
     public string Id { get; set; } = "";
     public string UserId { get; set; } = "";
-    public string ContextType { get; set; } = "";   // "user" | "space" | "app"
+    public string ContextType { get; set; } = "";   // "user" | "space" ("app" keys of the retired per-app DBs are refused)
     public string ContextId { get; set; } = "";
     // App-keys only: the owner pair backing path resolution
     // (<owner-folder>/apps/<context_id>/app.db). NULL for user/space keys; the

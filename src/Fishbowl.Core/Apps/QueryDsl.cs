@@ -95,7 +95,7 @@ public static class QueryDsl
                     $"orderBy: column '{ob.Field}' does not exist.", ob.Field);
             if (col.Name == BaseColumns.AdditionalData)
                 throw new QueryDslException(QueryDslErrorCodes.UnqueryableColumn,
-                    "orderBy: 'additional_data' is a non-queryable field. Promote it to a typed column via `app_alter_table` if you need to order on it.",
+                    "orderBy: 'additional_data' is a non-queryable field. Promote it to a typed column via `table_alter` if you need to order on it.",
                     BaseColumns.AdditionalData);
             string dir;
             if (ob.Direction.Equals("asc", StringComparison.OrdinalIgnoreCase)) dir = "ASC";
@@ -191,7 +191,7 @@ public static class QueryDsl
                 $"Column '{columnName}' does not exist on this table.", columnName);
         if (col.Name == BaseColumns.AdditionalData)
             throw new QueryDslException(QueryDslErrorCodes.UnqueryableColumn,
-                "'additional_data' is a non-queryable field. Promote it to a typed column via `app_alter_table` if you need to filter on it.",
+                "'additional_data' is a non-queryable field. Promote it to a typed column via `table_alter` if you need to filter on it.",
                 BaseColumns.AdditionalData);
 
         // Sugar: `{ col: <scalar> }` desugars to `{ col: { $eq: <scalar> } }`.

@@ -53,6 +53,10 @@ public class ApiKeyAuthenticationHandler : AuthenticationHandler<ApiKeyAuthentic
         if (key is null)
             return AuthenticateResult.Fail("Invalid or revoked API key.");
 
+        // Keys of the retired per-app databases (context "app") open nothing.
+        if (string.Equals(key.ContextType, "app", StringComparison.Ordinal))
+            return AuthenticateResult.Fail("App keys are retired — make a space key with the tables scopes instead.");
+
         var claims = new List<Claim>
         {
             new(ClaimTypes.NameIdentifier, key.UserId),
@@ -69,15 +73,6 @@ public class ApiKeyAuthenticationHandler : AuthenticationHandler<ApiKeyAuthentic
             if (space is null || await _spaces.GetMembershipAsync(space.Id, key.UserId, Context.RequestAborted) is null)
                 return AuthenticateResult.Fail("This key's space is gone, or its owner is no longer a member.");
             claims.Add(new Claim(McpContextClaims.SpaceId, space.Id));
-        }
-        // App-keys carry the owner pair so downstream code can build a full
-        // AppRef from claims alone (no second DB lookup on the hot path).
-        if (string.Equals(key.ContextType, "app", StringComparison.Ordinal))
-        {
-            if (!string.IsNullOrEmpty(key.OwnerType))
-                claims.Add(new Claim(McpContextClaims.OwnerType, key.OwnerType));
-            if (!string.IsNullOrEmpty(key.OwnerId))
-                claims.Add(new Claim(McpContextClaims.OwnerId, key.OwnerId));
         }
         foreach (var scope in key.Scopes)
             claims.Add(new Claim(McpContextClaims.Scope, scope));

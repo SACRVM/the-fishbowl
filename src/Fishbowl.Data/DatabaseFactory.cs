@@ -70,12 +70,6 @@ public class DatabaseFactory
     {
         ContextType.User => Path.Combine(_usersPath, ctx.Id, PersonalDbFileName),
         ContextType.Space => Path.Combine(_spacesPath, ctx.Id, SpaceDbFileName),
-        // App refs are only one third of the routing tuple — opening the
-        // file needs the owner pair too. Surface accidental misuse instead
-        // of silently routing to nowhere.
-        ContextType.App => throw new ArgumentException(
-            "ContextRef.App carries only the app id; use DatabaseFactory.ResolveAppPath(AppRef) / CreateAppConnection(AppRef) instead.",
-            nameof(ctx)),
         _ => throw new ArgumentException($"Unknown context type: {ctx.Type}", nameof(ctx)),
     };
 
@@ -89,41 +83,9 @@ public class DatabaseFactory
         _ => throw new ArgumentException($"Context type {ctx.Type} has no folder of its own.", nameof(ctx)),
     };
 
-    // App DBs live nested under their owner:
-    //   users/<userId>/apps/<appId>/app.db
-    //   spaces/<spaceId>/apps/<appId>/app.db
-    // Dropping a space/user folder onto another Fishbowl instance moves the
-    // owner *plus its apps* atomically, which is what folder-per-context is
-    // for. Folder name is the App's ULID (26 chars; well under MAX_PATH).
-    public string ResolveAppPath(AppRef appRef)
-    {
-        if (string.IsNullOrEmpty(appRef.AppId) || string.IsNullOrEmpty(appRef.OwnerId))
-            throw new ArgumentException("AppRef requires non-empty OwnerId and AppId.", nameof(appRef));
-
-        var ownerRoot = appRef.OwnerType switch
-        {
-            AppRef.OwnerTypeUser => _usersPath,
-            AppRef.OwnerTypeSpace => _spacesPath,
-            _ => throw new ArgumentException(
-                $"Unknown AppRef owner type: {appRef.OwnerType}", nameof(appRef)),
-        };
-        return Path.Combine(ownerRoot, appRef.OwnerId, "apps", appRef.AppId, AppDbFileName);
-    }
-
-    // Opens (and on first use creates) an app's SQLite file. App DBs have no
-    // built-in schema — owner-defined tables come in via app_create_table.
-    // sqlite-vec is NOT loaded: per-table vector indexes are post-MVP, so
-    // every app open today is leaner than a context open.
-    public IDbConnection CreateAppConnection(AppRef appRef)
-    {
-        var dbPath = ResolveAppPath(appRef);
-        var parent = Path.GetDirectoryName(dbPath);
-        if (!string.IsNullOrEmpty(parent) && !Directory.Exists(parent))
-            Directory.CreateDirectory(parent);
-
-        return OpenAndInitialize(dbPath, EnsureAppInitialized, loadVec: false);
-    }
-
+    // The retired per-app databases (users|spaces/<id>/apps/<appId>/app.db).
+    // Nothing opens them any more; the archivers still carry the files along
+    // so no one's data silently disappears.
     public const string AppDbFileName = "app.db";
 
     // Preferred primary entrypoint: one context resolves to one file. Personal
@@ -705,16 +667,6 @@ public class DatabaseFactory
                 id          TEXT PRIMARY KEY,
                 deleted_at  TEXT NOT NULL
             );");
-    }
-
-    // App DBs have no built-in schema. Owner brings in real SQL tables via
-    // `app_create_table` / `app_alter_table` (Fishbowl.Data.Repositories.
-    // AppSchemaRepository). user_version stays at 0 until/unless we ship
-    // app-engine migrations; the absence of any built-in schema is the
-    // whole point of the platform.
-    private void EnsureAppInitialized(IDbConnection connection)
-    {
-        // Intentionally empty.
     }
 
     private void ApplyUserInitialSchema(IDbConnection connection)

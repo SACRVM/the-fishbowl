@@ -225,7 +225,7 @@ in the implementation plan; the shape:
    Tables app. *3a built 2026-09-29* (tables, types, links, own rows, trash,
    aggregates, REST, MCP; table names get a hidden `t_` prefix — open
    question settled). Still open: searchable columns, the Tables app (on the
-   kit's `sac-data-grid`), removing the old per-app DB.
+   kit's `sac-data-grid`). The old per-app DB is removed (2026-09-30).
 4. **Space apps** — `.apps/` protection + hidden folders, tiles from
    `app.json`, frame serving from `.apps/`, the space API over the bridge
    (`context.*`, kit issue), messages from apps, the error store, the

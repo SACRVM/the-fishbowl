@@ -34,32 +34,8 @@ public class ApiKeyRepository : IApiKeyRepository
         IReadOnlyList<string> scopes,
         CancellationToken ct = default)
     {
-        if (context.Type == ContextType.App)
-            throw new ArgumentException(
-                "Use the AppRef overload to mint app-scoped keys.", nameof(context));
-
         var contextType = context.Type == ContextType.Space ? "space" : "user";
         return IssueInternalAsync(userId, contextType, context.Id, ownerType: null, ownerId: null,
-            name, scopes, ct);
-    }
-
-    public Task<IssuedApiKey> IssueAsync(
-        string userId,
-        AppRef appRef,
-        string name,
-        IReadOnlyList<string> scopes,
-        CancellationToken ct = default)
-    {
-        if (string.IsNullOrWhiteSpace(appRef.AppId))
-            throw new ArgumentException("AppRef.AppId is required", nameof(appRef));
-        if (string.IsNullOrWhiteSpace(appRef.OwnerId))
-            throw new ArgumentException("AppRef.OwnerId is required", nameof(appRef));
-        if (appRef.OwnerType is not (AppRef.OwnerTypeUser or AppRef.OwnerTypeSpace))
-            throw new ArgumentException(
-                $"AppRef.OwnerType must be '{AppRef.OwnerTypeUser}' or '{AppRef.OwnerTypeSpace}'",
-                nameof(appRef));
-
-        return IssueInternalAsync(userId, "app", appRef.AppId, appRef.OwnerType, appRef.OwnerId,
             name, scopes, ct);
     }
 

@@ -289,6 +289,20 @@ public class ApiKeyAuthTests : IClassFixture<WebApplicationFactory<Program>>, ID
         Assert.DoesNotContain("alice-personal", raw);
     }
 
+    // Keys of the retired per-app databases open nothing — without this they
+    // would fall back to their owner's personal workspace.
+    [Fact]
+    public async Task RetiredAppKey_IsRefused()
+    {
+        var issued = await _keys.IssueAsync(AliceId, ContextRef.User(AliceId), "old-app-key",
+            new[] { "read:notes" }, TestContext.Current.CancellationToken);
+        using (var db = _dbFactory.CreateSystemConnection())
+            db.Execute("UPDATE api_keys SET context_type = 'app', context_id = 'someapp', owner_type = 'user', owner_id = @u WHERE id = @id",
+                new { u = AliceId, id = issued.Record.Id });
+        var client = ClientWithToken(issued.RawToken);
+        Assert.Equal(HttpStatusCode.Unauthorized, (await client.GetAsync("/api/v1/notes", TestContext.Current.CancellationToken)).StatusCode);
+    }
+
     // A key whose owner left the space stops working.
     [Fact]
     public async Task SpaceBearer_OwnerNoLongerMember_IsRefused()
