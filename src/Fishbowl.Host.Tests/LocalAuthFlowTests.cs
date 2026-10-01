@@ -172,6 +172,32 @@ public class LocalAuthFlowTests : IClassFixture<WebApplicationFactory<Program>>,
         Assert.Equal(HttpStatusCode.OK, me.StatusCode);
     }
 
+    // A new password (own change or an admin's reset) ends the sessions that
+    // were signed in with the old one.
+    [Fact]
+    public async Task PasswordChange_EndsOlderSessions()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var client = _factory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false, HandleCookies = true });
+        await client.PostAsJsonAsync("/api/setup", new { LocalUsername = "bob", LocalPassword = "supersecret-password" }, ct);
+        await client.PostAsJsonAsync("/api/auth/login", new { Username = "bob", Password = "supersecret-password" }, ct);
+        Assert.Equal(HttpStatusCode.OK, (await client.GetAsync("/api/v1/me", ct)).StatusCode);
+
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var system = scope.ServiceProvider.GetRequiredService<Fishbowl.Core.Repositories.ISystemRepository>();
+            var hasher = scope.ServiceProvider.GetRequiredService<Fishbowl.Core.Auth.IPasswordHasher>();
+            var bob = await system.GetUserByLocalUsernameAsync("bob", ct);
+            var fresh = hasher.Hash("another-password-123");
+            await system.SetPasswordAsync(bob!.Id, fresh.Hash, fresh.Salt, ct: ct);
+        }
+        Assert.Equal(HttpStatusCode.Unauthorized, (await client.GetAsync("/api/v1/me", ct)).StatusCode);
+
+        // Signing in with the new password works again.
+        await client.PostAsJsonAsync("/api/auth/login", new { Username = "bob", Password = "another-password-123" }, ct);
+        Assert.Equal(HttpStatusCode.OK, (await client.GetAsync("/api/v1/me", ct)).StatusCode);
+    }
+
     [Fact]
     public async Task Login_WrongPassword_Returns401()
     {

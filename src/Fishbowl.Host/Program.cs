@@ -320,6 +320,8 @@ authBuilder.AddGoogle(options =>
         // Add internal ID as a claim - this is what our APIs will use
         var identity = (ClaimsIdentity)context.Principal!.Identity!;
         identity.AddClaim(new Claim("fishbowl_user_id", decision.UserId!));
+        if ((await repo.GetUserAsync(decision.UserId!, context.HttpContext.RequestAborted))?.SessionStamp is { } stamp)
+            identity.AddClaim(new Claim(Fishbowl.Core.Mcp.McpContextClaims.SessionStamp, stamp));
         if (decision.JoinedSpace is { } joined)
             context.ReturnUri = "/#/space/" + Uri.EscapeDataString(joined) + "/notes";
     };
@@ -380,6 +382,27 @@ builder.Services.AddFishbowlScheduler();
 builder.Services.AddSingleton<Fishbowl.Core.Auth.IPasswordHasher, Fishbowl.Host.Auth.Argon2PasswordHasher>();
 
 builder.Services.AddAuthorization();
+
+// Password guessing against local accounts: a few tries a minute per address.
+builder.Services.AddRateLimiter(o =>
+{
+    o.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+    o.OnRejected = async (ctx, ct) =>
+        await ctx.HttpContext.Response.WriteAsJsonAsync(new
+        {
+            error = "too_many_attempts",
+            message = "Too many sign-in attempts — wait a minute and try again.",
+        }, ct);
+    var testing = builder.Environment.IsEnvironment("Testing");
+    o.AddPolicy(Fishbowl.Api.Endpoints.AuthApi.RateLimitPolicy, http =>
+        System.Threading.RateLimiting.RateLimitPartition.GetFixedWindowLimiter(
+            http.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+            _ => new System.Threading.RateLimiting.FixedWindowRateLimiterOptions
+            {
+                PermitLimit = testing ? 1000 : 10,
+                Window = TimeSpan.FromMinutes(1),
+            }));
+});
 builder.Services.AddOpenApi();
 
 // Reverse-proxy awareness. When TLS is terminated by a fronting proxy (Caddy/
@@ -501,6 +524,7 @@ if (app.Environment.IsDevelopment())
 }
 
 app.UseAuthentication();
+app.UseRateLimiter();
 // Account state after authentication: a pending account is kept to /pending,
 // a disabled or blocked one loses its session on the next request.
 app.UseAccountState();

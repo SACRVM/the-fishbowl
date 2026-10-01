@@ -1,6 +1,7 @@
 using System.Security.Claims;
 using Fishbowl.Api.Accounts;
 using Fishbowl.Core.Auth;
+using Fishbowl.Core.Mcp;
 using Fishbowl.Core.Models;
 using Fishbowl.Core.Repositories;
 using Microsoft.AspNetCore.Authentication;
@@ -26,6 +27,9 @@ namespace Fishbowl.Api.Endpoints;
 // chosen password + clears the flag + signs them in.
 public static class AuthApi
 {
+    // Applied to the password endpoints; the host defines it (per address).
+    public const string RateLimitPolicy = "auth";
+
     public static IEndpointRouteBuilder MapAuthApi(this IEndpointRouteBuilder routes)
     {
         var group = routes.MapGroup("/api/auth");
@@ -74,7 +78,8 @@ public static class AuthApi
         .Produces(StatusCodes.Status204NoContent)
         .Produces(StatusCodes.Status400BadRequest)
         .Produces(StatusCodes.Status401Unauthorized)
-        .AllowAnonymous();
+        .AllowAnonymous()
+        .RequireRateLimiting(RateLimitPolicy);
 
         // Two ways to land here:
         //   1. From the must-change branch above — user supplies the temp
@@ -118,7 +123,8 @@ public static class AuthApi
             var fresh = hasher.Hash(request.NewPassword);
             await system.SetPasswordAsync(user!.Id, fresh.Hash, fresh.Salt, mustChange: false, ct);
 
-            await SignInAsync(context, user);
+            // Signed in with the stamp the new password just set.
+            await SignInAsync(context, await system.GetUserAsync(user.Id, ct) ?? user);
             return Results.NoContent();
         })
         .WithName("ChangePassword")
@@ -126,7 +132,8 @@ public static class AuthApi
         .Produces(StatusCodes.Status204NoContent)
         .Produces(StatusCodes.Status400BadRequest)
         .Produces(StatusCodes.Status401Unauthorized)
-        .AllowAnonymous();
+        .AllowAnonymous()
+        .RequireRateLimiting(RateLimitPolicy);
 
         return routes;
     }
@@ -153,6 +160,8 @@ public static class AuthApi
             identity.AddClaim(new Claim(ClaimTypes.Name, user.Name));
         if (!string.IsNullOrEmpty(user.Email))
             identity.AddClaim(new Claim(ClaimTypes.Email, user.Email));
+        if (!string.IsNullOrEmpty(user.SessionStamp))
+            identity.AddClaim(new Claim(McpContextClaims.SessionStamp, user.SessionStamp));
 
         return context.SignInAsync(
             CookieAuthenticationDefaults.AuthenticationScheme,

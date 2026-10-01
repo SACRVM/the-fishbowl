@@ -49,6 +49,18 @@ public sealed class AccountStateMiddleware
         // account an admin deleted while this session was alive.
         if (user is null && await admin.IsDeletedAsync(userId, context.RequestAborted))
             state = DeletedState;
+        // A cookie session from before the last password change is over.
+        if (user?.SessionStamp is { } stamp
+            && context.User.Identity?.AuthenticationType is CookieAuthenticationDefaults.AuthenticationScheme or "Google"
+            && context.User.FindFirst(McpContextClaims.SessionStamp)?.Value != stamp)
+        {
+            try { await context.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme); }
+            catch (InvalidOperationException) { /* no cookie handler (tests) */ }
+            var api = context.Request.Path.StartsWithSegments("/api") || context.Request.Path.StartsWithSegments("/mcp");
+            if (api) context.Response.StatusCode = StatusCodes.Status401Unauthorized;
+            else context.Response.Redirect("/login");
+            return;
+        }
         if (state == UserStates.Active)
         {
             await _next(context);

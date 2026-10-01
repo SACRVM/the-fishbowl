@@ -629,7 +629,25 @@ public class DatabaseFactory
             ApplySystemV14(connection);
             connection.Execute("PRAGMA user_version = 14");
             _logger.LogInformation("Applied system schema v14");
+            version = 14;
         }
+
+        if (version < 15)
+        {
+            ApplySystemV15(connection);
+            connection.Execute("PRAGMA user_version = 15");
+            _logger.LogInformation("Applied system schema v15");
+        }
+    }
+
+    // A session stamp per account: every password change rotates it, and the
+    // request gate ends cookie sessions that carry an older one. NULL (never
+    // rotated) leaves existing sessions alone.
+    private void ApplySystemV15(IDbConnection connection)
+    {
+        var cols = connection.Query<string>("SELECT name FROM pragma_table_info('users')").ToList();
+        if (!cols.Contains("session_stamp"))
+            connection.Execute("ALTER TABLE users ADD COLUMN session_stamp TEXT;");
     }
 
     // Space roles become a staircase (space-apps spec § Roles): 'readonly' is

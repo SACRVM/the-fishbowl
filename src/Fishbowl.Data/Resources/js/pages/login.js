@@ -39,6 +39,7 @@ const DE = {
     "This invitation link has expired. Ask for a new one.": "Dieser Einladungslink ist abgelaufen. Bitte um einen neuen.",
     "This invitation link doesn't work. Ask for a new one.": "Dieser Einladungslink funktioniert nicht. Bitte um einen neuen.",
     "Sign-in refused.": "Anmeldung abgelehnt.",
+    "Too many sign-in attempts — wait a minute and try again.": "Zu viele Anmeldeversuche — warte eine Minute und versuch es dann noch einmal.",
 };
 // T(key, english, vars): the German text when German, else the English.
 function T(key, en, vars) {
@@ -142,6 +143,10 @@ if (LANG === "de") {
                 showError(T("wrong", "Wrong username or password."));
                 return;
             }
+            if (res.status === 429) {
+                showError(T("Too many sign-in attempts — wait a minute and try again.", "Too many sign-in attempts — wait a minute and try again."));
+                return;
+            }
             if (res.status === 403) {
                 const body = await res.json().catch(() => ({}));
                 showError(body?.message ? T(body.message, body.message) : T("cant-sign-in", "This account can't sign in."));
@@ -189,6 +194,7 @@ if (LANG === "de") {
             let body = null;
             try { body = JSON.parse(text); } catch { /* not JSON */ }
             // The server's refusal codes (ApiErrors) in the page's language.
+            if (res.status === 429) { showError(T("Too many sign-in attempts — wait a minute and try again.", "Too many sign-in attempts — wait a minute and try again.")); return; }
             if (body?.error === "min_length") { showError(T("new-too-short", "New password must be at least 12 characters.")); return; }
             if (body?.error === "password_unchanged") { showError(T("new-same", "New password must differ from the temporary one.")); return; }
             showError(T("change-failed", "Couldn't change password: {message}", { message: body?.message || text || res.status }));

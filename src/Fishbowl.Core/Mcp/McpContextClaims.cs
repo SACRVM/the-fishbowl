@@ -15,6 +15,8 @@ public static class McpContextClaims
     // slug the key was issued for). Set by the key handler, which resolves
     // the slug once per request and checks the owner is still a member.
     public const string SpaceId = "fishbowl_space_id";
+    // A cookie session's copy of users.session_stamp (see AccountStateMiddleware).
+    public const string SessionStamp = "fishbowl_session";
     public const string Scope = "scope";
 
     // Name of the authentication scheme used for Bearer tokens. Duplicated

@@ -18,6 +18,9 @@ public class User
     public string? Name { get; set; }
     public string? Email { get; set; }
     public string? AvatarUrl { get; set; }
+    // Rotated by every password change; a cookie session with an older one
+    // is over (system schema v15). Null = never rotated.
+    public string? SessionStamp { get; set; }
     public DateTime CreatedAt { get; set; }
     public string? PasswordHash { get; set; }
     public string? PasswordSalt { get; set; }
