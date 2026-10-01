@@ -194,4 +194,25 @@ public class SecretStripperTests
     {
         Assert.Equal(expected, SecretStripper.ContainsSecret(content));
     }
+
+    // One grammar with the editor: an unclosed block runs to the end; only a
+    // line that is ":::end" / "::end" (+ whitespace and text) closes it.
+    [Theory]
+    [InlineData("intro\n:::secret\nhunter2\nmore", "intro\n[secret content hidden]")]
+    [InlineData(":::secret\nuser=a\n::endpoint=https://x\npw=hunter2\n:::end\nafter", "[secret content hidden]\nafter")]
+    [InlineData(":::secret\npw=hunter2\n  :::end\nstill secret", "[secret content hidden]")]
+    [InlineData(":::secret\n:::end\nafter", "[secret content hidden]\nafter")]
+    [InlineData(":::secret AWS\r\nkey\r\n:::end\r\nafter", "[secret content hidden]\nafter")]
+    [InlineData("a\n::secret\nx\n::end note\nb\n:::SECRET\ny\n:::end", "a\n[secret content hidden]\nb\n[secret content hidden]")]
+    public void Strip_FollowsTheEditorsBlockGrammar(string input, string expected)
+    {
+        Assert.Equal(expected, SecretStripper.Strip(input));
+        Assert.True(SecretStripper.ContainsSecret(input));
+    }
+
+    [Fact]
+    public void Strip_SecretInsideAWord_IsNotAnOpener()
+    {
+        Assert.Equal(":::secretive plan", SecretStripper.Strip(":::secretive plan"));
+    }
 }

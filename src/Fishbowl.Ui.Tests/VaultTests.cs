@@ -209,6 +209,29 @@ public class VaultTests
     /// vault is unlocked.
     /// </summary>
     [Fact]
+    public async Task Vault_ClientEncryptsWhatTheEditorMasks_Test()
+    {
+        // The client's block grammar is the editor's (and SecretStripper's):
+        // an unclosed block runs to the end; "::endpoint=" or an indented
+        // ":::end" doesn't close one.
+        var context = await _fixture.Browser!.NewContextAsync(new BrowserNewContextOptions { IgnoreHTTPSErrors = true, BypassCSP = true });
+        var page = await context.NewPageAsync();
+        try
+        {
+            await page.GotoAsync(_fixture.BaseUrl + "/#/notes");
+            await page.Locator("fb-notes-view").WaitForAsync();
+            async Task<string[]> Bodies(string text) => await page.EvaluateAsync<string[]>("t => fb.api.secretBodies(t)", text);
+            Assert.Equal(new[] { "hunter2\nmore" }, await Bodies("intro\n:::secret\nhunter2\nmore"));
+            Assert.Equal(new[] { "user=a\n::endpoint=https://x\npw=hunter2" }, await Bodies(":::secret\nuser=a\n::endpoint=https://x\npw=hunter2\n:::end\nafter"));
+            Assert.Equal(new[] { "pw=hunter2\n  :::end\nstill secret" }, await Bodies(":::secret\npw=hunter2\n  :::end\nstill secret"));
+            Assert.Equal(new[] { "" }, await Bodies(":::secret\n:::end"));
+            Assert.Equal(new[] { "x", "y" }, await Bodies("a\n::secret\nx\n::end note\nb\n:::SECRET\ny\n:::end"));
+            Assert.Empty(await Bodies(":::secretive plan"));
+        }
+        finally { await context.CloseAsync(); }
+    }
+
+    [Fact]
     public async Task Vault_ArchivedNote_StillDecrypts_Test()
     {
         var context = await _fixture.Browser!.NewContextAsync(new BrowserNewContextOptions { IgnoreHTTPSErrors = true, BypassCSP = true });

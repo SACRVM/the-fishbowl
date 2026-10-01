@@ -102,15 +102,30 @@
     // that can't be decrypted shows a bracketed notice inside its :::secret
     // block so the user sees something's there rather than losing it.
 
-    // :::secret (optional label) \n <body> \n :::end (rest of line). `m` for
-    // per-line anchors; non-greedy body so adjacent blocks don't collapse.
-    // IMPORTANT: the optional label uses `[ \t]` (horizontal whitespace
-    // only), NOT `\s`. With `\s`, the engine greedily consumes the `\n`
-    // after `:::secret` into the optional group AND then `[^\n]*` eats the
-    // first body line — so the capture group loses the first body line.
-    // Bug squashed: always keep the label-matcher confined to the boundary
-    // line by using [ \t] to forbid newlines.
-    const INLINE_SECRET_RE = /^:{2,3}secret(?:[ \t][^\n]*)?\n([\s\S]*?)\n:{2,3}end[^\n]*$/gm;
+    // One grammar with the editor (vendored sac-md-secret.js) and the server
+    // (SecretStripper): a block OPENS on a line `:::secret` (or `::secret`,
+    // optional label) and CLOSES on a line `:::end` / `::end`, optionally
+    // followed by whitespace and text; without a closer it runs to the end
+    // of the note. Opening is generous (any case, indented), closing strict
+    // (never `::endpoint=`, never an indented `:::end`): everything the
+    // editor shows as secret gets encrypted, never less.
+    const SECRET_OPEN = /^[ \t]*:{2,3}secret(?:[ \t].*)?$/i;
+    const SECRET_CLOSE = /^:{2,3}end(?:\s.*)?$/;
+
+    // Replaces each secret block (its lines) with fn(body); returns the new text.
+    function replaceSecretBlocks(content, fn) {
+        const lines = content.split("\n");
+        const out = [];
+        for (let i = 0; i < lines.length; i++) {
+            if (!SECRET_OPEN.test(lines[i].replace(/\r$/, ""))) { out.push(lines[i]); continue; }
+            let end = i + 1;
+            while (end < lines.length && !SECRET_CLOSE.test(lines[end].replace(/\r$/, ""))) end++;
+            const body = lines.slice(i + 1, Math.min(end, lines.length)).join("\n").replace(/\r$/, "");
+            out.push(fn(body));
+            i = Math.min(end, lines.length - 1);
+        }
+        return out.join("\n");
+    }
     const MARKER_SECRET_RE = /:{2,3}secret#(\d+):{2,3}end/g;
     const ENVELOPE_VERSION = 2;
 
@@ -125,7 +140,7 @@
     async function transformNoteOutbound(note) {
         const content = note?.content || "";
         const bodies = [];
-        const rewritten = content.replace(INLINE_SECRET_RE, (_m, body) => {
+        const rewritten = replaceSecretBlocks(content, (body) => {
             const i = bodies.length;
             bodies.push(body);
             return `:::secret#${i}:::end`;
@@ -373,7 +388,11 @@
         ? `${ctx("/todos")}?includeCompleted=true`
         : ctx("/todos"));
 
+    // The block grammar, for tests: list of block bodies in a text.
+    const secretBodies = (text) => { const b = []; replaceSecretBlocks(text || "", (x) => { b.push(x); return ""; }); return b; };
+
     fb.api = {
+        secretBodies,
         files,
         notes,
         todos,

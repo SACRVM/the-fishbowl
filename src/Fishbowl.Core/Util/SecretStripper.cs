@@ -9,22 +9,38 @@ namespace Fishbowl.Core.Util;
 // this non-negotiable — secrets are human-access only.
 public static class SecretStripper
 {
-    // Matches `:::secret` on its own line through `:::end` on its own line,
-    // inclusive. Singleline so `.` crosses newlines.
+    // One grammar with the editor (vendored sac-md-secret.js) and the
+    // client-side encryption (api.js): a block OPENS on a line `:::secret`
+    // (or the old two-colon `::secret`, optional label) and CLOSES on a line
+    // that is `:::end` / `::end`, optionally followed by whitespace and text;
+    // a block without a closer runs to the end of the note.
     //
-    // `:{2,3}` accepts both the current three-colon form and the original
-    // two-colon one. New content is always written with three (it reads as a
-    // Pandoc-style fenced div), but notes predating the change keep their two
-    // and must keep being stripped — a delimiter this regex fails to match is
-    // secret content crossing a trust boundary in the clear, so the old form
-    // stays recognised until an explicit migration retires it.
-    //
-    // The opening line may carry a label (`:::secret AWS root`) — the editor
-    // and the client-side encryption both accept one, so the stripper must
-    // too, or a labelled block would cross a trust boundary in the clear.
-    private static readonly Regex Block = new(
-        @":{2,3}secret(?:[ \t][^\r\n]*)?\r?\n.*?\r?\n\s*:{2,3}end",
-        RegexOptions.Singleline | RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    // The two rules lean opposite ways on purpose: opening is generous (any
+    // case, indented — we'd rather hide too much), closing is strict (exactly
+    // what the editor treats as the end, never e.g. `::endpoint=` or an
+    // indented `:::end`) — closing earlier than the editor would put the rest
+    // of what it shows as secret in the clear.
+    private static readonly Regex Open = new(
+        @"^[ \t]*:{2,3}secret(?:[ \t].*)?$", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly Regex Close = new(
+        @"^:{2,3}end(?:\s.*)?$", RegexOptions.Compiled);
+
+    // The secret blocks of a text as line ranges [open, close] (close = the
+    // last line when the block isn't closed).
+    private static List<(int Open, int Close)> Blocks(string[] lines)
+    {
+        var blocks = new List<(int, int)>();
+        for (var i = 0; i < lines.Length; i++)
+        {
+            if (!Open.IsMatch(lines[i].TrimEnd('\r'))) continue;
+            var end = i + 1;
+            while (end < lines.Length && !Close.IsMatch(lines[end].TrimEnd('\r'))) end++;
+            if (end >= lines.Length) end = lines.Length - 1;
+            blocks.Add((i, end));
+            i = end;
+        }
+        return blocks;
+    }
 
     // Post-encryption marker form (Phase 3): `:::secret#N:::end` on a single
     // line, where N is the ciphertext index in content_secret. These markers
@@ -40,13 +56,30 @@ public static class SecretStripper
     // an encrypted marker. Used to keep secrets out of contexts that can't
     // hold them (spaces, until they get a shared vault).
     public static bool ContainsSecret(string? content)
-        => !string.IsNullOrEmpty(content) && (Block.IsMatch(content) || Marker.IsMatch(content));
+        => !string.IsNullOrEmpty(content) && (Blocks(content.Split('\n')).Count > 0 || Marker.IsMatch(content));
 
     public static string? Strip(string? content)
     {
         if (string.IsNullOrEmpty(content)) return content;
-        var stripped = Block.Replace(content, Placeholder);
-        return Marker.Replace(stripped, Placeholder);
+        var lines = content.Split('\n');
+        var blocks = Blocks(lines);
+        if (blocks.Count > 0)
+        {
+            var kept = new List<string>(lines.Length);
+            var b = 0;
+            for (var i = 0; i < lines.Length; i++)
+            {
+                if (b < blocks.Count && i == blocks[b].Open)
+                {
+                    kept.Add(Placeholder);
+                    i = blocks[b++].Close;
+                    continue;
+                }
+                kept.Add(lines[i]);
+            }
+            content = string.Join('\n', kept);
+        }
+        return Marker.Replace(content, Placeholder);
     }
 
     // Returns a shallow copy of the note with content stripped and the
