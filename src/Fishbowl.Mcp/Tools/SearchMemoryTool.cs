@@ -49,9 +49,9 @@ public class SearchMemoryTool : IMcpTool
     public async Task<object> InvokeAsync(
         ContextRef ctx, string actor, JsonElement arguments, ClaimsPrincipal principal, CancellationToken ct)
     {
-        var query = arguments.GetProperty("query").GetString() ?? string.Empty;
+        var query = McpArgs.RequiredString(arguments, "query");
         var limit = arguments.TryGetProperty("limit", out var l) && l.ValueKind == JsonValueKind.Number
-            ? Math.Clamp(l.GetInt32(), 1, 100) : 10;
+            ? Math.Clamp(McpArgs.Int(l, "limit"), 1, 100) : 10;
         var includePending = !arguments.TryGetProperty("include_pending", out var p)
             || p.ValueKind == JsonValueKind.Null
             || p.GetBoolean();

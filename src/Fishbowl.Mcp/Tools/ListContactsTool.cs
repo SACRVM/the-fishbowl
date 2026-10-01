@@ -48,7 +48,7 @@ public class ListContactsTool : IMcpTool
         var includeArchived = arguments.TryGetProperty("includeArchived", out var ia)
                               && ia.ValueKind == JsonValueKind.True;
         var limit = arguments.TryGetProperty("limit", out var l) && l.ValueKind == JsonValueKind.Number
-            ? Math.Clamp(l.GetInt32(), 1, 500) : 100;
+            ? Math.Clamp(McpArgs.Int(l, "limit"), 1, 500) : 100;
 
         var all = await _contacts.GetAllAsync(ctx, includeArchived, ct);
         var rows = all.Take(limit).Select(c => new

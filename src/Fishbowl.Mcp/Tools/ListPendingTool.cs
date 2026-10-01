@@ -30,7 +30,7 @@ public class ListPendingTool : IMcpTool
         ContextRef ctx, string actor, JsonElement arguments, ClaimsPrincipal principal, CancellationToken ct)
     {
         var limit = arguments.TryGetProperty("limit", out var l) && l.ValueKind == JsonValueKind.Number
-            ? Math.Clamp(l.GetInt32(), 1, 500) : 50;
+            ? Math.Clamp(McpArgs.Int(l, "limit"), 1, 500) : 50;
 
         var pending = await _notes.GetAllAsync(ctx, new[] { "review:pending" }, match: "all", ct);
         var stripped = pending.Take(limit).Select(SecretStripper.StripNote).ToList();

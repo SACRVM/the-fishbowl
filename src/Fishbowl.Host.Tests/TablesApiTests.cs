@@ -262,6 +262,20 @@ public class TablesApiTests : IClassFixture<WebApplicationFactory<Program>>, IDi
         Assert.Equal("Pumpkin soup", (await Find("ginger"))[0]);
     }
 
+    // Mistakes in a request are 400s with a code, never 500s.
+    [Fact]
+    public async Task BadQueriesAndChanges_AreRefusals()
+    {
+        var space = await ClubAsync();
+        var t = $"/api/v1/spaces/{space.Slug}/tables";
+        await Ok(await As(Designer).PostAsync(t, Body(Rooms), Ct));
+        Assert.Equal("query_invalid", await Error(await As(Reader).PostAsync($"{t}/rooms/query", Body("""{ "where": { "nope": 1 } }"""), Ct)));
+        Assert.Equal("query_invalid", await Error(await As(Reader).PostAsync($"{t}/rooms/query", Body("""{ "orderBy": [ {} ] }"""), Ct)));
+        Assert.Equal("change_invalid", await Error(await As(Designer).PatchAsync($"{t}/rooms", Body("""{ "dropColumns": [1] }"""), Ct)));
+        Assert.Equal("change_invalid", await Error(await As(Designer).PatchAsync($"{t}/rooms", Body("[]"), Ct)));
+        Assert.Equal("row_invalid", await Error(await As(Member).PostAsync($"{t}/rooms/rows", Body("""{ "title": "a", "code": "x", "code": "y" }"""), Ct)));
+    }
+
     [Fact]
     public async Task PersonalWorkspace_HasNoTables()
     {

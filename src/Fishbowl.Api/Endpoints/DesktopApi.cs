@@ -278,6 +278,10 @@ public static class DesktopApi
                 {
                     // Nothing stored — nothing to purge.
                 }
+                catch (FileStoreException ex)
+                {
+                    return FilesApi.Fail(ex);
+                }
             }
             await repo.DeleteAppAsync(t.Ctx, id, ct);
             return Results.Ok(new { removed = true, purged });

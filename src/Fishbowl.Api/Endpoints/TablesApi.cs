@@ -163,8 +163,12 @@ public static class TablesApi
     private static bool Bool(JsonElement e, string name) =>
         e.ValueKind == JsonValueKind.Object && e.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.True;
 
-    internal static QuerySpec ParseSpec(JsonElement body) =>
-        body.ValueKind == JsonValueKind.Object ? AppJsonParsers.ParseQuerySpec(body) : new QuerySpec();
+    internal static QuerySpec ParseSpec(JsonElement body)
+    {
+        if (body.ValueKind != JsonValueKind.Object) return new QuerySpec();
+        try { return AppJsonParsers.ParseQuerySpec(body); }
+        catch (ArgumentException ex) { throw new TableException("query_invalid", ex.Message, args: new { reason = ex.Message }); }
+    }
 
     // The space by id and the caller's role in it, as a TableActor.
     internal static TableActor ActorFor(string userId, SpaceRole role) =>

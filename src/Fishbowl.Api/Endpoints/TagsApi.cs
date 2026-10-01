@@ -45,7 +45,7 @@ public static class TagsApi
             }
             catch (ArgumentException ex)
             {
-                return Results.BadRequest(new { error = ex.Message });
+                return ApiErrors.BadRequest("invalid_value", ex.Message, new { reason = ex.Message });
             }
         })
         .WithName("UpsertTagColor")
@@ -72,7 +72,7 @@ public static class TagsApi
             }
             catch (ArgumentException ex)
             {
-                return Results.BadRequest(new { error = ex.Message });
+                return ApiErrors.BadRequest("invalid_value", ex.Message, new { reason = ex.Message });
             }
         })
         .WithName("RenameTag")
@@ -99,7 +99,7 @@ public static class TagsApi
             }
             catch (ArgumentException ex)
             {
-                return Results.BadRequest(new { error = ex.Message });
+                return ApiErrors.BadRequest("invalid_value", ex.Message, new { reason = ex.Message });
             }
         })
         .WithName("DeleteTag")

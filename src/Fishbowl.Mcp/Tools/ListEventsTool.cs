@@ -56,7 +56,7 @@ public class ListEventsTool : IMcpTool
         ContextRef ctx, string actor, JsonElement arguments, ClaimsPrincipal principal, CancellationToken ct)
     {
         var limit = arguments.TryGetProperty("limit", out var l) && l.ValueKind == JsonValueKind.Number
-            ? Math.Clamp(l.GetInt32(), 1, 500) : 50;
+            ? Math.Clamp(McpArgs.Int(l, "limit"), 1, 500) : 50;
 
         DateTime? from = TryDate(arguments, "from");
         DateTime? to = TryDate(arguments, "to");
@@ -68,7 +68,7 @@ public class ListEventsTool : IMcpTool
         }
         else if (arguments.TryGetProperty("upcoming_days", out var dN) && dN.ValueKind == JsonValueKind.Number)
         {
-            var days = Math.Clamp(dN.GetInt32(), 1, 365);
+            var days = Math.Clamp(McpArgs.Int(dN, "upcoming_days"), 1, 365);
             var start = DateTime.UtcNow;
             found = await _events.GetRangeAsync(ctx, start, start.AddDays(days), ct);
         }

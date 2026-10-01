@@ -96,7 +96,8 @@ public static class McpEndpoint
         catch (Exception ex)
         {
             logger.LogWarning(ex, "MCP dispatch failed for {Method}", request.Method);
-            error = new McpError(McpErrorCodes.InternalError, ex.Message);
+            // The detail is in the server log; paths and SQL stay there.
+            error = new McpError(McpErrorCodes.InternalError, "Internal error — the server log has the details.");
         }
 
         if (isNotification) return Results.Accepted();

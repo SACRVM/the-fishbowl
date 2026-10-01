@@ -84,6 +84,16 @@ public static class TableJson
     // An ALTER as REST and MCP send it.
     public static Fishbowl.Core.Repositories.TableChange ParseChange(JsonElement b)
     {
+        TableException Bad(string what) => new("change_invalid", $"The change is malformed: {what}.", args: new { reason = what });
+        if (b.ValueKind != JsonValueKind.Object) throw Bad("send a JSON object");
+        if (b.TryGetProperty("dropColumns", out var dc) && (dc.ValueKind != JsonValueKind.Array || dc.EnumerateArray().Any(x => x.ValueKind != JsonValueKind.String)))
+            throw Bad("dropColumns is a list of column names");
+        if (b.TryGetProperty("renameColumns", out var rc) && (rc.ValueKind != JsonValueKind.Object || rc.EnumerateObject().Any(p => p.Value.ValueKind != JsonValueKind.String)))
+            throw Bad("renameColumns maps old names to new names");
+        if (b.TryGetProperty("updateColumns", out var uc) && (uc.ValueKind != JsonValueKind.Object || uc.EnumerateObject().Any(p => p.Value.ValueKind != JsonValueKind.Object)))
+            throw Bad("updateColumns maps column names to objects");
+        if (b.TryGetProperty("addColumns", out var ac) && ac.ValueKind != JsonValueKind.Array)
+            throw Bad("addColumns is a list of columns");
         bool? ownRows = b.TryGetProperty("ownRows", out var o) && o.ValueKind is JsonValueKind.True or JsonValueKind.False ? o.GetBoolean() : null;
         var add = b.TryGetProperty("addColumns", out var a) ? TableJson.ParseColumns(a) : null;
         var drop = b.TryGetProperty("dropColumns", out var d) && d.ValueKind == JsonValueKind.Array

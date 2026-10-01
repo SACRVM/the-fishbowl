@@ -126,7 +126,7 @@ public static class AdminApi
             // system.db — same rules as setup.
             var username = request!.Username?.Trim().ToLowerInvariant() ?? string.Empty;
             var usernameError = ValidateUsername(username);
-            if (usernameError is not null) return Results.BadRequest(new { error = usernameError });
+            if (usernameError is not null) return ApiErrors.BadRequest("invalid_username", usernameError, new { reason = usernameError });
             if (string.IsNullOrEmpty(request.Password) || request.Password.Length < 12)
                 return ApiErrors.BadRequest("min_length", "Password must be at least 12 characters.", new { field = "password", min = 12 });
 
@@ -405,7 +405,7 @@ public static class AdminApi
 
             var username = body.Username?.Trim().ToLowerInvariant() ?? string.Empty;
             var usernameError = ValidateUsername(username);
-            if (usernameError is not null) return Results.BadRequest(new { error = usernameError });
+            if (usernameError is not null) return ApiErrors.BadRequest("invalid_username", usernameError, new { reason = usernameError });
             if (body.QuotaBytes is < 0) return ApiErrors.BadRequest("invalid_value", "quotaBytes must be 0 (unlimited) or more.", new { field = "quotaBytes" });
             var displayName = string.IsNullOrWhiteSpace(body.DisplayName) ? username : body.DisplayName.Trim();
             if (displayName.Length > 100) return ApiErrors.BadRequest("max_length", "Display name must be 100 characters or fewer.", new { field = "displayName", max = 100 });

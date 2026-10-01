@@ -71,7 +71,7 @@ public static class EventsApi
             }
             catch (ArgumentException ex)
             {
-                return Results.BadRequest(new { error = ex.Message });
+                return ApiErrors.BadRequest("invalid_value", ex.Message, new { reason = ex.Message });
             }
         })
         .WithName("CreateEvent")
@@ -100,7 +100,7 @@ public static class EventsApi
             }
             catch (ArgumentException ex)
             {
-                return Results.BadRequest(new { error = ex.Message });
+                return ApiErrors.BadRequest("invalid_value", ex.Message, new { reason = ex.Message });
             }
         })
         .WithName("UpdateEvent")

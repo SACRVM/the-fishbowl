@@ -60,7 +60,7 @@ public static class SpacesApi
             }
             catch (ArgumentException ex)
             {
-                return Results.BadRequest(new { error = ex.Message });
+                return ApiErrors.BadRequest("invalid_value", ex.Message, new { reason = ex.Message });
             }
         })
         .WithName("CreateSpace")
@@ -289,7 +289,7 @@ public static class SpacesApi
             }
             catch (ArgumentException ex)
             {
-                return Results.BadRequest(new { error = ex.Message });
+                return ApiErrors.BadRequest("invalid_value", ex.Message, new { reason = ex.Message });
             }
         })
         .WithName("UpsertSpaceTagColor")
@@ -311,7 +311,7 @@ public static class SpacesApi
             }
             catch (ArgumentException ex)
             {
-                return Results.BadRequest(new { error = ex.Message });
+                return ApiErrors.BadRequest("invalid_value", ex.Message, new { reason = ex.Message });
             }
         })
         .WithName("RenameSpaceTag")
@@ -333,7 +333,7 @@ public static class SpacesApi
             }
             catch (ArgumentException ex)
             {
-                return Results.BadRequest(new { error = ex.Message });
+                return ApiErrors.BadRequest("invalid_value", ex.Message, new { reason = ex.Message });
             }
         })
         .WithName("DeleteSpaceTag")
@@ -646,7 +646,7 @@ public static class SpacesApi
             }
             catch (ArgumentException ex)
             {
-                return Results.BadRequest(new { error = ex.Message });
+                return ApiErrors.BadRequest("invalid_value", ex.Message, new { reason = ex.Message });
             }
         })
         .WithName("CreateSpaceEvent")
@@ -673,7 +673,7 @@ public static class SpacesApi
             }
             catch (ArgumentException ex)
             {
-                return Results.BadRequest(new { error = ex.Message });
+                return ApiErrors.BadRequest("invalid_value", ex.Message, new { reason = ex.Message });
             }
         })
         .WithName("UpdateSpaceEvent")

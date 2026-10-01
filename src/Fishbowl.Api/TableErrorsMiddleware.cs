@@ -1,3 +1,4 @@
+using Fishbowl.Core.Apps;
 using Fishbowl.Core.Tables;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
@@ -22,6 +23,12 @@ public sealed class TableErrorsMiddleware
         catch (TableException ex) when (!context.Response.HasStarted)
         {
             await ApiErrors.Json(ex.Status, ex.Code, ex.Message, ex.Args).ExecuteAsync(context);
+        }
+        catch (QueryDslException ex) when (!context.Response.HasStarted)
+        {
+            // A filter or order the table can't take (unknown column, wrong type…).
+            await ApiErrors.Json(StatusCodes.Status400BadRequest, "query_invalid", ex.Message,
+                new { reason = ex.Message, rule = ex.Code, column = ex.Field }).ExecuteAsync(context);
         }
     }
 }

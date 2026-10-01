@@ -48,7 +48,7 @@ public class FindContactTool : IMcpTool
         var query = arguments.TryGetProperty("query", out var q) && q.ValueKind == JsonValueKind.String
             ? q.GetString() ?? "" : "";
         var limit = arguments.TryGetProperty("limit", out var l) && l.ValueKind == JsonValueKind.Number
-            ? Math.Clamp(l.GetInt32(), 1, 500) : 20;
+            ? Math.Clamp(McpArgs.Int(l, "limit"), 1, 500) : 20;
 
         var hits = await _contacts.SearchAsync(ctx, query, limit, ct);
         var rows = hits.Select(c => new
