@@ -121,6 +121,26 @@ public class ReminderDispatcherTests : IDisposable
         Assert.Single(_bot.Calls); // still only the first tick's call
     }
 
+    // A failed send isn't latched; the next tick (which looks back an hour)
+    // delivers it, once.
+    [Fact]
+    public async Task FailedSend_IsRetriedByALaterTick_Once()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        await SeedUserAsync(Alice, ct);
+        await SeedDiscordChannelAsync(Alice, ct);
+        var now = DateTime.UtcNow;
+        await SeedEventAsync(Alice, now.AddMinutes(30), reminderMinutes: 30, ct);
+        var dispatcher = _services.GetRequiredService<ReminderDispatcher>();
+
+        _bot.FailNext = true;
+        Assert.Equal(0, await dispatcher.RunTickAsync(now.AddMinutes(-1), now.AddMinutes(1), ct));
+        var later = now.AddMinutes(1);
+        Assert.Equal(1, await dispatcher.RunTickAsync(later - ReminderDispatcher.RetryLookback, later.AddMinutes(1), ct));
+        Assert.Equal(0, await dispatcher.RunTickAsync(later - ReminderDispatcher.RetryLookback, later.AddMinutes(2), ct));
+        Assert.Single(_bot.Calls);
+    }
+
     [Fact]
     public async Task NoChannel_DoesNotFire_AndDoesNotLatch()
     {
@@ -286,8 +306,12 @@ public class ReminderDispatcherTests : IDisposable
         public string Name { get; }
         public List<(string UserId, string Message)> Calls { get; } = new();
 
+        // The next send fails, like an offline bot.
+        public bool FailNext { get; set; }
+
         public Task SendAsync(string userId, string message, CancellationToken ct)
         {
+            if (FailNext) { FailNext = false; throw new Fishbowl.Core.Plugins.BotDeliveryException("offline"); }
             Calls.Add((userId, message));
             return Task.CompletedTask;
         }

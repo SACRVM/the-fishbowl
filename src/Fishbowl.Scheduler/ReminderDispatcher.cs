@@ -29,6 +29,11 @@ public class ReminderDispatcher : BackgroundService
 {
     private static readonly TimeSpan TickInterval = TimeSpan.FromMinutes(1);
     private static readonly TimeSpan CatchUpWindow = TimeSpan.FromHours(6);
+
+    // Every tick looks this far back too: a reminder whose send failed (bot
+    // offline, Discord down, a channel linked a little later) goes out on a
+    // later tick. The (event, occurrence) latch keeps it to once.
+    internal static readonly TimeSpan RetryLookback = TimeSpan.FromHours(1);
     private static readonly TimeSpan StartupDelay = TimeSpan.FromSeconds(30);
     private static readonly TimeSpan NotAncientWindow = TimeSpan.FromDays(1);
 
@@ -69,7 +74,8 @@ public class ReminderDispatcher : BackgroundService
             var ok = false;
             try
             {
-                var fired = await RunTickAsync(_lastTickUtc, tickStart, stoppingToken);
+                var from = _lastTickUtc < tickStart - RetryLookback ? _lastTickUtc : tickStart - RetryLookback;
+                var fired = await RunTickAsync(from, tickStart, stoppingToken);
                 if (fired > 0)
                     _logger.LogInformation("Reminder tick fired {Count} notifications", fired);
                 ok = true;
