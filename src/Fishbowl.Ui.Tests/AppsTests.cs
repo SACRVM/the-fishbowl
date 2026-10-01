@@ -97,9 +97,9 @@ public class AppsTests : IAsyncLifetime
         await CleanAsync(page);
         try
         {
-            // ── Install: the dashed tile, the URL, the review. ──
-            await page.GotoAsync(_fixture.BaseUrl + "/#/");
-            await page.Locator("#fb-install-tile").ClickAsync();
+            // ── Install: the Apps window, the URL, the review. ──
+            await WindowApp.OpenAsync(page, _fixture.BaseUrl, "apps");
+            await page.Locator("#fb-win-apps .wa-bar button[title='Install an app']").ClickAsync();
             var url = page.Locator("sac-dialog[title='Install an app']");
             await url.Locator("#fb-app-url").FillAsync(_app.AppUrl);
             await page.WaitForTimeoutAsync(400);   // the dialog's fade-in, for the picture
@@ -115,6 +115,7 @@ public class AppsTests : IAsyncLifetime
             await page.WaitForTimeoutAsync(400);   // the dialog's fade-in, for the picture
             await page.ScreenshotAsync(new() { Path = Path.Combine(Shots, "desk-3-review.png") });
             await review.Locator("button[data-action='ok']").ClickAsync();
+            await WindowApp.CloseAllAsync(page);   // the Apps window, back to the desktop
 
             // ── The tile, SACRVM Desktop's origin line. ──
             await Assertions.Expect(Tile(page)).ToBeVisibleAsync(new() { Timeout = 10000 });
@@ -168,12 +169,13 @@ public class AppsTests : IAsyncLifetime
             }
 
             // ── Settings → Apps lists it. ──
-            await page.GotoAsync(_fixture.BaseUrl + "/#/apps");
+            await WindowApp.OpenAsync(page, _fixture.BaseUrl, "apps");
             var row = page.Locator($"fb-apps-settings-view .fb-row[data-app='{FixtureAppServer.AppId}']");
             await Assertions.Expect(row).ToContainTextAsync("v2.0.0");
             await Assertions.Expect(row.Locator("sac-chip")).ToHaveAttributeAsync("label", "sandboxed");
-            await Assertions.Expect(page.Locator("#fb-view-toolbar button[title='Install an app']")).ToBeVisibleAsync();
+            await Assertions.Expect(page.Locator("#fb-win-apps .wa-bar button[title='Install an app']")).ToBeVisibleAsync();
             await page.ScreenshotAsync(new() { Path = Path.Combine(Shots, "desk-7-settings-apps.png") });
+            await WindowApp.CloseAllAsync(page);
 
             // ── Remove, keeping the data. ──
             await page.GotoAsync(_fixture.BaseUrl + "/#/");
@@ -237,17 +239,18 @@ public class AppsTests : IAsyncLifetime
             await page.GotoAsync(_fixture.BaseUrl + "/#/");
             await Assertions.Expect(page.Locator("fb-hub-view a.tile[data-key='builtin:notes']")).ToBeVisibleAsync();
             await Assertions.Expect(page.Locator("#fb-install-tile")).ToHaveCountAsync(0);
-            await page.GotoAsync(_fixture.BaseUrl + "/#/apps");
-            await Assertions.Expect(page.Locator("#fb-apps-policy")).ToContainTextAsync("turned it off");
-            await Assertions.Expect(page.Locator("#fb-view-toolbar button[title='Install an app']")).ToHaveCountAsync(0);
+            await WindowApp.OpenAsync(page, _fixture.BaseUrl, "apps");
+            await Assertions.Expect(page.Locator("#fb-apps-policy")).ToContainTextAsync("turned off on this Fishbowl");
+            await Assertions.Expect(page.Locator("#fb-win-apps .wa-bar button[title='Install an app']")).ToHaveCountAsync(0);
             await Assertions.Expect(page.Locator("fb-apps-settings-view .empty-state button")).ToHaveCountAsync(0);
             await page.APIRequest.DeleteAsync($"{_fixture.BaseUrl}/api/v1/admin/config/Apps:Install");
+            await WindowApp.CloseAllAsync(page);
 
             // A space: its owner installs, sandboxed only.
             var res = await page.APIRequest.PostAsync($"{_fixture.BaseUrl}/api/v1/spaces", new() { DataObject = new { name = "Apps " + Guid.NewGuid().ToString("N")[..6] } });
             slug = (await res.JsonAsync())!.Value.GetProperty("slug").GetString();
-            await page.GotoAsync($"{_fixture.BaseUrl}/#/space/{slug}/");
-            await page.Locator("#fb-install-tile").ClickAsync();
+            await WindowApp.OpenAsync(page, _fixture.BaseUrl, "apps", $"#/space/{slug}/");
+            await page.Locator("#fb-win-apps .wa-bar button[title='Install an app']").ClickAsync();
             var url = page.Locator("sac-dialog[title='Install an app']");
             await url.Locator("#fb-app-url").FillAsync(_app.AppUrl);
             await url.Locator("button[data-action='read']").ClickAsync();
@@ -276,17 +279,18 @@ public class AppsTests : IAsyncLifetime
             await InstallByApiAsync(page, new[] { "files" });
             await page.GotoAsync(_fixture.BaseUrl + "/#/");
             await Assertions.Expect(Tile(page)).ToBeVisibleAsync();
-            await page.Locator("#fb-install-tile").ScrollIntoViewIfNeededAsync();
             await page.ScreenshotAsync(new() { Path = Path.Combine(Shots, "phone-1-desktop.png") });
-            await page.Locator("#fb-install-tile").ClickAsync();
+            await WindowApp.OpenAsync(page, _fixture.BaseUrl, "apps");
+            await page.Locator("#fb-win-apps .wa-bar button[title='Install an app']").ClickAsync();
             var url = page.Locator("sac-dialog[title='Install an app']");
             await url.Locator("#fb-app-url").FillAsync(_app.AppUrl);
             await page.WaitForTimeoutAsync(400);   // the dialog's fade-in, for the picture
             await page.ScreenshotAsync(new() { Path = Path.Combine(Shots, "phone-2-install-url.png") });
             await url.Locator("button[data-action='cancel']").ClickAsync();
-            await page.GotoAsync(_fixture.BaseUrl + "/#/apps");
+            await WindowApp.OpenAsync(page, _fixture.BaseUrl, "apps");
             await Assertions.Expect(page.Locator($"fb-apps-settings-view .fb-row[data-app='{FixtureAppServer.AppId}']")).ToBeVisibleAsync();
             await page.ScreenshotAsync(new() { Path = Path.Combine(Shots, "phone-7-settings-apps.png") });
+            await WindowApp.CloseAllAsync(page);
             await page.GotoAsync(_fixture.BaseUrl + "/#/");
             await Tile(page).ClickAsync();
             await Assertions.Expect(page.FrameLocator("sac-window iframe").Locator("#net")).ToHaveTextAsync("net blocked", new() { Timeout = 15000 });

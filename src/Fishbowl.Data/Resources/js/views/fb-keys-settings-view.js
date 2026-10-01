@@ -1,5 +1,5 @@
 /**
- * <fb-keys-settings-view>  (mounted at #/keys)
+ * <fb-keys-settings-view>  (a window app, fb.windowApps "keys")
  *
  * Mint, list, and revoke API keys. The raw token returned from `fb.api.keys.create`
  * is displayed exactly once — after the user closes the reveal modal there is
@@ -348,4 +348,3 @@ function formatRelative(iso) {
 }
 
 customElements.define("fb-keys-settings-view", FbKeysSettingsView);
-sac.router.register("#/keys", "fb-keys-settings-view", { label: "API keys", icon: "key", palette: false });

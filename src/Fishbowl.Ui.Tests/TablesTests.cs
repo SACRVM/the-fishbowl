@@ -71,11 +71,10 @@ public class TablesTests
             Assert.Equal(90, (await row.JsonAsync())!.Value.GetProperty("seats").GetInt64());
 
             // Tables exist only in spaces: the burger lists them there, not in
-            // the personal workspace, and Secrets the other way round.
+            // the personal workspace.
             await Assertions.Expect(page.Locator($"sac-nav a[href='#/space/{slug}/tables']")).ToHaveCountAsync(1);
-            await Assertions.Expect(page.Locator("sac-nav a[href$='/secrets']")).ToHaveCountAsync(0);
             await page.GotoAsync($"{_fixture.BaseUrl}/#/");
-            await Assertions.Expect(page.Locator("sac-nav a[href='#/secrets']")).ToHaveCountAsync(1);
+            await Assertions.Expect(page.Locator("sac-nav a[href='#/notes']")).ToHaveCountAsync(1);
             await Assertions.Expect(page.Locator("sac-nav a[href$='/tables']")).ToHaveCountAsync(0);
 
             Assert.Empty(errors);

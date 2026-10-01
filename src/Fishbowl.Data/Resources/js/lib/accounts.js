@@ -400,17 +400,8 @@
         return false;
     }
 
-    let adminRegistered = false;
-    function registerAdminRoutes() {
-        if (adminRegistered) return;
-        adminRegistered = true;
-        sac.router.register("#/admin/users", "fb-users-admin-view", { label: "Users", icon: "users", palette: false, scope: "root" });
-        sac.router.register("#/admin/settings", "fb-system-settings-view", { label: "System settings", icon: "settings", palette: false, scope: "root" });
-        sac.router.register("#/admin/system", "fb-system-view", { label: "System Info", icon: "info", palette: false, scope: "root" });
-    }
-
     fb.accounts = {
-        formatBytes, quotaField, readQuota, approve, reject, block, unblock, registerAdminRoutes,
+        formatBytes, quotaField, readQuota, approve, reject, block, unblock,
         addLocalUser, resetPassword, setQuota, setAdmin, setDisabled, revealPassword, deleteUser,
     };
 })();

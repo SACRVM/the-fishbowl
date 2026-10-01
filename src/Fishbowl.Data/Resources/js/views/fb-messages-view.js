@@ -1,5 +1,5 @@
 /**
- * Messages (#/messages): the system inbox.
+ * Messages (a window app, fb.windowApps "messages"): the system inbox.
  *
  * What the system tells you — not chat. Today: "someone wants to join"
  * (admins, with Approve / Reject / Block right in the row) and "your
@@ -131,7 +131,8 @@ class FbMessagesView extends HTMLElement {
             text.textContent = fb.t("fb.messages.quota", "Your storage is almost full: {used} of {quota}.", { used: gb(d.usedBytes), quota: gb(d.quotaBytes) });
             meta.textContent = when;
             const link = document.createElement("a");
-            link.href = "#/data";   // personal: the quota is the user's own
+            link.href = "#";   // the quota is the user's own: the Your data window
+            link.addEventListener("click", (e) => { e.preventDefault(); fb.yourData.open(); });
             link.textContent = fb.t("fb.messages.see-data", "See your data");
             link.className = "msg-link";
             body.appendChild(link);
@@ -178,4 +179,3 @@ class FbMessagesView extends HTMLElement {
 }
 
 customElements.define("fb-messages-view", FbMessagesView);
-sac.router.register("#/messages", "fb-messages-view", { label: "Messages", icon: "mail", palette: false });

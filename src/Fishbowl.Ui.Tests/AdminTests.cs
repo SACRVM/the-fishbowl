@@ -8,7 +8,7 @@ using Microsoft.Playwright;
 namespace Fishbowl.Ui.Tests;
 
 // Admin phases A1 + A2 in the browser: the envelope badge, approving a join
-// request right from #/messages, the Users view with its per-account menu
+// request right from the Messages window, the Users view with its per-account menu
 // (add a local user, admin, disable), System settings — and that for anyone
 // who isn't an admin, neither admin view exists at all. The fixture's
 // injected user is an active admin; pending accounts are seeded straight
@@ -48,7 +48,7 @@ public class AdminTests
         var page = await context.NewPageAsync();
         try
         {
-            await page.GotoAsync(_fixture.BaseUrl + "/#/messages");
+            await WindowApp.OpenAsync(page, _fixture.BaseUrl, "messages");
 
             // The envelope carries the unread count.
             var envelope = page.Locator("#fb-messages-btn");
@@ -86,12 +86,12 @@ public class AdminTests
         var page = await context.NewPageAsync();
         try
         {
-            await page.GotoAsync(_fixture.BaseUrl + "/#/admin/users");
+            await WindowApp.OpenAsync(page, _fixture.BaseUrl, "users");
             var view = page.Locator("fb-users-admin-view");
             await Assertions.Expect(view).ToBeVisibleAsync(new() { Timeout = 5000 });
 
-            // The route exists for an admin, with its nav entry.
-            Assert.True(await page.EvaluateAsync<bool>("() => sac.router.routes().some(r => r.hash === '#/admin/users')"));
+            // A window app: no route, no burger entry.
+            Assert.False(await page.EvaluateAsync<bool>("() => sac.router.routes().some(r => r.hash === '#/admin/users')"));
 
             var pending = view.Locator("[data-section='pending'] .user-row").Filter(new() { HasText = "Grace Hopper" });
             await Assertions.Expect(pending).ToHaveCountAsync(1, new() { Timeout = 5000 });
@@ -106,11 +106,12 @@ public class AdminTests
             // In a space the page does not exist.
             var slug = await page.EvaluateAsync<string>(
                 "async () => (await fb.api.spaces.create({ name: 'Admin elsewhere ' + Math.random().toString(36).slice(2, 7) })).slug");
-            // The page exists only in Personal (route scope "root"): in a
-            // space its link lands on the space's desktop.
-            await page.GotoAsync($"{_fixture.BaseUrl}/#/space/{slug}/admin/users");
-            await Assertions.Expect(page.Locator("fb-hub-view")).ToBeVisibleAsync(new() { Timeout = 5000 });
-            await Assertions.Expect(view).ToHaveCountAsync(0);
+            // Personal only: switching to a space closes the window, and the
+            // space's desktop has no Users tile.
+            await page.GotoAsync($"{_fixture.BaseUrl}/#/space/{slug}/");
+            await Assertions.Expect(page.Locator("fb-hub-view a.tile[data-key='builtin:notes']")).ToBeVisibleAsync(new() { Timeout = 5000 });
+            await Assertions.Expect(page.Locator("fb-hub-view a.tile[data-key='builtin:users']")).ToHaveCountAsync(0);
+            await Assertions.Expect(page.Locator("#fb-win-users[open]")).ToHaveCountAsync(0);
             await page.EvaluateAsync("async (s) => fb.api.spaces.delete(s)", slug);
         }
         finally
@@ -129,18 +130,18 @@ public class AdminTests
         var page = await context.NewPageAsync();
         try
         {
-            await page.GotoAsync(_fixture.BaseUrl + "/#/admin/users");
+            await page.GotoAsync(_fixture.BaseUrl + "/#/");
             await Assertions.Expect(page.Locator("#fb-account")).ToBeVisibleAsync(new() { Timeout = 5000 });
+            await Assertions.Expect(page.Locator("fb-hub-view a.tile[data-key='builtin:notes']")).ToBeVisibleAsync(new() { Timeout = 5000 });
+            await Assertions.Expect(page.Locator("fb-hub-view a.tile[data-key='builtin:users']")).ToHaveCountAsync(0);
             // Messages are everyone's; the admin view is nobody else's.
             await Assertions.Expect(page.Locator("#fb-messages-btn")).ToBeVisibleAsync();
             Assert.False(await page.EvaluateAsync<bool>("() => sac.router.routes().some(r => r.hash === '#/admin/users')"));
-            Assert.False(await page.EvaluateAsync<bool>("() => sac.router.routes().some(r => r.hash === '#/admin/settings')"));
-            Assert.False(await page.EvaluateAsync<bool>("() => sac.router.routes().some(r => r.hash === '#/admin/system')"));
+            await Assertions.Expect(page.Locator("fb-hub-view a.tile[data-key='builtin:system']")).ToHaveCountAsync(0);
             await Assertions.Expect(page.Locator("fb-hub-view a.tile[href*='admin']")).ToHaveCountAsync(0);
             await Assertions.Expect(page.Locator("fb-users-admin-view")).ToHaveCountAsync(0);
             await Assertions.Expect(page.Locator("fb-hub-view")).ToBeVisibleAsync();
-            await page.GotoAsync(_fixture.BaseUrl + "/#/admin/settings");
-            await Assertions.Expect(page.Locator("fb-system-settings-view")).ToHaveCountAsync(0);
+            Assert.False(await page.EvaluateAsync<bool>("() => !!window.fb?.desktop && fb.desktop.builtins().then(b => b.some(a => a.key === 'builtin:system'))"));
         }
         finally
         {
@@ -167,7 +168,7 @@ public class AdminTests
         var page = await context.NewPageAsync();
         try
         {
-            await page.GotoAsync(_fixture.BaseUrl + "/#/admin/users");
+            await WindowApp.OpenAsync(page, _fixture.BaseUrl, "users");
             await page.GetByRole(AriaRole.Button, new() { Name = "Add local user" }).ClickAsync(new() { Timeout = 5000 });
             var add = page.Locator("sac-dialog[title='Add a local user']");
             await add.Locator("#fb-add-username").FillAsync(username);
@@ -211,7 +212,7 @@ public class AdminTests
         var page = await context.NewPageAsync();
         try
         {
-            await page.GotoAsync(_fixture.BaseUrl + "/#/admin/users");
+            await WindowApp.OpenAsync(page, _fixture.BaseUrl, "users");
             var row = Row(page, name);
             await Assertions.Expect(row).ToHaveCountAsync(1, new() { Timeout = 5000 });
 
@@ -275,7 +276,7 @@ public class AdminTests
         var page = await context.NewPageAsync();
         try
         {
-            await page.GotoAsync(_fixture.BaseUrl + "/#/admin/users");
+            await WindowApp.OpenAsync(page, _fixture.BaseUrl, "users");
 
             // Blocked: the dialog lists the space and only closes.
             var ownerRow = Row(page, ownerName);
@@ -330,16 +331,16 @@ public class AdminTests
             var page = await context.NewPageAsync();
             try
             {
-                await page.GotoAsync(_fixture.BaseUrl + "/#/admin/system");
-                var view = page.Locator("fb-system-view");
+                // The desktop tile opens the System window.
+                await page.GotoAsync(_fixture.BaseUrl + "/#/");
+                await page.Locator("fb-hub-view a.tile[data-key='builtin:system']").ClickAsync(new() { Timeout = 5000 });
+                var view = page.Locator("#fb-win-system fb-system-view");
+                await view.Locator("sac-tab[name='info']").ClickAsync();
                 await Assertions.Expect(view.Locator(".fb-row[data-key='version'] .fb-row-meta")).Not.ToBeEmptyAsync(new() { Timeout = 5000 });
                 await Assertions.Expect(view.Locator(".fb-row[data-key='users'] .fb-row-meta")).ToContainTextAsync("account");
                 await Assertions.Expect(view.Locator(".fb-row[data-key='archived-users']")).ToBeVisibleAsync();
                 await Assertions.Expect(view.Locator(".fb-row[data-key='embedding'] .fb-row-meta")).Not.ToBeEmptyAsync();
                 await page.ScreenshotAsync(new PageScreenshotOptions { Path = Path.Combine(shot, $"{tag}-system.png"), FullPage = true });
-                // The desktop has its tile, for admins.
-                await page.GotoAsync(_fixture.BaseUrl + "/#/");
-                await Assertions.Expect(page.Locator("fb-hub-view a.tile[href='#/admin/system']")).ToBeVisibleAsync(new() { Timeout = 5000 });
             }
             finally
             {
@@ -357,11 +358,20 @@ public class AdminTests
         var page = await context.NewPageAsync();
         try
         {
-            await page.GotoAsync(_fixture.BaseUrl + "/#/admin/settings");
-            var view = page.Locator("fb-system-settings-view");
+            // The System window: Info first, then one tab per settings
+            // group — all in one row; the last tab is remembered.
+            await page.GotoAsync(_fixture.BaseUrl + "/#/");
+            await page.EvaluateAsync("() => fb.systemApp.open('info')");
+            var view = page.Locator("#fb-win-system fb-system-view");
+            await Assertions.Expect(view.Locator(".fb-row[data-key='version']")).ToBeVisibleAsync(new() { Timeout = 5000 });
+            var first = (await view.Locator("sac-tab").First.BoundingBoxAsync())!;
+            var last = (await view.Locator("sac-tab").Last.BoundingBoxAsync())!;
+            Assert.True(Math.Abs(first.Y - last.Y) < 2, "every tab in one row");
+            await view.Locator("sac-tab[name='digest']").ClickAsync();
             var hour = view.Locator(".cfg-row[data-key='Digest:Hour']");
             await Assertions.Expect(hour).ToBeVisibleAsync(new() { Timeout = 5000 });
-            await Assertions.Expect(view.Locator("[data-section='Daily digest']")).ToContainTextAsync("Digest hour");
+            await Assertions.Expect(view.Locator("[data-section='digest']")).ToContainTextAsync("Digest hour");
+            await Assertions.Expect(view.Locator(".fb-row[data-key='version']")).ToBeHiddenAsync();
 
             // A bad value is refused under its row; a good one saves.
             await hour.Locator("input").FillAsync("30");
@@ -376,6 +386,7 @@ public class AdminTests
             await Assertions.Expect(signUp).ToHaveValueAsync(new System.Text.RegularExpressions.Regex("approval|open|closed"));
 
             // The secret: set it, then it's only ever "Set".
+            await view.Locator("sac-tab[name='integrations']").ClickAsync();
             var token = view.Locator(".cfg-row[data-key='Discord:BotToken']");
             await token.GetByRole(AriaRole.Button, new() { NameRegex = new System.Text.RegularExpressions.Regex("^(Set|Replace)$") }).ClickAsync();
             await token.Locator("input[type='password']").FillAsync(Token);
@@ -384,19 +395,19 @@ public class AdminTests
             await Assertions.Expect(view.Locator(".restart-note")).ToBeVisibleAsync();
 
             await page.ReloadAsync();
+            await page.EvaluateAsync("() => fb.systemApp.open()");
+            await Assertions.Expect(view.Locator("sac-tab[name='integrations'][active]")).ToHaveCountAsync(1, new() { Timeout = 5000 });
             await Assertions.Expect(view.Locator(".cfg-row[data-key='Digest:Hour'] input")).ToHaveValueAsync("9", new() { Timeout = 5000 });
             Assert.DoesNotContain(Token, await page.ContentAsync());
             Assert.DoesNotContain("abcdefghijklmnop", await view.InnerTextAsync());
             await page.ScreenshotAsync(new PageScreenshotOptions { Path = Path.Combine(Path.GetTempPath(), "fishbowl_ui_system_settings.png"), FullPage = true });
 
-            // In a space the page does not exist.
+            // In a space there is no System tile.
             var slug = await page.EvaluateAsync<string>(
                 "async () => (await fb.api.spaces.create({ name: 'Settings elsewhere ' + Math.random().toString(36).slice(2, 7) })).slug");
-            // The page exists only in Personal (route scope "root"): in a
-            // space its link lands on the space's desktop.
-            await page.GotoAsync($"{_fixture.BaseUrl}/#/space/{slug}/admin/settings");
-            await Assertions.Expect(page.Locator("fb-hub-view")).ToBeVisibleAsync(new() { Timeout = 5000 });
-            await Assertions.Expect(view).ToHaveCountAsync(0);
+            await page.GotoAsync($"{_fixture.BaseUrl}/#/space/{slug}/");
+            await Assertions.Expect(page.Locator("fb-hub-view a.tile[data-key='builtin:notes']")).ToBeVisibleAsync(new() { Timeout = 5000 });
+            await Assertions.Expect(page.Locator("fb-hub-view a.tile[data-key='builtin:system']")).ToHaveCountAsync(0);
             await page.EvaluateAsync("async (s) => fb.api.spaces.delete(s)", slug);
         }
         finally

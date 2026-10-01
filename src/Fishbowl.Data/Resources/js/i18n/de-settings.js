@@ -190,7 +190,6 @@ window.sac?.i18n?.add?.("de", {
 
     // --- Your data -------------------------------------------------------------
     "fb.data.title": "Deine Daten",
-    "fb.data.subtitle": "Lade alles aus diesem Arbeitsbereich herunter — es gehört dir. Jeder Download ist eine ZIP, die du überall öffnen kannst; die Datenbank ist eine normale SQLite-Datei.",
     "fb.data.export": "Export",
     "fb.data.owner-only": "Nur der Besitzer des Space kann ihn exportieren.",
     "fb.data.unavailable": "Der Export ist gerade nicht erreichbar.",
@@ -235,9 +234,9 @@ window.sac?.i18n?.add?.("de", {
     "fb.apps.page-server-n": "{n} Server",
     "fb.apps.page-nothing": "Nichts außer ihrem eigenen Rahmen",
     "fb.apps.page-policy-owner": "Dir gehört dieser Space: Du installierst seine Apps, nur abgeschirmt. Alle Mitglieder sehen und öffnen sie.",
-    "fb.apps.page-policy-off": "Dein Admin hat das Installieren von Apps abgeschaltet.",
+    "fb.apps.page-policy-off": "Das Installieren von Apps ist in diesem Fishbowl abgeschaltet (System → Apps).",
     "fb.apps.page-policy-member": "Der Besitzer des Space installiert seine Apps; du siehst und öffnest sie.",
-    "fb.apps.page-policy-admins": "Dein Admin lässt nur Admins Apps installieren oder hat es abgeschaltet.",
+    "fb.apps.page-policy-admins": "In diesem Fishbowl dürfen nur Global-Admins Apps installieren.",
     "fb.apps.page-policy-trust": "Du kannst Apps abgeschirmt installieren oder, bei deinen eigenen Apps, vertraut.",
     "fb.apps.page-policy-sandboxed": "Du kannst abgeschirmte Apps installieren. Vertraute Apps sind Admins vorbehalten.",
 
@@ -337,10 +336,7 @@ window.sac?.i18n?.add?.("de", {
     "fb.admin.delete-failed": "Das Konto konnte nicht gelöscht werden.",
 
     // --- Admin: System settings -------------------------------------------------
-    "fb.admin.settings-title": "Systemeinstellungen",
-    "fb.admin.settings-subtitle": "Wie dieses Fishbowl läuft, für alle darauf. Jede Einstellung speichert für sich.",
     "fb.admin.restart-note": "Manche gespeicherten Änderungen wirken erst nach dem nächsten Neustart von Fishbowl.",
-    "fb.admin.settings-personal-only": "Systemeinstellungen gelten für das ganze Fishbowl — öffne sie aus deinem persönlichen Arbeitsbereich.",
     "fb.admin.settings-unavailable": "Die Einstellungen lassen sich gerade nicht laden.",
     "fb.admin.cfg-save-failed": "Die Einstellung konnte nicht gespeichert werden.",
     "fb.admin.cfg-reset-failed": "Die Einstellung konnte nicht zurückgesetzt werden.",
@@ -421,9 +417,8 @@ window.sac?.i18n?.add?.("de", {
     "fb.admin.cfg-choice.false": "nein",
 
     // --- Admin: System ---------------------------------------------------------
-    "fb.admin.system-title": "Systeminfo",
-    "fb.admin.system-subtitle": "Wie es diesem Fishbowl geht. Nur Größen und Zeiten — niemandes Notizen oder Dateien.",
-    "fb.admin.system-personal-only": "System wird für das ganze Fishbowl gezeigt, aus deinem persönlichen Arbeitsbereich.",
+    "fb.admin.system-title": "System",
+    "fb.admin.tab-info": "Info",
     "fb.admin.system-unavailable": "Die Systeminformationen lassen sich gerade nicht laden.",
     "fb.admin.last-checked": "Zuletzt geprüft {when}",
     "fb.admin.last-run": "Zuletzt gelaufen {when}",
@@ -446,7 +441,7 @@ window.sac?.i18n?.add?.("de", {
     "fb.admin.archives": "Archive",
     "fb.admin.deleted-spaces": "Gelöschte Spaces",
     "fb.admin.deleted-accounts": "Gelöschte Konten",
-    "fb.admin.archives-kept": "Archive werden {days} aufbewahrt, dann entfernt (Archive:RetentionDays in den Systemeinstellungen).",
+    "fb.admin.archives-kept": "Archive werden {days} aufbewahrt, dann entfernt (Archive:RetentionDays unter Export & Archiv).",
     "fb.admin.archives-forever": "Archive bleiben, bis jemand sie löscht (Archive:RetentionDays ist 0).",
     "fb.admin.count-account-1": "{n} Konto",
     "fb.admin.count-account-n": "{n} Konten",

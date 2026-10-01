@@ -507,6 +507,14 @@
                 this._loadUsage(pane);
             }
             pane.section.toggleAttribute("data-space", workspace !== "personal");
+            // A pane shows its own workspace's colours — the right one can be
+            // another workspace than the active one (its header line, marks).
+            const col = pane.section.closest(".fv-col") || pane.section;
+            const tint = fb.accents?.forWorkspace?.(workspace);
+            if (tint) {
+                col.style.setProperty("--accent", tint.accent);
+                col.style.setProperty("--accent-warm", tint.warm);
+            }
             pane.drop.toggleAttribute("disabled", !this._writable(pane));
             if (path && pane.browser.path !== path) pane.browser.path = path;
             this._paintMenus();

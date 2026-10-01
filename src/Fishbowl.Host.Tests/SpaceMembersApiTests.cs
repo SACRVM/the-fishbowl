@@ -166,7 +166,7 @@ public class SpaceMembersApiTests : IClassFixture<WebApplicationFactory<Program>
         Assert.Empty((await Json(await As(Owner).GetAsync($"/api/v1/spaces/{space.Slug}/invites", Ct))).EnumerateArray());
 
         var again = await As(Member).GetAsync(path, Ct);
-        Assert.Equal("/?invite=invite-used#/spaces", again.Headers.Location!.OriginalString);
+        Assert.Equal("/?invite=invite-used#/", again.Headers.Location!.OriginalString);
         Assert.Null(await new SpaceRepository(_db).GetMembershipAsync(space.Id, Newbie + "x", Ct));
     }
 

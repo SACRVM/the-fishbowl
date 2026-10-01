@@ -15,15 +15,18 @@
  * workspace — starts small, and they come after those three, so they share
  * medium cells four at a time (the kit's .tile-pack).
  *
+ * Two kinds of app: pages (Notes, Todos, Calendar, Files, Tables — a route,
+ * in the burger) and window apps (`open`: Messages, Trash, Apps, Spaces,
+ * API keys, Secrets, Users, System — fb.windowApps, no route).
+ *
  * Palette groups (sac.commands). Routes still register with palette: false
  * — not because the palette would leave a space (it scopes route hashes
- * since kit 2.18) but because Apps and Go below already list them with the
+ * since kit 2.18) but because Apps already lists every app with the
  * workspace's rules: hidden tiles, admin apps only in the personal
- * workspace, Secrets never in a space. A "Views" group would repeat them
- * and offer pages that don't work where you are.
- *   Apps      every visible tile, in desktop order
+ * workspace, Secrets never in a space.
+ *   Apps      every visible tile, in desktop order (a window app opens)
  *   Create    new note / todo / event — fb.desktop.go() into the view
- *   Go        the settings pages
+ *   Go        the desktop, and the Your data window
  *   Workspace Personal and every space
  *   Notes     full-text search in the active workspace's notes (a
  *             sac.commands source over the hybrid search), title + the
@@ -36,19 +39,19 @@
         { key: "builtin:calendar", hash: "#/calendar",    name: "Calendar", icon: "calendar", desc: "Events and reminders, yours.", size: "medium" },
         { key: "builtin:files",    hash: "#/files",       name: "Files",    icon: "folder",   desc: "Real files, two panes, any workspace." },
         { key: "builtin:tables",   hash: "#/tables",      name: "Tables",   icon: "grid",     desc: "This space's own tables, like a spreadsheet.", space: true },
-        { key: "builtin:messages", hash: "#/messages",    name: "Messages", icon: "mail",     desc: "What Fishbowl has to tell you." },
-        { key: "builtin:trash",    hash: "#/trash",       name: "Trash",    icon: "trash",    desc: "Deleted things, back with one click." },
-        { key: "builtin:users",    hash: "#/admin/users", name: "Users",    icon: "users",    desc: "Approve and manage accounts.", admin: true, personal: true },
-        { key: "builtin:settings", hash: "#/admin/settings", name: "System settings", icon: "settings", desc: "How this Fishbowl runs.", admin: true, personal: true },
-        { key: "builtin:system",   hash: "#/admin/system", name: "System Info", icon: "info", desc: "Version, data sizes, archives.", admin: true, personal: true },
+        // Window apps (fb.windowApps): `open`, no address.
+        { key: "builtin:messages", open: () => fb.windowApps.open("messages"), name: "Messages", icon: "mail",  desc: "What Fishbowl has to tell you." },
+        { key: "builtin:trash",    open: () => fb.windowApps.open("trash"),    name: "Trash",    icon: "trash", desc: "Deleted things, back with one click." },
+        { key: "builtin:apps",     open: () => fb.windowApps.open("apps"),     name: "Apps",     icon: "cube",  desc: "The apps installed on this desktop." },
+        { key: "builtin:spaces",   open: () => fb.windowApps.open("spaces"),   name: "Spaces",   icon: "layers", desc: "Shared workspaces and who is in them.", personal: true },
+        { key: "builtin:keys",     open: () => fb.windowApps.open("keys"),     name: "API keys", icon: "key",   desc: "Tokens for agents and scripts.", personal: true },
+        { key: "builtin:secrets",  open: () => fb.windowApps.open("secrets"),  name: "Secrets",  icon: "lock",  desc: "The ways in to your secret vault.", personal: true },
+        { key: "builtin:users",    open: () => fb.windowApps.open("users"),    name: "Users",    icon: "users", desc: "Approve and manage accounts.", admin: true, personal: true },
+        { key: "builtin:system",   open: () => fb.windowApps.open("system"),   name: "System",   icon: "settings", desc: "How this Fishbowl is doing and how it runs.", admin: true, personal: true },
     ];
 
     const SETTINGS = [
         { hash: "#/",        label: "Desktop",  icon: "home" },
-        { hash: "#/spaces",  label: "Spaces",   icon: "users" },
-        { hash: "#/apps",    label: "Apps",     icon: "grid" },
-        { hash: "#/keys",    label: "API keys", icon: "key" },
-        { hash: "#/secrets", label: "Secrets",  icon: "lock", personal: true },
     ];
 
     const SIZES = ["small", "medium", "wide", "large"];
@@ -74,6 +77,7 @@
 
     /** Where an app lives from the active workspace. */
     function hrefOf(app) {
+        if (!app.hash) return null;   // a window app (`open`)
         return app.personal ? app.hash : sac.scope.hashFor(app.hash);
     }
 
@@ -171,10 +175,13 @@
 
         let entries = [];
         try { entries = (await load()).entries; } catch { entries = []; }
+        // The burger lists what the desktop shows (shell.js renders the
+        // window apps; the pages are the kit's own route list).
+        window.dispatchEvent(new CustomEvent("fb:desktop-entries", { detail: { entries: entries.filter((x) => !x.hidden) } }));
         for (const e of entries.filter((x) => !x.hidden)) {
             register(`app:${e.key}`, {
                 label: e.name, icon: e.icon, group: fb.t("fb.palette.apps", "Apps"),
-                run: e.app ? () => fb.desktopApps.open(e.app.id) : () => sac.router.navigate(e.href),
+                run: e.app ? () => fb.desktopApps.open(e.app.id) : e.open ? () => e.open() : () => sac.router.navigate(e.href),
             });
         }
         // A space Reader can't create anything there.
@@ -194,6 +201,10 @@
                 run: () => sac.router.navigate(sac.scope.hashFor(s.hash)),
             });
         }
+        register("go:your-data", {
+            label: fb.t("fb.shell.your-data", "Your data…"), icon: "download", group: fb.t("fb.palette.go", "Go"),
+            run: () => fb.yourData.open(),
+        });
         if (space) {
             register("ws:personal", {
                 label: fb.t("fb.palette.switch-personal", "Switch to Personal"), icon: "user", group: fb.t("fb.palette.workspace", "Workspace"),

@@ -1,5 +1,5 @@
 /**
- * <fb-trash-view>  (mounted at #/trash, both workspaces)
+ * <fb-trash-view>  (a window app, fb.windowApps "trash", both workspaces)
  *
  * One trash for everything (space-apps spec, decision 13): the workspace's
  * deleted notes, todos, events and contacts (fb.api.trash) and its deleted
@@ -60,7 +60,7 @@ class FbTrashView extends HTMLElement {
 
     render() {
         const list = this.querySelector("#trash-list");
-        fb.toolbar.set(this.writable && this.items.length ? [{
+        fb.windowApps.toolbar(this, this.writable && this.items.length ? [{
             id: "fb-trash-empty", icon: "trash", title: fb.t("fb.trash.empty-action", "Empty trash"), onClick: () => this.emptyAll(),
         }] : []);
         if (!this.items.length) {
@@ -183,4 +183,3 @@ class FbTrashView extends HTMLElement {
 }
 
 customElements.define("fb-trash-view", FbTrashView);
-sac.router.register("#/trash", "fb-trash-view", { label: "Trash", icon: "trash", palette: false });

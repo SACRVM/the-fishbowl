@@ -146,6 +146,7 @@
             canInstall: !!stored?.canInstall,
             canTrust: !!stored?.canTrust,
             canArrange: !!stored?.canArrange,
+            installPolicy: stored?.installPolicy || "everyone",
         };
         register();
         if (state.canArrange) checkUpdates();

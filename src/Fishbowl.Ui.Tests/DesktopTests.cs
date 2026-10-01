@@ -105,8 +105,14 @@ public class DesktopTests
         try
         {
             await page.GotoAsync(_fixture.BaseUrl + "/#/");
-            foreach (var hash in new[] { "#/notes", "#/todos", "#/calendar", "#/files", "#/messages", "#/admin/users" })
+            foreach (var hash in new[] { "#/notes", "#/todos", "#/calendar", "#/files" })
                 await Assertions.Expect(page.Locator($"fb-hub-view a.tile[href='{hash}']")).ToBeVisibleAsync(new() { Timeout = 5000 });
+            // The window apps: a tile each, no address.
+            foreach (var key in new[] { "messages", "trash", "apps", "spaces", "keys", "secrets", "users", "system" })
+                await Assertions.Expect(page.Locator($"fb-hub-view a.tile.tile-window[data-key='builtin:{key}']")).ToBeVisibleAsync();
+            await page.Locator("fb-hub-view a.tile[data-key='builtin:keys']").ClickAsync();
+            await Assertions.Expect(page.Locator("#fb-win-keys fb-keys-settings-view")).ToBeVisibleAsync(new() { Timeout = 5000 });
+            Assert.EndsWith("#/", page.Url);
             await page.ScreenshotAsync(new PageScreenshotOptions { Path = Path.Combine(Path.GetTempPath(), "fishbowl_ui_desktop.png") });
 
             // In a space: the space's own hrefs, no admin tile.

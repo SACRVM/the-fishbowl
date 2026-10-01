@@ -49,6 +49,13 @@
         return s?.type === "scoped" ? `/spaces/${encodeURIComponent(s.slug)}${path}` : path;
     }
 
+    // A path in a named workspace ("personal" | "space:<slug>"), else ctx().
+    function wsPath(ws, path) {
+        if (ws === "personal") return path;
+        if (typeof ws === "string" && ws.startsWith("space:")) return `/spaces/${encodeURIComponent(ws.slice(6))}${path}`;
+        return ctx(path);
+    }
+
     function messagesChanged(result) {
         window.dispatchEvent(new CustomEvent("fb:messages-changed"));
         return result;
@@ -438,9 +445,11 @@
         // "all". `info()` gives the sizes (and whether "all" is offered);
         // `url(kind)` is a same-origin link the browser downloads directly —
         // never buffered into a Blob. Cookie-only; a space is owner-only.
+        // `ws` names the workspace like fb.api.files.in(): "personal" or
+        // "space:<slug>"; without it the active one.
         export: {
-            info: () => request(ctx("/export/info")),
-            url:  (kind) => base + ctx(`/export/${encodeURIComponent(kind)}`),
+            info: (ws) => request(wsPath(ws, "/export/info")),
+            url:  (kind, ws) => base + wsPath(ws, `/export/${encodeURIComponent(kind)}`),
         },
         // Archived spaces — what "Archive before deleting" left behind.
         archive: {

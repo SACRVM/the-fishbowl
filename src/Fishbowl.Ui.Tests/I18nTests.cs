@@ -68,8 +68,8 @@ public class I18nTests
             await page.Keyboard.PressAsync("Escape");
 
             // The burger: route labels, Home is "Start".
-            await page.GotoAsync(_fixture.BaseUrl + "/#/messages");
-            await Assertions.Expect(page.Locator("fb-messages-view h1")).ToHaveTextAsync("Nachrichten", new() { Timeout = 5000 });
+            await WindowApp.OpenAsync(page, _fixture.BaseUrl, "messages");
+            await Assertions.Expect(page.Locator("#fb-win-messages")).ToHaveAttributeAsync("title", "Nachrichten", new() { Timeout = 5000 });
             var navText = await page.Locator("#fb-nav").EvaluateAsync<string>("n => n.shadowRoot.textContent");
             Assert.Contains("Notizen", navText);
             Assert.Contains("Kalender", navText);
@@ -77,7 +77,8 @@ public class I18nTests
 
             // A reload keeps it (the server's setting).
             await page.ReloadAsync();
-            await Assertions.Expect(page.Locator("fb-messages-view h1")).ToHaveTextAsync("Nachrichten", new() { Timeout = 5000 });
+            await WindowApp.OpenAsync(page, _fixture.BaseUrl, "messages");
+            await Assertions.Expect(page.Locator("#fb-win-messages")).ToHaveAttributeAsync("title", "Nachrichten", new() { Timeout = 5000 });
 
             // Another browser of the same user: German from the server, not
             // from this browser's localStorage.
@@ -177,10 +178,10 @@ public class I18nKeyTableTests
         "js/views/fb-spaces-settings-view.js",
         "js/views/fb-keys-settings-view.js",
         "js/views/fb-secrets-settings-view.js",
-        "js/views/fb-data-settings-view.js",
+        "js/lib/your-data.js",
         "js/views/fb-apps-settings-view.js",
         "js/views/fb-users-admin-view.js",
-        "js/views/fb-system-settings-view.js",
+        "js/lib/system-settings.js",
         "js/views/fb-system-view.js",
         "js/lib/vault.js",
     };
@@ -221,7 +222,7 @@ public class I18nKeyTableTests
             need.Add($"fb.admin.count-{n}-1");
             need.Add($"fb.admin.count-{n}-n");
         }
-        var view = File.ReadAllText(Path.Combine(root, "js", "views", "fb-system-settings-view.js"));
+        var view = File.ReadAllText(Path.Combine(root, "js", "lib", "system-settings.js"));
         var labels = Regex.Matches(view, "^\\s*\"([A-Za-z]+:[A-Za-z]+)\":\\s*\"", RegexOptions.Multiline).Select(m => m.Groups[1].Value).Distinct();
         need.AddRange(labels.Select(k => $"fb.admin.cfg.{k}"));
 
@@ -261,13 +262,13 @@ public class I18nKeyTableTests
             foreach (Match m in Regex.Matches(text, "data-t(?:-[a-z]+)?=\"(fb\\.[^\"$]+)\"")) used.Add(m.Groups[1].Value);
         }
         // Keys built at run time: the built-in apps, Go entries, routes.
-        foreach (var app in new[] { "notes", "todos", "calendar", "files", "messages", "users", "settings", "system" })
+        foreach (var app in new[] { "notes", "todos", "calendar", "files", "messages", "trash", "tables", "apps", "spaces", "keys", "secrets", "users", "system" })
         {
             used.Add($"fb.app.{app}.name");
             used.Add($"fb.app.{app}.desc");
         }
-        foreach (var go in new[] { "desktop", "spaces", "apps", "keys", "secrets" }) used.Add($"fb.go.{go}");
-        foreach (var route in new[] { "home", "notes", "todos", "calendar", "files", "messages", "spaces", "apps", "keys", "secrets", "data", "admin-users", "admin-settings", "admin-system" })
+        foreach (var go in new[] { "desktop" }) used.Add($"fb.go.{go}");
+        foreach (var route in new[] { "home", "notes", "todos", "calendar", "files", "tables" })
             used.Add($"fb.route.{route}");
         used.Add("fb.shell.lock-secrets");
         used.Add("fb.shell.unlock-secrets");

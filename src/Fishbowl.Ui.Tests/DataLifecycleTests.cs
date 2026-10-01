@@ -36,7 +36,7 @@ public class DataLifecycleTests
             await page.APIRequest.PostAsync($"{_fixture.BaseUrl}/api/v1/spaces/{slug}/notes",
                 new APIRequestContextOptions { DataObject = new { title = "survives the archive" } });
 
-            await page.GotoAsync(_fixture.BaseUrl + "/#/spaces");
+            await WindowApp.OpenAsync(page, _fixture.BaseUrl, "spaces");
             var row = page.Locator($"fb-spaces-settings-view #space-list .space-row[data-slug='{slug}']");
             await row.Locator(".delete-btn").ClickAsync();
 
@@ -98,10 +98,13 @@ public class DataLifecycleTests
                 });
             Assert.True(put.Ok);
 
-            await page.GotoAsync(_fixture.BaseUrl + "/#/data");
-            var view = page.Locator("fb-data-settings-view");
+            // "Your data…" in the account menu opens a window, not a page.
+            await page.GotoAsync(_fixture.BaseUrl + "/#/");
+            await page.Locator("#fb-account [slot='trigger']").ClickAsync();
+            await page.Locator("#fb-account button[data-action='your-data']").ClickAsync();
+            var view = page.Locator("#fb-your-data [data-workspace='personal']");
             await Assertions.Expect(view.Locator(".export-row")).ToHaveCountAsync(3, new() { Timeout = 10000 });
-            await Assertions.Expect(view.Locator(".storage")).ToContainTextAsync("You use");
+            await Assertions.Expect(view.Locator(".storage-text")).ToContainTextAsync("You use");
             await page.ScreenshotAsync(new PageScreenshotOptions { Path = Path.Combine(Path.GetTempPath(), "fishbowl_ui_your_data.png"), FullPage = true });
 
             var download = await page.RunAndWaitForDownloadAsync(() =>

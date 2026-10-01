@@ -59,7 +59,7 @@
                 case "longtext":
                     map.push({ col: { ...base, type: "longtext" }, ...same }); break;
                 case "integer":
-                    map.push({ col: { ...base, type: "number", decimals: 0 }, ...same }); break;
+                    map.push({ col: { ...base, type: "number", decimals: 0, step: 1 }, ...same }); break;
                 case "decimal":
                     map.push({ col: { ...base, type: "number" }, ...same }); break;
                 case "yesno":

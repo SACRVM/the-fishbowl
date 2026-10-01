@@ -361,7 +361,7 @@ public class VaultTests
         try
         {
             // ── Set up from the settings page, adding a passkey on the way. ──
-            await page.GotoAsync(baseUrl + "/#/secrets");
+            await WindowApp.OpenAsync(page, baseUrl, "secrets");
             await page.GetByRole(AriaRole.Button, new() { Name = "Set up secrets" }).ClickAsync();
             var setup = page.Locator("sac-dialog[title='Set up secrets']");
             await setup.WaitForAsync(new LocatorWaitForOptions { Timeout = 5000 });
@@ -382,6 +382,7 @@ public class VaultTests
 
             // ── Reload: locked; the passkey unlocks. ──
             await page.ReloadAsync();
+            await WindowApp.OpenAsync(page, baseUrl, "secrets");
             await Assertions.Expect(page.Locator("fb-secrets-settings-view .status-text")).ToContainTextAsync("Locked");
             await page.GetByRole(AriaRole.Button, new() { Name = "Unlock", Exact = true }).First.ClickAsync();
             var unlock = page.Locator("sac-dialog[title='Unlock secrets']");
@@ -475,7 +476,7 @@ public class VaultTests
         await ResetVaultAsync(api, baseUrl);
         try
         {
-            await page.GotoAsync(baseUrl + "/#/secrets");
+            await WindowApp.OpenAsync(page, baseUrl, "secrets");
             await page.GetByRole(AriaRole.Button, new() { Name = "Set up secrets" }).ClickAsync();
             var setup = page.Locator("sac-dialog[title='Set up secrets']");
             await setup.WaitForAsync(new LocatorWaitForOptions { Timeout = 5000 });
@@ -538,15 +539,16 @@ public class VaultTests
                 DataObject = new { name = "Secrets elsewhere " + Guid.NewGuid().ToString("N")[..6] },
             });
             var slug = (await space.JsonAsync())!.Value.GetProperty("slug").GetString()!;
-            await page.GotoAsync($"{baseUrl}/#/space/{slug}/secrets");
-            // Route scope "root": in a space the link lands on the desktop.
-            await Assertions.Expect(page.Locator("fb-hub-view")).ToBeVisibleAsync();
-            await Assertions.Expect(page.Locator("fb-secrets-settings-view")).ToHaveCountAsync(0);
+            await page.GotoAsync($"{baseUrl}/#/space/{slug}/");
+            // Personal only: a space closes the window and has no Secrets tile.
+            await Assertions.Expect(page.Locator("fb-hub-view a.tile[data-key='builtin:notes']")).ToBeVisibleAsync(new() { Timeout = 5000 });
+            await Assertions.Expect(page.Locator("fb-hub-view a.tile[data-key='builtin:secrets']")).ToHaveCountAsync(0);
+            await Assertions.Expect(page.Locator("#fb-win-secrets[open]")).ToHaveCountAsync(0);
 
             // ── No WebAuthn in the browser: a hint, never a dead button. ──
             var bare = await context.NewPageAsync();
             await bare.AddInitScriptAsync("delete window.PublicKeyCredential;");
-            await bare.GotoAsync(baseUrl + "/#/secrets");
+            await WindowApp.OpenAsync(bare, baseUrl, "secrets");
             await Assertions.Expect(bare.Locator("fb-secrets-settings-view")).ToContainTextAsync("Passkeys aren't available");
             await Assertions.Expect(bare.GetByRole(AriaRole.Button, new() { Name = "Add a passkey" })).ToHaveCountAsync(0);
         }

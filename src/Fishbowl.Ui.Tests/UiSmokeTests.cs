@@ -114,16 +114,16 @@ public class UiSmokeTests
     }
 
     [Theory]
-    [InlineData("#/keys", "fb-keys-settings-view")]
-    [InlineData("#/spaces", "fb-spaces-settings-view")]
-    public async Task SettingsView_LoadsOnKitComponents_Test(string hash, string view)
+    [InlineData("keys", "fb-keys-settings-view")]
+    [InlineData("spaces", "fb-spaces-settings-view")]
+    public async Task SettingsView_LoadsOnKitComponents_Test(string app, string view)
     {
         var context = await _fixture.Browser!.NewContextAsync(new BrowserNewContextOptions { IgnoreHTTPSErrors = true, BypassCSP = true });
         var page = await context.NewPageAsync();
         var errors = new List<string>();
         page.PageError += (_, e) => errors.Add(e);
 
-        await page.GotoAsync(_fixture.BaseUrl + "/" + hash);
+        await WindowApp.OpenAsync(page, _fixture.BaseUrl, app);
         await page.Locator(view).WaitForAsync(new LocatorWaitForOptions { Timeout = 5000 });
 
         // The status banner is the kit's now, and every element the view
@@ -532,10 +532,10 @@ public class UiSmokeTests
         await Assertions.Expect(pill).ToContainTextAsync("Personal");
         Assert.DoesNotContain("#/space/", page.Url);
 
-        // "Manage spaces…" goes to the spaces settings.
+        // "Manage spaces…" opens the Spaces window.
         await pill.ClickAsync();
         await page.Locator("#fb-context button[data-action='manage-spaces']").ClickAsync();
-        await page.WaitForURLAsync(u => u.EndsWith("#/spaces"), new PageWaitForURLOptions { Timeout = 3000 });
+        await Assertions.Expect(page.Locator("#fb-win-spaces fb-spaces-settings-view")).ToBeVisibleAsync(new() { Timeout = 3000 });
 
         await context.CloseAsync();
     }
@@ -569,7 +569,7 @@ public class UiSmokeTests
         var name = "Colour space " + Guid.NewGuid().ToString("N")[..6];
         var created = await page.APIRequest.PostAsync(_fixture.BaseUrl + "/api/v1/spaces", new APIRequestContextOptions { DataObject = new { name } });
         var slug = (await created.JsonAsync())!.Value.GetProperty("slug").GetString()!;
-        await page.GotoAsync(_fixture.BaseUrl + "/#/spaces");
+        await WindowApp.OpenAsync(page, _fixture.BaseUrl, "spaces");
         var row = page.Locator($".space-row[data-slug='{slug}']");
         // The row leads with the space's colour; clicking it opens the picker,
         // picking saves and closes.
@@ -599,7 +599,7 @@ public class UiSmokeTests
         var name = "Live space " + Guid.NewGuid().ToString("N")[..6];
 
         // Loaded first, so the switcher's initial list can't contain it.
-        await page.GotoAsync(_fixture.BaseUrl + "/#/spaces");
+        await WindowApp.OpenAsync(page, _fixture.BaseUrl, "spaces");
         await page.Locator("#name-input").FillAsync(name);
         await page.Locator("#create-btn").ClickAsync();
         var row = page.Locator(".space-row", new PageLocatorOptions { HasText = name });
@@ -624,7 +624,7 @@ public class UiSmokeTests
             DataObject = new { name = "space key", contextType = "space", contextId = slug, scopes = new[] { "read:notes" } },
         });
         Assert.True(key.Ok, $"key create failed: {key.Status}");
-        await page.GotoAsync(_fixture.BaseUrl + $"/#/space/{slug}/keys");
+        await WindowApp.OpenAsync(page, _fixture.BaseUrl, "keys", $"#/space/{slug}/");
         await Assertions.Expect(page.Locator("#key-context")).ToHaveValueAsync($"space::{slug}");
         var firstGroup = page.Locator("#key-list .key-group").First;
         await Assertions.Expect(firstGroup).ToHaveAttributeAsync("data-context", $"space:{slug}");
@@ -648,7 +648,7 @@ public class UiSmokeTests
         var created = await page.APIRequest.PostAsync(_fixture.BaseUrl + "/api/v1/spaces", new APIRequestContextOptions { DataObject = new { name } });
         var slug = (await created.JsonAsync())!.Value.GetProperty("slug").GetString()!;
 
-        await page.GotoAsync(_fixture.BaseUrl + "/#/spaces");
+        await WindowApp.OpenAsync(page, _fixture.BaseUrl, "spaces");
         await page.Locator(".space-row", new PageLocatorOptions { HasText = name }).Locator(".members-btn").ClickAsync();
         var win = page.Locator("#fb-space-members");
         var me = win.Locator(".fb-member-row");
@@ -680,7 +680,6 @@ public class UiSmokeTests
         await page.WaitForURLAsync(u => u.Contains($"#/space/{slug}/notes"), new PageWaitForURLOptions { Timeout = 5000 });
         // Spent: opening it again says so.
         await page.GotoAsync(second);
-        await page.WaitForURLAsync(u => u.Contains("#/spaces"), new PageWaitForURLOptions { Timeout = 5000 });
         await Assertions.Expect(page.Locator("#sac-toast-stack").GetByText("used already").First)
             .ToBeVisibleAsync(new() { Timeout = 5000 });
         // The withdrawn link doesn't work either.
@@ -711,7 +710,7 @@ public class UiSmokeTests
         Assert.True((await page.APIRequest.DeleteAsync(_fixture.BaseUrl + "/api/v1/files?path=" + Uri.EscapeDataString(file))).Ok);
 
         await page.GotoAsync(_fixture.BaseUrl + "/#/");
-        await page.Locator("a.tile[href$='#/trash']").ClickAsync();
+        await page.Locator("a.tile[data-key='builtin:trash']").ClickAsync();
         var noteRow = page.Locator(".fb-trash-row[data-kind='note']", new PageLocatorOptions { HasText = title });
         var fileRow = page.Locator(".fb-trash-row[data-kind='file']", new PageLocatorOptions { HasText = file });
         await Assertions.Expect(noteRow).ToHaveCountAsync(1);
@@ -775,7 +774,7 @@ public class UiSmokeTests
     {
         var context = await _fixture.Browser!.NewContextAsync(new BrowserNewContextOptions { IgnoreHTTPSErrors = true, BypassCSP = true });
         var page = await context.NewPageAsync();
-        await page.GotoAsync(_fixture.BaseUrl + "/#/keys");
+        await WindowApp.OpenAsync(page, _fixture.BaseUrl, "keys");
         await page.Locator("#key-name").FillAsync("reveal smoke");
         await page.Locator("#create-btn").ClickAsync();
 

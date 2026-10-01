@@ -98,22 +98,7 @@ class FbHubView extends HTMLElement {
                     width: 13rem;
                 }
 
-                /* SACRVM Desktop's install tile (.tile-add) and origin line
-                   (.tile-meta), desktop.css. */
-                fb-hub-view .tile-add {
-                    align-items: center;
-                    justify-content: center;
-                    gap: 0.6rem;
-                    background: transparent;
-                    border: 1px dashed var(--border-strong);
-                    color: var(--text-muted);
-                    font: inherit;
-                    font-weight: 600;
-                    font-size: 0.95rem;
-                    cursor: pointer;
-                }
-                fb-hub-view .tile-add > sac-icon { --icon-size: 32px; margin-bottom: 0; color: var(--text-muted); }
-                fb-hub-view .tile-add:hover { border-color: var(--accent); color: var(--text); }
+                /* SACRVM Desktop's origin line (.tile-meta), desktop.css. */
                 fb-hub-view .tile-meta {
                     color: var(--text-dim);
                     font-size: 0.75rem;
@@ -154,7 +139,6 @@ class FbHubView extends HTMLElement {
         if (!this.isConnected) return;
         this._entries = loaded.entries;
         this._canArrange = loaded.canArrange;
-        this._canInstall = loaded.canInstall;
         this._renderTiles();
     }
 
@@ -172,6 +156,14 @@ class FbHubView extends HTMLElement {
                 tile.addEventListener("click", (ev) => {
                     ev.preventDefault();
                     fb.desktopApps.open(e.app.id);
+                });
+            } else if (e.open) {
+                // A built-in window app (System): a window, not an address.
+                tile.href = "#";
+                tile.classList.add("tile-window");
+                tile.addEventListener("click", (ev) => {
+                    ev.preventDefault();
+                    e.open();
                 });
             } else {
                 tile.href = e.href;
@@ -205,7 +197,6 @@ class FbHubView extends HTMLElement {
             if (e.color) tile.style.setProperty("--accent", fb.accents.cssVar(e.color));
             return tile;
         });
-        if (this._canInstall) tiles.push(this._installTile());
         this._grid.replaceChildren(...this._packSmall(tiles));
         this._toolbar();
     }
@@ -225,23 +216,6 @@ class FbHubView extends HTMLElement {
             pack.appendChild(t);
         }
         return out;
-    }
-
-    /** SACRVM Desktop's dashed tile that closes the grid. */
-    _installTile() {
-        const add = document.createElement("button");
-        add.type = "button";
-        add.className = "tile tile-add";
-        add.id = "fb-install-tile";
-        const icon = document.createElement("sac-icon");
-        icon.setAttribute("name", "plus");
-        const label = document.createElement("span");
-        label.textContent = this._entries.some((e) => e.app)
-            ? fb.t("fb.desk.install", "Install app")
-            : fb.t("fb.desk.install-first", "Install your first app");
-        add.append(icon, label);
-        add.addEventListener("click", () => fb.desktopApps.install());
-        return add;
     }
 
     /** "Show hidden tiles" — only when there are some and you may arrange. */

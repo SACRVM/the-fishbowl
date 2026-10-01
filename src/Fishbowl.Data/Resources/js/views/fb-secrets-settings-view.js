@@ -1,5 +1,5 @@
 /**
- * Settings → Secrets (#/secrets): the ways in to the secret vault.
+ * Secrets (a window app, fb.windowApps "secrets"): the ways in to the secret vault.
  *
  * Lists the vault's key slots — passphrase, recovery key, passkeys — with
  * when each was added and last used, and manages them through fb.vault:
@@ -63,9 +63,7 @@ class FbSecretsSettingsView extends HTMLElement {
             mount.innerHTML = `
                 <div class="card">
                     <p>${fb.t("fb.secrets.space-none", "Secrets are personal for now — a space has no vault.")}</p>
-                    <div class="toolbar"><button type="button" class="btn" id="to-personal">${fb.t("fb.secrets.open-personal", "Open in Personal")}</button></div>
                 </div>`;
-            mount.querySelector("#to-personal").addEventListener("click", () => sac.router.navigate("#/secrets"));
             return;
         }
         if (!status.available) {
@@ -246,4 +244,3 @@ class FbSecretsSettingsView extends HTMLElement {
 }
 
 customElements.define("fb-secrets-settings-view", FbSecretsSettingsView);
-sac.router.register("#/secrets", "fb-secrets-settings-view", { label: "Secrets", icon: "lock", palette: false, scope: "root" });

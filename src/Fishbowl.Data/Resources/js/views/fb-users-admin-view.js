@@ -1,5 +1,5 @@
 /**
- * Users (#/admin/users): the admin's list of accounts. Registered only for
+ * Users (a window app, fb.windowApps "users"): the admin's list of accounts. Registered only for
  * admins (fb.accounts.registerAdminRoutes, called by shell.js once /me says
  * so) — for anyone else the route, its nav entry and its palette entry don't
  * exist.
@@ -77,13 +77,11 @@ class FbUsersAdminView extends HTMLElement {
         if (!mount) return;
 
         if (sac.scope.get().type === "scoped") {
-            fb.toolbar.set([]);
+            fb.windowApps.toolbar(this, []);
             mount.innerHTML = `
                 <div class="card">
                     <p>${fb.t("fb.admin.users-personal-only", "Users are managed for the whole Fishbowl, from your personal workspace.")}</p>
-                    <div class="toolbar"><button type="button" class="btn" id="to-personal">${fb.t("fb.admin.open-personal", "Open in Personal")}</button></div>
                 </div>`;
-            mount.querySelector("#to-personal").addEventListener("click", () => sac.router.navigate("#/admin/users"));
             return;
         }
 
@@ -95,10 +93,10 @@ class FbUsersAdminView extends HTMLElement {
             mount.innerHTML = `<div class="card"><p class="muted">${fb.t("fb.admin.users-unavailable", "The user list can't be loaded right now.")}</p></div>`;
             return;
         }
-        if (!this.isConnected) return; // navigated away while loading: the toolbar is another view's now
+        if (!this.isConnected) return; // closed while loading
         this._defaultQuota = data?.defaultQuotaBytes ?? null;
-        // The page's action sits in the nav toolbar, as every view's does.
-        fb.toolbar.set([{
+        // The window's own action.
+        fb.windowApps.toolbar(this, [{
             icon: "plus",
             title: fb.t("fb.admin.add-local", "Add local user"),
             onClick: async () => { if (await fb.accounts.addLocalUser(this._defaultQuota)) this.refresh(); },

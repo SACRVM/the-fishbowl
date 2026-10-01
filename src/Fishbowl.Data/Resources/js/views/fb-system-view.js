@@ -1,54 +1,138 @@
 /**
- * System (#/admin/system, admin spec § System, phase A3): the instance at a
- * glance — the running version, how much the data takes by kind (personal
- * workspaces, spaces, system.db, the embedding model, logs), the archives
- * (deleted spaces and accounts, and how long they're kept), whether the
- * embedding model is ready, and when the scheduler last ran. Numbers only,
- * never anyone's content.
+ * System (admin spec § System): the instance's own app — a window app, not
+ * a page: fb.systemApp.open(tab?) opens it in a wide <sac-window> (the
+ * desktop tile and the palette do), through fb.windowApps. Admins only,
+ * personal workspace only (the tile is). Tabs:
  *
- * Registered only for admins (fb.accounts.registerAdminRoutes), like Users
- * and System settings. Personal only: in a space it points back.
+ *   Info      the instance at a glance — the running version, how much the
+ *             data takes by kind (personal workspaces, spaces, system.db, the
+ *             embedding model, logs), the archives (deleted spaces and
+ *             accounts, and how long they're kept), whether the embedding
+ *             model is ready, and when the scheduler last ran. Numbers only,
+ *             never anyone's content.
+ *   one tab per settings group (fb.systemSettings): Sign-in, Files &
+ *             quotas, … — a new editable key lands in its group's tab
+ *             without UI work.
+ *
+ * The last tab is remembered in this browser. <fb-system-view> is the
+ * window's content; there is no route.
  */
 (function () {
 class FbSystemView extends HTMLElement {
     connectedCallback() {
         this.render();
-        this._onScope = () => this.refresh();
-        window.addEventListener("sac:scope-changed", this._onScope);
-        this.refresh();
-    }
-
-    disconnectedCallback() {
-        window.removeEventListener("sac:scope-changed", this._onScope);
+        this._tabs = this.querySelector("#sys-tabs");
+        this._tabs.addEventListener("sac:tab-show", (e) => {
+            try { localStorage.setItem("fb.system.tab", e.detail.name); } catch { /* storage off */ }
+        });
+        this.build();
     }
 
     render() {
-        this.classList.add("fb-page");
         this.innerHTML = `
-            <header><div>
-                <h1>${fb.t("fb.admin.system-title", "System Info")}</h1>
-                <p class="subtitle">
-                    ${fb.t("fb.admin.system-subtitle", "How this Fishbowl is doing. Sizes and times only — nobody's notes or files.")}
-                </p>
-            </div></header>
-            <div id="system-body"></div>
+            <style>
+                fb-system-view { display: block; padding: 4px 20px 20px; }
+                fb-system-view .card { margin-bottom: 16px; }
+                fb-system-view .card p { margin: 0 0 12px; }
+                fb-system-view .muted { color: var(--text-muted); font-size: 13px; }
+                fb-system-view .restart-note { margin-bottom: 12px; }
+                fb-system-view sac-tab-panel > .card:first-child { margin-top: 16px; }
+                fb-system-view .cfg-row { padding: 14px 0; }
+                fb-system-view .cfg-row + .cfg-row { border-top: 1px solid var(--border); }
+                fb-system-view .cfg-head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+                fb-system-view .cfg-label { font-weight: 600; }
+                fb-system-view .cfg-key { font-family: var(--font-mono); font-size: 12px; color: var(--text-muted); }
+                fb-system-view .cfg-desc { margin: 4px 0 10px; font-size: 13px; color: var(--text-muted); }
+                fb-system-view .cfg-edit { flex-wrap: wrap; }
+                fb-system-view .cfg-edit input { flex: 1; min-width: 12rem; }
+                fb-system-view .cfg-edit input.cfg-num { flex: 0 0 8rem; min-width: 0; }
+                fb-system-view .cfg-edit .select { width: auto; }
+                fb-system-view .cfg-unit,
+                fb-system-view .cfg-state { font-size: 13px; color: var(--text-muted); }
+                fb-system-view .cfg-state.set { color: var(--ok); }
+                fb-system-view .cfg-error { margin: 8px 0 0; font-size: 13px; color: var(--danger-text); }
+            </style>
+            <sac-status-banner class="restart-note" kind="warn"
+                message="${fb.t("fb.admin.restart-note", "Some saved changes take effect after the next restart of Fishbowl.")}"></sac-status-banner>
+            <sac-tab-group id="sys-tabs" overflow="wrap" aria-label="${fb.t("fb.admin.system-title", "System")}"></sac-tab-group>
         `;
     }
 
-    async refresh() {
-        const mount = this.querySelector("#system-body");
-        if (!mount) return;
+    // Info + one tab per settings group; the URL picks the active one.
+    async build() {
+        let rows = null;
+        try { rows = await fb.api.admin.config(); }
+        catch (err) { console.warn("[fb-system-view] config failed:", err?.status); }
+        if (!this.isConnected) return;
+        this._sections = rows ? fb.systemSettings.sections(rows) : [];
 
-        if (sac.scope.get().type === "scoped") {
-            mount.innerHTML = `
-                <div class="card">
-                    <p>${fb.t("fb.admin.system-personal-only", "System is shown for the whole Fishbowl, from your personal workspace.")}</p>
-                    <div class="toolbar"><button type="button" class="btn" id="to-personal">${fb.t("fb.admin.open-personal", "Open in Personal")}</button></div>
-                </div>`;
-            mount.querySelector("#to-personal").addEventListener("click", () => sac.router.navigate("#/admin/system"));
-            return;
+        const tab = (name, label) => {
+            const t = document.createElement("sac-tab");
+            t.setAttribute("name", name);
+            t.textContent = label;
+            return t;
+        };
+        const panel = (name) => {
+            const p = document.createElement("sac-tab-panel");
+            p.setAttribute("name", name);
+            return p;
+        };
+        const info = panel("info");
+        const parts = [tab("info", fb.t("fb.admin.tab-info", "Info")), info];
+        for (const s of this._sections) parts.push(tab(s.id, s.title), panel(s.id));
+        this._tabs.replaceChildren(...parts);
+        this._fillSettings();
+        let last = null;
+        try { last = localStorage.getItem("fb.system.tab"); } catch { /* storage off */ }
+        this._show(this.getAttribute("tab") || last);
+        await this.renderInfo(info);
+        if (!rows) {
+            const p = document.createElement("div");
+            p.className = "card";
+            p.innerHTML = `<p>${fb.t("fb.admin.settings-unavailable", "The settings can't be loaded right now.")}</p>`;
+            info.appendChild(p);
         }
+    }
 
+    _show(name) {
+        const known = name === "info" || this._sections?.some((s) => s.id === name);
+        this._tabs.active = known ? name : "info";
+    }
+
+    // Each settings tab: its group's rows in one card.
+    _fillSettings() {
+        for (const s of this._sections) {
+            const p = this._tabs.querySelector(`sac-tab-panel[name="${s.id}"]`);
+            if (!p) continue;
+            const card = document.createElement("div");
+            card.className = "card";
+            card.dataset.section = s.id;
+            for (const r of s.rows) card.appendChild(fb.systemSettings.row(r, {
+                refresh: () => this._reloadSettings(),
+                saved: (res, label, cleared) => this._saved(res, label, cleared),
+            }));
+            p.replaceChildren(card);
+        }
+    }
+
+    // After a save: the same tabs with fresh values (a new group rebuilds).
+    async _reloadSettings() {
+        let rows;
+        try { rows = await fb.api.admin.config(); } catch { return; }
+        const next = fb.systemSettings.sections(rows);
+        const same = next.length === this._sections.length && next.every((s, i) => s.id === this._sections[i].id);
+        this._sections = next;
+        if (same) this._fillSettings();
+        else this.build();
+    }
+
+    _saved(res, label, cleared) {
+        if (res?.restartRequired) this.querySelector(".restart-note").setAttribute("open", "");
+        window.sac?.toast?.(cleared ? fb.t("fb.admin.cfg-cleared", "{label}: back to the default.", { label }) : fb.t("fb.admin.cfg-saved", "{label} saved.", { label }), { kind: "success" });
+    }
+
+    // The Info tab: the instance at a glance.
+    async renderInfo(mount) {
         let s;
         try {
             s = await fb.api.admin.system();
@@ -101,7 +185,7 @@ class FbSystemView extends HTMLElement {
         const keep = document.createElement("p");
         keep.className = "muted";
         keep.textContent = a.retentionDays > 0
-            ? fb.t("fb.admin.archives-kept", "Archives are kept {days}, then removed (Archive:RetentionDays in System settings).", { days: count(a.retentionDays, "day", "day", "days") })
+            ? fb.t("fb.admin.archives-kept", "Archives are kept {days}, then removed (Archive:RetentionDays under Export & archive).", { days: count(a.retentionDays, "day", "day", "days") })
             : fb.t("fb.admin.archives-forever", "Archives are kept until someone deletes them (Archive:RetentionDays is 0).");
         archives.panel.appendChild(keep);
 
@@ -135,4 +219,6 @@ function row(icon, name, meta, key) {
 }
 
 customElements.define("fb-system-view", FbSystemView);
+
+fb.systemApp = { open: (tab) => fb.windowApps.open("system", { tab }) };
 })();

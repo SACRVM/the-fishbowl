@@ -1,5 +1,5 @@
 /**
- * <fb-spaces-settings-view>  (mounted at #/spaces)
+ * <fb-spaces-settings-view>  (a window app, fb.windowApps "spaces")
  *
  * Minimal management surface for space workspaces — list, create, delete,
  * members (fb.spaceMembers: roles, invitation links, leaving),
@@ -215,7 +215,9 @@ class FbSpacesSettingsView extends HTMLElement {
         list.querySelectorAll(".open-btn").forEach(btn => {
             btn.addEventListener("click", (e) => {
                 const slug = e.currentTarget.closest(".space-row")?.dataset.slug;
-                if (slug) sac.router.navigate(`#/space/${encodeURIComponent(slug)}/notes`);
+                if (!slug) return;
+                this.closest("sac-window")?.close?.();   // the space is what you came for
+                sac.router.navigate(`#/space/${encodeURIComponent(slug)}/notes`);
             });
         });
 
@@ -445,4 +447,3 @@ function roleLabel(role) { return fb.spaceMembers.roleLabel(role); }
 function fmtSize(n) { return fb.format.bytes(n); }
 
 customElements.define("fb-spaces-settings-view", FbSpacesSettingsView);
-sac.router.register("#/spaces", "fb-spaces-settings-view", { label: "Spaces", icon: "users", palette: false });

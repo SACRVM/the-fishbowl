@@ -1,5 +1,5 @@
 /**
- * <fb-apps-settings-view>  (mounted at #/apps — Settings → Apps)
+ * <fb-apps-settings-view>  (a window app, fb.windowApps "apps")
  *
  * The apps installed on the active workspace's desktop, in one list: where
  * each comes from, its version, how it runs (a sandboxed / trusted chip) and
@@ -28,7 +28,6 @@ class FbAppsSettingsView extends HTMLElement {
         window.removeEventListener("fb:apps-changed", this._refresh);
         window.removeEventListener("fb:app-updates", this._repaint);
         window.removeEventListener("sac:scope-changed", this._refresh);
-        fb.toolbar?.clear?.();
     }
 
     render() {
@@ -59,7 +58,7 @@ class FbAppsSettingsView extends HTMLElement {
         this.renderList();
         this.renderPolicy();
         const st = fb.desktopApps.state;
-        fb.toolbar.set(st.canInstall ? [{ icon: "plus", title: fb.t("fb.apps.page-install", "Install an app"), onClick: () => fb.desktopApps.install() }] : []);
+        fb.windowApps.toolbar(this, st.canInstall ? [{ icon: "plus", title: fb.t("fb.apps.page-install", "Install an app"), onClick: () => fb.desktopApps.install() }] : []);
     }
 
     renderList() {
@@ -169,12 +168,14 @@ class FbAppsSettingsView extends HTMLElement {
             p.textContent = st.canInstall
                 ? fb.t("fb.apps.page-policy-owner", "You own this space: you install its apps, sandboxed only. Every member sees and opens them.")
                 : st.canArrange
-                    ? fb.t("fb.apps.page-policy-off", "Your admin turned installing apps off.")
+                    ? fb.t("fb.apps.page-policy-off", "Installing apps is turned off on this Fishbowl (System → Apps).")
                     : fb.t("fb.apps.page-policy-member", "The space's owner installs its apps; you see and open them.");
             return;
         }
         if (!st.canInstall) {
-            p.textContent = fb.t("fb.apps.page-policy-admins", "Your admin keeps installing apps to admins, or turned it off.");
+            p.textContent = st.installPolicy === "off"
+                ? fb.t("fb.apps.page-policy-off", "Installing apps is turned off on this Fishbowl (System → Apps).")
+                : fb.t("fb.apps.page-policy-admins", "Only Global Admins may install apps on this Fishbowl.");
             return;
         }
         p.textContent = st.canTrust
@@ -184,4 +185,3 @@ class FbAppsSettingsView extends HTMLElement {
 }
 
 customElements.define("fb-apps-settings-view", FbAppsSettingsView);
-sac.router.register("#/apps", "fb-apps-settings-view", { label: "Apps", icon: "grid", palette: false });

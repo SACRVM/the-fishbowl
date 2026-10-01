@@ -49,6 +49,8 @@
     <script defer src="/js/lib/tags-registry.js"></script>
     <script defer src="/js/lib/tag-manager.js"></script>
     <script defer src="/js/lib/space-members.js"></script>
+    <script defer src="/js/lib/your-data.js"></script>
+    <script defer src="/js/lib/window-apps.js"></script>
     <script defer src="/js/lib/access.js"></script>
     <script defer src="/js/lib/table-grid.js"></script>
 
@@ -94,12 +96,11 @@
     <script defer src="/kit/js/components/sac-spinner.js"></script>
     <script defer src="/kit/js/components/sac-tooltip.js"></script>
     <!-- sac-data-grid, vendored verbatim (VERSION beside it) — the Tables app. -->
-    <script defer src="/js/vendor/sac-data-grid/sac-data-grid-types.js"></script>
-    <script defer src="/js/vendor/sac-data-grid/sac-data-grid.js"></script>
-    <script defer src="/js/vendor/sac-data-grid/sac-data-grid-edit.js"></script>
-    <script defer src="/js/vendor/sac-data-grid/sac-data-grid-form.js"></script>
-    <script defer src="/js/vendor/sac-data-grid/sac-data-grid-source.js"></script>
-    <script defer src="/js/vendor/sac-data-grid/sac-data-grid.de.js"></script>
+    <script defer src="/js/vendor/sac-data-grid/js/sac-data-grid-types.js"></script>
+    <script defer src="/js/vendor/sac-data-grid/js/sac-data-grid.js"></script>
+    <script defer src="/js/vendor/sac-data-grid/js/sac-data-grid-edit.js"></script>
+    <script defer src="/js/vendor/sac-data-grid/js/sac-data-grid-form.js"></script>
+    <script defer src="/js/vendor/sac-data-grid/js/sac-data-grid.de.js"></script>
 
     <!-- sac-md-editor: appkit add-on module, vendored verbatim from
          SACRVM/sac-md-editor (pinned commit in the VERSION file next to it).
@@ -117,13 +118,12 @@
     <script defer src="/js/views/fb-spaces-settings-view.js"></script>
     <script defer src="/js/views/fb-keys-settings-view.js"></script>
     <script defer src="/js/views/fb-secrets-settings-view.js"></script>
-    <script defer src="/js/views/fb-data-settings-view.js"></script>
     <script defer src="/js/views/fb-apps-settings-view.js"></script>
     <script defer src="/js/views/fb-messages-view.js"></script>
     <script defer src="/js/views/fb-trash-view.js"></script>
     <script defer src="/js/views/fb-tables-view.js"></script>
     <script defer src="/js/views/fb-users-admin-view.js"></script>
-    <script defer src="/js/views/fb-system-settings-view.js"></script>
+    <script defer src="/js/lib/system-settings.js"></script>
     <script defer src="/js/views/fb-system-view.js"></script>
 
     <!-- shell: account menu, view toolbar, router mount -->
@@ -161,6 +161,7 @@
                 <sac-avatar id="fb-account-avatar"></sac-avatar>
             </button>
             <button data-action="profile"><sac-icon name="user"></sac-icon> <span data-t="fb.shell.profile">Profile</span></button>
+            <button data-action="your-data"><sac-icon name="download"></sac-icon> <span data-t="fb.shell.your-data">Your data…</span></button>
             <hr>
             <button data-action="logout" data-danger><sac-icon name="log-out"></sac-icon> <span data-t="fb.shell.logout">Log out</span></button>
         </sac-menu>

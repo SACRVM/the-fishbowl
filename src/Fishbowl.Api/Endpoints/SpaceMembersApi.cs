@@ -178,7 +178,7 @@ public static class SpaceMembersApi
             if (problem != InviteProblem.None)
                 return string.IsNullOrEmpty(userId)
                     ? Results.Redirect("/login?authError=" + Uri.EscapeDataString(SignInRefusals.Describe(InviteRefusal(problem))))
-                    : Results.Redirect("/?invite=" + InviteRefusal(problem) + "#/spaces");
+                    : Results.Redirect("/?invite=" + InviteRefusal(problem) + "#/");
             if (string.IsNullOrEmpty(userId))
             {
                 InviteCookie.Write(http, token, invite!.ExpiresAt);
@@ -187,7 +187,7 @@ public static class SpaceMembersApi
             var slug = await gate.AcceptInviteAsync(userId, token, ct);
             InviteCookie.Clear(http);
             return slug is null
-                ? Results.Redirect("/?invite=" + SignInRefusals.InviteUnknown + "#/spaces")
+                ? Results.Redirect("/?invite=" + SignInRefusals.InviteUnknown + "#/")
                 : Results.Redirect($"/#/space/{Uri.EscapeDataString(slug)}/notes");
         })
         .AllowAnonymous()

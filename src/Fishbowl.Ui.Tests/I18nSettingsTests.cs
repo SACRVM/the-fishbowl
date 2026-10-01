@@ -41,22 +41,23 @@ public class I18nSettingsTests
         try
         {
             await SetLanguageAsync(page, "de");
-            await page.GotoAsync(_fixture.BaseUrl + "/#/admin/settings");
-            var hour = page.Locator("fb-system-settings-view .cfg-row[data-key='Digest:Hour']");
+            await WindowApp.OpenAsync(page, _fixture.BaseUrl, "system", tab: "digest");
+            var hour = page.Locator("fb-system-view .cfg-row[data-key='Digest:Hour']");
             await Assertions.Expect(hour).ToBeVisibleAsync(new() { Timeout = 5000 });
             await hour.Locator("input").FillAsync("30");
             await hour.GetByRole(AriaRole.Button, new() { Name = "Speichern" }).ClickAsync();
             await Assertions.Expect(hour.Locator(".cfg-error"))
                 .ToHaveTextAsync("Gib eine ganze Zahl von 0 bis 23 ein.", new() { Timeout = 5000 });
 
-            var origins = page.Locator("fb-system-settings-view .cfg-row[data-key='Apps:AllowedOrigins']");
+            await page.Locator("fb-system-view sac-tab[name='apps']").ClickAsync();
+            var origins = page.Locator("fb-system-view .cfg-row[data-key='Apps:AllowedOrigins']");
             await origins.Locator("input").FillAsync("ftp://nope");
             await origins.GetByRole(AriaRole.Button, new() { Name = "Speichern" }).ClickAsync();
             await Assertions.Expect(origins.Locator(".cfg-error"))
                 .ToHaveTextAsync("Kein https-Ursprung (nur Schema und Host): ftp://nope", new() { Timeout = 5000 });
             var dir = Path.Combine(Path.GetTempPath(), "err-final");
             Directory.CreateDirectory(dir);
-            await hour.ScrollIntoViewIfNeededAsync();
+            await origins.ScrollIntoViewIfNeededAsync();
             await page.ScreenshotAsync(new() { Path = Path.Combine(dir, "desk-system-settings-error.png") });
         }
         finally
@@ -84,34 +85,34 @@ public class I18nSettingsTests
             try
             {
                 await SetLanguageAsync(page, "de");
-                var pages = new (string Hash, string Title, string Name)[]
+                var pages = new (string App, string Title, string Name)[]
                 {
-                    ("#/spaces", "Spaces", "spaces"),
-                    ("#/keys", "API-Schlüssel", "keys"),
-                    ("#/secrets", "Geheimnisse", "secrets"),
-                    ("#/data", "Deine Daten", "data"),
-                    ("#/apps", "Apps", "apps"),
-                    ("#/admin/users", "Benutzer", "users"),
-                    ("#/admin/settings", "Systemeinstellungen", "system-settings"),
-                    ("#/admin/system", "Systeminfo", "system"),
+                    ("spaces", "Spaces", "spaces"),
+                    ("keys", "API-Schlüssel", "keys"),
+                    ("secrets", "Geheimnisse", "secrets"),
+                    ("apps", "Apps", "apps"),
+                    ("users", "Benutzer", "users"),
+                    ("system", "System", "system"),
                 };
-                foreach (var (hash, title, name) in pages)
+                foreach (var (app, title, name) in pages)
                 {
-                    await page.GotoAsync($"{_fixture.BaseUrl}/{hash}");
-                    await Assertions.Expect(page.Locator("#app-root h1").First).ToHaveTextAsync(title, new() { Timeout = 8000 });
+                    var win = await WindowApp.OpenAsync(page, _fixture.BaseUrl, app);
+                    await Assertions.Expect(win).ToHaveAttributeAsync("title", title, new() { Timeout = 8000 });
                     await page.WaitForTimeoutAsync(600);
                     await page.ScreenshotAsync(new() { Path = Path.Combine(Shots(), $"{tag}-{name}.png"), FullPage = tag == "desk" });
                 }
 
                 // Samples beyond the headings.
-                await page.GotoAsync(_fixture.BaseUrl + "/#/spaces");
-                await Assertions.Expect(page.Locator("#create-btn")).ToHaveTextAsync("Space anlegen", new() { Timeout = 5000 });
-                await page.GotoAsync(_fixture.BaseUrl + "/#/keys");
-                await Assertions.Expect(page.Locator("#create-btn")).ToHaveTextAsync("Schlüssel anlegen", new() { Timeout = 5000 });
-                await page.GotoAsync(_fixture.BaseUrl + "/#/admin/system");
+                await WindowApp.OpenAsync(page, _fixture.BaseUrl, "spaces");
+                await Assertions.Expect(page.Locator("#fb-win-spaces #create-btn")).ToHaveTextAsync("Space anlegen", new() { Timeout = 5000 });
+                await WindowApp.OpenAsync(page, _fixture.BaseUrl, "keys");
+                await Assertions.Expect(page.Locator("#fb-win-keys #create-btn")).ToHaveTextAsync("Schlüssel anlegen", new() { Timeout = 5000 });
+                await page.EvaluateAsync("() => fb.systemApp.open('info')");
+                await Assertions.Expect(page.Locator("#fb-win-system")).ToHaveAttributeAsync("title", "System");
                 await Assertions.Expect(page.Locator("[data-key='version'] .fb-row-name")).ToHaveTextAsync("Version", new() { Timeout = 5000 });
                 await Assertions.Expect(page.Locator("[data-key='maintenance'] .fb-row-name")).ToHaveTextAsync("Tägliche Wartung");
-                await page.GotoAsync(_fixture.BaseUrl + "/#/admin/settings");
+                await Assertions.Expect(page.Locator("fb-system-view sac-tab[name='sign-in']")).ToHaveTextAsync("Anmeldung");
+                await page.Locator("fb-system-view sac-tab[name='sign-in']").ClickAsync();
                 await Assertions.Expect(page.Locator("[data-key='Auth:SignUp'] .cfg-label")).ToHaveTextAsync("Neue Konten", new() { Timeout = 5000 });
                 await Assertions.Expect(page.Locator("[data-key='Auth:SignUp'] .cfg-key")).ToHaveTextAsync("Auth:SignUp");
 
@@ -127,7 +128,7 @@ public class I18nSettingsTests
                     var otherId = (await created.JsonAsync())!.Value.GetProperty("id").GetString()!;
                     try
                     {
-                        await page.GotoAsync(_fixture.BaseUrl + "/#/admin/users");
+                        await WindowApp.OpenAsync(page, _fixture.BaseUrl, "users");
                         var row = page.Locator($".user-row[data-user-id='{otherId}']");
                         await row.Locator("sac-menu button[slot='trigger']").ClickAsync(new() { Timeout = 8000 });
                         await Assertions.Expect(row.Locator("sac-menu [data-action='delete']")).ToContainTextAsync("Löschen");
@@ -145,8 +146,8 @@ public class I18nSettingsTests
                     }
 
                     // A known 400 from the server, in German: blocking yourself.
-                    await page.GotoAsync(_fixture.BaseUrl + "/#/admin/users");
-                    await Assertions.Expect(page.Locator("#app-root h1").First).ToHaveTextAsync("Benutzer", new() { Timeout = 5000 });
+                    await WindowApp.OpenAsync(page, _fixture.BaseUrl, "users");
+                    await Assertions.Expect(page.Locator("#fb-win-users")).ToHaveAttributeAsync("title", "Benutzer", new() { Timeout = 5000 });
                     var text = await page.EvaluateAsync<string>(@"async (id) => {
                         try { await fb.api.admin.block(id); return 'no error'; }
                         catch (err) { return fb.errors.text(err, 'fallback'); }
@@ -179,8 +180,8 @@ public class I18nSettingsTests
         try
         {
             await SetLanguageAsync(page, "de");
-            await page.GotoAsync(_fixture.BaseUrl + "/#/secrets");
-            await Assertions.Expect(page.Locator("#app-root h1").First).ToHaveTextAsync("Geheimnisse", new() { Timeout = 8000 });
+            await WindowApp.OpenAsync(page, _fixture.BaseUrl, "secrets");
+            await Assertions.Expect(page.Locator("#fb-win-secrets")).ToHaveAttributeAsync("title", "Geheimnisse", new() { Timeout = 8000 });
             // The unlock dialog, drawn without a vault behind it: the dialog
             // builder alone, never submitted.
             var vaultState = await page.EvaluateAsync<bool>("async () => (await fb.vault.status()).initialized");

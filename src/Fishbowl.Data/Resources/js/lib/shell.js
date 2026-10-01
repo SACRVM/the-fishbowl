@@ -63,6 +63,33 @@
     window.addEventListener("hashchange", syncHome);
     syncHome();
 
+    // The burger lists every app the desktop has. The kit's own list holds
+    // the pages (routes); the window apps and installed apps have no route,
+    // so they are rows of ours right under Home, styled like it, in desktop
+    // order (fb:desktop-entries from fb.desktop.syncCommands).
+    window.addEventListener("fb:desktop-entries", (ev) => {
+        const nav = document.getElementById("fb-nav");
+        if (!nav || !homeLink) return;
+        nav.querySelectorAll(":scope > a.fb-window-link").forEach((a) => a.remove());
+        const rows = (ev.detail?.entries || []).filter((e) => e.app || e.open).map((e) => {
+            const a = document.createElement("a");
+            a.slot = "panel";
+            a.className = "fb-home-link fb-window-link";
+            a.href = "#";
+            a.dataset.key = e.key;
+            a.setAttribute("data-nav-close", "");
+            a.innerHTML = `<sac-icon name="${e.icon || "cube"}"></sac-icon><span></span>`;
+            a.querySelector("span").textContent = e.name;
+            a.addEventListener("click", (c) => {
+                c.preventDefault();
+                if (e.app) fb.desktopApps.open(e.app.id);
+                else e.open();
+            });
+            return a;
+        });
+        homeLink.after(...rows);
+    });
+
     // --- Accent colours -----------------------------------------------------
     // Both are kit palette slot names ("teal"…) or null for the kit default.
     // The personal accent is --accent. Inside a space that has a colour,
@@ -76,6 +103,26 @@
     const paletteVar = (slot) => `var(--palette-${slot})`;
     let personalAccent = null;
     try { const v = localStorage.getItem(ACCENT_KEY); if (isSlot(v)) personalAccent = v; } catch { /* storage blocked */ }
+
+    // The kit's own accents, read before anything is set inline on :root —
+    // what a workspace without a colour falls back to.
+    const kitTokens = (() => {
+        const cs = getComputedStyle(document.documentElement);
+        return { accent: cs.getPropertyValue("--accent").trim(), warm: cs.getPropertyValue("--accent-warm").trim() };
+    })();
+
+    /** The accents a workspace wears ("personal" | "space:<slug>"), as CSS
+     *  values — for a part of the page that shows another workspace than the
+     *  active one (Files' right pane). Same rule as applyAccents. */
+    function accentsFor(workspace) {
+        const slug = typeof workspace === "string" && workspace.startsWith("space:") ? workspace.slice(6) : null;
+        const spaceColor = slug ? spaces?.find(s => s.slug === slug)?.color : null;
+        const accent = isSlot(spaceColor) ? spaceColor : personalAccent;
+        return {
+            accent: accent ? paletteVar(accent) : kitTokens.accent,
+            warm: isSlot(spaceColor) ? paletteVar(spaceColor) : kitTokens.warm,
+        };
+    }
 
     function applyAccents() {
         const root = document.documentElement.style;
@@ -151,7 +198,7 @@
         const action = e.detail.action || "";
         if (action === "ctx:user") sac.scope.set({ type: "root" });
         else if (action.startsWith("ctx:space:")) sac.scope.set({ type: "scoped", slug: action.slice("ctx:space:".length) });
-        else if (action === "manage-spaces") sac.router.navigate("#/spaces");
+        else if (action === "manage-spaces") fb.windowApps.open("spaces");
     });
     window.addEventListener("sac:scope-changed", renderSwitcher);
 
@@ -190,9 +237,6 @@
         account.hidden = false;
         messagesBtn.hidden = false;
         refreshUnread();
-        // The admin apps exist only for admins: registered here, never for
-        // anyone else, so they are in no nav, palette or route table.
-        if (me.isAdmin) fb.accounts.registerAdminRoutes();
     }).catch((err) => {
         // 401 → already redirected by api.js. Anything else degrades
         // silently: the shell works, just without the account menu.
@@ -212,11 +256,11 @@
     searchBtn.addEventListener("click", () => sac.palette?.open());
 
     // --- Messages ----------------------------------------------------------
-    // The envelope opens #/messages; its badge is the unread count, kept fresh
+    // The envelope opens the Messages window; its badge is the unread count, kept fresh
     // on every change (fb.api fires fb:messages-changed), on navigation and
     // once a minute (an admin sees a new request without reloading).
     const messagesBtn = document.getElementById("fb-messages-btn");
-    messagesBtn.addEventListener("click", () => sac.router.navigate("#/messages"));
+    messagesBtn.addEventListener("click", () => fb.windowApps.open("messages"));
     async function refreshUnread() {
         if (messagesBtn.hidden) return;
         let n = 0;
@@ -243,6 +287,7 @@
 
     account.addEventListener("sac:select", (e) => {
         if (e.detail.action === "profile") openProfile();
+        if (e.detail.action === "your-data") fb.yourData.open();
         if (e.detail.action === "logout")  logout();
         if (e.detail.action === "lock-secrets") {
             fb.vault?.lock().then(() => window.sac?.toast?.(fb.t("fb.shell.secrets-locked", "Secrets locked."), { kind: "success" }));
@@ -268,7 +313,7 @@
     };
     const lockItem = vaultItem("lock-secrets", "lock", "fb.shell.lock-secrets", "Lock secrets");
     const unlockItem = vaultItem("unlock-secrets", "unlock", "fb.shell.unlock-secrets", "Unlock secrets");
-    account.querySelector('[data-action="profile"]')?.after(lockItem, unlockItem);
+    account.querySelector('[data-action="your-data"]')?.after(lockItem, unlockItem);
     async function syncVaultItems() {
         const s = await (fb.vault?.status?.() ?? { available: false });
         lockItem.hidden = !(s.available && s.unlocked);
@@ -444,7 +489,7 @@
         const m = /^var\(--palette-([a-z]+)\)$/.exec(value || "");
         return m && isSlot(m[1]) ? m[1] : null;
     }
-    fb.accents = { swatches: accentSwatches, slotOf: swatchSlot, cssVar: paletteVar };
+    fb.accents = { swatches: accentSwatches, slotOf: swatchSlot, cssVar: paletteVar, forWorkspace: accentsFor };
 
     async function logout() {
         try {

@@ -80,7 +80,7 @@ public static class DesktopApi
     }
 
     // What the admin's policy lets this caller do in this workspace.
-    private sealed record Allowance(bool Install, bool Trust, IReadOnlyList<string> AllowedOrigins);
+    private sealed record Allowance(bool Install, bool Trust, IReadOnlyList<string> AllowedOrigins, string InstallPolicy);
 
     private static async Task<Allowance> AllowanceAsync(HttpContext http, Target t, CancellationToken ct)
     {
@@ -93,7 +93,7 @@ public static class DesktopApi
         // A space desktop is its owner's call; only `off` stops it there.
         var canInstall = t.CanWrite && (t.IsSpace ? install != DesktopPolicy.Off : DesktopPolicy.Allows(install, isAdmin));
         var canTrust = canInstall && !t.IsSpace && DesktopPolicy.Allows(trusted, isAdmin);
-        return new Allowance(canInstall, canTrust, origins);
+        return new Allowance(canInstall, canTrust, origins, install);
     }
 
     private static object Dto(DesktopApp a) => new
@@ -143,6 +143,8 @@ public static class DesktopApi
                 canArrange = t.CanWrite,
                 canInstall = allow.Install,
                 canTrust = allow.Trust,
+                // Apps:Install, so the page can say why installing isn't offered.
+                installPolicy = allow.InstallPolicy,
             });
         });
 
