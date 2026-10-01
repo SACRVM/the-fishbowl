@@ -22,8 +22,9 @@
  *       tile:        "wide",                  // optional tile footprint in the launcher
  *                                             // grid: "medium" (default, omit-able) |
  *                                             // "wide" (2 columns) | "large" (2 columns
- *                                             // × 2 rows); unknown values fall back to
- *                                             // medium silently
+ *                                             // × 2 rows) | "small" (icon only, four
+ *                                             // fill one medium cell); unknown values
+ *                                             // fall back to medium silently
  *       tiles: [                              // optional — MULTIPLE launcher tiles for
  *           { id: "today",                    // one app (complex apps deploy several
  *             name: "Today",                  // entry points into a desktop). When set,

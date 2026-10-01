@@ -242,11 +242,13 @@
      *                  page format (a field's own `format` attribute).
      *   parseDate(text, opts)  typed text → "yyyy-mm-dd", "" for empty text,
      *                  null for garbage or an impossible date (2026-02-31).
+     *                  A trailing time (space or T, seconds, Z / offset)
+     *                  is dropped, as in a date-only spreadsheet column.
      *                  Tolerant like <sac-date-field>: an ISO date always
      *                  works; otherwise day / month / year in the format's
      *                  order, any of . / - between, single digits, a two-digit
      *                  year (00–68 → 20xx, 69–99 → 19xx). opts.format.
-     *   formatTime(hhmm, opts)  "14:30" → "14:30" under h23, "2:30 PM" under
+     *   formatTime(hhmm, opts)  "14:30" → "14:30" under h23, "02:30 PM" under
      *                  h12 (AM / PM translated). "" for empty or garbage.
      *                  opts.hourCycle overrides the page hour cycle.
      *   parseTime(text)  typed or pasted text → "HH:MM" (24-hour), "" for
@@ -350,11 +352,17 @@
         if (text == null) return null;
         const s = String(text).trim();
         if (s === "") return "";
-        let m = /^(\d{4})-(\d{1,2})-(\d{1,2})$/.exec(s);
-        if (m) return isoDate(+m[1], +m[2], +m[3]);
+        // A trailing time ("2026-09-25 14:30", "…T14:30:00.000Z",
+        // "25.09.2026 2:30 PM") is how spreadsheets and JSON hand over a
+        // date: it must be a real time, and it is dropped, as Excel does in
+        // a date-only column.
+        const time = (t) => t === undefined ||
+            !!parseTime(t.replace(/\s*(?:Z|[+-]\d{2}:?\d{2})$/i, ""));
+        let m = /^(\d{4})-(\d{1,2})-(\d{1,2})(?:(?:T|\s+)(.+))?$/.exec(s);
+        if (m) return time(m[4]) ? isoDate(+m[1], +m[2], +m[3]) : null;
         if (fmt === "iso") return null;
-        m = /^(\d{1,2})\s*[./-]\s*(\d{1,2})\s*[./-]\s*(\d{2}|\d{4})$/.exec(s);
-        if (!m) return null;
+        m = /^(\d{1,2})\s*[./-]\s*(\d{1,2})\s*[./-]\s*(\d{4}|\d{2})(?:\s+(.+))?$/.exec(s);
+        if (!m || !time(m[4])) return null;
         let y = +m[3];
         if (m[3].length === 2) y += y <= 68 ? 2000 : 1900;
         const [d, mo] = fmt === "mdy/" ? [+m[2], +m[1]] : [+m[1], +m[2]];
@@ -414,7 +422,7 @@
         const h = +m[1], mi = pad2(+m[2]);
         if (cycle !== "h12") return `${pad2(h)}:${mi}`;
         const label = h < 12 ? tr("time-field.am", "AM") : tr("time-field.pm", "PM");
-        return `${h % 12 || 12}:${mi} ${label}`;
+        return `${pad2(h % 12 || 12)}:${mi} ${label}`;
     }
 
     /** opts[key] if it is a known value, else the page-wide one. */

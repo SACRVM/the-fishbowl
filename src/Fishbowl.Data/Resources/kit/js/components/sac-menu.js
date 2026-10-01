@@ -198,6 +198,10 @@ class SacMenu extends HTMLElement {
 
                     opacity: 0;
                     visibility: hidden;            /* keeps items out of the tab order while closed */
+                    /* visibility flips only at the END of its transition, so a
+                       closing panel would still catch clicks during the fade
+                       (a second right-click on a context-menu spot). */
+                    pointer-events: none;
                     transform: translateY(-4px);
                     transition: opacity 120ms var(--ease-smooth),
                                 transform 120ms var(--ease-smooth),
@@ -206,6 +210,7 @@ class SacMenu extends HTMLElement {
                 :host([open]) .panel {
                     opacity: 1;
                     visibility: visible;
+                    pointer-events: auto;
                     transform: translateY(0);
                 }
                 /* Out of the top layer = out of layout. A closed panel that

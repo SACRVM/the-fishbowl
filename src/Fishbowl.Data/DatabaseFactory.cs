@@ -445,7 +445,23 @@ public class DatabaseFactory
             ApplyUserV15(connection);
             connection.Execute("PRAGMA user_version = 15");
             _logger.LogInformation("Applied user schema v15 to {DbPath}", ((SqliteConnection)connection).DataSource);
+            version = 15;
         }
+
+        if (version < 16)
+        {
+            ApplyUserV16(connection);
+            connection.Execute("PRAGMA user_version = 16");
+            _logger.LogInformation("Applied user schema v16 to {DbPath}", ((SqliteConnection)connection).DataSource);
+        }
+    }
+
+    // Tiles have a default size per app now (the housekeeping ones start
+    // small). Until then every tile write stored the size it showed, so a
+    // stored "medium" was never a choice — it goes back to "the default".
+    private static void ApplyUserV16(IDbConnection connection)
+    {
+        connection.Execute("UPDATE desktop_tiles SET size = NULL WHERE size = 'medium';");
     }
 
     // Searchable table columns: a row of a table with searchable columns is

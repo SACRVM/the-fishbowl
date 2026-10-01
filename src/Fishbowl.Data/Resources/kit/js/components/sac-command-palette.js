@@ -16,6 +16,8 @@
  *                 chosen inside #/scope/SLUG/… stays in that workspace (the
  *                 <sac-nav> rule). A prefix route ("#/files/*") navigates
  *                 to its prefix. External links open in a new tab, unscoped.
+ *                 A route bound to the other kind of workspace (register's
+ *                 scope: "root"/"scoped") is left out.
  *   2. Commands — everything registered on sac.commands (below), grouped by
  *                 each command's `group` (default "Commands"). An app owns
  *                 its toolbar, so toolbar actions it wants keyboard-reachable
@@ -386,6 +388,8 @@
             if (router && typeof router.routes === "function") {
                 for (const route of router.routes()) {
                     if (!route || !route.label || route.palette === false) continue;
+                    // Not in this workspace (scope: "root"/"scoped") — not here either.
+                    if (router.inScope && !router.inScope(route)) continue;
                     const group = typeof route.palette === "function" ? route.palette()
                         : route.palette || t("palette.group-views", "Views");
                     const hash = route.hash;

@@ -282,4 +282,17 @@ window.sac?.i18n?.add?.("de", {
     "fb.trash.delete-title": "Endgültig löschen?",
     "fb.trash.delete-body": "„{name}“ ist dann weg und lässt sich nicht wiederherstellen.",
     "fb.trash.delete-failed": "Das ließ sich nicht löschen.",
+    // Tables (fb-tables-view, fb.tableGrid)
+    "fb.tables.title": "Tabellen",
+    "fb.tables.resize": "Breite der Tabellenliste ändern",
+    "fb.tables.rows-1": "1 Zeile",
+    "fb.tables.rows": "{n} Zeilen",
+    "fb.tables.none": "Noch keine Tabellen",
+    "fb.tables.none-hint": "Tabellen legt ein Agent oder ein Designer dieses Space an — bitte ihn, zu bauen, was du brauchst.",
+    "fb.tables.pick": "Wähl eine Tabelle",
+    "fb.tables.own-rows": "Mitglieder ändern nur ihre eigenen Zeilen.",
+    "fb.tables.col-title": "Titel",
+    "fb.tables.col-author": "Angelegt von",
+    "fb.tables.col-modified": "Geändert",
+    "fb.tables.save-failed": "Die Zeile ließ sich nicht speichern.",
 });

@@ -197,13 +197,34 @@ class FbHubView extends HTMLElement {
             tile.append(icon, body);
             if (this._canArrange) tile.appendChild(this._menu(e));
             if (e.size === "wide" || e.size === "large") tile.classList.add("size-" + e.size);
+            if (e.size === "small") {
+                tile.classList.add("small");   // the kit's .small: icon only
+                tile.title = e.name;
+            }
             // Tile colour = the app's highlight, the SACRVM Desktop move.
             if (e.color) tile.style.setProperty("--accent", fb.accents.cssVar(e.color));
             return tile;
         });
         if (this._canInstall) tiles.push(this._installTile());
-        this._grid.replaceChildren(...tiles);
+        this._grid.replaceChildren(...this._packSmall(tiles));
         this._toolbar();
+    }
+
+    /** The kit's .tile-pack: consecutive small tiles share one medium cell,
+     *  four at most; any other tile between them starts a new pack. */
+    _packSmall(tiles) {
+        const out = [];
+        let pack = null;
+        for (const t of tiles) {
+            if (!t.classList.contains("small")) { pack = null; out.push(t); continue; }
+            if (!pack || pack.childElementCount === 4) {
+                pack = document.createElement("div");
+                pack.className = "tile-pack";
+                out.push(pack);
+            }
+            pack.appendChild(t);
+        }
+        return out;
     }
 
     /** SACRVM Desktop's dashed tile that closes the grid. */
@@ -302,6 +323,7 @@ class FbHubView extends HTMLElement {
         });
 
         menu.append(
+            item("size:small", fb.t("fb.desk.size-small", "Small tile")),
             item("size:medium", fb.t("fb.desk.size-medium", "Medium tile")),
             item("size:wide", fb.t("fb.desk.size-wide", "Wide tile")),
             item("size:large", fb.t("fb.desk.size-large", "Large tile")),

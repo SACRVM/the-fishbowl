@@ -11,6 +11,7 @@ window.sac?.i18n?.add?.("de", {
     "fb.route.notes": "Notizen",
     "fb.route.todos": "Aufgaben",
     "fb.route.trash": "Papierkorb",
+    "fb.route.tables": "Tabellen",
     "fb.route.calendar": "Kalender",
     "fb.route.files": "Dateien",
     "fb.route.messages": "Nachrichten",
@@ -21,7 +22,7 @@ window.sac?.i18n?.add?.("de", {
     "fb.route.data": "Deine Daten",
     "fb.route.admin-users": "Benutzer",
     "fb.route.admin-settings": "Systemeinstellungen",
-    "fb.route.admin-system": "System",
+    "fb.route.admin-system": "Systeminfo",
 
     // --- Shell: nav, account menu, workspace switcher -----------------------
     "fb.shell.account": "Konto",
@@ -68,6 +69,8 @@ window.sac?.i18n?.add?.("de", {
     "fb.app.files.name": "Dateien",
     "fb.app.files.desc": "Echte Dateien, zwei Spalten, jeder Arbeitsbereich.",
     "fb.app.trash.name": "Papierkorb",
+    "fb.app.tables.name": "Tabellen",
+    "fb.app.tables.desc": "Die eigenen Tabellen dieses Space, wie eine Tabellenkalkulation.",
     "fb.app.trash.desc": "Gelöschtes, mit einem Klick zurück.",
     "fb.app.messages.name": "Nachrichten",
     "fb.app.messages.desc": "Was Fishbowl dir zu sagen hat.",
@@ -75,7 +78,7 @@ window.sac?.i18n?.add?.("de", {
     "fb.app.users.desc": "Konten freigeben und verwalten.",
     "fb.app.settings.name": "Systemeinstellungen",
     "fb.app.settings.desc": "Wie dieses Fishbowl läuft.",
-    "fb.app.system.name": "System",
+    "fb.app.system.name": "Systeminfo",
     "fb.app.system.desc": "Version, Datenmengen, Archive.",
 
     "fb.desk.tagline": "Dein Gedächtnis lebt hier. Du nicht.",
@@ -86,6 +89,7 @@ window.sac?.i18n?.add?.("de", {
     "fb.desk.hidden-title": "Ausgeblendete Kacheln",
     "fb.desk.show": "Zeigen",
     "fb.desk.options": "Optionen für {name}",
+    "fb.desk.size-small": "Kleine Kachel",
     "fb.desk.size-medium": "Mittlere Kachel",
     "fb.desk.size-wide": "Breite Kachel",
     "fb.desk.size-large": "Große Kachel",

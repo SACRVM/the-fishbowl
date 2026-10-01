@@ -160,7 +160,19 @@ class SacDialog extends HTMLElement {
             if (self && el.shadowRoot && out.length > at + 1) out.splice(at, 1);
         };
         Array.from(this.shadowRoot.children).forEach(walk);
-        return out;
+        // A radio group is one stop, as natively: its checked radio, else
+        // its first one. A group = same name within the same form or root.
+        const radio = (el) => el.localName === "input" && el.type === "radio" && el.name;
+        const pick = new Map();
+        for (const el of out) {
+            if (!radio(el)) continue;
+            const owner = el.form || el.getRootNode();
+            if (!pick.has(owner)) pick.set(owner, new Map());
+            const g = pick.get(owner), cur = g.get(el.name);
+            if (!cur || (el.checked && !cur.checked)) g.set(el.name, el);
+        }
+        return out.filter((el) => !radio(el) ||
+            pick.get(el.form || el.getRootNode()).get(el.name) === el);
     }
 
     /** The focused element itself, down through every open shadow root —
@@ -187,11 +199,18 @@ class SacDialog extends HTMLElement {
             const items = this._focusables();
             if (items.length === 0) return;
             const idx = items.indexOf(SacDialog._deepActive());
-            let next;
-            if (e.shiftKey) next = items[(idx <= 0 ? items.length : idx) - 1];
-            else            next = items[(idx + 1) % items.length];
+            const step = e.shiftKey ? -1 : 1;
+            let at = idx === -1 ? (e.shiftKey ? items.length : -1) : idx;
             e.preventDefault();
-            next.focus();
+            // Walk on past anything that refuses focus (visibility: hidden,
+            // a component that swallows focus()) — a stuck Tab is a trap
+            // you cannot leave.
+            for (let n = 0; n < items.length; n++) {
+                at = (at + step + items.length) % items.length;
+                items[at].focus();
+                const now = SacDialog._deepActive();
+                if (now === items[at] || (now && items[at].contains(now))) return;
+            }
         }
     }
 

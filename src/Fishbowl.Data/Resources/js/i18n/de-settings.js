@@ -421,7 +421,7 @@ window.sac?.i18n?.add?.("de", {
     "fb.admin.cfg-choice.false": "nein",
 
     // --- Admin: System ---------------------------------------------------------
-    "fb.admin.system-title": "System",
+    "fb.admin.system-title": "Systeminfo",
     "fb.admin.system-subtitle": "Wie es diesem Fishbowl geht. Nur Größen und Zeiten — niemandes Notizen oder Dateien.",
     "fb.admin.system-personal-only": "System wird für das ganze Fishbowl gezeigt, aus deinem persönlichen Arbeitsbereich.",
     "fb.admin.system-unavailable": "Die Systeminformationen lassen sich gerade nicht laden.",

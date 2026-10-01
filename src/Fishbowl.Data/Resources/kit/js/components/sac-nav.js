@@ -368,6 +368,9 @@ class SacNav extends HTMLElement {
         this._hasSlotted = hasSlotted;
 
         const routes = (window.sac?.router?.routes() || []).filter(r => r.hash !== "#/")
+            // A route bound to one kind of workspace (scope: "root"/"scoped")
+            // is left out of the other — re-checked on sac:scope-changed.
+            .filter(r => !sac.router.inScope || sac.router.inScope(r))
             // On a shared page (launcher pattern) the router carries the
             // host's destinations too — the host group already lists those,
             // so the app's own group drops the duplicates.

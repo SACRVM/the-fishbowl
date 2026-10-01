@@ -10,7 +10,10 @@
  * The arrangement (size, colour, order, hidden) is per workspace and lives
  * on the server (fb.api.desktop), so it follows the user across devices.
  * Tiles keep their stored position (the desktop has no reordering UI);
- * a tile never arranged sorts by its registry index.
+ * a tile never arranged sorts by its registry index. Only Notes, Todos and
+ * Calendar start medium; every other tile — built-in or installed, in any
+ * workspace — starts small, and they come after those three, so they share
+ * medium cells four at a time (the kit's .tile-pack).
  *
  * Palette groups (sac.commands). Routes still register with palette: false
  * — not because the palette would leave a space (it scopes route hashes
@@ -28,15 +31,16 @@
  */
 (function () {
     const BUILTINS = [
-        { key: "builtin:notes",    hash: "#/notes",       name: "Notes",    icon: "note",     desc: "Write freely. Find anything." },
-        { key: "builtin:todos",    hash: "#/todos",       name: "Todos",    icon: "check",    desc: "Fast to-dos, always at hand." },
-        { key: "builtin:calendar", hash: "#/calendar",    name: "Calendar", icon: "calendar", desc: "Events and reminders, yours." },
+        { key: "builtin:notes",    hash: "#/notes",       name: "Notes",    icon: "note",     desc: "Write freely. Find anything.", size: "medium" },
+        { key: "builtin:todos",    hash: "#/todos",       name: "Todos",    icon: "check",    desc: "Fast to-dos, always at hand.", size: "medium" },
+        { key: "builtin:calendar", hash: "#/calendar",    name: "Calendar", icon: "calendar", desc: "Events and reminders, yours.", size: "medium" },
         { key: "builtin:files",    hash: "#/files",       name: "Files",    icon: "folder",   desc: "Real files, two panes, any workspace." },
+        { key: "builtin:tables",   hash: "#/tables",      name: "Tables",   icon: "grid",     desc: "This space's own tables, like a spreadsheet.", space: true },
         { key: "builtin:messages", hash: "#/messages",    name: "Messages", icon: "mail",     desc: "What Fishbowl has to tell you." },
         { key: "builtin:trash",    hash: "#/trash",       name: "Trash",    icon: "trash",    desc: "Deleted things, back with one click." },
         { key: "builtin:users",    hash: "#/admin/users", name: "Users",    icon: "users",    desc: "Approve and manage accounts.", admin: true, personal: true },
         { key: "builtin:settings", hash: "#/admin/settings", name: "System settings", icon: "settings", desc: "How this Fishbowl runs.", admin: true, personal: true },
-        { key: "builtin:system",   hash: "#/admin/system", name: "System", icon: "info", desc: "Version, data sizes, archives.", admin: true, personal: true },
+        { key: "builtin:system",   hash: "#/admin/system", name: "System Info", icon: "info", desc: "Version, data sizes, archives.", admin: true, personal: true },
     ];
 
     const SETTINGS = [
@@ -47,7 +51,7 @@
         { hash: "#/secrets", label: "Secrets",  icon: "lock", personal: true },
     ];
 
-    const SIZES = ["medium", "wide", "large"];
+    const SIZES = ["small", "medium", "wide", "large"];
 
     // Names in the current language: "builtin:notes" → fb.app.notes.name /
     // .desc, a Go entry's hash → fb.go.<path>. English is the registry's.
@@ -64,7 +68,7 @@
     /** The built-ins this user sees in the active workspace, registry order. */
     async function builtins() {
         const user = await me();
-        return BUILTINS.filter((a) => (!a.admin || user?.isAdmin) && (!a.personal || !inSpace()))
+        return BUILTINS.filter((a) => (!a.admin || user?.isAdmin) && (!a.personal || !inSpace()) && (!a.space || inSpace()))
             .map((a) => ({ ...a, name: nameOf(a), desc: descOf(a) }));
     }
 
@@ -91,7 +95,8 @@
             return {
                 ...entry,
                 position: typeof t.position === "number" ? t.position : i + 1,
-                size: SIZES.includes(t.size) ? t.size : "medium",
+                size: SIZES.includes(t.size) ? t.size : (entry.size || "small"),
+                defaultSize: entry.size || "small",
                 color: t.color && fb.tags.SLOTS.includes(t.color) ? t.color : null,
                 hidden: !!t.hidden,
             };
@@ -118,7 +123,10 @@
 
     /** Store one tile's arrangement (the whole row) and resync the palette. */
     async function save(entry) {
-        await fb.api.desktop.putTile(entry.key, entry);
+        // A size is stored only when it differs from the app's default, so
+        // a later default (or a colour change today) never freezes it.
+        const size = entry.size === (entry.defaultSize || "small") ? null : entry.size;
+        await fb.api.desktop.putTile(entry.key, { ...entry, size });
         syncCommands();
     }
 

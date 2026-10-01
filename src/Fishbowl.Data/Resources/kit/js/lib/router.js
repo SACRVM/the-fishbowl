@@ -38,6 +38,15 @@
  * any scoped workspace (see scope.js). A prefix route's sub-path is read
  * after the strip, and a scope switch keeps the view mounted (it gets a
  * `sac:route` with the new hash, and sac:scope-changed as always).
+ *
+ * A view that only makes sense in one kind of workspace says so:
+ *   sac.router.register("#/tables/*", "my-tables-view", { label: "Tables", scope: "scoped" });
+ *   sac.router.register("#/secrets",  "my-secrets-view", { label: "Secrets", scope: "root" });
+ *   // options.scope: "any" (default) | "root" | "scoped". Outside its
+ *   // workspace the route does not exist: <sac-nav> and the Ctrl-K palette
+ *   // leave it out, and the router treats its hash as unmatched (falls
+ *   // back like an unknown route). sac.router.inScope(route) is the same
+ *   // test for apps that build their own lists from routes().
  */
 (function () {
     if (!window.sac) { console.warn("[sac.router] globals.js must load first — router unavailable."); return; }
@@ -58,19 +67,29 @@
         return sac.scope ? sac.scope.stripPrefix(hash) : hash;
     }
 
+    // "root" | "scoped" — the active workspace kind ("root" without scope.js).
+    function scopeType() {
+        return sac.scope ? sac.scope.get().type : "root";
+    }
+
+    function inScope(entry) {
+        return !entry || !entry.scope || entry.scope === "any" || entry.scope === scopeType();
+    }
+
     function decode(part) {
         try { return decodeURIComponent(part); } catch (_) { return part; }
     }
 
     /** Resolve a root-scope hash to { entry, subpath }: an exact route first,
      *  then the longest prefix route that owns it, then "#/". The subpath is
-     *  "" for an exact route (and for a prefix route's bare base). */
+     *  "" for an exact route (and for a prefix route's bare base). Routes
+     *  outside the active workspace (options.scope) never match. */
     function match(key) {
         const exact = routes.get(key);
-        if (exact && !exact.prefix) return { entry: exact, subpath: "" };
+        if (exact && !exact.prefix && inScope(exact)) return { entry: exact, subpath: "" };
         let best = null, bestLen = -1;
         for (const [base, entry] of routes) {
-            if (!entry.prefix || base.length <= bestLen) continue;
+            if (!entry.prefix || base.length <= bestLen || !inScope(entry)) continue;
             if (key === base || key.startsWith(base.endsWith("/") ? base : base + "/")) {
                 best = { entry, subpath: decode(key.slice(base.length).replace(/^\/+/, "")) };
                 bestLen = base.length;
@@ -116,6 +135,7 @@
                 label: options.label || tagName || hash,
                 icon:  options.icon  || null,
                 palette: options.palette === undefined ? null : options.palette,
+                scope: options.scope === "root" || options.scope === "scoped" ? options.scope : "any",
                 prefix,
             });
             // Notify listeners (e.g. <sac-nav>) that the route table changed.
@@ -132,11 +152,16 @@
                 render();
             }
         },
-        // Every route as { hash, tag, label, icon, palette, prefix }. A prefix
-        // route lists under its base hash ("#/files"), so a link to it lands
-        // on the prefix itself.
+        // Every route as { hash, tag, label, icon, palette, scope, prefix }.
+        // A prefix route lists under its base hash ("#/files"), so a link to
+        // it lands on the prefix itself. Lists ALL routes — filter with
+        // inScope() for the active workspace.
         routes() {
             return Array.from(routes.entries()).map(([hash, info]) => ({ hash, ...info }));
+        },
+        // true when a route (from routes()) exists in the active workspace.
+        inScope(route) {
+            return inScope(route);
         },
         current() {
             return currentHash();

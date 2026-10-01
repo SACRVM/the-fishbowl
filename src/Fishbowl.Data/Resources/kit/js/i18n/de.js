@@ -173,6 +173,10 @@
         "launcher.placeholder-width": "500px",
         "launcher.remove": "{name} entfernen",
         "launcher.show": "{name} einblenden",
+        "launcher.size-large": "Große Kachel",
+        "launcher.size-medium": "Mittlere Kachel",
+        "launcher.size-small": "Kleine Kachel",
+        "launcher.size-wide": "Breite Kachel",
         "launcher.tile-menu": "Aktionen für {name}",
 
         "layer-list.add": "Ebene hinzufügen",

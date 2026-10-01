@@ -103,11 +103,14 @@ public class AdminTests
             // Nothing in your own menu locks you out.
             await Assertions.Expect(me.Locator("button[data-action='block'], button[data-action='disable']")).ToHaveCountAsync(0);
 
-            // In a space the page points back to Personal.
+            // In a space the page does not exist.
             var slug = await page.EvaluateAsync<string>(
                 "async () => (await fb.api.spaces.create({ name: 'Admin elsewhere ' + Math.random().toString(36).slice(2, 7) })).slug");
+            // The page exists only in Personal (route scope "root"): in a
+            // space its link lands on the space's desktop.
             await page.GotoAsync($"{_fixture.BaseUrl}/#/space/{slug}/admin/users");
-            await Assertions.Expect(view).ToContainTextAsync("Open in Personal", new() { Timeout = 5000 });
+            await Assertions.Expect(page.Locator("fb-hub-view")).ToBeVisibleAsync(new() { Timeout = 5000 });
+            await Assertions.Expect(view).ToHaveCountAsync(0);
             await page.EvaluateAsync("async (s) => fb.api.spaces.delete(s)", slug);
         }
         finally
@@ -386,11 +389,14 @@ public class AdminTests
             Assert.DoesNotContain("abcdefghijklmnop", await view.InnerTextAsync());
             await page.ScreenshotAsync(new PageScreenshotOptions { Path = Path.Combine(Path.GetTempPath(), "fishbowl_ui_system_settings.png"), FullPage = true });
 
-            // In a space the page points back to Personal.
+            // In a space the page does not exist.
             var slug = await page.EvaluateAsync<string>(
                 "async () => (await fb.api.spaces.create({ name: 'Settings elsewhere ' + Math.random().toString(36).slice(2, 7) })).slug");
+            // The page exists only in Personal (route scope "root"): in a
+            // space its link lands on the space's desktop.
             await page.GotoAsync($"{_fixture.BaseUrl}/#/space/{slug}/admin/settings");
-            await Assertions.Expect(view).ToContainTextAsync("Open in Personal", new() { Timeout = 5000 });
+            await Assertions.Expect(page.Locator("fb-hub-view")).ToBeVisibleAsync(new() { Timeout = 5000 });
+            await Assertions.Expect(view).ToHaveCountAsync(0);
             await page.EvaluateAsync("async (s) => fb.api.spaces.delete(s)", slug);
         }
         finally

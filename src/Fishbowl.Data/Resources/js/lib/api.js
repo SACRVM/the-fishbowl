@@ -383,6 +383,18 @@
         empty:   ()   => request(ctx("/trash"), { method: "DELETE" }),
     };
 
+    // A space's own tables (spaces only: the routes live under /spaces/<slug>/).
+    const t = (name) => ctx(`/tables/${encodeURIComponent(name)}`);
+    const tables = {
+        list:     ()             => request(ctx("/tables")),
+        describe: (name)         => request(t(name)),
+        query:    (name, spec)   => request(`${t(name)}/query`, { method: "POST", body: JSON.stringify(spec || {}) }),
+        count:    (name, where)  => request(`${t(name)}/count`, { method: "POST", body: JSON.stringify({ where }) }),
+        insert:   (name, values) => request(`${t(name)}/rows`, { method: "POST", body: JSON.stringify(values) }),
+        update:   (name, id, values) => request(`${t(name)}/rows/${encodeURIComponent(id)}`, { method: "PATCH", body: JSON.stringify(values) }),
+        remove:   (name, id)     => request(`${t(name)}/rows/${encodeURIComponent(id)}`, { method: "DELETE" }),
+    };
+
     const todos = crud("todos");
     todos.list = (opts) => request(opts?.includeCompleted
         ? `${ctx("/todos")}?includeCompleted=true`
@@ -397,6 +409,7 @@
         notes,
         todos,
         trash,
+        tables,
         contacts,
         events,
         tags: {

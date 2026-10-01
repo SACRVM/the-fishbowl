@@ -246,4 +246,4 @@ class FbSecretsSettingsView extends HTMLElement {
 }
 
 customElements.define("fb-secrets-settings-view", FbSecretsSettingsView);
-sac.router.register("#/secrets", "fb-secrets-settings-view", { label: "Secrets", icon: "lock", palette: false });
+sac.router.register("#/secrets", "fb-secrets-settings-view", { label: "Secrets", icon: "lock", palette: false, scope: "root" });

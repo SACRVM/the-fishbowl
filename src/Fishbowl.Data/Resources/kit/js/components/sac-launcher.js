@@ -53,7 +53,7 @@
  * Property:
  *   layout — the user layer as one plain object, in and out:
  *             { order: [keys], hidden: [keys],
- *               sizes: { key: "medium" | "wide" | "large" },
+ *               sizes: { key: "small" | "medium" | "wide" | "large" },
  *               colors: { key: palette slot }, custom: [manifests] }.
  *             `sizes` overrides a tile's footprint, `colors` its accent with
  *             a data-palette slot name ("blue", "teal", … — ui.css
@@ -125,10 +125,16 @@
  *   colors the tile (icon, hover ring) AND seeds the app's --accent when
  *   opened through it — tile color = app highlight. The optional manifest
  *   field `tile` sets the footprint: "medium" (default) | "wide" spans 2
- *   grid columns | "large" spans 2 columns AND 2 rows; unknown values fall
+ *   grid columns | "large" spans 2 columns AND 2 rows | "small" is a
+ *   quarter of a medium: four in a row fill one medium cell as a 2×2 block
+ *   (top-left, top-right, bottom-left, bottom-right; any other footprint
+ *   between them starts a new block). A small tile shows its icon only —
+ *   the name is its tooltip and accessible name. Unknown values fall
  *   back to medium silently. Tiles are square like the .grid pattern's
- *   (a wide one as tall as one column is wide, a large one 2×2). All
- *   footprints collapse to medium on narrow viewports (≤768px), matching
+ *   (a wide one as tall as one column is wide, a large one 2×2). Small
+ *   tiles stay small everywhere — a phone gains the most from the
+ *   density: in a one-column grid a block is one row of four. Wide and
+ *   large collapse to medium on narrow viewports (≤768px), matching
  *   the .grid pattern — and whenever the grid itself is too narrow for two
  *   columns (a launcher inside a sac-window or split panel on a wide
  *   screen), via a container query on the grid. In edit mode each tile grows keyboard-reachable
@@ -145,6 +151,12 @@
  * the tile back. A dashed outline marks the slot the tile will land in. A
  * drop persists exactly like the move buttons (the effective order is
  * stored and sac:layout fires); the buttons stay the keyboard path.
+ *
+ * Small tiles need a finer grid than CSS auto-placement can pack into
+ * 2×2 blocks, so while at least one is shown the launcher places every
+ * cell itself on a half-size grid (grid-row/grid-column inline, re-run on
+ * resize and every DOM move — drag included). With no small tile the grid
+ * is the plain .grid pattern, untouched.
  *
  * Compact/touch: the grid goes single-column below 581px of its own width
  * (the .grid pattern's 280px minimum), wide/large tiles included — a span-2
@@ -229,11 +241,29 @@ class SacLauncher extends HTMLElement {
             this._dragObserver.observe(this._grid, {
                 subtree: true, attributes: true, attributeFilter: ["data-sortable-dragging"] });
         }
+        if (!this._layoutObserver) {
+            // Small-tile placement follows every DOM move (a drag moves cells
+            // live) and every width change.
+            const relayout = () => this._layout();
+            this._layoutObserver = new MutationObserver(relayout);
+            this._layoutObserver.observe(this._grid, { childList: true });
+            this._resizeObserver = new ResizeObserver(relayout);
+            this._resizeObserver.observe(this._grid);
+            const mq = window.matchMedia(SacLauncher.COMPACT);
+            mq.addEventListener("change", relayout);
+            this._offRelayout = () => mq.removeEventListener("change", relayout);
+        }
+        this._layout();
     }
 
     disconnectedCallback() {
         if (this._sortable) { this._sortable.destroy(); this._sortable = null; }
         if (this._dragObserver) { this._dragObserver.disconnect(); this._dragObserver = null; }
+        if (this._layoutObserver) {
+            this._layoutObserver.disconnect(); this._layoutObserver = null;
+            this._resizeObserver.disconnect(); this._resizeObserver = null;
+            this._offRelayout(); this._offRelayout = null;
+        }
         this._stopTrack();
         if (this._offLang) { this._offLang(); this._offLang = null; }
         document.removeEventListener("sac:apps-changed", this._onReady);
@@ -597,6 +627,96 @@ class SacLauncher extends HTMLElement {
         // In edit mode the Add tile is visible, so the empty hint would lie —
         // unless there is no Add tile.
         this._empty.hidden = this._order.length > 0 || (this.hasAttribute("edit") && !noAdd);
+        this._layout();
+    }
+
+    /**
+     * Places the cells on a half-size grid while a small tile is shown (see
+     * the header). Mirrors CSS sparse auto-placement in medium units — a
+     * cursor that only moves forward, each item at the first free spot that
+     * fits — except that consecutive small tiles share one medium cell.
+     * One-column grid: a medium cell is a row, its block four across.
+     */
+    _layout() {
+        const grid = this._grid;
+        if (!grid) return;
+        const cells = Array.from(grid.children).filter(c =>
+            c.classList.contains("sac-launcher-cell") && getComputedStyle(c).display !== "none");
+        if (!cells.some(c => c.classList.contains("size-small"))) {
+            if (this._fine) {
+                this._fine = false;
+                grid.classList.remove("sac-launcher-fine", "sac-launcher-list");
+                grid.style.removeProperty("grid-template-columns");
+                grid.style.removeProperty("grid-auto-rows");
+                Array.from(grid.children).forEach(c => { c.style.gridColumn = ""; c.style.gridRow = ""; });
+            }
+            return;
+        }
+        const cs = getComputedStyle(grid);
+        const gap = parseFloat(cs.columnGap) || 0;
+        const width = grid.clientWidth - (parseFloat(cs.paddingLeft) || 0) - (parseFloat(cs.paddingRight) || 0);
+        if (width <= 0) return;
+        this._fine = true;
+        // The .grid pattern's auto-fill: n columns from n × 280px + (n − 1) × gap.
+        const n = Math.max(1, Math.floor((width + gap) / (280 + gap)));
+        const list = n === 1;
+        const collapse = list || window.matchMedia(SacLauncher.COMPACT).matches;
+        const sub = list ? 4 : 2 * n;
+        grid.classList.add("sac-launcher-fine");
+        grid.classList.toggle("sac-launcher-list", list);
+        grid.style.setProperty("grid-template-columns", `repeat(${sub}, minmax(0, 1fr))`);
+        if (list) grid.style.removeProperty("grid-auto-rows");
+        else grid.style.setProperty("grid-auto-rows", `${(width - (sub - 1) * gap) / sub}px`);
+
+        const used = new Set();
+        const free = (r, c, w, h) => {
+            for (let y = r; y < r + h; y++) for (let x = c; x < c + w; x++) {
+                if (used.has(y + "," + x)) return false;
+            }
+            return true;
+        };
+        let cr = 0, cc = 0, pack = null;
+        const place = (w, h) => {
+            let r = cr, c = cc;
+            for (;;) {
+                if (c + w > n) { r++; c = 0; continue; }
+                if (free(r, c, w, h)) break;
+                c++;
+            }
+            for (let y = r; y < r + h; y++) for (let x = c; x < c + w; x++) used.add(y + "," + x);
+            cr = r; cc = c + w;
+            return [r, c];
+        };
+        for (const cell of cells) {
+            const st = cell.style;
+            if (cell.classList.contains("size-small")) {
+                if (!pack || pack.k === 4) {
+                    const [r, c] = place(1, 1);
+                    pack = { r, c, k: 0 };
+                }
+                const k = pack.k++;
+                if (list) {
+                    st.gridColumn = `${k + 1}`;
+                    st.gridRow = `${pack.r + 1}`;
+                } else {
+                    st.gridColumn = `${2 * pack.c + (k & 1) + 1}`;
+                    st.gridRow = `${2 * pack.r + (k >> 1) + 1}`;
+                }
+                continue;
+            }
+            pack = null;
+            const large = !collapse && cell.classList.contains("size-large");
+            const w = large || (!collapse && cell.classList.contains("size-wide")) ? 2 : 1;
+            const h = large ? 2 : 1;
+            const [r, c] = place(w, h);
+            if (list) {
+                st.gridColumn = "1 / -1";
+                st.gridRow = `${r + 1}`;
+            } else {
+                st.gridColumn = `${2 * c + 1} / span ${2 * w}`;
+                st.gridRow = `${2 * r + 1} / span ${2 * h}`;
+            }
+        }
     }
 
     _makeCell(entry) {
@@ -703,6 +823,12 @@ class SacLauncher extends HTMLElement {
         const size = this._state.sizes[entry.key] || entry.tile;
         cell.classList.toggle("size-wide", size === "wide");
         cell.classList.toggle("size-large", size === "large");
+        cell.classList.toggle("size-small", size === "small");
+        cell._tile.classList.toggle("small", size === "small");
+        // Icon only: the name rides along as tooltip (the h2 stays the
+        // accessible name, visually hidden by ui.css's .tile.small).
+        if (size === "small") cell._tile.title = name;
+        else cell._tile.removeAttribute("title");
 
         cell._left.disabled = f.first;
         cell._right.disabled = f.last;
@@ -836,6 +962,7 @@ class SacLauncher extends HTMLElement {
             else cell._tile.removeAttribute("tabindex");
         });
         this._grid.classList.toggle("sac-launcher-can-drag", this._dragAllowed());
+        this._layout();   // hidden tiles appear / disappear with edit mode
     }
 
     /* ------------------------------------------------------------------ */
@@ -975,8 +1102,8 @@ class SacLauncher extends HTMLElement {
 
     _showDialog() {
         // Our keydown listener must register BEFORE the dialog's own (both
-        // capture on document; same node fires in registration order) so we
-        // can extend its focus trap across the form inputs.
+        // capture on document; same node fires in registration order) so
+        // Enter in a field submits before anything else sees it.
         document.addEventListener("keydown", this._onDialogKeydown, true);
         this._dialog.open();
         const firstBad = this._formEl.querySelector('[aria-invalid="true"]');
@@ -1064,24 +1191,7 @@ class SacLauncher extends HTMLElement {
             dlg.close("add");
             return;
         }
-        if (e.key !== "Tab") return;
-
-        // Extend the dialog's focus trap (it only knows its own shadow
-        // buttons) to a ring of: form inputs → dialog buttons → form inputs.
-        const inputs = Array.from(this._formEl.querySelectorAll("input"));
-        const btns = dlg.shadowRoot
-            ? Array.from(dlg.shadowRoot.querySelectorAll(".btn"))
-            : [];
-        const ring = inputs.concat(btns);
-        if (ring.length === 0) return;
-        let idx = ring.indexOf(active);
-        if (idx < 0 && dlg.shadowRoot) idx = ring.indexOf(dlg.shadowRoot.activeElement);
-        e.preventDefault();
-        e.stopImmediatePropagation(); // the dialog's own trap must not also fire
-        let next;
-        if (e.shiftKey) next = ring[(idx <= 0 ? ring.length : idx) - 1];
-        else next = ring[(idx + 1) % ring.length];
-        next.focus();
+        // Tab: the dialog's own trap covers the form (it walks its body).
     }
 
     _onDialogAction(action) {
@@ -1205,6 +1315,14 @@ class SacLauncher extends HTMLElement {
                     --grid-rows: 1;
                 }
             }
+            /* Small tiles: _layout() places every cell on a half-size grid
+               (inline grid-row / grid-column + the grid's own track list),
+               so a cell's height is its rows', not the square of ui.css. A
+               one-column grid lays a block of four out as one row: square
+               cells of natural height. */
+            sac-launcher > .grid.sac-launcher-fine > .sac-launcher-cell { height: auto; }
+            sac-launcher > .grid.sac-launcher-fine > .sac-launcher-cell.size-small { min-height: 0; }
+            sac-launcher > .grid.sac-launcher-list > .sac-launcher-cell.size-small { aspect-ratio: 1; }
             /* Two 280px columns + the 21px gap: below that the grid has one
                column and a span-2 cell would invent a second one. */
             @container sac-launcher-grid (width < 581px) {
@@ -1252,6 +1370,15 @@ class SacLauncher extends HTMLElement {
                 gap: 4px;
             }
             sac-launcher[edit] .sac-launcher-controls { display: flex; }
+            /* A small tile is too narrow for a row of controls: they wrap
+               from its top-right corner, and the menu sits closer in. */
+            sac-launcher .size-small > .sac-launcher-controls {
+                top: 6px;
+                right: 6px;
+                left: 6px;
+                flex-wrap: wrap;
+                justify-content: flex-end;
+            }
             sac-launcher .sac-launcher-ctrl {
                 display: flex;
                 align-items: center;
@@ -1315,6 +1442,7 @@ class SacLauncher extends HTMLElement {
                 transition: transform 0.4s var(--ease-bounce);
             }
             sac-launcher[edit] .sac-launcher-menu { display: none; }
+            sac-launcher .size-small > .sac-launcher-menu { right: 6px; top: 6px; margin-top: 0; }
             sac-launcher:not([edit]) .sac-launcher-cell:has(> .sac-launcher-tile:hover) > .sac-launcher-menu {
                 transform: translateY(-8px);
             }
@@ -1343,6 +1471,17 @@ class SacLauncher extends HTMLElement {
             }
             @media (max-width: 480px) and (pointer: coarse) {
                 sac-launcher .sac-launcher-menu { margin-top: -18px; }
+            }
+            @media (max-width: 480px) {
+                sac-launcher .size-small > .sac-launcher-menu { top: 4px; right: 4px; margin-top: 0; }
+            }
+            /* Touch: a small tile keeps the 28px controls (two per row fit);
+               the halo shrinks so neighbours never overlap. */
+            @media (pointer: coarse) {
+                sac-launcher .size-small > .sac-launcher-controls { gap: 4px; }
+                sac-launcher .size-small .sac-launcher-ctrl,
+                sac-launcher .size-small .sac-launcher-menu-btn { width: 28px; height: 28px; }
+                sac-launcher .size-small .sac-launcher-ctrl::after { inset: -2px; }
             }
 
             /* Drag reorder. Edit mode: the inert tile shows it can be
@@ -1472,7 +1611,13 @@ class SacLauncher extends HTMLElement {
 }
 SacLauncher._instances = 0;
 /** Layout sizes and palette slots (ui.css --palette-<slot>) `layout` accepts. */
-SacLauncher.SIZES = ["medium", "wide", "large"];
+SacLauncher.SIZES = ["small", "medium", "wide", "large"];
+/** A footprint's menu label ("Small tile" / "Kleine Kachel"), for hosts
+ *  that offer a size menu via setMenu() — labelKey "launcher.size-<size>". */
+SacLauncher.sizeLabel = (size) => t("launcher.size-" + size,
+    { small: "Small tile", medium: "Medium tile", wide: "Wide tile", large: "Large tile" }[size] || size);
+/** The kit's compact breakpoint (ui.css) — wide/large collapse to medium. */
+SacLauncher.COMPACT = "(max-width: 768px), (max-height: 480px) and (pointer: coarse)";
 SacLauncher.PALETTE = ["blue", "orange", "red", "green", "purple", "pink", "yellow", "teal", "gray", "indigo"];
 SacLauncher._emptyLayout = () => ({ order: [], hidden: [], sizes: {}, colors: {}, custom: [] });
 /** Any value → a clean layout: string keys, deduped lists, known sizes and

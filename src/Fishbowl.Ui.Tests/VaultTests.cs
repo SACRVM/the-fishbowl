@@ -532,15 +532,16 @@ public class VaultTests
             await Assertions.Expect(passkeyRow).ToHaveCountAsync(0, new() { Timeout = 10000 });
             await Assertions.Expect(page.Locator("fb-secrets-settings-view .slot-row")).ToHaveCountAsync(2);
 
-            // ── In a space the page only points back to Personal. ──
+            // ── In a space the page does not exist. ──
             var space = await api.PostAsync($"{baseUrl}/api/v1/spaces", new APIRequestContextOptions
             {
                 DataObject = new { name = "Secrets elsewhere " + Guid.NewGuid().ToString("N")[..6] },
             });
             var slug = (await space.JsonAsync())!.Value.GetProperty("slug").GetString()!;
             await page.GotoAsync($"{baseUrl}/#/space/{slug}/secrets");
-            await Assertions.Expect(page.Locator("fb-secrets-settings-view")).ToContainTextAsync("Secrets are personal");
-            await Assertions.Expect(page.Locator("fb-secrets-settings-view .slot-row")).ToHaveCountAsync(0);
+            // Route scope "root": in a space the link lands on the desktop.
+            await Assertions.Expect(page.Locator("fb-hub-view")).ToBeVisibleAsync();
+            await Assertions.Expect(page.Locator("fb-secrets-settings-view")).ToHaveCountAsync(0);
 
             // ── No WebAuthn in the browser: a hint, never a dead button. ──
             var bare = await context.NewPageAsync();

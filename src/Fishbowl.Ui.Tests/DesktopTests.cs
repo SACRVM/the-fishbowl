@@ -141,9 +141,20 @@ public class DesktopTests
             await Assertions.Expect(Cell(page, "builtin:todos").Locator(".tile-menu button[data-action='size:medium']")).ToHaveTextAsync("✓ Medium tile");
             await Cell(page, "builtin:todos").Locator(".tile-menu button[data-action='size:wide']").ClickAsync();
             await Assertions.Expect(Cell(page, "builtin:todos")).ToHaveClassAsync(new System.Text.RegularExpressions.Regex("size-wide"));
-            var medium = (await Cell(page, "builtin:files").BoundingBoxAsync())!;
+            var medium = (await Cell(page, "builtin:calendar").BoundingBoxAsync())!;
             var wide = (await Cell(page, "builtin:todos").BoundingBoxAsync())!;
             Assert.True(wide.Width > medium.Width * 2 - 2, $"wide {wide.Width} vs medium {medium.Width}");
+
+            // Small: the housekeeping tiles start small — a quarter of a
+            // medium, together in the kit's .tile-pack, icon only.
+            await Assertions.Expect(page.Locator(".tile-pack > a.tile.small[data-key='builtin:messages']")).ToHaveCountAsync(1);
+            await Assertions.Expect(page.Locator(".tile-pack > a.tile.small[data-key='builtin:trash']")).ToHaveCountAsync(1);
+            await OpenMenuAsync(page, "builtin:messages");
+            await Assertions.Expect(Cell(page, "builtin:messages").Locator(".tile-menu button[data-action='size:small']")).ToHaveTextAsync("✓ Small tile");
+            await page.Keyboard.PressAsync("Escape");
+            var small = (await Cell(page, "builtin:messages").BoundingBoxAsync())!;
+            Assert.True(small.Width < medium.Width / 2 && small.Width > medium.Width / 3, $"small {small.Width} vs medium {medium.Width}");
+            await Assertions.Expect(Cell(page, "builtin:messages").Locator("p").First).ToBeHiddenAsync();
 
             // Colour, from the menu's colour row.
             await OpenMenuAsync(page, "builtin:calendar");

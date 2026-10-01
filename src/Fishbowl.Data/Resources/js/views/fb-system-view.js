@@ -26,7 +26,7 @@ class FbSystemView extends HTMLElement {
         this.classList.add("fb-page");
         this.innerHTML = `
             <header><div>
-                <h1>${fb.t("fb.admin.system-title", "System")}</h1>
+                <h1>${fb.t("fb.admin.system-title", "System Info")}</h1>
                 <p class="subtitle">
                     ${fb.t("fb.admin.system-subtitle", "How this Fishbowl is doing. Sizes and times only — nobody's notes or files.")}
                 </p>

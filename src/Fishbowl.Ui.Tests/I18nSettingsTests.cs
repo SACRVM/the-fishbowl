@@ -93,7 +93,7 @@ public class I18nSettingsTests
                     ("#/apps", "Apps", "apps"),
                     ("#/admin/users", "Benutzer", "users"),
                     ("#/admin/settings", "Systemeinstellungen", "system-settings"),
-                    ("#/admin/system", "System", "system"),
+                    ("#/admin/system", "Systeminfo", "system"),
                 };
                 foreach (var (hash, title, name) in pages)
                 {

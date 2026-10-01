@@ -404,9 +404,9 @@
     function registerAdminRoutes() {
         if (adminRegistered) return;
         adminRegistered = true;
-        sac.router.register("#/admin/users", "fb-users-admin-view", { label: "Users", icon: "users", palette: false });
-        sac.router.register("#/admin/settings", "fb-system-settings-view", { label: "System settings", icon: "settings", palette: false });
-        sac.router.register("#/admin/system", "fb-system-view", { label: "System", icon: "info", palette: false });
+        sac.router.register("#/admin/users", "fb-users-admin-view", { label: "Users", icon: "users", palette: false, scope: "root" });
+        sac.router.register("#/admin/settings", "fb-system-settings-view", { label: "System settings", icon: "settings", palette: false, scope: "root" });
+        sac.router.register("#/admin/system", "fb-system-view", { label: "System Info", icon: "info", palette: false, scope: "root" });
     }
 
     fb.accounts = {

@@ -36,7 +36,9 @@
  *                 (00–68 → 20xx, 69–99 → 19xx), any of . / - as separator,
  *                 and an ISO date is always accepted — the rules of
  *                 sac.regional.parseDate / formatDate, which show and read
- *                 dates the same way outside a field.
+ *                 dates the same way outside a field. Formats other than
+ *                 ISO need lib/globals.js (sac.regional); without it the
+ *                 field is ISO-only.
  *   label       — text above the row, kit form-label styling. Absent/empty =
  *                 no label line at all. Also becomes the input's accessible name.
  *   placeholder — the input's placeholder. Default follows the format

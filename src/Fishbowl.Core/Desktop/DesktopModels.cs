@@ -30,11 +30,12 @@ public static class AppPermissions
 
 public static partial class DesktopTiles
 {
+    public const string Small = "small";   // a quarter of a medium, four to a cell
     public const string Medium = "medium";
     public const string Wide = "wide";
     public const string Large = "large";
 
-    public static readonly string[] Sizes = { Medium, Wide, Large };
+    public static readonly string[] Sizes = { Small, Medium, Wide, Large };
 
     // "builtin:notes", "app:color-bucket" — the registry key the UI uses.
     [GeneratedRegex(@"^[a-z0-9][a-z0-9:._-]{0,99}$")]
