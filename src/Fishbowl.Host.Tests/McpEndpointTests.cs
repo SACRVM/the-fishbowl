@@ -255,6 +255,29 @@ public class McpEndpointTests : IClassFixture<WebApplicationFactory<Program>>, I
         Assert.Contains("40", Text(agg));
     }
 
+    // An agent never saw a note's secrets, so it can't rewrite its text —
+    // title and tags it may change; REST PUT through a key is refused too.
+    [Fact]
+    public async Task Mcp_UpdateMemory_LeavesSecretNotesText_Alone()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var notes = new NoteRepository(_dbFactory, new TagRepository(_dbFactory));
+        var id = await notes.CreateAsync(ContextRef.User(AliceId), AliceId,
+            new Fishbowl.Core.Models.Note { Title = "Bank", Content = "login\n:::secret\npin 1234\n:::end" }, Fishbowl.Core.Models.NoteSource.Human, ct);
+        var client = await BearerClientAsync("read:notes", "write:notes");
+
+        var refused = await CallToolAsync(client, "update_memory", new { id, content = "login\n[secret content hidden]" });
+        Assert.Contains("holds secrets", refused.GetProperty("error").GetProperty("message").GetString());
+        var renamed = await CallToolAsync(client, "update_memory", new { id, title = "Bank (old)" });
+        Assert.False(renamed.TryGetProperty("error", out _));
+        var stored = await notes.GetByIdAsync(ContextRef.User(AliceId), id, ct);
+        Assert.Equal("Bank (old)", stored!.Title);
+        Assert.Contains("pin 1234", stored.Content);
+
+        var put = await client.PutAsJsonAsync($"/api/v1/notes/{id}", new { title = "x", content = "y" }, ct);
+        Assert.Equal(HttpStatusCode.Conflict, put.StatusCode);
+    }
+
     [Fact]
     public async Task Mcp_RememberAndGet_RoundTripsANote()
     {

@@ -102,6 +102,12 @@ public static class NotesApi
             if (ctx is null) return Results.Unauthorized();
 
             note.Id = id;
+            // A key can't see secrets, so a PUT from one would overwrite them
+            // with "[secret content hidden]" and drop the ciphertext.
+            if (user.Identity?.AuthenticationType == McpContextClaims.BearerScheme
+                && await repo.GetByIdAsync(ctx.Value, id, ct) is { } current
+                && (SecretStripper.ContainsSecret(current.Content) || current.ContentSecret is { Length: > 0 }))
+                return ApiErrors.Conflict("secret_note", "This note holds secrets — agents can't change it; edit it in Fishbowl.");
             try
             {
                 var updated = await repo.UpdateAsync(ctx.Value, note, SourceForPrincipal(user), ct);

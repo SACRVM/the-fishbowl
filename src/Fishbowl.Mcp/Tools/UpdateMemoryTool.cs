@@ -46,7 +46,13 @@ public class UpdateMemoryTool : IMcpTool
         if (arguments.TryGetProperty("title", out var t) && t.ValueKind == JsonValueKind.String)
             existing.Title = t.GetString() ?? existing.Title;
         if (arguments.TryGetProperty("content", out var c) && c.ValueKind == JsonValueKind.String)
+        {
+            // The agent only ever saw "[secret content hidden]": writing its text
+            // back would drop the secret's marker and orphan the ciphertext.
+            if (SecretStripper.ContainsSecret(existing.Content) || existing.ContentSecret is { Length: > 0 })
+                throw new ArgumentException("This note holds secrets — its text can only be changed in Fishbowl. Title and tags can be changed here.");
             existing.Content = c.GetString();
+        }
         if (arguments.TryGetProperty("tags", out var g) && g.ValueKind == JsonValueKind.Array)
         {
             existing.Tags = g.EnumerateArray().Select(e => e.GetString() ?? "")

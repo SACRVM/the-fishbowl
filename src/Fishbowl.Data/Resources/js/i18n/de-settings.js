@@ -565,6 +565,7 @@ window.sac?.i18n?.add?.("de", {
     "fb.errors.invalid_username": "Ungültiger Benutzername: {reason}",
     "fb.errors.query_invalid": "Dieser Filter geht hier nicht: {reason}",
     "fb.errors.change_invalid": "Die Änderung ist fehlerhaft: {reason}",
+    "fb.errors.secret_note": "Diese Notiz enthält Geheimnisse — Agenten können sie nicht ändern; bearbeite sie in Fishbowl.",
     "fb.errors.restore_conflict": "Das kann nicht zurück: Sein Platz ist belegt, oder etwas, das es braucht, fehlt.",
     "fb.errors.is_folder": "Das ist ein Ordner.",
     "fb.errors.not_a_folder": "Das ist kein Ordner.",

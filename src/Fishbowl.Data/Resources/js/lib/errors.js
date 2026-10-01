@@ -116,6 +116,7 @@
         "invalid_username": "{reason}",
         "query_invalid": "That filter doesn't work here: {reason}",
         "change_invalid": "{reason}",
+        "secret_note": "This note holds secrets — agents can't change it; edit it in Fishbowl.",
         "restore_conflict": "It can't come back: its place is taken, or something it needs is gone.",
         "is_folder": "That's a folder.",
         "not_a_folder": "That isn't a folder.",
