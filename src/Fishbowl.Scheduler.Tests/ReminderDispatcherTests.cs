@@ -308,4 +308,15 @@ public class ReminderDispatcherTests : IDisposable
             }
         }
     }
+
+    // A catch-up after downtime says the event has begun, not "now".
+    [Fact]
+    public void FormatReminderMessage_EventAlreadyStarted_SaysSo()
+    {
+        var now = new DateTime(2026, 10, 1, 12, 0, 0, DateTimeKind.Utc);
+        var ev = new Fishbowl.Core.Models.Event { Title = "Standup", StartAt = now.AddMinutes(-40) };
+        var msg = ReminderDispatcher.FormatReminderMessage(ev, now);
+        Assert.Contains("started 40m ago", msg);
+        Assert.Contains("hat vor 40 min begonnen", ReminderDispatcher.FormatReminderMessage(ev, now, "de"));
+    }
 }

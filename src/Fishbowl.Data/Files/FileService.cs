@@ -28,7 +28,8 @@ public sealed class FileService : IFileService
     private const string FilesFolder = "files";
     private static readonly ConcurrentDictionary<string, SemaphoreSlim> Locks = new(StringComparer.Ordinal);
     private static readonly ConcurrentDictionary<string, long> UsageCache = new(StringComparer.Ordinal);
-    private static (DateTime At, long Bytes) _instanceUsage = (DateTime.MinValue, 0);
+    // Per data root (a process can host several — the test fixtures do).
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, (DateTime At, long Bytes)> InstanceUsageCache = new();
     private static readonly TimeSpan PartMaxAge = TimeSpan.FromHours(1);
 
     private readonly DatabaseFactory _dbFactory;
@@ -443,7 +444,8 @@ public sealed class FileService : IFileService
 
     private long InstanceUsage()
     {
-        if (DateTime.UtcNow - _instanceUsage.At < TimeSpan.FromSeconds(60)) return _instanceUsage.Bytes;
+        if (InstanceUsageCache.TryGetValue(_dbFactory.UsersRoot, out var cached) && DateTime.UtcNow - cached.At < TimeSpan.FromSeconds(60))
+            return cached.Bytes;
         long total = 0;
         foreach (var root in new[] { _dbFactory.UsersRoot, _dbFactory.SpacesRoot })
             if (Directory.Exists(root))
@@ -451,7 +453,7 @@ public sealed class FileService : IFileService
                     total += DiskFileStore.Measure(Path.Combine(dir, FilesFolder)).Bytes;
         var archive = Path.Combine(Path.GetDirectoryName(_dbFactory.UsersRoot)!, "archive");
         total += DiskFileStore.Measure(archive).Bytes;
-        _instanceUsage = (DateTime.UtcNow, total);
+        InstanceUsageCache[_dbFactory.UsersRoot] = (DateTime.UtcNow, total);
         return total;
     }
 
@@ -691,6 +693,10 @@ public sealed class FileService : IFileService
                 var now = DiskFileStore.Stat(r, target.Rel);
                 if (now?.Kind == FileKinds.Folder) throw new FileStoreException(409, "is_folder", "A folder with that name already exists here.", "name_exists");
                 CheckPrecondition(now, ifMatch, ifNoneMatchStar);
+                // And the room: parallel uploads each passed the check before streaming.
+                if (s.QuotaBytes > 0 && Usage(r) - (now?.Size ?? 0) + total > s.QuotaBytes)
+                    throw FileStoreException.TooLarge("quota", "That would go over this workspace's storage quota.");
+                if (OwnerRoom(owner) != long.MaxValue && OwnerRoom(owner) + (now?.Size ?? 0) < total) throw OwnerQuotaExceeded(owner!);
                 DiskFileStore.Unhide(temp);
                 DiskFileStore.Move(temp, target.Full, overwriteFile: true);
                 var item = DiskFileStore.Stat(r, target.Rel)!;
@@ -1187,17 +1193,18 @@ public sealed class FileService : IFileService
                     var dst = rt.Resolve(FilePathResolver.Join(targetFolder.Rel, item.Name), create: true, allowRoot: false);
                     if (sameContext && (string.Equals(dst.Rel, src.Rel, rs.Comparison) || dst.Rel.StartsWith(src.Rel + "/", rs.Comparison)))
                         throw new FileStoreException(400, "into_own_subtree", "A folder can't go into itself.");
+                    // Checks first: a refused transfer must not have trashed what it would replace.
+                    var (bytes, nodes) = CountTree(rs, item);
+                    CheckNodes(nodes);
+                    CheckRoom(rt, s, sameContext && move ? 0 : bytes, sameContext && move ? 0 : bytes);
+                    if (ownerGrows) CheckOwnerRoom(targetOwner, bytes);
+
                     if (DiskFileStore.Exists(dst.Full))
                     {
                         if (mode == FileConflictMode.Fail) throw FileStoreException.Exists();
                         if (mode == FileConflictMode.Rename) dst = FreeName(rt, dst, " (2)", " ({0})");
                         else await TrashCoreAsync(to, rt, dst, actor, ct);   // replace: the old one goes to trash
                     }
-
-                    var (bytes, nodes) = CountTree(rs, item);
-                    CheckNodes(nodes);
-                    CheckRoom(rt, s, sameContext && move ? 0 : bytes, sameContext && move ? 0 : bytes);
-                    if (ownerGrows) CheckOwnerRoom(targetOwner, bytes);
 
                     List<DiskItem> created;
                     var moved = false;

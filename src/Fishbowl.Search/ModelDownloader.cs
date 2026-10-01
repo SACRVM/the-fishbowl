@@ -53,9 +53,10 @@ public sealed class ModelDownloader
     public string ModelPath => Path.Combine(_modelsDir, "model.onnx");
     public string VocabPath => Path.Combine(_modelsDir, "vocab.txt");
 
-    // True once both files are on disk and hash-match. EmbeddingService uses
-    // this to decide whether to initialise the pipeline or throw
-    // EmbeddingUnavailableException.
+    // True once both files are on disk. A file only gets its final name after
+    // it was downloaded completely and verified (written as .part, then
+    // renamed), so present means whole. EmbeddingService uses this to decide
+    // whether to initialise the pipeline or throw EmbeddingUnavailableException.
     public bool IsReady()
     {
         if (!Directory.Exists(_modelsDir)) return false;
@@ -88,15 +89,18 @@ public sealed class ModelDownloader
             var url = $"{BaseUrl}/{file.UpstreamPath}";
             _logger.LogInformation("Downloading {Name} from {Url}", file.LocalName, url);
 
-            await DownloadToFileAsync(url, localPath, file.LocalName, ct);
+            var partPath = localPath + ".part";
+            await DownloadToFileAsync(url, partPath, file.LocalName, ct);
 
-            if (!await IsVerifiedAsync(localPath, file.Sha256, ct))
+            if (!await IsVerifiedAsync(partPath, file.Sha256, ct))
             {
-                File.Delete(localPath);
+                File.Delete(partPath);
                 throw new InvalidOperationException(
                     $"SHA-256 mismatch for {file.LocalName} — expected {file.Sha256}. " +
                     "Deleted partial file; next start will retry.");
             }
+            // Only a complete, verified file ever has the name the loader reads.
+            File.Move(partPath, localPath, overwrite: true);
 
             _logger.LogInformation("Verified {Name}", file.LocalName);
         }

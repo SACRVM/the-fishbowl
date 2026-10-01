@@ -140,8 +140,9 @@ public class DiscordBotHostedService : IHostedService, IAsyncDisposable
     {
         // DM-only invariant. User-installable apps can be invoked in guilds
         // too; we hard-reject everything outside a DM/private channel
-        // regardless of the command's declared contexts.
-        if (command.Channel is not (IDMChannel or IGroupChannel))
+        // regardless of the command's declared contexts. Group DMs too:
+        // /link would store the group as the channel reminders go to.
+        if (command.Channel is not IDMChannel)
         {
             await SafeRespondAsync(command, "I only work in DMs.", ephemeral: true);
             return;
@@ -180,7 +181,7 @@ public class DiscordBotHostedService : IHostedService, IAsyncDisposable
                 scope.ServiceProvider.GetService<DiscordUserResolver>());
 
             var reply = await router.DispatchAsync(command.Data.Name, ctx, CancellationToken.None);
-            await command.FollowupAsync(reply.Message, ephemeral: reply.Ephemeral);
+            await command.FollowupAsync(DiscordText.Fit(reply.Message), ephemeral: reply.Ephemeral);
         }
         catch (Exception ex)
         {
@@ -227,6 +228,7 @@ public class DiscordBotHostedService : IHostedService, IAsyncDisposable
 
     private async Task DisposeClientAsync()
     {
+        _bot.Bind(null);   // a disposed socket must not be used for sends
         if (_client is null) return;
         try { await _client.LogoutAsync(); } catch { /* shutting down */ }
         try { await _client.StopAsync(); } catch { /* shutting down */ }

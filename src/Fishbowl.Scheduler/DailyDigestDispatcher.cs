@@ -33,6 +33,10 @@ public class DailyDigestDispatcher : BackgroundService
     private const string HourKey = "Digest:Hour";
     private const int DefaultHour = 7;
 
+    // After a failed send a user's digest waits this long before the next
+    // try (a closed DM would otherwise be retried every minute all day).
+    private static readonly TimeSpan FailedSendBackoff = TimeSpan.FromMinutes(30);
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, DateTime> _retryAfter = new();
     private readonly IServiceScopeFactory _scopes;
     private readonly ILogger<DailyDigestDispatcher> _logger;
 
@@ -59,7 +63,7 @@ public class DailyDigestDispatcher : BackgroundService
                 if (sent > 0)
                     _logger.LogInformation("Daily digest tick sent {Count} digests", sent);
             }
-            catch (OperationCanceledException)
+            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
             {
                 break;
             }
@@ -127,6 +131,7 @@ public class DailyDigestDispatcher : BackgroundService
         var channels = sp.GetRequiredService<INotificationChannelRepository>();
 
         IBotClient? target = null;
+        if (_retryAfter.TryGetValue(userId, out var after) && DateTime.UtcNow < after) return null;
         foreach (var bot in bots)
         {
             var channel = await channels.GetAsync(userId, bot.Name, ct);
@@ -136,7 +141,8 @@ public class DailyDigestDispatcher : BackgroundService
 
         var ctx = ContextRef.User(userId);
         var dayStartUtc = DateTime.SpecifyKind(nowLocal.Date, DateTimeKind.Local).ToUniversalTime();
-        var dayEndUtc = dayStartUtc.AddDays(1);
+        // Local midnight to local midnight: 23 or 25 hours on a DST change day.
+        var dayEndUtc = DateTime.SpecifyKind(nowLocal.Date.AddDays(1), DateTimeKind.Local).ToUniversalTime();
 
         var events = sp.GetRequiredService<IEventRepository>();
         var todos = sp.GetRequiredService<ITodoRepository>();
@@ -164,7 +170,9 @@ public class DailyDigestDispatcher : BackgroundService
         {
             _logger.LogWarning(ex,
                 "Bot {Platform} threw while sending daily digest to {UserId}", target.Name, userId);
-            return null; // treat like "no channel" — retry next tick
+            // Not latched, so it goes out later today — but not every minute.
+            _retryAfter[userId] = DateTime.UtcNow + FailedSendBackoff;
+            return null;
         }
 
         _logger.LogInformation("Sent daily digest to {UserId} via {Platform}", userId, target.Name);

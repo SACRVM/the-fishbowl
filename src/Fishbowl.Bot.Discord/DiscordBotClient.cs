@@ -38,15 +38,15 @@ public class DiscordBotClient : IBotClient
     // Set by DiscordBotHostedService after a successful login. Calling
     // SendAsync before this is wired throws, but it shouldn't happen in
     // practice — reminder dispatch only starts after the bot connects.
-    internal void Bind(DiscordSocketClient socket) => _socket = socket;
+    internal void Bind(DiscordSocketClient? socket) => _socket = socket;
 
     public async Task SendAsync(string userId, string message, CancellationToken ct)
     {
         if (_socket is null)
         {
             _logger.LogWarning(
-                "Discord SendAsync called for user {UserId} but bot is not connected — skipping", userId);
-            return;
+                "Discord SendAsync called for user {UserId} but bot is not connected", userId);
+            throw new BotDeliveryException("Discord isn't connected.");
         }
 
         using var scope = _scopes.CreateScope();
@@ -55,8 +55,8 @@ public class DiscordBotClient : IBotClient
 
         if (channel is null || !channel.Enabled)
         {
-            _logger.LogDebug("No active Discord channel for user {UserId} — skipping send", userId);
-            return;
+            _logger.LogDebug("No active Discord channel for user {UserId}", userId);
+            throw new BotDeliveryException("No Discord channel is linked for this user.");
         }
 
         IMessageChannel? dm = null;
@@ -74,10 +74,10 @@ public class DiscordBotClient : IBotClient
         if (dm is null)
         {
             _logger.LogWarning("Could not resolve Discord DM channel for user {UserId}", userId);
-            return;
+            throw new BotDeliveryException("The Discord DM couldn't be opened.");
         }
 
-        await dm.SendMessageAsync(message);
+        await dm.SendMessageAsync(DiscordText.Fit(message));
     }
 
     // Discord evicts cold DM channels from the gateway cache surprisingly

@@ -44,7 +44,7 @@ public class FilesMaintenanceService : BackgroundService
         while (!stoppingToken.IsCancellationRequested)
         {
             try { await RunOnceAsync(stoppingToken); }
-            catch (OperationCanceledException) { break; }
+            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { break; }
             catch (Exception ex) { _logger.LogError(ex, "Files maintenance failed — will retry next interval"); }
 
             try { await Task.Delay(Interval, stoppingToken); }

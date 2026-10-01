@@ -66,13 +66,15 @@ public class ReminderDispatcher : BackgroundService
         while (!stoppingToken.IsCancellationRequested)
         {
             var tickStart = DateTime.UtcNow;
+            var ok = false;
             try
             {
                 var fired = await RunTickAsync(_lastTickUtc, tickStart, stoppingToken);
                 if (fired > 0)
                     _logger.LogInformation("Reminder tick fired {Count} notifications", fired);
+                ok = true;
             }
-            catch (OperationCanceledException)
+            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
             {
                 break;
             }
@@ -82,7 +84,8 @@ public class ReminderDispatcher : BackgroundService
             }
 
             _lastTickUtc = tickStart;
-            _status?.MarkReminderTick(tickStart);
+            // The System page shows the last tick that worked, not just one that ran.
+            if (ok) _status?.MarkReminderTick(tickStart);
 
             try { await Task.Delay(TickInterval, stoppingToken); }
             catch (OperationCanceledException) { break; }
@@ -214,6 +217,8 @@ public class ReminderDispatcher : BackgroundService
         if (ev.AllDay && ev.StartDate is not null)
             whenText = ChatText.Get("reminder.onAllDay", language,
                 AllDayDates.TryParse(ev.StartDate, out var day) ? ChatText.Day(day, language) : ev.StartDate);
+        // A catch-up after downtime: the event has begun already.
+        else if (when.TotalMinutes <= -1) whenText = ChatText.Get("reminder.startedAgo", language, (int)-when.TotalMinutes);
         else if (when.TotalSeconds <= 30) whenText = ChatText.Get("reminder.now", language);
         else if (when.TotalMinutes < 1) whenText = ChatText.Get("reminder.lessThanMinute", language);
         else if (when.TotalMinutes < 60) whenText = ChatText.Get("reminder.inMinutes", language, (int)when.TotalMinutes);
