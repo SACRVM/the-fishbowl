@@ -140,7 +140,7 @@ window.sac?.i18n?.add?.("de", {
 
     // --- Secrets ---------------------------------------------------------------
     "fb.secrets.title": "Geheimnisse",
-    "fb.secrets.subtitle": "Geheime Blöcke in deinen Notizen werden in diesem Browser verschlüsselt. Hier sind die Wege, sie zu entsperren — jeder davon öffnet deine Geheimnisse auf jedem Gerät.",
+    "fb.secrets.subtitle": "Geheime Blöcke in deinen Notizen werden in diesem Browser verschlüsselt — nicht einmal der Betreiber dieses Fishbowl kann sie lesen. Alles andere liegt unverschlüsselt da, wo es der Betreiber des Servers lesen könnte. Hier sind die Wege, deine Geheimnisse zu entsperren — jeder davon öffnet sie auf jedem Gerät.",
     "fb.secrets.space-none": "Geheimnisse sind vorerst persönlich — ein Space hat keinen Tresor.",
     "fb.secrets.open-personal": "Im persönlichen Bereich öffnen",
     "fb.secrets.unavailable": "Der Tresor ist gerade nicht erreichbar.",
@@ -243,7 +243,7 @@ window.sac?.i18n?.add?.("de", {
 
     // --- Admin: Users ----------------------------------------------------------
     "fb.admin.users-title": "Benutzer",
-    "fb.admin.users-subtitle": "Wer dieses Fishbowl nutzen kann. Du siehst, wer die Leute sind und wie viel Platz sie haben — nie, was sie hier ablegen.",
+    "fb.admin.users-subtitle": "Wer dieses Fishbowl nutzen kann. Du siehst, wer die Leute sind und wie viel Platz sie haben — nie, was sie hier ablegen. Ein Passwort-Reset wird der betroffenen Person immer angezeigt.",
     "fb.admin.users-personal-only": "Benutzer werden für das ganze Fishbowl verwaltet, aus deinem persönlichen Arbeitsbereich.",
     "fb.admin.open-personal": "Im persönlichen Bereich öffnen",
     "fb.admin.users-unavailable": "Die Benutzerliste lässt sich gerade nicht laden.",
@@ -296,7 +296,8 @@ window.sac?.i18n?.add?.("de", {
     "fb.admin.user-added": "Benutzer angelegt",
     "fb.admin.can-sign-in-now": "{who} kann sich jetzt anmelden.",
     "fb.admin.reset-title": "Passwort von {who} zurücksetzen?",
-    "fb.admin.reset-body": "Das jetzige Passwort funktioniert sofort nicht mehr. Du bekommst ein vorläufiges zum Weitergeben; beim Anmelden wird ein neues gewählt.",
+    "fb.admin.reset-body": "Das jetzige Passwort funktioniert sofort nicht mehr. Ein vorläufiges geht per Discord-DM an die Person, wenn sie Discord verknüpft hat — sonst bekommst du es zum Weitergeben. Beim Anmelden wird ein neues gewählt, und die Person erfährt vom Reset.",
+    "fb.admin.reset-delivered": "{who} hat ein vorläufiges Passwort per {via}-DM bekommen und wählt beim Anmelden ein eigenes.",
     "fb.admin.password-reset": "Passwort zurückgesetzt",
     "fb.admin.reset-failed": "Das Passwort konnte nicht zurückgesetzt werden.",
     "fb.admin.quota-title": "Speicher für {who}",

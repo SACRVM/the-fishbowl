@@ -109,6 +109,17 @@ class FbMessagesView extends HTMLElement {
             icon.setAttribute("name", "user");
             text.textContent = fb.t("fb.messages.joined-by-invite", "{who} joined this Fishbowl through a space invitation.", { who: label });
             meta.textContent = when;
+        } else if (m.kind === "password.reset") {
+            icon.setAttribute("name", "key");
+            text.textContent = m.data?.via === "import"
+                ? fb.t("fb.messages.password-import", "A Global Admin set up your account with a password. Choose your own when you sign in.")
+                : fb.t("fb.messages.password-reset", "A Global Admin reset your password. If you didn't ask for it, tell them.");
+            meta.textContent = when;
+        } else if (m.kind === "password.reset-used") {
+            icon.setAttribute("name", "warn");
+            text.textContent = fb.t("fb.messages.password-reset-used",
+                "Someone signed in with the temporary password from the reset and chose a new one. If that wasn't you, an admin used your account — ask them, and change your password.");
+            meta.textContent = when;
         } else if (m.kind === "user.approved") {
             icon.setAttribute("name", "success");
             text.textContent = fb.t("fb.messages.welcome", "Your account was approved. Welcome to this Fishbowl.");

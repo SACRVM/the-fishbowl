@@ -65,7 +65,7 @@ class FbUsersAdminView extends HTMLElement {
             <header><div>
                 <h1>${fb.t("fb.admin.users-title", "Users")}</h1>
                 <p class="subtitle">
-                    ${fb.t("fb.admin.users-subtitle", "Who can use this Fishbowl. You see who people are and how much room they have — never what they keep here.")}
+                    ${fb.t("fb.admin.users-subtitle", "Who can use this Fishbowl. You see who people are and how much room they have — never what they keep here. A password reset is always shown to the person it's for.")}
                 </p>
             </div></header>
             <div id="users-body"></div>

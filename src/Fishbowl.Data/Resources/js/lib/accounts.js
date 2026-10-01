@@ -204,7 +204,7 @@
     async function resetPassword(user) {
         const answer = await sac.dialog.confirm({
             title: fb.t("fb.admin.reset-title", "Reset the password of {who}?", { who: who(user) }),
-            message: fb.t("fb.admin.reset-body", "Their current password stops working at once. You get a temporary one to pass on; they choose a new one when they sign in."),
+            message: fb.t("fb.admin.reset-body", "Their current password stops working at once. A temporary one goes to their Discord DM if they have one linked — otherwise you get it to pass on. They choose a new one when they sign in, and they're told about the reset."),
             buttons: [
                 { action: "cancel", label: fb.t("fb.common.cancel", "Cancel") },
                 { action: "reset", label: fb.t("fb.admin.menu-reset", "Reset password"), kind: "destructive", armAfterMs: 800 },
@@ -213,7 +213,13 @@
         if (answer !== "reset") return false;
         try {
             const res = await fb.api.admin.resetPassword(user.id);
-            await revealPassword({ title: fb.t("fb.admin.password-reset", "Password reset"), username: who(user), tempPassword: res.tempPassword });
+            if (res.deliveredTo) {
+                // Sent straight to the user's chat — the admin never sees it.
+                window.sac?.toast?.(fb.t("fb.admin.reset-delivered", "{who} got a temporary password by {via} DM. They choose their own when they sign in.",
+                    { who: who(user), via: res.deliveredTo === "discord" ? "Discord" : res.deliveredTo }), { kind: "success" });
+            } else {
+                await revealPassword({ title: fb.t("fb.admin.password-reset", "Password reset"), username: who(user), tempPassword: res.tempPassword });
+            }
             return true;
         } catch (err) {
             return failed(err, fb.t("fb.admin.reset-failed", "Couldn't reset the password."));

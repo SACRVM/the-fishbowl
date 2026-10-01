@@ -47,7 +47,7 @@ class FbSecretsSettingsView extends HTMLElement {
             <header><div>
                 <h1>${fb.t("fb.secrets.title", "Secrets")}</h1>
                 <p class="subtitle">
-                    ${fb.t("fb.secrets.subtitle", "Secret blocks in your notes are encrypted in this browser. These are the ways to unlock them — any one of them opens your secrets on any device.")}
+                    ${fb.t("fb.secrets.subtitle", "Secret blocks in your notes are encrypted in this browser — not even this Fishbowl's operator can read them. Everything else is stored as is, where whoever runs the server could read it. These are the ways to unlock your secrets — any one of them opens them on any device.")}
                 </p>
             </div></header>
             <div id="secrets-body"></div>

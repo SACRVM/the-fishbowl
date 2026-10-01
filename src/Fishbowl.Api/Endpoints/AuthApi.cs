@@ -95,6 +95,7 @@ public static class AuthApi
             ISystemRepository system,
             IPasswordHasher hasher,
             AccountGate gate,
+            IMessageRepository messages,
             CancellationToken ct) =>
         {
             if (string.IsNullOrWhiteSpace(request?.Username)
@@ -122,6 +123,14 @@ public static class AuthApi
 
             var fresh = hasher.Hash(request.NewPassword);
             await system.SetPasswordAsync(user!.Id, fresh.Hash, fresh.Salt, mustChange: false, ct);
+
+            // Someone used the password a Global Admin set: the account's owner
+            // hears of it — if it wasn't them, the admin went in.
+            if ((await messages.ListAsync(user.Id, ct: ct)).Any(m => m.Kind == MessageKinds.PasswordReset && m.DoneAt is null))
+            {
+                await messages.ResolveAsync(MessageKinds.PasswordReset, "user", user.Id, ct);
+                await messages.CreateAsync(new[] { user.Id }, MessageKinds.PasswordResetUsed, "user", user.Id, null, ct);
+            }
 
             // Signed in with the stamp the new password just set.
             await SignInAsync(context, await system.GetUserAsync(user.Id, ct) ?? user);

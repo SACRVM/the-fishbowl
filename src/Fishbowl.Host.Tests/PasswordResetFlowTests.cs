@@ -1,5 +1,6 @@
 using System.Net;
 using System.Net.Http.Json;
+using Fishbowl.Core.Models;
 using Fishbowl.Core.Repositories;
 using Fishbowl.Data;
 using Microsoft.AspNetCore.Authentication;
@@ -213,6 +214,12 @@ public class PasswordResetFlowTests : IClassFixture<WebApplicationFactory<Progra
         var repo = scope.ServiceProvider.GetRequiredService<ISystemRepository>();
         var refreshed = await repo.GetUserAsync(alice, ct);
         Assert.False(refreshed!.MustChangePassword);
+
+        // The reset is never silent: Alice was told about it, and that the
+        // temporary password has been used to set a new one.
+        var inbox = await scope.ServiceProvider.GetRequiredService<IMessageRepository>().ListAsync(alice, ct: ct);
+        Assert.Contains(inbox, m => m.Kind == MessageKinds.PasswordReset && m.DoneAt is not null);
+        Assert.Contains(inbox, m => m.Kind == MessageKinds.PasswordResetUsed);
 
         // The new password is the live one — login with it returns 204
         // (no must-change flag, real cookie issued from the server's

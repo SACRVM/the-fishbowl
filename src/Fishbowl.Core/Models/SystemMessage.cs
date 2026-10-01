@@ -30,6 +30,14 @@ public static class MessageKinds
     // skips the sign-up policy. Info only. Subject: the user.
     public const string UserInvited = "user.invited";
 
+    // To the user: a Global Admin set a new (temporary) password for the
+    // account — a reset or an import. Data: { via: "reset" | "import" }.
+    public const string PasswordReset = "password.reset";
+
+    // To the user: someone signed in with that temporary password and chose
+    // a new one. If it wasn't them, the admin used their account.
+    public const string PasswordResetUsed = "password.reset-used";
+
     // To the user: their storage crossed 90% of the quota. Data:
     // { usedBytes, quotaBytes }. Once per crossing.
     public const string QuotaWarning = "quota.warning";

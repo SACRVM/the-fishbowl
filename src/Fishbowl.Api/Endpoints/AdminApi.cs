@@ -6,13 +6,16 @@ using Fishbowl.Core.Auth;
 using Fishbowl.Core.Files;
 using Fishbowl.Core.Mcp;
 using Fishbowl.Core.Models;
+using Fishbowl.Core.Plugins;
 using Fishbowl.Core.Repositories;
+using Fishbowl.Core.Util;
 using Fishbowl.Data;
 using Fishbowl.Data.Files;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Data.Sqlite;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace Fishbowl.Api.Endpoints;
 
@@ -78,6 +81,7 @@ public static class AdminApi
             DatabaseFactory dbFactory,
             IPasswordHasher hasher,
             IUserAdminRepository admin,
+            IMessageRepository messages,
             CancellationToken ct) =>
         {
             if (!await IsCookieAdminAsync(user, system, ct))
@@ -146,6 +150,8 @@ public static class AdminApi
             await system.CreateUserMappingAsync(folder, "local", username, ct);
             var hash = hasher.Hash(request.Password);
             await system.SetPasswordAsync(folder, hash.Hash, hash.Salt, ct: ct);
+            // The account's owner learns that an admin gave it a password.
+            await messages.CreateAsync(new[] { folder }, MessageKinds.PasswordReset, "user", folder, "{\"via\":\"import\"}", ct);
             await admin.RecordAdminActionAsync(ActorId(user), AdminActions.ImportUser, "user", folder, ct);
 
             return Results.Ok(new
@@ -159,16 +165,22 @@ public static class AdminApi
         .WithSummary("Registers a pre-existing users/{folderName}/ data folder as a new user with a local password.")
         .RequireAuthorization();
 
-        // Admin password reset → temp password the operator passes out-of-band
-        // (chat / paper). User must rotate on next login. Returns the new
-        // password as plaintext exactly once; we never email it (CONCEPT.md
-        // self-host-without-internet means we can't assume an SMTP server).
+        // Admin password reset → a temporary password the user must replace at
+        // the next sign-in. A Global Admin never reads content, so the reset
+        // is made visible rather than silent: with a linked chat channel the
+        // temporary password goes straight to the user (the admin never sees
+        // it); otherwise the admin gets it once to pass on. Either way the
+        // user gets a password.reset message, and whoever then signs in with
+        // it triggers password.reset-used.
         group.MapPost("/users/{userId}/reset-password", async (
             string userId,
             ClaimsPrincipal caller,
             ISystemRepository system,
             IPasswordHasher hasher,
             IUserAdminRepository admin,
+            IMessageRepository messages,
+            INotificationChannelRepository channels,
+            HttpContext http,
             CancellationToken ct) =>
         {
             if (!await IsCookieAdminAsync(caller, system, ct))
@@ -190,6 +202,26 @@ public static class AdminApi
             var hash = hasher.Hash(tempPassword);
             await system.SetPasswordAsync(userId, hash.Hash, hash.Salt, mustChange: true, ct);
             await admin.RecordAdminActionAsync(ActorId(caller), AdminActions.ResetPassword, "user", userId, ct);
+            await messages.CreateAsync(new[] { userId }, MessageKinds.PasswordReset, "user", userId, "{\"via\":\"reset\"}", ct);
+
+            // Straight to the user when they have a chat channel.
+            foreach (var bot in http.RequestServices.GetServices<IBotClient>())
+            {
+                var channel = await channels.GetAsync(userId, bot.Name, ct);
+                if (channel is null || !channel.Enabled) continue;
+                try
+                {
+                    await bot.SendAsync(userId, ChatText.Get("password.resetCode", target.Language, tempPassword), ct);
+                    return Results.Ok(new
+                    {
+                        userId,
+                        deliveredTo = bot.Name,
+                        mustChangeOnNextLogin = true,
+                        message = "The temporary password went to the user's " + bot.Name + " DM — you don't see it.",
+                    });
+                }
+                catch (Exception) { /* not delivered: the admin passes it on */ }
+            }
 
             return Results.Ok(new
             {
