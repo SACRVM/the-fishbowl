@@ -33,10 +33,7 @@ public static class NotesApi
         // Bearer clients are MCP-ish; cookie users are humans. The auth
         // scheme is the authoritative signal here — matches how the
         // RequireScope helper gates access.
-        static NoteSource SourceForPrincipal(ClaimsPrincipal user)
-            => user.Identity?.AuthenticationType == McpContextClaims.BearerScheme
-                ? NoteSource.Mcp
-                : NoteSource.Human;
+        static NoteSource SourceForPrincipal(ClaimsPrincipal user) => NoteSources.Of(user);
 
         group.MapGet("/", async (
             string[]? tag,

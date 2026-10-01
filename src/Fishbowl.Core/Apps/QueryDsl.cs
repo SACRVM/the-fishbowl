@@ -50,10 +50,6 @@ public static class QueryDsl
           .Append(" FROM \"").Append(tableName).Append('"');
 
         var wherePieces = new List<string>();
-        // Old app tables soft-delete; space tables have no such column (a
-        // deleted row is in the trash).
-        if (!spec.IncludeDeleted && byName.ContainsKey("is_deleted"))
-            wherePieces.Add("\"is_deleted\" = 0");
 
         if (spec.Where.HasValue && spec.Where.Value.ValueKind != JsonValueKind.Null
             && spec.Where.Value.ValueKind != JsonValueKind.Undefined)
@@ -298,8 +294,14 @@ public static class QueryDsl
         if (value.ValueKind == JsonValueKind.Null) return null;
         switch (col.Type)
         {
-            case AppColumnType.Text:
             case AppColumnType.DateTime:
+                // Stored as UTC "o" (…T10:00:00.0000000Z): compare like with like.
+                if (value.ValueKind == JsonValueKind.String && DateTimeOffset.TryParse(value.GetString(),
+                        System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.AssumeUniversal, out var dt))
+                    return dt.UtcDateTime.ToString("o");
+                throw new QueryDslException(QueryDslErrorCodes.TypeMismatch,
+                    $"Column '{col.Name}' expects an ISO 8601 date and time; got {value}.", col.Name);
+            case AppColumnType.Text:
             case AppColumnType.Json:
                 if (value.ValueKind == JsonValueKind.String) return value.GetString();
                 throw new QueryDslException(QueryDslErrorCodes.TypeMismatch,

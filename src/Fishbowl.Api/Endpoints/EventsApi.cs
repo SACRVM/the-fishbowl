@@ -16,7 +16,7 @@ public static class EventsApi
 {
     public static RouteGroupBuilder MapEventsApi(this IEndpointRouteBuilder routes)
     {
-        var group = routes.MapGroup("/api/v1/events");
+        var group = routes.MapGroup("/api/v1/events").PersonalKeysOnly();
 
         group.MapGet("/", async (
             ClaimsPrincipal user, IEventRepository repo,

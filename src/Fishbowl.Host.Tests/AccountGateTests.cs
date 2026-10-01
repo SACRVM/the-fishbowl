@@ -137,6 +137,22 @@ public class AccountGateTests : IDisposable
         Assert.Null(await _gate.AcceptInviteAsync(pending.UserId!, token, Ct));   // spent
     }
 
+    // Removing or demoting the maker withdraws their open invitations.
+    [Fact]
+    public async Task Invitation_DiesWithItsMakersAuthority()
+    {
+        var owner = (await Google("owner")).UserId!;
+        await _system.SetConfigAsync(SignUpPolicy.ModeKey, "open", Ct);
+        var maker = (await Google("maker")).UserId!;
+        var space = await _spaces.CreateAsync(owner, "Club x", Ct);
+        await _spaces.AddMemberAsync(space.Id, maker, SpaceRole.Admin, Ct);
+        var (_, token) = await _invites.CreateAsync(space.Id, SpaceRole.Admin, maker, TimeSpan.FromDays(7), Ct);
+        await _spaces.SetRoleAsync(space.Id, maker, SpaceRole.Member, Ct);
+        var guest = (await Google("guest")).UserId!;
+        Assert.Null(await _gate.AcceptInviteAsync(guest, token, Ct));
+        Assert.Null(await _spaces.GetMembershipAsync(space.Id, guest, Ct));
+    }
+
     [Fact]
     public async Task Invitation_Expired_OrBlocked_DoesNothing()
     {

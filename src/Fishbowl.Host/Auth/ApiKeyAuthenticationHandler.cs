@@ -1,6 +1,7 @@
 using System.Security.Claims;
 using System.Text.Encodings.Web;
 using Fishbowl.Core.Mcp;
+using Fishbowl.Core.Models;
 using Fishbowl.Core.Repositories;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.Extensions.Logging;
@@ -57,6 +58,7 @@ public class ApiKeyAuthenticationHandler : AuthenticationHandler<ApiKeyAuthentic
         if (string.Equals(key.ContextType, "app", StringComparison.Ordinal))
             return AuthenticateResult.Fail("App keys are retired — make a space key with the tables scopes instead.");
 
+        IReadOnlyList<string> scopes = key.Scopes.ToList();
         var claims = new List<Claim>
         {
             new(ClaimTypes.NameIdentifier, key.UserId),
@@ -70,11 +72,16 @@ public class ApiKeyAuthenticationHandler : AuthenticationHandler<ApiKeyAuthentic
         if (string.Equals(key.ContextType, "space", StringComparison.Ordinal))
         {
             var space = await _spaces.GetBySlugAsync(key.ContextId, Context.RequestAborted);
-            if (space is null || await _spaces.GetMembershipAsync(space.Id, key.UserId, Context.RequestAborted) is null)
+            var member = space is null ? null : await _spaces.GetMembershipAsync(space.Id, key.UserId, Context.RequestAborted);
+            if (space is null || member is not { } role)
                 return AuthenticateResult.Fail("This key's space is gone, or its owner is no longer a member.");
             claims.Add(new Claim(McpContextClaims.SpaceId, space.Id));
+            // A key can't do more than its owner may in the space today: a
+            // Reader's key loses write:*, a key below Designer design:*.
+            scopes = scopes.Where(s => (!s.StartsWith("write:", StringComparison.Ordinal) || role.CanWrite())
+                && (!s.StartsWith("design:", StringComparison.Ordinal) || role.CanDesign())).ToList();
         }
-        foreach (var scope in key.Scopes)
+        foreach (var scope in scopes)
             claims.Add(new Claim(McpContextClaims.Scope, scope));
 
         var identity = new ClaimsIdentity(claims, Scheme.Name);

@@ -249,7 +249,8 @@ public class McpEndpointTests : IClassFixture<WebApplicationFactory<Program>>, I
         var bobKey = await _keys.IssueAsync("mcp_bob", ContextRef.Space(space.Slug), "bob", scopes, ct);
         var bob = _factory.CreateClient();
         bob.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", bobKey.RawToken);
-        Assert.Contains("Designer", (await CallToolAsync(bob, "table_drop", new { table = "inventory" })).GetProperty("error").GetProperty("message").GetString());
+        // The key loses design:tables: its owner is only a Member.
+        Assert.Contains("design:tables", (await CallToolAsync(bob, "table_drop", new { table = "inventory" })).GetProperty("error").GetProperty("message").GetString());
         var agg = await CallToolAsync(bob, "row_aggregate", new { table = "inventory", fn = "sum", column = "qty" });
         Assert.Contains("40", Text(agg));
     }

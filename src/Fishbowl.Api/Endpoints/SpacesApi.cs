@@ -26,6 +26,7 @@ public static class SpacesApi
 
         group.MapGet("/", async (ClaimsPrincipal user, ISpaceRepository repo, CancellationToken ct) =>
         {
+            if (user.Identity?.AuthenticationType == McpContextClaims.BearerScheme) return Results.Forbid();   // a person's act, not a key's
             var userId = user.FindFirst("fishbowl_user_id")?.Value;
             if (string.IsNullOrEmpty(userId)) return Results.Unauthorized();
 
@@ -48,6 +49,7 @@ public static class SpacesApi
         group.MapPost("/", async (
             CreateSpaceRequest body, ClaimsPrincipal user, ISpaceRepository repo, CancellationToken ct) =>
         {
+            if (user.Identity?.AuthenticationType == McpContextClaims.BearerScheme) return Results.Forbid();   // a person's act, not a key's
             var userId = user.FindFirst("fishbowl_user_id")?.Value;
             if (string.IsNullOrEmpty(userId)) return Results.Unauthorized();
 
@@ -69,6 +71,7 @@ public static class SpacesApi
 
         group.MapGet("/{slug}", async (string slug, ClaimsPrincipal user, ISpaceRepository repo, CancellationToken ct) =>
         {
+            if (user.Identity?.AuthenticationType == McpContextClaims.BearerScheme) return Results.Forbid();   // a person's act, not a key's
             var userId = user.FindFirst("fishbowl_user_id")?.Value;
             if (string.IsNullOrEmpty(userId)) return Results.Unauthorized();
 
@@ -100,6 +103,7 @@ public static class SpacesApi
         group.MapPatch("/{slug}", async (
             string slug, UpdateSpaceRequest body, ClaimsPrincipal user, ISpaceRepository repo, CancellationToken ct) =>
         {
+            if (user.Identity?.AuthenticationType == McpContextClaims.BearerScheme) return Results.Forbid();   // a person's act, not a key's
             var userId = user.FindFirst("fishbowl_user_id")?.Value;
             if (string.IsNullOrEmpty(userId)) return Results.Unauthorized();
             if (body.Color is not null && !TagPalette.IsSlot(body.Color))
@@ -208,7 +212,7 @@ public static class SpacesApi
             var userId = user.FindFirst("fishbowl_user_id")!.Value;
             try
             {
-                var created = await notes.CreateAsync(ContextRef.Space(space.Id), userId, note, ct);
+                var created = await notes.CreateAsync(ContextRef.Space(space.Id), userId, note, NoteSources.Of(user), ct);
                 return Results.Created($"/api/v1/spaces/{slug}/notes/{created}", note);
             }
             catch (ResourceValidationException ex)
@@ -231,7 +235,7 @@ public static class SpacesApi
             note.Id = id;
             try
             {
-                var updated = await notes.UpdateAsync(ContextRef.Space(space.Id), note, ct);
+                var updated = await notes.UpdateAsync(ContextRef.Space(space.Id), note, NoteSources.Of(user), ct);
                 return updated ? Results.NoContent() : Results.NotFound();
             }
             catch (ResourceValidationException ex)

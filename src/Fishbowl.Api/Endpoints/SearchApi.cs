@@ -96,6 +96,6 @@ public static class SearchApi
         .WithName("ReindexSearch")
         .WithSummary("Re-embeds every note in the current context. Cookie-auth only.");
 
-        return group;
+        return group.RequireAuthorization();
     }
 }

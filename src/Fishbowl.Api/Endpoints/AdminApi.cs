@@ -37,6 +37,7 @@ public static class AdminApi
             ClaimsPrincipal user,
             ISystemRepository system,
             DatabaseFactory dbFactory,
+            IUserAdminRepository admin,
             CancellationToken ct) =>
         {
             if (!await IsCookieAdminAsync(user, system, ct))
@@ -53,8 +54,9 @@ public static class AdminApi
             foreach (var dir in Directory.EnumerateDirectories(usersRoot))
             {
                 var name = Path.GetFileName(dir);
-                if (string.IsNullOrEmpty(name)) continue;
+                if (string.IsNullOrEmpty(name) || name.StartsWith('.')) continue;   // parked .deleted-/.restoring- folders
                 if (existingSet.Contains(name)) continue;
+                if (await admin.IsDeletedAsync(name, ct)) continue;
 
                 var dbPath = Path.Combine(dir, DatabaseFactory.PersonalDbFileName);
                 if (!File.Exists(dbPath)) continue;
@@ -85,7 +87,7 @@ public static class AdminApi
             // walk outside the users root — no separators, no traversal,
             // no nulls. Folder names are typically GUIDs or local usernames.
             var folder = request?.FolderName?.Trim() ?? string.Empty;
-            if (!IsSafePathComponent(folder))
+            if (!IsSafePathComponent(folder) || folder.StartsWith('.') || await admin.IsDeletedAsync(folder, ct))
                 return ApiErrors.BadRequest("invalid_folder_name", "folderName must be a single path component (no '/', '\\', '..').");
 
             var existing = await system.GetUserAsync(folder, ct);

@@ -100,6 +100,12 @@ public class SpaceInviteRepository : ISpaceInviteRepository
         if (space == 0) return null;
 
         var role = SpaceRoleExtensions.FromDbValue(invite.Role);
+        // The maker must still be allowed to hand out this role: removing or
+        // demoting someone withdraws their open invitations.
+        var maker = await db.QuerySingleOrDefaultAsync<string?>(new CommandDefinition(
+            "SELECT role FROM space_members WHERE space_id = @SpaceId AND user_id = @CreatedBy",
+            new { invite.SpaceId, invite.CreatedBy }, transaction: tx, cancellationToken: ct));
+        if (SpaceRoleExtensions.TryParse(maker) is not { } makerRole || !makerRole.CanGrant(role)) return null;
         var current = await db.QuerySingleOrDefaultAsync<string?>(new CommandDefinition(
             "SELECT role FROM space_members WHERE space_id = @SpaceId AND user_id = @userId",
             new { invite.SpaceId, userId }, transaction: tx, cancellationToken: ct));

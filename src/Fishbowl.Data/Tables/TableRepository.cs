@@ -273,8 +273,9 @@ public class TableRepository : ITableRepository
             if (c.Kind is ColumnKind.Link or ColumnKind.Member or ColumnKind.File)
                 throw new TableException("column_default", $"Link, member and file columns have no default ('{c.Name}').", args: Args());
             CoerceScalar(table, c, d);
-            if (c.Unique && rowsExist)
-                throw new TableException("column_default", $"A unique column added to a table with rows can't have a default ('{c.Name}').", args: Args());
+            // Every row left without a value would get the same one.
+            if (c.Unique)
+                throw new TableException("column_default", $"A unique column can't have a default ('{c.Name}').", args: Args());
         }
         if (c.Required && rowsExist && c.Default is null)
             throw new TableException("column_required", $"A required column added to a table with rows needs a default ('{c.Name}').", args: Args());
@@ -310,7 +311,7 @@ public class TableRepository : ITableRepository
                         await db.ExecuteAsync(new CommandDefinition($"ALTER TABLE \"{physical}\" ADD COLUMN \"{c.Name}\" {c.Kind.SqlType()}", transaction: tx, cancellationToken: token));
                         if (c.Default is { } d)
                             await db.ExecuteAsync(new CommandDefinition($"UPDATE \"{physical}\" SET \"{c.Name}\" = @v",
-                                new { v = CoerceScalar(table, c, d) }, transaction: tx, cancellationToken: token));
+                                new { v = StoredDefault(table, c, d) }, transaction: tx, cancellationToken: token));
                     }
                     await AddColumnMetaAsync(db, tx, table, c, (int)++position, token);
                 }
@@ -336,7 +337,8 @@ public class TableRepository : ITableRepository
                     throw new TableException("column_name", $"'{to}' can't be a column name.", args: new { table, column = to });
                 if (names.Contains(to))
                     throw TableException.Conflict("column_exists", $"Table '{table}' already has a column '{to}'.", new { table, column = to });
-                await DropColumnStructuresAsync(db, tx, table, c, token);
+                // A multi-link's join table is renamed below, not dropped.
+                if (!(c.Kind == ColumnKind.Link && c.Multiple)) await DropColumnStructuresAsync(db, tx, table, c, token);
                 if (c.Kind == ColumnKind.Link && c.Multiple)
                     await db.ExecuteAsync(new CommandDefinition(
                         $"ALTER TABLE \"{TableNames.Join(table, from)}\" RENAME TO \"{TableNames.Join(table, to)}\"", transaction: tx, cancellationToken: token));
@@ -382,8 +384,10 @@ public class TableRepository : ITableRepository
                 }
                 if (update.Required is { } req)
                 {
-                    if (req && !(c.Kind == ColumnKind.Link && c.Multiple) && await db.ExecuteScalarAsync<long>(new CommandDefinition(
-                            $"SELECT COUNT(*) FROM \"{physical}\" WHERE \"{name}\" IS NULL OR \"{name}\" = ''", transaction: tx, cancellationToken: token)) > 0)
+                    var empty = c.Kind == ColumnKind.Link && c.Multiple
+                        ? $"SELECT COUNT(*) FROM \"{physical}\" p WHERE NOT EXISTS (SELECT 1 FROM \"{TableNames.Join(table, name)}\" j WHERE j.row_id = p.id)"
+                        : $"SELECT COUNT(*) FROM \"{physical}\" WHERE \"{name}\" IS NULL OR \"{name}\" = ''";
+                    if (req && await db.ExecuteScalarAsync<long>(new CommandDefinition(empty, transaction: tx, cancellationToken: token)) > 0)
                         throw new TableException("column_required", $"Rows without a value in '{name}' exist — fill them first.", args: new { table, column = name });
                     await db.ExecuteAsync(new CommandDefinition("UPDATE db_columns SET required = @r WHERE table_name = @table AND name = @name",
                         new { r = req ? 1 : 0, table, name }, transaction: tx, cancellationToken: token));
@@ -631,6 +635,11 @@ public class TableRepository : ITableRepository
         {
             // Full text still finds it; a reindex adds the vector later.
         }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            // Like notes: the write lands, the vector is best effort.
+            _logger.LogWarning(ex, "Embedding a table row failed; it stays findable by full text");
+        }
     }
 
     private static async Task UnindexRowAsync(IDbConnection db, IDbTransaction tx, string table, string id, CancellationToken ct)
@@ -727,7 +736,8 @@ public class TableRepository : ITableRepository
         var given = new HashSet<string>(StringComparer.Ordinal);
         foreach (var prop in values.EnumerateObject())
         {
-            given.Add(prop.Name);
+            if (!given.Add(prop.Name))
+                throw new TableException("row_invalid", $"'{prop.Name}' is in the row twice.", args: new { table = def.Name, column = prop.Name });
             if (prop.Name == TableBaseColumns.Title)
             {
                 var t = prop.Value.ValueKind == JsonValueKind.String ? prop.Value.GetString()!.Trim() : "";
@@ -757,7 +767,7 @@ public class TableRepository : ITableRepository
         if (insert)
             foreach (var col in def.Columns.Where(c => !given.Contains(c.Name)))
             {
-                if (col.Default is { } d) result.Scalars.Add((col.Name, col.Multiple ? JsonSerializer.Serialize(new[] { d.GetString() }) : CoerceScalar(def.Name, col, d)));
+                if (col.Default is { } d) result.Scalars.Add((col.Name, StoredDefault(def.Name, col, d)));
                 else if (col.Required)
                     throw new TableException("value_required", $"'{col.Name}' is required.", args: new { table = def.Name, column = col.Name });
             }
@@ -837,6 +847,10 @@ public class TableRepository : ITableRepository
             throw new TableException("link_missing", $"'{col.Name}' links to {col.LinkTarget}, which has no '{target}'.",
                 args: new { table = def.Name, column = col.Name, target = col.LinkTarget, id = target });
     }
+
+    // A column's default as it is stored — a "multiple" choice holds a JSON list.
+    private static object? StoredDefault(string table, ColumnDef col, JsonElement d) =>
+        col.Multiple ? JsonSerializer.Serialize(new[] { (string)CoerceScalar(table, col, d)! }) : CoerceScalar(table, col, d);
 
     // A single value of a non-link column, as it is stored.
     internal static object? CoerceScalar(string table, ColumnDef col, JsonElement v)
@@ -982,18 +996,23 @@ public class TableRepository : ITableRepository
     }
 
     // The trash puts a row back: works or doesn't (false = conflict).
-    internal static async Task<bool> RestoreRowAsync(IDbConnection db, IDbTransaction tx, string table, JsonObject data, CancellationToken ct)
+    // `coming` = ids that are being restored together with this row (a whole
+    // table): links into the same table may point at them.
+    internal static async Task<bool> RestoreRowAsync(IDbConnection db, IDbTransaction tx, string table, JsonObject data, CancellationToken ct,
+        IReadOnlySet<string>? coming = null)
     {
         var def = await LoadAsync(db, tx, table, ct);
         if (def is null) return false;
         var row = data["row"]!.AsObject();
         var id = row["id"]!.GetValue<string>();
+        bool Coming(ColumnDef c, string target) =>
+            c.LinkTarget == table && (target == id || coming?.Contains(target) == true);
         var physical = TableNames.Physical(table);
         if (await db.ExecuteScalarAsync<long>(new CommandDefinition($"SELECT COUNT(*) FROM \"{physical}\" WHERE id = @id", new { id }, transaction: tx, cancellationToken: ct)) > 0)
             return false;
         var columns = (await db.QueryAsync<string>(new CommandDefinition($"SELECT name FROM pragma_table_info('{physical}')", transaction: tx, cancellationToken: ct))).ToHashSet();
         foreach (var c in def.Columns.Where(c => c.Kind == ColumnKind.Link && !c.Multiple))
-            if (row[c.Name] is JsonValue target && await db.ExecuteScalarAsync<long>(new CommandDefinition(
+            if (row[c.Name] is JsonValue target && !Coming(c, target.ToString()) && await db.ExecuteScalarAsync<long>(new CommandDefinition(
                     $"SELECT COUNT(*) FROM \"{TableNames.TargetTable(c.LinkTarget!)}\" WHERE id = @t", new { t = target.ToString() }, transaction: tx, cancellationToken: ct)) == 0)
                 return false;
         var p = new DynamicParameters();
@@ -1021,7 +1040,7 @@ public class TableRepository : ITableRepository
         {
             var ids = (data["links"]?[c.Name] as JsonArray)?.Select(x => x!.GetValue<string>()).ToList() ?? new List<string>();
             foreach (var target in ids)
-                if (await db.ExecuteScalarAsync<long>(new CommandDefinition(
+                if (!Coming(c, target) && await db.ExecuteScalarAsync<long>(new CommandDefinition(
                         $"SELECT COUNT(*) FROM \"{TableNames.TargetTable(c.LinkTarget!)}\" WHERE id = @target", new { target }, transaction: tx, cancellationToken: ct)) == 0)
                     return false;
             await WriteLinksAsync(db, tx, table, id, new List<(string, List<string>)> { (c.Name, ids) }, ct);
@@ -1044,8 +1063,10 @@ public class TableRepository : ITableRepository
             d["createdAt"] is { } at ? at.GetValue<DateTime>() : DateTime.UtcNow, d["createdBy"]?.GetValue<string>());
         try { await CreateInAsync(db, tx, def, ct); }
         catch (TableException) { return false; }   // a link target is gone, or a limit
-        foreach (var row in data["rows"]!.AsArray())
-            if (!await RestoreRowAsync(db, tx, name, row!.AsObject(), ct)) return false;
+        var rows = data["rows"]!.AsArray();
+        var coming = rows.Select(r => r!["row"]!["id"]!.GetValue<string>()).ToHashSet(StringComparer.Ordinal);
+        foreach (var row in rows)
+            if (!await RestoreRowAsync(db, tx, name, row!.AsObject(), ct, coming)) return false;
         return true;
     }
 }

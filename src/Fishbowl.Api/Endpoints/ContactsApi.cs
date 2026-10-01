@@ -17,7 +17,7 @@ public static class ContactsApi
 {
     public static RouteGroupBuilder MapContactsApi(this IEndpointRouteBuilder routes)
     {
-        var group = routes.MapGroup("/api/v1/contacts");
+        var group = routes.MapGroup("/api/v1/contacts").PersonalKeysOnly();
 
         group.MapGet("/", async (
             ClaimsPrincipal user, IContactRepository repo,

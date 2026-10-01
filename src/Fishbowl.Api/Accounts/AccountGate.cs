@@ -105,11 +105,20 @@ public class AccountGate
 
         if (invite is not null)
         {
+            // Pending until the invitation is really used — two people with
+            // the same link at once must not both end up active.
             userId = Guid.NewGuid().ToString();
             await _system.CreateUserAsync(userId, name, email, avatarUrl, ct);
+            await _admin.SetStateAsync(userId, UserStates.Pending, ct);
             await _system.CreateUserMappingAsync(userId, provider, providerId, ct);
-            _logger.LogInformation("Provisioned user {UserId} via {Provider} (invitation)", userId, provider);
-            return await AdmitAsync(userId, invite, isNew: true, ct);
+            var admitted = await AdmitAsync(userId, invite, isNew: true, ct);
+            if (admitted.JoinedSpace is not null)
+            {
+                _logger.LogInformation("Provisioned user {UserId} via {Provider} (invitation)", userId, provider);
+                return admitted;
+            }
+            // Spent in the meantime: no account from it — the sign-up policy decides.
+            await _admin.DeletePendingAsync(userId, ct);
         }
 
         var domains = SignUpPolicy.ParseDomains(await _system.GetConfigAsync(SignUpPolicy.AllowedDomainsKey, ct));

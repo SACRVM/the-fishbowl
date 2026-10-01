@@ -14,7 +14,7 @@ public static class TagsApi
 
     public static RouteGroupBuilder MapTagsApi(this IEndpointRouteBuilder routes)
     {
-        var group = routes.MapGroup("/api/v1/tags");
+        var group = routes.MapGroup("/api/v1/tags").PersonalKeysOnly();
 
         group.MapGet("/", async (ClaimsPrincipal user, ITagRepository repo, CancellationToken ct) =>
         {

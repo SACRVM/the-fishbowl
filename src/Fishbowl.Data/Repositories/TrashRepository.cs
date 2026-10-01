@@ -158,6 +158,17 @@ public class TrashRepository : ITrashRepository
                     return TrashRestore.Conflict;
                 }
 
+                // A note's full-text row comes back with it (the vector after commit).
+                if (item.Kind == TrashKinds.Note)
+                {
+                    var tags = snapshot["tags"] is JsonValue tv && tv.TryGetValue<string>(out var tj)
+                        ? string.Join(' ', JsonSerializer.Deserialize<List<string>>(tj) ?? new()) : "";
+                    await db.ExecuteAsync(new CommandDefinition(@"
+                    INSERT INTO notes_fts (rowid, title, content, tags)
+                    SELECT rowid, title, content, @tags FROM notes WHERE id = @id",
+                        new { id = item.ItemId, tags }, transaction: tx, cancellationToken: token));
+                }
+
                 if (item.Kind == TrashKinds.Contact)
                     await db.ExecuteAsync(new CommandDefinition(@"
                     INSERT INTO contacts_fts (rowid, name, email, phone, notes)

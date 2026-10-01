@@ -35,11 +35,13 @@ public class QueryDslTests
             IncludeDeleted: includeDeleted);
 
     [Fact]
-    public void Empty_WherePrependsSoftDeleteFilter()
+    public void Empty_Where_AddsNoFilter_EvenWithAnIsDeletedColumn()
     {
+        // Space tables have no soft delete; a user column called is_deleted
+        // is just a column (the old per-app DBs' implicit filter is gone).
         var compiled = QueryDsl.CompileSelect("transactions", Schema, Spec());
         Assert.Equal(
-            "SELECT * FROM \"transactions\" WHERE \"is_deleted\" = 0 LIMIT 100",
+            "SELECT * FROM \"transactions\" LIMIT 100",
             compiled.Sql);
         Assert.Empty(compiled.Parameters);
     }

@@ -285,7 +285,7 @@ authBuilder.AddGoogle(options =>
     // These will be overridden by OpenOptions below
     options.ClientId = "placeholder";
     options.ClientSecret = "placeholder";
-    options.SaveTokens = true;
+    options.SaveTokens = false;   // nothing reads the Google tokens; keep them out of the cookie
 
     options.Events.OnTicketReceived = async context =>
     {
@@ -538,6 +538,9 @@ app.MapGet("/login", async (
     return Results.Bytes(resource.Data, "text/html");
 });
 
+static bool IsLocalUrl(string? url) =>
+    !string.IsNullOrEmpty(url) && url[0] == '/' && (url.Length == 1 || (url[1] != '/' && url[1] != '\\'));
+
 app.MapGet("/login/challenge/{provider}", (string provider, string? returnUrl) =>
 {
     var scheme = provider.ToLower() switch
@@ -549,7 +552,8 @@ app.MapGet("/login/challenge/{provider}", (string provider, string? returnUrl) =
     if (scheme == null) return Results.BadRequest("Unsupported provider.");
 
     return Results.Challenge(
-        properties: new AuthenticationProperties { RedirectUri = returnUrl ?? "/" },
+        // Only back into this Fishbowl — never to a URL a link chose.
+        properties: new AuthenticationProperties { RedirectUri = IsLocalUrl(returnUrl) ? returnUrl! : "/" },
         authenticationSchemes: new[] { scheme });
 });
 

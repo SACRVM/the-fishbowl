@@ -303,6 +303,35 @@ public class ApiKeyAuthTests : IClassFixture<WebApplicationFactory<Program>>, ID
         Assert.Equal(HttpStatusCode.Unauthorized, (await client.GetAsync("/api/v1/notes", TestContext.Current.CancellationToken)).StatusCode);
     }
 
+    // A space key never reaches its owner's personal todos/events/contacts/
+    // tags, and a Reader's key loses its write scopes — on the flat routes,
+    // the space's own routes and the space administration alike.
+    [Fact]
+    public async Task SpaceBearer_StaysInItsSpace_AndAReaderCantWrite()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var spaces = new SpaceRepository(_dbFactory);
+        var space = await spaces.CreateAsync(BobId, "Read Club", ct);
+        await spaces.AddMemberAsync(space.Id, AliceId, SpaceRole.Reader, ct);
+        var issued = await _keys.IssueAsync(AliceId, ContextRef.Space(space.Slug), "reader-key",
+            new[] { "read:notes", "write:notes", "read:tasks", "write:tasks", "read:events", "read:contacts", "read:tags" }, ct);
+        var client = ClientWithToken(issued.RawToken);
+
+        foreach (var path in new[] { "/api/v1/todos", "/api/v1/events", "/api/v1/contacts", "/api/v1/tags" })
+            Assert.Equal(HttpStatusCode.Forbidden, (await client.GetAsync(path, ct)).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await client.GetAsync("/api/v1/notes", ct)).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await client.PostAsJsonAsync("/api/v1/notes", new { title = "nope" }, ct)).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await client.PostAsJsonAsync($"/api/v1/spaces/{space.Slug}/todos", new { title = "nope" }, ct)).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await client.GetAsync("/api/v1/spaces", ct)).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await client.PostAsJsonAsync("/api/v1/spaces", new { name = "Sneaky" }, ct)).StatusCode);
+
+        // As a member the same kind of key writes — tagged as an agent's note.
+        await spaces.SetRoleAsync(space.Id, AliceId, SpaceRole.Member, ct);
+        var made = await client.PostAsJsonAsync($"/api/v1/spaces/{space.Slug}/notes", new { title = "agent wrote" }, ct);
+        Assert.Equal(HttpStatusCode.Created, made.StatusCode);
+        Assert.Contains("source:mcp", await made.Content.ReadAsStringAsync(ct));
+    }
+
     // A key whose owner left the space stops working.
     [Fact]
     public async Task SpaceBearer_OwnerNoLongerMember_IsRefused()

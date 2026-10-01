@@ -12,7 +12,7 @@ public static class TodoApi
 {
     public static RouteGroupBuilder MapTodoApi(this IEndpointRouteBuilder routes)
     {
-        var group = routes.MapGroup("/api/v1/todos");
+        var group = routes.MapGroup("/api/v1/todos").PersonalKeysOnly();
 
         group.MapGet("/", async (ClaimsPrincipal user, ITodoRepository repo, bool includeCompleted = false, CancellationToken ct = default) =>
         {
