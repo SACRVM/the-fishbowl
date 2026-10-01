@@ -59,10 +59,15 @@ class FbCalendarView extends HTMLElement {
             || fb.t("fb.calendar.all-day-short", "all day").length > 7;   // "ganztägig"
         this.style.setProperty("--cv-time-w", longTime ? "66px" : "52px");
         this.render();
+        // A space Reader gets no write actions (the server would refuse them):
+        // no new events, and the editor only shows.
+        this.writable = await fb.access.canWrite();
+        this.querySelector("#cv-new-btn").hidden = !this.writable;
+        this.querySelector("#cv-editor-wrap").toggleAttribute("inert", !this.writable);
         await this.loadEvents();
         if (!this.isConnected) return;   // left during the load — don't hook a dead view
         // "New event" from the Ctrl-K palette (fb.desktop.go).
-        this._onIntent = () => { if (fb.desktop?.takeIntent("calendar")?.action === "create") this.createEvent(); };
+        this._onIntent = () => { if (fb.desktop?.takeIntent("calendar")?.action === "create" && this.writable) this.createEvent(); };
         window.addEventListener("fb:intent", this._onIntent);
         this._onIntent();
     }
@@ -715,7 +720,7 @@ class FbCalendarView extends HTMLElement {
                 this.renderAgenda();
             });
             cell.addEventListener("dblclick", (e) => {
-                if (e.target.closest(".cv-chip")) return;
+                if (e.target.closest(".cv-chip") || this.writable === false) return;
                 this.selectedDay = cell.dataset.key;
                 this.createEvent(cell.dataset.key);
             });
@@ -865,13 +870,13 @@ class FbCalendarView extends HTMLElement {
                 title:   fb.t("fb.calendar.back", "Back to calendar"),
                 onClick: () => this.closeEditor()
             },
-            {
+            ...(this.writable === false ? [] : [{
                 icon:    "trash",
                 title:   fb.t("fb.calendar.delete", "Delete event"),
                 onClick: () => this.deleteEditing()
-            }
+            }])
         ]);
-        if (!evt.id) this.querySelector("#cv-title").focus();
+        if (!evt.id && this.writable !== false) this.querySelector("#cv-title").focus();
         requestAnimationFrame(() => this.autosizeDesc());
         this.renderAgenda();
     }

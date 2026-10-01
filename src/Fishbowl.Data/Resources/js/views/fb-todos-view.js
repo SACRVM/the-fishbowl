@@ -27,17 +27,24 @@ class FbTodosView extends HTMLElement {
 
     async connectedCallback() {
         this.render();
+        // A space Reader gets no write actions (the server would refuse them).
+        this.writable = await fb.access.canWrite();
+        this.querySelector("#new-btn").hidden = !this.writable;
+        this.querySelector("#empty-new-btn").hidden = !this.writable;
+        for (const id of ["#title", "#description"]) this.querySelector(id)?.toggleAttribute("readonly", !this.writable);
+        this.querySelector("#due-at")?.toggleAttribute("disabled", !this.writable);
+        this.toggleAttribute("readonly", !this.writable);   // CSS hides #due-clear
         // Drag an open todo to reorder (the kit's sortable: mouse drags after
         // a 4px move, touch after a long-press, Escape cancels). Done todos
         // stay where they are, below the open ones.
-        this._sortable = sac.sortable(this.querySelector("#todo-list"), {
+        if (this.writable) this._sortable = sac.sortable(this.querySelector("#todo-list"), {
             items: ".tv-item:not(.completed)",
             onReorder: (from, to) => this._moveTodo(from, to),
         });
         await this.loadTodos();
         if (!this.isConnected) return;   // left during the load — don't hook a dead view
         // "New todo" from the Ctrl-K palette (fb.desktop.go).
-        this._onIntent = () => { if (fb.desktop?.takeIntent("todos")?.action === "create") this.createTodo(); };
+        this._onIntent = () => { if (fb.desktop?.takeIntent("todos")?.action === "create" && this.writable) this.createTodo(); };
         window.addEventListener("fb:intent", this._onIntent);
         this._onIntent();
     }
@@ -185,6 +192,7 @@ class FbTodosView extends HTMLElement {
                     padding: 0;
                 }
                 fb-todos-view .tv-check:hover { border-color: var(--text); }
+                fb-todos-view[readonly] #due-clear { display: none; }
                 fb-todos-view .tv-check.checked {
                     background: var(--ok-fill);
                     border-color: var(--ok-fill);
@@ -533,6 +541,7 @@ class FbTodosView extends HTMLElement {
 
     updateToolbar(todo) {
         const completed = !!todo.completedAt;
+        if (this.writable === false) { fb.toolbar.clear(); return; }
         fb.toolbar.set([
             {
                 icon:    "check",
@@ -626,7 +635,7 @@ class FbTodosView extends HTMLElement {
                 : "";
             return `
                 <div class="${rowClasses}" data-id="${t.id}" tabindex="0">
-                    <button class="tv-check ${isDone ? "checked" : ""}" data-action="check"
+                    <button class="tv-check ${isDone ? "checked" : ""}" data-action="check" ${this.writable === false ? "disabled" : ""}
                             title="${isDone ? fb.t("fb.todos.mark-undone", "Mark as not done") : fb.t("fb.todos.mark-done", "Mark as done")}"
                             aria-label="${isDone ? fb.t("fb.todos.mark-undone", "Mark as not done") : fb.t("fb.todos.mark-done", "Mark as done")}">${checkSvg}</button>
                     <div class="tv-item-title">${escapeHtml(t.title || fb.t("fb.todos.untitled", "Untitled"))}</div>
@@ -637,7 +646,7 @@ class FbTodosView extends HTMLElement {
                             </span>
                         </div>
                     ` : ""}
-                    <div class="tv-item-actions">
+                    <div class="tv-item-actions" ${this.writable === false ? "hidden" : ""}>
                         <button class="icon-btn hover-reveal danger tv-item-action delete" data-action="delete" title="${fb.t("fb.common.delete", "Delete")}" aria-label="${fb.t("fb.common.delete", "Delete")}"><sac-icon name="trash"></sac-icon></button>
                     </div>
                 </div>

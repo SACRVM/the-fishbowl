@@ -59,6 +59,11 @@ class FbNotesView extends HTMLElement {
         // Save pending edits while the key still exists; after the lock a
         // flush of a note with a secret would have to ask for it again.
         this._unhookLock = fb.vault?.onBeforeLock?.(() => this.flushSave());
+        // A space Reader gets no write actions (the server would refuse them).
+        this.writable = await fb.access.canWrite();
+        this.toggleAttribute("readonly", !this.writable);
+        this.querySelector("#new-btn").hidden = !this.writable;
+        this.querySelector("#empty-new-btn").hidden = !this.writable;
         this._setViewToolbar();
         await this.loadNotes();
         if (!this.isConnected) return;   // left during the load — don't hook a dead view
@@ -72,7 +77,7 @@ class FbNotesView extends HTMLElement {
 
     _takeIntent() {
         const it = fb.desktop?.takeIntent("notes");
-        if (it?.action === "create") this.createNote();
+        if (it?.action === "create" && this.writable !== false) this.createNote();
         if (it?.action === "open" && it.id) this.select(it.id);
     }
 
@@ -102,11 +107,11 @@ class FbNotesView extends HTMLElement {
                 title:   fb.t("fb.notes.refresh", "Refresh notes"),
                 onClick: () => this.loadNotes(),
             },
-            {
+            ...(this.writable === false ? [] : [{
                 icon:    "settings",
                 title:   fb.t("fb.notes.manage-tags", "Manage tags"),
                 onClick: () => this._openManageDialog(),
-            },
+            }]),
         ]);
     }
 
@@ -948,7 +953,7 @@ class FbNotesView extends HTMLElement {
                         <span class="nv-item-snippet">${escapeHtml(snippet || fb.t("fb.notes.no-text", "No additional text"))}</span>
                     </div>
                     ${tagLine}
-                    <div class="nv-item-actions">
+                    <div class="nv-item-actions" ${this.writable === false ? "hidden" : ""}>
                         ${approveBtnHtml}
                         <button class="icon-btn hover-reveal nv-item-action pin ${n.pinned ? "active" : ""}" data-action="pin" title="${pinTitle}" aria-label="${pinTitle}"><sac-icon name="pin"></sac-icon></button>
                         <button class="icon-btn hover-reveal nv-item-action archive ${n.archived ? "active" : ""}" data-action="archive" title="${archiveTitle}" aria-label="${archiveTitle}"><sac-icon name="archive"></sac-icon></button>
@@ -1083,7 +1088,8 @@ class FbNotesView extends HTMLElement {
     _applyReadOnly(note) {
         const locked = hasLockedSecrets(note);
         this.querySelector("#locked-pill").hidden = !locked;
-        const ro = !!note.archived || locked;
+        const ro = !!note.archived || locked || this.writable === false;
+        this.querySelector("#tag-input")?.toggleAttribute("disabled", this.writable === false);
         const editor = this.querySelector("#editor");
         editor.classList.toggle("readonly", ro);
         this.querySelector("#content").toggleAttribute("readonly", ro);

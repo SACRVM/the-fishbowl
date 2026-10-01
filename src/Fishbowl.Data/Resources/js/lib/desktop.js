@@ -169,13 +169,15 @@
                 run: e.app ? () => fb.desktopApps.open(e.app.id) : () => sac.router.navigate(e.href),
             });
         }
-        if (entries.some((e) => e.key === "builtin:notes")) {
+        // A space Reader can't create anything there.
+        const writable = await (fb.access?.canWrite?.() ?? true);
+        if (writable && entries.some((e) => e.key === "builtin:notes")) {
             register("create:note", { label: fb.t("fb.palette.new-note", "New note"), icon: "plus", group: fb.t("fb.palette.create", "Create"), run: () => go("notes", "create") });
         }
-        if (entries.some((e) => e.key === "builtin:todos")) {
+        if (writable && entries.some((e) => e.key === "builtin:todos")) {
             register("create:todo", { label: fb.t("fb.palette.new-todo", "New todo"), icon: "plus", group: fb.t("fb.palette.create", "Create"), run: () => go("todos", "create") });
         }
-        if (entries.some((e) => e.key === "builtin:calendar")) {
+        if (writable && entries.some((e) => e.key === "builtin:calendar")) {
             register("create:event", { label: fb.t("fb.palette.new-event", "New event"), icon: "plus", group: fb.t("fb.palette.create", "Create"), run: () => go("calendar", "create") });
         }
         for (const s of SETTINGS.filter((x) => !x.personal || !space)) {
