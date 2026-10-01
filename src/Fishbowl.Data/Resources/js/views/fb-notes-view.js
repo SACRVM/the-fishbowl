@@ -61,6 +61,7 @@ class FbNotesView extends HTMLElement {
         this._unhookLock = fb.vault?.onBeforeLock?.(() => this.flushSave());
         this._setViewToolbar();
         await this.loadNotes();
+        if (!this.isConnected) return;   // left during the load — don't hook a dead view
         this._renderTagFilter();
         this._refreshTagSuggestions();
         // "New note" / a note picked in the Ctrl-K palette (fb.desktop.go).
@@ -1228,6 +1229,7 @@ class FbNotesView extends HTMLElement {
             this.renderList();
         } catch (err) {
             console.error("[fb-notes-view] pin toggle failed:", err);
+            window.sac?.toast?.(fb.errors.text(err, fb.t("fb.notes.save-failed", "Couldn't save that change.")), { kind: "error" });
             note.pinned = !note.pinned;
         }
     }
@@ -1251,6 +1253,7 @@ class FbNotesView extends HTMLElement {
             this.renderList();
         } catch (err) {
             console.error("[fb-notes-view] archive toggle failed:", err);
+            window.sac?.toast?.(fb.errors.text(err, fb.t("fb.notes.save-failed", "Couldn't save that change.")), { kind: "error" });
             note.archived = !note.archived;
         }
     }
@@ -1278,6 +1281,7 @@ class FbNotesView extends HTMLElement {
             this.renderList();
         } catch (err) {
             console.error("[fb-notes-view] approve failed:", err);
+            window.sac?.toast?.(fb.errors.text(err, fb.t("fb.notes.save-failed", "Couldn't save that change.")), { kind: "error" });
             note.tags = previousTags;
         }
     }
@@ -1331,6 +1335,7 @@ class FbNotesView extends HTMLElement {
             this.querySelector("#content").focus();
         } catch (err) {
             console.error("[fb-notes-view] create failed:", err);
+            window.sac?.toast?.(fb.errors.text(err, fb.t("fb.notes.create-failed", "Couldn't create the note.")), { kind: "error" });
         }
     }
 

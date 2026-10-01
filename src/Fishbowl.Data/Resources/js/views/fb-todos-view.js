@@ -35,6 +35,7 @@ class FbTodosView extends HTMLElement {
             onReorder: (from, to) => this._moveTodo(from, to),
         });
         await this.loadTodos();
+        if (!this.isConnected) return;   // left during the load — don't hook a dead view
         // "New todo" from the Ctrl-K palette (fb.desktop.go).
         this._onIntent = () => { if (fb.desktop?.takeIntent("todos")?.action === "create") this.createTodo(); };
         window.addEventListener("fb:intent", this._onIntent);
@@ -760,6 +761,7 @@ class FbTodosView extends HTMLElement {
             && newDesc === (todo.description || "")
             && newDue === (todo.dueAt || null)) return;
 
+        const before = { title: todo.title, description: todo.description, dueAt: todo.dueAt };
         todo.title       = newTitle;
         todo.description = newDesc;
         todo.dueAt       = newDue;
@@ -772,6 +774,9 @@ class FbTodosView extends HTMLElement {
             this._updateRowInPlace(todo);
         } catch (err) {
             console.error("[fb-todos-view] update failed:", err);
+            // Back to what the server has, so the next change saves it again.
+            Object.assign(todo, before);
+            window.sac?.toast?.(fb.errors.text(err, fb.t("fb.todos.save-failed", "Couldn't save the todo.")), { kind: "error" });
         }
     }
 
@@ -880,6 +885,7 @@ class FbTodosView extends HTMLElement {
             this.renderList();
         } catch (err) {
             console.error("[fb-todos-view] delete failed:", err);
+            window.sac?.toast?.(fb.errors.text(err, fb.t("fb.todos.delete-failed", "Couldn't delete the todo.")), { kind: "error" });
         }
     }
 
@@ -891,6 +897,7 @@ class FbTodosView extends HTMLElement {
             this.querySelector("#title").focus();
         } catch (err) {
             console.error("[fb-todos-view] create failed:", err);
+            window.sac?.toast?.(fb.errors.text(err, fb.t("fb.todos.create-failed", "Couldn't create the todo.")), { kind: "error" });
         }
     }
 

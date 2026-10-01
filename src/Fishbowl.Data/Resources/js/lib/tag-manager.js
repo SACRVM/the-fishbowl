@@ -63,7 +63,7 @@
         const row = document.createElement("div");
         row.className = "fb-tags-row";
         row.innerHTML = `
-            ${system ? `<sac-chip class="fb-tags-badge" label="system" title="${fb.t("fb.notes.tags.system", "System tag")}"></sac-chip>` : ""}
+            ${system ? `<sac-chip class="fb-tags-badge" label="${fb.t("fb.notes.tags.system-chip", "system")}" title="${fb.t("fb.notes.tags.system", "System tag")}"></sac-chip>` : ""}
             <input class="fb-tags-name" type="text" aria-label="${fb.t("fb.notes.tags.name", "Tag name")}"
                    ${system ? `readonly title="${fb.t("fb.notes.tags.protected", "System tag — the name is protected")}"` : ""}>
             <sac-swatch-grid selectable columns="${fb.tags.SLOTS.length}" aria-label="${fb.t("fb.notes.tags.colour", "Tag colour")}"></sac-swatch-grid>

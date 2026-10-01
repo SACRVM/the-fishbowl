@@ -86,6 +86,7 @@ window.sac?.i18n?.add?.("de", {
     "fb.spaces.invite-role": "Rolle",
     "fb.spaces.invite-days": "Gültig für",
     "fb.spaces.invite-days-n": "{n} Tage",
+    "fb.spaces.invite-days-1": "1 Tag",
     "fb.spaces.invite-create": "Link erstellen",
     "fb.spaces.invite-hint": "Ein Link, einmal nutzbar. Schick ihn auf jedem Weg, den du magst — wer ihn öffnet und sich anmeldet, ist drin, auch wenn neue Konten sonst eine Freigabe brauchen.",
     "fb.spaces.invite-link-title": "Einladungslink",

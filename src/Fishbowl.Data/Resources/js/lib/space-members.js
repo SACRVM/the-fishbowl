@@ -256,7 +256,9 @@
                 <p class="fb-invite-hint"></p>
             </div>`;
         dlg.querySelectorAll("select[name=role] option").forEach((o) => { o.textContent = roleLabel(o.value); });
-        dlg.querySelectorAll("select[name=days] option").forEach((o) => { o.textContent = fb.t("fb.spaces.invite-days-n", "{n} days", { n: o.value }); });
+        dlg.querySelectorAll("select[name=days] option").forEach((o) => {
+            o.textContent = o.value === "1" ? fb.t("fb.spaces.invite-days-1", "1 day") : fb.t("fb.spaces.invite-days-n", "{n} days", { n: o.value });
+        });
         dlg.querySelector(".fb-invite-hint").textContent = fb.t("fb.spaces.invite-hint",
             "A link for one person. Send it any way you like — whoever opens it and signs in is in, even when new accounts otherwise wait for approval.");
         dlg.addEventListener("sac:action", async (e) => {

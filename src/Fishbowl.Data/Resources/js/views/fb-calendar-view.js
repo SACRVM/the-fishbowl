@@ -60,6 +60,7 @@ class FbCalendarView extends HTMLElement {
         this.style.setProperty("--cv-time-w", longTime ? "66px" : "52px");
         this.render();
         await this.loadEvents();
+        if (!this.isConnected) return;   // left during the load — don't hook a dead view
         // "New event" from the Ctrl-K palette (fb.desktop.go).
         this._onIntent = () => { if (fb.desktop?.takeIntent("calendar")?.action === "create") this.createEvent(); };
         window.addEventListener("fb:intent", this._onIntent);
@@ -1076,7 +1077,7 @@ class FbCalendarView extends HTMLElement {
             await this.loadEvents();
         } catch (err) {
             console.error("[fb-calendar-view] save failed:", err);
-            this.querySelector("#cv-hint").textContent = "Save failed — will retry on next change";
+            this.querySelector("#cv-hint").textContent = fb.t("fb.calendar.save-failed", "Save failed — will retry on next change");
         }
     }
 
@@ -1119,6 +1120,7 @@ class FbCalendarView extends HTMLElement {
             this._discardEditor();
         } catch (err) {
             console.error("[fb-calendar-view] delete failed:", err);
+            window.sac?.toast?.(fb.errors.text(err, fb.t("fb.calendar.delete-failed", "Couldn't delete the event.")), { kind: "error" });
         }
     }
 

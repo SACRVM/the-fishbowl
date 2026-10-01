@@ -821,7 +821,7 @@
                 `<dt>${escapeHtml(label)}</dt><dd${mono ? ' class="fv-mono"' : ""}>${value}</dd>`);
             const name = stat?.name || baseName(path);
             row(t("fb.files.p-kind", "Kind"), escapeHtml(kind === "folder" ? t("fb.files.p-folder", "Folder") : stat?.link ? t("fb.files.p-link", "Link") : (stat?.type || t("fb.files.p-file", "File"))));
-            if (stat) row(t("fb.files.p-size", "Size"), `${escapeHtml(sizeText(stat.size))} <span class="fv-mono">(${escapeHtml(t("fb.files.p-bytes", "{n} bytes", { n: Number(stat.size).toLocaleString("en-US") }))})</span>`);
+            if (stat) row(t("fb.files.p-size", "Size"), `${escapeHtml(sizeText(stat.size))} <span class="fv-mono">(${escapeHtml(t("fb.files.p-bytes", "{n} bytes", { n: fb.format.num(Number(stat.size), 0) }))})</span>`);
             if (kind === "folder") row(t("fb.files.p-items", "Items"), `<span data-prop="items">…</span>`);
             row(t("fb.files.p-modified", "Modified"), `<span data-prop="modified">${stat?.modified ? escapeHtml(fb.format.dateTime(new Date(stat.modified))) : "…"}</span>`);
             row(t("fb.files.workspace", "Workspace"), escapeHtml(this._label(pane.workspace)));

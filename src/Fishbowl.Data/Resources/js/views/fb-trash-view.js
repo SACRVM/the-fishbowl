@@ -41,6 +41,7 @@ class FbTrashView extends HTMLElement {
             fb.api.files.trashList().catch(() => []),
             scope.type === "scoped" ? fb.api.spaces.list().catch(() => []) : Promise.resolve([]),
         ]);
+        if (!this.isConnected) return;   // left meanwhile: the toolbar belongs to another view now
         if (scope.type === "scoped") {
             const role = spaces.find((s) => s.slug === scope.slug)?.role;
             this.writable = role !== "reader";
