@@ -75,7 +75,7 @@
                 const label = t(routeKey(r.hash), english.get(r.hash));
                 if (label === r.label) continue;
                 const hash = r.prefix ? (r.hash === "#/" ? "#/*" : `${r.hash}/*`) : r.hash;
-                sac.router.register(hash, r.tag, { label, icon: r.icon, palette: r.palette, scope: r.scope });
+                sac.router.register(hash, r.tag, { label, icon: r.icon, palette: r.palette, scope: r.scope, open: r.open || undefined });
             }
         } finally {
             relabeling = false;

@@ -17,7 +17,8 @@
  *                 <sac-nav> rule). A prefix route ("#/files/*") navigates
  *                 to its prefix. External links open in a new tab, unscoped.
  *                 A route bound to the other kind of workspace (register's
- *                 scope: "root"/"scoped") is left out.
+ *                 scope: "root"/"scoped") is left out; a route with `open`
+ *                 (a window app) runs it instead of navigating.
  *   2. Commands — everything registered on sac.commands (below), grouped by
  *                 each command's `group` (default "Commands"). An app owns
  *                 its toolbar, so toolbar actions it wants keyboard-reachable
@@ -406,7 +407,9 @@
                         // In-app hashes stay inside the active scoped
                         // workspace — the rule <sac-nav> follows for its
                         // links. Resolved when run, not when collected.
-                        run:   isExternal
+                        run:   route.open
+                            ? () => route.open(route)
+                            : isExternal
                             ? () => window.open(hash, "_blank", "noopener")
                             : () => router.navigate(scopedHash(hash)),
                     });

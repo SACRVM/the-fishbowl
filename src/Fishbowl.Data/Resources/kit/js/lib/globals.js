@@ -63,6 +63,11 @@
          *   mode()         "auto" (follows the system) or the chosen code
          *   set(code)      "auto" or a code; persisted (localStorage
          *                  "sac-lang"), mirrored onto <html lang>, announced
+         *   set(code, { persist: false })
+         *                  this page only: the stored choice stays as it is
+         *                  and another tab's switch is not followed — a
+         *                  single-language site on an origin it shares with
+         *                  other kit pages
          *   onChange(cb)   cb(code) on every change, incl. other tabs;
          *                  returns an unsubscribe
          *   available()    codes that have a table, "en" first
@@ -135,6 +140,7 @@
     // The explicit choice: localStorage, with an in-memory copy for when
     // storage refuses (private mode) — the switch still holds for this page.
     let chosen;
+    let pinned = false;   // set(code, { persist: false }) — ignore other tabs
     function choice() {
         if (chosen !== undefined) return chosen;
         try { chosen = norm(localStorage.getItem(KEY)); } catch (err) { chosen = ""; }
@@ -170,12 +176,17 @@
     window.sac.lang = {
         get: current,
         mode() { return choice() || "auto"; },
-        set(code) {
+        set(code, opts) {
             chosen = code === "auto" ? "" : norm(code);
-            try {
-                if (chosen) localStorage.setItem(KEY, chosen);
-                else localStorage.removeItem(KEY);
-            } catch (err) { /* the in-memory choice still applies */ }
+            // persist: false — this page only, the stored choice untouched
+            // (a single-language site on an origin other kit pages share).
+            pinned = !!opts && opts.persist === false;
+            if (!pinned) {
+                try {
+                    if (chosen) localStorage.setItem(KEY, chosen);
+                    else localStorage.removeItem(KEY);
+                } catch (err) { /* the in-memory choice still applies */ }
+            }
             announce();
         },
         onChange(cb) {
@@ -202,7 +213,7 @@
 
     // Another tab switched: follow it.
     window.addEventListener("storage", (e) => {
-        if (e.key !== KEY) return;
+        if (e.key !== KEY || pinned) return;
         chosen = undefined;
         announce();
     });

@@ -507,9 +507,22 @@
             } : null,
             setDirty(flag) { fire("setDirty", [!!flag]); },
             close() { fire("close", []); },
-            granted: Object.assign({}, granted, { connect: (granted.connect || []).slice() }),
+            granted: Object.assign({}, granted, {
+                connect: (granted.connect || []).slice(),
+                api: (granted.api || []).slice(),
+            }),
             isolated: true,
         };
+        // The host's own capabilities (grant.api): each method a call over
+        // the bridge — the host runs it and answers.
+        Object.entries(d.api || {}).forEach(([name, methods]) => {
+            if (!Array.isArray(methods) || Object.prototype.hasOwnProperty.call(ctx, name)) return;
+            const cap = {};
+            methods.forEach((m) => {
+                if (typeof m === "string") cap[m] = (...args) => call("api.call", [name, m, args]);
+            });
+            ctx[name] = Object.freeze(cap);
+        });
 
         if (d.kind !== "view") {
             ctx.deepLink = {

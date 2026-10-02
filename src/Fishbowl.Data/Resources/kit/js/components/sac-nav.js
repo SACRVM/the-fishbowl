@@ -934,7 +934,7 @@ class SacNav extends HTMLElement {
                     : `<ul class="nav-list">
                          ${routes.map(r => `
                              <li>
-                                 <a class="nav-item ${isActive(r) ? "active" : ""}" href="${esc(hrefFor(r.hash))}">
+                                 <a class="nav-item ${!r.open && isActive(r) ? "active" : ""}" href="${esc(hrefFor(r.hash))}"${r.open ? ` data-open-route="${esc(r.hash)}"` : ""}>
                                      ${r.icon ? `<sac-icon name="${esc(r.icon)}"></sac-icon>` : ""}
                                      <span>${escText(r.label)}</span>
                                  </a>
@@ -1034,6 +1034,18 @@ class SacNav extends HTMLElement {
                 // semantics (a new tab with the window open), and an unknown id or
                 // a host with no sac.apps simply falls back to that too. Mirrors
                 // the launcher tile's [data-app] contract.
+                // A route registered with `open` (a window app in the list):
+                // run it instead of following the hash, which is only its key.
+                if (el.dataset.openRoute) {
+                    e.preventDefault();
+                    const route = (window.sac?.router?.routes() || []).find(r => r.hash === el.dataset.openRoute);
+                    if (route && route.open) {
+                        try { route.open(route); }
+                        catch (err) { console.error("[sac-nav] a route's open() threw:", err); }
+                    }
+                    this._closeAll();
+                    return;
+                }
                 const m = /[?&]app=([^&]+)/.exec(el.getAttribute("href") || "");
                 const id = m && decodeURIComponent(m[1]);
                 if (id && !e.defaultPrevented && e.button === 0 &&

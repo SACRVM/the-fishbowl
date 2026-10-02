@@ -229,6 +229,62 @@ public class FilesApiTests : IClassFixture<WebApplicationFactory<Program>>, IDis
             new { op = "copy", from = new { workspace = "personal", paths = new[] { "note.txt" } }, to = new { workspace = "personal", folder = "" } }, Ct)).StatusCode);
     }
 
+    // A space's app code (files/.apps/): every member reads it, only a
+    // Designer (a key: design:apps) changes it, the folder itself stays, and
+    // the personal workspace has none.
+    [Fact]
+    public async Task AppsFolder_DesignersOnly_FolderFixed_SpaceOnly()
+    {
+        var space = await new SpaceRepository(_db).CreateAsync(Alice, "App Space", Ct);
+        using (var sys = _db.CreateSystemConnection())
+            sys.Execute("INSERT INTO space_members(space_id, user_id, role, joined_at) VALUES (@s, @u, 'member', @now)",
+                new { s = space.Id, u = Bob, now = DateTime.UtcNow.ToString("o") });
+        var prefix = $"/api/v1/spaces/{space.Slug}/files";
+        async Task<HttpResponseMessage> PutDeep(HttpClient c, string path, string p = null!) =>
+            await c.SendAsync(Upload($"{p ?? prefix}/content?parents=1&path={Uri.EscapeDataString(path)}", Encoding.UTF8.GetBytes("{}")), Ct);
+        async Task<string?> Code(HttpResponseMessage r) => (await Json(r)).GetProperty("error").GetString();
+
+        // The owner (a Designer and more) writes app code; a member reads it.
+        Assert.Equal(HttpStatusCode.Created, (await PutDeep(As(Alice), ".apps/booking/app.json")).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await As(Bob).GetAsync($"{prefix}/list?path=.apps/booking", Ct)).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await As(Bob).GetAsync($"{prefix}/content?path=.apps/booking/app.json", Ct)).StatusCode);
+
+        // A member writes elsewhere, never into or out of .apps.
+        Assert.Equal(HttpStatusCode.Created, (await Put(As(Bob), "notes.txt", "n", prefix)).StatusCode);
+        var write = await PutDeep(As(Bob), ".apps/booking/app.js");
+        Assert.Equal(HttpStatusCode.Forbidden, write.StatusCode);
+        Assert.Equal("apps_design_only", await Code(write));
+        var copyOut = await As(Bob).PostAsJsonAsync($"{prefix}/copy", new { from = ".apps/booking/app.json", to = "stolen.json" }, Ct);
+        Assert.Equal("apps_design_only", await Code(copyOut));
+        var moveIn = await As(Bob).PostAsJsonAsync($"{prefix}/move", new { from = "notes.txt", to = ".apps/notes.txt" }, Ct);
+        Assert.Equal("apps_design_only", await Code(moveIn));
+        Assert.Equal("apps_design_only", await Code(await As(Bob).DeleteAsync($"{prefix}?path=.apps/booking/app.json", Ct)));
+
+        // The folder itself stays, even for the owner.
+        var del = await As(Alice).DeleteAsync($"{prefix}?path=.apps", Ct);
+        Assert.Equal(HttpStatusCode.Conflict, del.StatusCode);
+        Assert.Equal("apps_folder_fixed", await Code(del));
+        Assert.Equal("apps_folder_fixed", await Code(await As(Alice).PostAsJsonAsync($"{prefix}/move", new { from = ".apps", to = "apps-old" }, Ct)));
+
+        // Trashed app code comes back only through a Designer.
+        var trashed = await Json(await As(Alice).DeleteAsync($"{prefix}?path=.apps/booking/app.json", Ct));
+        var id = trashed.GetProperty("id").GetString();
+        Assert.Equal("apps_design_only", await Code(await As(Bob).PostAsync($"{prefix}/trash/{id}/restore", null, Ct)));
+        Assert.Equal(HttpStatusCode.OK, (await As(Alice).PostAsync($"{prefix}/trash/{id}/restore", null, Ct)).StatusCode);
+
+        // A key needs design:apps on top of the owner's role.
+        var keys = new ApiKeyRepository(_db);
+        var plain = (await keys.IssueAsync(Alice, ContextRef.Space(space.Slug), "w", new[] { "write:files" }, Ct)).RawToken;
+        Assert.Equal("apps_design_only", await Code(await PutDeep(WithToken(plain), ".apps/booking/key.js")));
+        var design = (await keys.IssueAsync(Alice, ContextRef.Space(space.Slug), "d", new[] { "write:files", "design:apps" }, Ct)).RawToken;
+        Assert.Equal(HttpStatusCode.Created, (await PutDeep(WithToken(design), ".apps/booking/key.js")).StatusCode);
+
+        // The personal workspace has no .apps.
+        var personal = await PutDeep(As(Alice), ".apps/mine/app.json", "/api/v1/files");
+        Assert.Equal(HttpStatusCode.BadRequest, personal.StatusCode);
+        Assert.Equal("apps_space_only", await Code(personal));
+    }
+
     [Fact]
     public async Task Spaces_ReadonlyAndTokenBinding_AndTransfer()
     {

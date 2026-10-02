@@ -223,6 +223,7 @@
         const manifest = o.manifest;
         const id = manifest.id;
         const granted = o.granted || { fs: false, files: false, identity: false, connect: [] };
+        const api = o.api || {};
         const appError = o.appError || fallbackError;
         const limits = Object.assign({ timeout: 30000, maxBytes: 64 * 1024 * 1024, rate: 200 }, o.limits || {});
         const token = randomId();
@@ -558,11 +559,23 @@
                 return true;
             },
             "close": () => { hostCtx.close(); },
+
+            // A host capability (grant.api): own keys of what the host
+            // granted, nothing reachable through a prototype.
+            "api.call": async ([name, method, callArgs]) => {
+                const own = (o, k) => o && typeof k === "string" && Object.prototype.hasOwnProperty.call(o, k);
+                const cap = own(api, name) ? api[name] : null;
+                const fn = cap && own(cap, method) ? cap[method] : null;
+                if (typeof fn !== "function") throw appError("denied", `the host granted no ${String(name)}.${String(method)}`);
+                try { return await fn(...(Array.isArray(callArgs) ? callArgs : [])); }
+                catch (err) { throw o.apiError ? o.apiError(err) : err; }
+            },
         };
 
         function toWire(err) {
             const message = String((err && err.message) || err || "error").slice(0, 1000);
-            let code = err && CODES.includes(err.code) ? err.code : null;
+            // A host capability's own code (grant.api) passes through as is.
+            let code = err && (err.hostCode || CODES.includes(err.code)) ? err.code : null;
             if (!code) {
                 if (/does not exist|not found|no such/i.test(message)) code = "not-found";
                 else if (/already exists|not JSON-serializable|cannot be stored|invalid|must be|is not a/i.test(message)) code = "bad-request";
@@ -691,6 +704,8 @@
                 filesKind: granted.files && ctx.files ? ctx.files.kind : null,
                 filesReadonly: !!(granted.files && ctx.files && ctx.files.readonly),
                 granted: jsonSafe(ctx.granted),
+                // Names and method names only — the functions stay here.
+                api: Object.fromEntries(Object.entries(api).map(([n, m]) => [n, Object.keys(m)])),
             });
 
             // Route: host → guest (a rail link, back/forward, a pasted URL).

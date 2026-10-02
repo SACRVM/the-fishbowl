@@ -179,6 +179,8 @@ window.sac?.i18n?.add?.("de", {
     "fb.files.copy-here": "Hierher kopieren",
     "fb.files.move-here": "Hierher verschieben",
     "fb.files.trash": "Papierkorb",
+    "fb.files.show-hidden": "Versteckte Dateien zeigen",
+    "fb.files.hide-hidden": "Versteckte Dateien ausblenden",
     "fb.files.trash-title": "Papierkorb — {ws}",
     "fb.files.delete-perm": "Endgültig löschen",
     "fb.files.quick-look": "Schnellansicht",

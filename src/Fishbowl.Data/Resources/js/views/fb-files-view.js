@@ -340,6 +340,7 @@
                     this.querySelector('.fv-col[data-col="left"] .fv-status')),
                 right: this._buildPane(this.querySelector('.fv-pane[data-side="right"]'), "right", this._rightStatus),
             };
+            for (const pane of Object.values(this._panes)) pane.browser.showHidden = fb.filesStore.showHidden;
         }
 
         _buildPane(section, side, status) {
@@ -659,7 +660,21 @@
                 items.push({ icon: "upload", title: t("fb.files.upload-key", "Upload (Alt+U)"), onClick: () => this._browse() });
             }
             items.push({ icon: "trash", title: t("fb.files.trash", "Trash"), onClick: () => this._openTrash(this._activePane) });
+            const shown = fb.filesStore.showHidden;
+            items.push({
+                icon: shown ? "eye-off" : "eye",
+                title: shown ? t("fb.files.hide-hidden", "Hide hidden files") : t("fb.files.show-hidden", "Show hidden files"),
+                onClick: () => this._toggleHidden(),
+            });
             fb.toolbar.set(items);
+        }
+
+        // Dot entries (a space's .apps) on or off, in both panes.
+        _toggleHidden() {
+            fb.filesStore.showHidden = !fb.filesStore.showHidden;
+            try { localStorage.setItem("fb.files.showHidden", fb.filesStore.showHidden ? "1" : "0"); } catch { /* storage off */ }
+            for (const pane of Object.values(this._panes)) pane.browser.showHidden = fb.filesStore.showHidden;
+            this._paintToolbar();
         }
 
         _paintBar() {

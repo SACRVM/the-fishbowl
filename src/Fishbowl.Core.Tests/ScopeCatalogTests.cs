@@ -13,7 +13,7 @@ public class ScopeCatalogTests
         // tool and API endpoint, per the comment on ScopeCatalog. The ten
         // resource scopes, the Files app's read:files/write:files and space
         // tables' read:/write:/design:tables (the per-app app:* trio is gone).
-        Assert.Equal(15, ScopeCatalog.All.Count);
+        Assert.Equal(16, ScopeCatalog.All.Count);
     }
 
     [Theory]

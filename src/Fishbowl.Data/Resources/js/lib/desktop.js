@@ -40,14 +40,14 @@
         { key: "builtin:files",    hash: "#/files",       name: "Files",    icon: "folder",   desc: "Real files, two panes, any workspace." },
         { key: "builtin:tables",   hash: "#/tables",      name: "Tables",   icon: "grid",     desc: "This space's own tables, like a spreadsheet.", space: true },
         // Window apps (fb.windowApps): `open`, no address.
-        { key: "builtin:messages", open: () => fb.windowApps.open("messages"), name: "Messages", icon: "mail",  desc: "What Fishbowl has to tell you." },
-        { key: "builtin:trash",    open: () => fb.windowApps.open("trash"),    name: "Trash",    icon: "trash", desc: "Deleted things, back with one click." },
-        { key: "builtin:apps",     open: () => fb.windowApps.open("apps"),     name: "Apps",     icon: "cube",  desc: "The apps installed on this desktop." },
-        { key: "builtin:spaces",   open: () => fb.windowApps.open("spaces"),   name: "Spaces",   icon: "layers", desc: "Shared workspaces and who is in them.", personal: true },
-        { key: "builtin:keys",     open: () => fb.windowApps.open("keys"),     name: "API keys", icon: "key",   desc: "Tokens for agents and scripts.", personal: true },
-        { key: "builtin:secrets",  open: () => fb.windowApps.open("secrets"),  name: "Secrets",  icon: "lock",  desc: "The ways in to your secret vault.", personal: true },
-        { key: "builtin:users",    open: () => fb.windowApps.open("users"),    name: "Users",    icon: "users", desc: "Approve and manage accounts.", admin: true, personal: true },
-        { key: "builtin:system",   open: () => fb.windowApps.open("system"),   name: "System",   icon: "settings", desc: "How this Fishbowl is doing and how it runs.", admin: true, personal: true },
+        { key: "builtin:messages", route: "messages", open: () => fb.windowApps.open("messages"), name: "Messages", icon: "mail",  desc: "What Fishbowl has to tell you." },
+        { key: "builtin:trash",    route: "trash", open: () => fb.windowApps.open("trash"),    name: "Trash",    icon: "trash", desc: "Deleted things, back with one click." },
+        { key: "builtin:apps",     route: "apps", open: () => fb.windowApps.open("apps"),     name: "Apps",     icon: "cube",  desc: "The apps installed on this desktop." },
+        { key: "builtin:spaces",   route: "spaces", open: () => fb.windowApps.open("spaces"),   name: "Spaces",   icon: "layers", desc: "Shared workspaces and who is in them.", personal: true },
+        { key: "builtin:keys",     route: "keys", open: () => fb.windowApps.open("keys"),     name: "API keys", icon: "key",   desc: "Tokens for agents and scripts.", personal: true },
+        { key: "builtin:secrets",  route: "secrets", open: () => fb.windowApps.open("secrets"),  name: "Secrets",  icon: "lock",  desc: "The ways in to your secret vault.", personal: true },
+        { key: "builtin:users",    route: "admin/users", open: () => fb.windowApps.open("users"),    name: "Users",    icon: "users", desc: "Approve and manage accounts.", admin: true, personal: true },
+        { key: "builtin:system",   route: "admin/system", open: () => fb.windowApps.open("system"),   name: "System",   icon: "settings", desc: "How this Fishbowl is doing and how it runs.", admin: true, personal: true },
     ];
 
     const SETTINGS = [
@@ -284,6 +284,22 @@
     window.addEventListener("DOMContentLoaded", () => {
         registerNoteSearch();
         loadSpaces();
+    });
+
+    // The burger lists what the desktop shows: the window apps are router
+    // entries that open (kit 2.25), registered after the pages so they follow
+    // them like on the desktop, each only where it exists (scope) and the
+    // admin ones only for an admin. Hidden tiles stay listed: hiding is about
+    // the desktop's room.
+    me().then((user) => {
+        for (const a of BUILTINS) {
+            if (!a.open || (a.admin && !user?.isAdmin)) continue;
+            sac.router.register(`#/${a.route}`, null, {
+                label: a.name, icon: a.icon, palette: false,
+                scope: a.personal ? "root" : a.space ? "scoped" : "any",
+                open: () => a.open(),
+            });
+        }
     });
 
     fb.desktop = { SIZES, builtins, load, save, go, takeIntent, syncCommands };

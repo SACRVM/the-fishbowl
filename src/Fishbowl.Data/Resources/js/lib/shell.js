@@ -63,15 +63,15 @@
     window.addEventListener("hashchange", syncHome);
     syncHome();
 
-    // The burger lists every app the desktop has. The kit's own list holds
-    // the pages (routes); the window apps and installed apps have no route,
-    // so they are rows of ours right under Home, styled like it, in desktop
-    // order (fb:desktop-entries from fb.desktop.syncCommands).
+    // The burger lists every app the desktop has: pages and built-in window
+    // apps are router entries (fb.desktop); the installed apps of the active
+    // workspace come and go with it, so they are rows of ours right under
+    // Home, styled like it (fb:desktop-entries from fb.desktop.syncCommands).
     window.addEventListener("fb:desktop-entries", (ev) => {
         const nav = document.getElementById("fb-nav");
         if (!nav || !homeLink) return;
         nav.querySelectorAll(":scope > a.fb-window-link").forEach((a) => a.remove());
-        const rows = (ev.detail?.entries || []).filter((e) => e.app || e.open).map((e) => {
+        const rows = (ev.detail?.entries || []).filter((e) => e.app).map((e) => {
             const a = document.createElement("a");
             a.slot = "panel";
             a.className = "fb-home-link fb-window-link";
@@ -82,8 +82,7 @@
             a.querySelector("span").textContent = e.name;
             a.addEventListener("click", (c) => {
                 c.preventDefault();
-                if (e.app) fb.desktopApps.open(e.app.id);
-                else e.open();
+                fb.desktopApps.open(e.app.id);
             });
             return a;
         });

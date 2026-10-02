@@ -90,8 +90,8 @@ public class AdminTests
             var view = page.Locator("fb-users-admin-view");
             await Assertions.Expect(view).ToBeVisibleAsync(new() { Timeout = 5000 });
 
-            // A window app: no route, no burger entry.
-            Assert.False(await page.EvaluateAsync<bool>("() => sac.router.routes().some(r => r.hash === '#/admin/users')"));
+            // A window app: a burger entry that opens it, no view route.
+            Assert.True(await page.EvaluateAsync<bool>("() => sac.router.routes().some(r => r.hash === '#/admin/users' && !!r.open && !r.tag)"));
 
             var pending = view.Locator("[data-section='pending'] .user-row").Filter(new() { HasText = "Grace Hopper" });
             await Assertions.Expect(pending).ToHaveCountAsync(1, new() { Timeout = 5000 });

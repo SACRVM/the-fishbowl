@@ -65,6 +65,11 @@
  *                   host toggles it — it knows, even while focus is in a
  *                   dialog), "auto" = follows focus inside the browser.
  *                   Absent = no cue, as before.
+ *   show-hidden   — presence lists dot entries (".config", ".apps/"):
+ *                   files and folders whose name starts with a dot are
+ *                   hidden by default, like a desktop file manager. The
+ *                   host binds it to its own toggle (a menu item, a key
+ *                   chord). The ".folder" marker is never listed.
  *   delete-button — the per-row trash button: "cursor" (default) shows it
  *                   on the hovered row and on the cursor row, always on
  *                   touch; "hover" only on the row under a hovering pointer
@@ -107,6 +112,7 @@
  *              folder), get/set. Setting moves it and scrolls it into view.
  *   items    — the rows in view order, read-only: [{ kind, path, name,
  *              stat }] (stat is null for folders) — for a status line.
+ *   showHidden — the show-hidden attribute as a boolean, get/set.
  *   selecting — mark mode on/off, get/set (needs `multiple`). Setting true
  *              enters it with the current marks (none is fine — a host's
  *              own "Select" button); false leaves it and clears the marks.
@@ -318,7 +324,7 @@
 
     class SacFileBrowser extends HTMLElement {
         static get observedAttributes() {
-            return ["accept", "root-label", "readonly", "multiple", "sort", "sort-dir", "columns", "header", "no-thumbnails", "delete-button"];
+            return ["accept", "root-label", "readonly", "multiple", "sort", "sort-dir", "columns", "header", "no-thumbnails", "delete-button", "show-hidden"];
         }
 
         constructor() {
@@ -425,12 +431,15 @@
                     this._head();
                     this._paint();
                     break;
-                default:                         // accept, root-label, readonly
+                default:                         // accept, root-label, readonly, show-hidden
                     this._crumbs();
                     this._head();
                     if (this._store) this.refresh(); else this._paint();
             }
         }
+
+        get showHidden() { return this.hasAttribute("show-hidden"); }
+        set showHidden(v) { this.toggleAttribute("show-hidden", !!v); }
 
         get store() { return this._store; }
         set store(handle) {
@@ -682,20 +691,22 @@
             const keep = this._pendingCursor != null ? this._pendingCursor : prev;
             this._pendingCursor = null;
             const ok = acceptTest(this.getAttribute("accept"));
+            // Dot entries stay out unless show-hidden asks for them.
+            const shown = this.hasAttribute("show-hidden") ? () => true : (name) => !name.startsWith(".");
             const seen = new Set();
             const folders = [];
             for (let f of listing.folders || []) {
                 f = String(f).replace(/\/+$/, "");
                 if (!f) continue;
                 if (prefix && !f.startsWith(prefix)) f = prefix + f;   // a store that answered with names
-                if (seen.has(f)) continue;
+                if (seen.has(f) || !shown(baseName(f))) continue;
                 seen.add(f);
                 folders.push({ kind: "folder", name: baseName(f), path: f, stat: null });
             }
             const files = (listing.files || [])
                 .filter((s) => s && s.path && baseName(s.path) !== MARKER)
                 .map((s) => ({ kind: "file", name: s.name || baseName(s.path), path: s.path, stat: s }))
-                .filter((r) => ok({ name: r.name, type: r.stat.type }));
+                .filter((r) => shown(r.name) && ok({ name: r.name, type: r.stat.type }));
             this._setRows(this._sorted(folders, files));
             const hadMarks = this._marks.size > 0;
             for (const set of [this._sel, this._marks]) {

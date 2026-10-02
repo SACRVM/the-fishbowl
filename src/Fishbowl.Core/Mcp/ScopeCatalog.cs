@@ -35,6 +35,10 @@ public static class ScopeCatalog
     public const string WriteTables = "write:tables";
     public const string DesignTables = "design:tables";
 
+    // A space's app code (files/.apps/, space-apps spec phase 4): writing it
+    // over the Files API. Space keys only; needs the owner's Designer role.
+    public const string DesignApps = "design:apps";
+
     private static readonly HashSet<string> _all = new(StringComparer.Ordinal)
     {
         ReadNotes, WriteNotes,
@@ -44,6 +48,7 @@ public static class ScopeCatalog
         ReadEvents, WriteEvents,
         ReadFiles, WriteFiles,
         ReadTables, WriteTables, DesignTables,
+        DesignApps,
     };
 
     public static IReadOnlyCollection<string> All => _all;

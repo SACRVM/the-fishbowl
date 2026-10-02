@@ -47,6 +47,14 @@
  *   // leave it out, and the router treats its hash as unmatched (falls
  *   // back like an unknown route). sac.router.inScope(route) is the same
  *   // test for apps that build their own lists from routes().
+ *
+ * An entry that opens something instead of showing a view (a window app):
+ *   sac.router.register("#/messages", null, { label: "Messages", icon: "users",
+ *                                             open: () => sac.apps.open("messages") });
+ *   // Listed like any route, in registration order — <sac-nav>'s burger and
+ *   // the Ctrl-K palette call open(route) instead of navigating. The hash is
+ *   // only the entry's key: it never matches, so a typed link to it falls
+ *   // back like an unknown route.
  */
 (function () {
     if (!window.sac) { console.warn("[sac.router] globals.js must load first — router unavailable."); return; }
@@ -86,10 +94,10 @@
      *  outside the active workspace (options.scope) never match. */
     function match(key) {
         const exact = routes.get(key);
-        if (exact && !exact.prefix && inScope(exact)) return { entry: exact, subpath: "" };
+        if (exact && !exact.prefix && !exact.open && inScope(exact)) return { entry: exact, subpath: "" };
         let best = null, bestLen = -1;
         for (const [base, entry] of routes) {
-            if (!entry.prefix || base.length <= bestLen || !inScope(entry)) continue;
+            if (!entry.prefix || entry.open || base.length <= bestLen || !inScope(entry)) continue;
             if (key === base || key.startsWith(base.endsWith("/") ? base : base + "/")) {
                 best = { entry, subpath: decode(key.slice(base.length).replace(/^\/+/, "")) };
                 bestLen = base.length;
@@ -136,6 +144,7 @@
                 icon:  options.icon  || null,
                 palette: options.palette === undefined ? null : options.palette,
                 scope: options.scope === "root" || options.scope === "scoped" ? options.scope : "any",
+                open: typeof options.open === "function" ? options.open : null,
                 prefix,
             });
             // Notify listeners (e.g. <sac-nav>) that the route table changed.
@@ -152,7 +161,7 @@
                 render();
             }
         },
-        // Every route as { hash, tag, label, icon, palette, scope, prefix }.
+        // Every route as { hash, tag, label, icon, palette, scope, open, prefix }.
         // A prefix route lists under its base hash ("#/files"), so a link to
         // it lands on the prefix itself. Lists ALL routes — filter with
         // inScope() for the active workspace.

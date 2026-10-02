@@ -407,6 +407,9 @@ class SacWindow extends HTMLElement {
             .content {
                 flex: 1;
                 overflow: auto;
+                /* A scroll that reaches the window's end stops there — the
+                   page behind the window never moves under it. */
+                overscroll-behavior: contain;
                 padding: var(--window-padding, 20px);
                 color: color-mix(in srgb, var(--fg) 78%, var(--bg));
                 font-size: 0.9rem;

@@ -268,7 +268,7 @@ public class I18nKeyTableTests
             used.Add($"fb.app.{app}.desc");
         }
         foreach (var go in new[] { "desktop" }) used.Add($"fb.go.{go}");
-        foreach (var route in new[] { "home", "notes", "todos", "calendar", "files", "tables" })
+        foreach (var route in new[] { "home", "notes", "todos", "calendar", "files", "tables", "messages", "trash", "apps", "spaces", "keys", "secrets", "admin-users", "admin-system" })
             used.Add($"fb.route.{route}");
         used.Add("fb.shell.lock-secrets");
         used.Add("fb.shell.unlock-secrets");

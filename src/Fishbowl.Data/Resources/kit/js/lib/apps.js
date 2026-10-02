@@ -157,7 +157,7 @@
  *   and reaches the host only through the bridge (kit/js/lib/app-bridge.js,
  *   loaded on demand; the frame runs kit/js/lib/app-guest.js). The app gets
  *   the same context shape; context.isolated says true.
- *   grant { files, identity, connect } — what the host hands over.
+ *   grant { files, identity, connect, api } — what the host hands over.
  *     files: true (the page's sac.files) | false | { provider } — a files
  *     provider for THIS app only ({ kind, open, save }, the remote provider
  *     pattern in files.js), or a factory (manifest) → provider | null run
@@ -184,6 +184,20 @@
  *                   manifest's ask — same-realm code shares the page's fetch,
  *                   so connect is advisory there, enforced only in the frame
  *                   (its CSP connect-src).
+ *     api: the host's OWN capabilities, per app — { name: { method: fn } }:
+ *       grant: { api: {
+ *           db:      { query: (spec) => …, insert: (table, values) => … },
+ *           members: { list: () => … },
+ *       } }
+ *     The app calls context.db.query(…) — same-realm and isolated alike
+ *     (through the bridge). Every method returns a promise; arguments and
+ *     results must be structured-cloneable for an isolated app. A thrown
+ *     error reaches the app as a rejected promise with { code, message }:
+ *     the host's own err.code when it is a short lowercase word
+ *     ("forbidden", "not-found"), else "internal". Names must be plain
+ *     identifiers that are not context fields already (fs, files, theme,
+ *     …); anything else is skipped with a warning. context.granted.api
+ *     lists the names handed over.
  *   context.granted reflects the result; an ungranted capability is null.
  *   Theme and language belong to the host: inside an isolated app a user's
  *   click on a <sac-theme-toggle> / <sac-lang-toggle> switches the HOST (as
@@ -289,12 +303,14 @@
  *                                  // in the DOM) and so never asks.
  *       close(),                   // sac.apps.close(<own id>) — a window closes,
  *                                  // a view goes home
+ *       <name>: { <method>(…) },   // a host capability (grant.api) — async
  *       granted: {                 // what the host actually handed over —
  *           fs, files, identity,   // booleans (identity may also be
  *                                  // "pseudonymous", files "scoped" — a
  *                                  // provider of its own); check before reaching for a
  *           connect: [origins],    // capability instead of guessing why it
- *       },                         // is null
+ *           api: [names],          // is null; api = the host capabilities
+ *       },
  *       isolated: false,           // true inside a sandboxed frame
  *   }
  *
@@ -449,6 +465,46 @@
         return false;
     }
 
+    // Context fields a host capability may not shadow.
+    const RESERVED = ["appId", "manifest", "params", "theme", "fs", "identity", "files", "lang",
+        "setDirty", "close", "granted", "isolated", "deepLink", "route", "onRoute", "href", "host",
+        "accent", "regional", "commands", "toolbar", "api"];
+
+    /** grant.api as the host said it → { name: { method: fn } }, own keys
+     *  and functions only; a bad name or an empty capability is skipped. */
+    function apiGrantOf(value, manifest) {
+        const out = {};
+        if (value == null) return out;
+        if (typeof value !== "object" || Array.isArray(value)) {
+            console.warn(`[sac.apps] ${manifest.id}: grant.api needs { name: { method: fn } } — nothing granted`);
+            return out;
+        }
+        Object.keys(value).forEach((name) => {
+            const cap = value[name];
+            if (!/^[A-Za-z_$][\w$]{0,40}$/.test(name) || RESERVED.includes(name)) {
+                console.warn(`[sac.apps] ${manifest.id}: grant.api "${name}" is not a free context name — skipped`);
+                return;
+            }
+            if (!cap || typeof cap !== "object") return;
+            const methods = {};
+            Object.keys(cap).forEach((m) => {
+                if (typeof cap[m] === "function" && /^[A-Za-z_$][\w$]{0,60}$/.test(m)) methods[m] = cap[m];
+            });
+            if (Object.keys(methods).length) out[name] = methods;
+        });
+        return out;
+    }
+
+    /** Runs one granted method; a failure becomes { code, message } — the
+     *  host's own short code, else "internal". */
+    function apiErrorOf(err) {
+        const code = err && typeof err.code === "string" && /^[a-z][a-z0-9-]{0,39}$/.test(err.code)
+            ? err.code : "internal";
+        const e = appError(code, String((err && err.message) || err || "error").slice(0, 1000));
+        e.hostCode = true;   // the bridge passes it through as is
+        return e;
+    }
+
     const isFilesProvider = (p) => !!p && typeof p.open === "function" && typeof p.save === "function";
     const scopedFiles = (g) => (g && g.files && typeof g.files === "object" && isFilesProvider(g.files.provider)
         ? g.files.provider : null);
@@ -470,6 +526,7 @@
                     : g.identity === true ? true
                     : g.identity === "pseudonymous" ? "pseudonymous" : false,
                 connect:  cleanList(g.connect),
+                api:      Object.keys(g.api || {}),
             };
         }
         return {
@@ -478,6 +535,7 @@
             identity: !window.sac.identity || g.identity === false ? false
                 : g.identity === "pseudonymous" ? "pseudonymous" : true,
             connect:  cleanList(g.connect !== undefined ? g.connect : manifest.connect),
+            api:      Object.keys(g.api || {}),
         };
     }
 
@@ -774,9 +832,21 @@
             // Leave: a window closes, a view goes home.
             close() { close(id); },
             // What the host actually handed over (vs. what the manifest asked).
-            granted: Object.assign({}, granted, { connect: granted.connect.slice() }),
+            granted: Object.assign({}, granted, { connect: granted.connect.slice(), api: granted.api.slice() }),
             isolated: pol.isolated,
         };
+        // The host's own capabilities (grant.api): context.<name>.<method>(),
+        // always async, errors as { code, message } — what the bridge gives
+        // an isolated app too.
+        Object.entries(pol.grant.api || {}).forEach(([name, methods]) => {
+            const cap = {};
+            Object.entries(methods).forEach(([m, fn]) => {
+                cap[m] = (...args) => Promise.resolve()
+                    .then(() => fn(...args))
+                    .catch((err) => { throw apiErrorOf(err); });
+            });
+            ctx[name] = Object.freeze(cap);
+        });
 
         if (manifest.kind !== "view") {
             ctx.deepLink = {
@@ -871,6 +941,7 @@
         if (opts && opts.grant !== undefined && pol.grant.files !== undefined) {
             pol.grant.files = filesGrantOf(pol.grant.files, copy);
         }
+        if (opts && opts.grant !== undefined) pol.grant.api = apiGrantOf(pol.grant.api, copy);
         policies.set(manifest.id, pol);
 
         // A view is a destination, so it belongs in the nav panel — one
@@ -1170,6 +1241,8 @@
             container,
             accentEl,
             granted:  grantedFor(manifest, policyOf(manifest.id)),
+            api:      policyOf(manifest.id).grant.api || {},
+            apiError: apiErrorOf,
             kitUrl:   sac.apps.kitUrl || KIT_BASE,
             frameUrl: sac.apps.frameUrl,
             limits:   sac.apps.limits,

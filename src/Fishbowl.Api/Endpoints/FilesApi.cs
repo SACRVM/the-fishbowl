@@ -51,7 +51,9 @@ public static class FilesApi
         return routes;
     }
 
-    private sealed record Target(ContextRef Ctx, string Actor);
+    // Personal: the personal workspace (no .apps there). CanDesign: may
+    // change the space's app code — Designer+, and a key needs design:apps.
+    private sealed record Target(ContextRef Ctx, string Actor, bool Personal = false, bool CanDesign = false);
 
     // Personal: the caller's own context (a Bearer key bound to a space or an
     // app has its own routes — 403 here). Space: membership via
@@ -68,14 +70,27 @@ public static class FilesApi
             try { ctx = McpContextClaims.Resolve(user); }
             catch (InvalidOperationException) { return (null, Results.Unauthorized()); }
             if (ctx.Type != ContextType.User) return (null, Results.Forbid());
-            return (new Target(ctx, userId), null);
+            return (new Target(ctx, userId, Personal: true), null);
         }
 
         var spaces = http.RequestServices.GetRequiredService<ISpaceRepository>();
         var resolved = await SpacesApi.ResolveSpaceAsync(slug, user, spaces, ct);
         if (resolved.Error is not null) return (null, resolved.Error);
         if (write && !resolved.Role!.Value.CanWrite()) return (null, Results.Forbid());
-        return (new Target(ContextRef.Space(resolved.Space!.Id), userId), null);
+        var canDesign = resolved.Role!.Value.CanDesign()
+            && (!IsBearer(user) || user.HasClaim(McpContextClaims.Scope, ScopeCatalog.DesignApps));
+        return (new Target(ContextRef.Space(resolved.Space!.Id), userId, CanDesign: canDesign), null);
+    }
+
+    // Writing into or out of .apps (space-apps spec, "Where things live").
+    private static void GuardApps(Target t, params string?[] paths)
+    {
+        foreach (var p in paths)
+        {
+            if (!AppsFolder.Contains(p)) continue;
+            if (t.Personal) throw AppsFolder.SpaceOnly();
+            if (!t.CanDesign) throw AppsFolder.DesignOnly();
+        }
     }
 
     private static bool IsBearer(ClaimsPrincipal user) => user.Identity?.AuthenticationType == McpContextClaims.BearerScheme;
@@ -158,6 +173,7 @@ public static class FilesApi
             var ifNoneMatch = http.Request.Headers.IfNoneMatch.ToString().Trim();
             var ifMatch = http.Request.Headers.IfMatch.ToString();
             // Kestrel's 30 MB default stays for every other route.
+            GuardApps(t, path);
             var caps = await files.GetCapabilitiesAsync(t.Ctx, ct);
             if (http.Features.Get<IHttpMaxRequestBodySizeFeature>() is { IsReadOnly: false } limit)
                 limit.MaxRequestBodySize = caps.MaxFileBytes + 1;
@@ -170,15 +186,25 @@ public static class FilesApi
             .RequireScope(ScopeCatalog.WriteFiles);
 
         g.MapPost("/folders", (HttpContext http, FolderRequest body) => Run(http, true, async (t, files, ct) =>
-            Results.Created((string?)null, await files.CreateFolderAsync(t.Ctx, body.Path, t.Actor, ct))))
+        {
+            GuardApps(t, body.Path);
+            return Results.Created((string?)null, await files.CreateFolderAsync(t.Ctx, body.Path, t.Actor, ct));
+        }))
             .WithName($"Create{tag}Folder").RequireScope(ScopeCatalog.WriteFiles);
 
         g.MapPost("/move", (HttpContext http, MoveRequest body) => Run(http, true, async (t, files, ct) =>
-            Results.Ok(await files.MoveAsync(t.Ctx, body.From, body.To, t.Actor, ct))))
+        {
+            if (AppsFolder.IsRoot(body.From)) throw AppsFolder.Fixed();
+            GuardApps(t, body.From, body.To);
+            return Results.Ok(await files.MoveAsync(t.Ctx, body.From, body.To, t.Actor, ct));
+        }))
             .WithName($"Move{tag}File").WithSummary("Rename or move within the workspace.").RequireScope(ScopeCatalog.WriteFiles);
 
         g.MapPost("/copy", (HttpContext http, MoveRequest body) => Run(http, true, async (t, files, ct) =>
-            Results.Created((string?)null, await files.CopyAsync(t.Ctx, body.From, body.To, t.Actor, ct))))
+        {
+            GuardApps(t, body.From, body.To);
+            return Results.Created((string?)null, await files.CopyAsync(t.Ctx, body.From, body.To, t.Actor, ct));
+        }))
             .WithName($"Copy{tag}File").RequireScope(ScopeCatalog.WriteFiles);
 
         g.MapDelete("", (HttpContext http, string? path, int? permanent) =>
@@ -186,6 +212,8 @@ public static class FilesApi
             if (permanent == 1 && IsBearer(http.User)) return Task.FromResult(Results.Forbid());
             return Run(http, true, async (t, files, ct) =>
             {
+                if (AppsFolder.IsRoot(path)) throw AppsFolder.Fixed();
+                GuardApps(t, path);
                 if (permanent == 1)
                 {
                     await files.DeletePermanentlyAsync(t.Ctx, path ?? "", t.Actor, ct);
@@ -205,6 +233,8 @@ public static class FilesApi
         // a bound body parameter would make routing demand a JSON content type.
         g.MapPost("/trash/{id}/restore", (HttpContext http, string id) => Run(http, true, async (t, files, ct) =>
         {
+            var entry = (await files.ListTrashAsync(t.Ctx, ct)).FirstOrDefault(e => e.Id == id);
+            GuardApps(t, entry?.OriginalPath);
             RestoreRequest? body = null;
             if (http.Request.HasJsonContentType() && http.Request.ContentLength is not 0)
                 body = await http.Request.ReadFromJsonAsync<RestoreRequest>(ct);
@@ -281,21 +311,28 @@ public static class FilesApi
             return Results.Json(new { error = "invalid_request", message = "Needs op (copy|move), from.paths and to." }, statusCode: 400);
 
         var spaces = http.RequestServices.GetRequiredService<ISpaceRepository>();
-        async Task<(ContextRef? Ctx, IResult? Error)> Workspace(string? ws, bool write)
+        async Task<(ContextRef? Ctx, IResult? Error)> Workspace(string? ws, bool write, string?[] paths)
         {
-            if (ws == "personal") return (ContextRef.User(userId), null);
+            if (ws == "personal")
+            {
+                if (paths.Any(AppsFolder.Contains)) return (null, Fail(AppsFolder.SpaceOnly()));
+                return (ContextRef.User(userId), null);
+            }
             if (ws is null || !ws.StartsWith("space:", StringComparison.Ordinal))
                 return (null, Results.Json(new { error = "invalid_workspace", message = "Workspace is \"personal\" or \"space:<slug>\"." }, statusCode: 400));
             var resolved = await SpacesApi.ResolveSpaceAsync(ws["space:".Length..], user, spaces, ct);
             if (resolved.Error is not null) return (null, resolved.Error);
             if (write && !resolved.Role!.Value.CanWrite()) return (null, Results.Forbid());
+            // Into or out of .apps: Designer (transfer is cookie-only, so no key scope).
+            if (paths.Any(p => AppsFolder.IsRoot(p) && move.Value)) return (null, Fail(AppsFolder.Fixed()));
+            if (paths.Any(AppsFolder.Contains) && !resolved.Role!.Value.CanDesign()) return (null, Fail(AppsFolder.DesignOnly()));
             return (ContextRef.Space(resolved.Space!.Id), null);
         }
 
         // Moving takes from the source, so it needs write there too.
-        var (from, fromError) = await Workspace(body.From.Workspace, write: move.Value);
+        var (from, fromError) = await Workspace(body.From.Workspace, write: move.Value, body.From.Paths);
         if (fromError is not null) return fromError;
-        var (to, toError) = await Workspace(body.To.Workspace, write: true);
+        var (to, toError) = await Workspace(body.To.Workspace, write: true, new[] { body.To.Folder });
         if (toError is not null) return toError;
 
         try

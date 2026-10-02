@@ -76,6 +76,11 @@ public class TablesTests
             await page.GotoAsync($"{_fixture.BaseUrl}/#/");
             await Assertions.Expect(page.Locator("sac-nav a[href='#/notes']")).ToHaveCountAsync(1);
             await Assertions.Expect(page.Locator("sac-nav a[href$='/tables']")).ToHaveCountAsync(0);
+            // The window apps are in the burger too, and open their window.
+            await page.Locator("#fb-nav").EvaluateAsync("n => n.open?.()");
+            var keys = page.Locator("sac-nav .nav-item", new() { HasText = "API keys" });
+            await keys.ClickAsync();
+            await Assertions.Expect(page.Locator("#fb-win-keys[open]")).ToHaveCountAsync(1);
 
             Assert.Empty(errors);
         }

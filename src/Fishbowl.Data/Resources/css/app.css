@@ -173,9 +173,6 @@
 fb-secrets-settings-view.in-window > header { display: flex; margin-bottom: 16px; }
 fb-secrets-settings-view.in-window > header h1 { display: none; }
 sac-window > .wa-bar { padding: 12px 20px 0; }
-/* Until the kit does it (sacrvm-appkit issue): a window's scroll stops at
-   its own end instead of scrolling the desktop behind it. */
-sac-window::part(content) { overscroll-behavior: contain; }
 
 /* One row style: the kit's list-detail row — flat, a divider between. */
 .fb-row { display: flex; align-items: center; gap: 14px; padding: 12px 0; }

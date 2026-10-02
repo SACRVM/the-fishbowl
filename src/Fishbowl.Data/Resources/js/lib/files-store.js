@@ -17,6 +17,10 @@
  *   filter      a name filter applied to entries() (the view's mod+F);
  *               folders stay so you can still walk down
  *   cached(p)   the last stat seen for a path, or null
+ *
+ * fb.filesStore.showHidden — the Files view's "Show hidden files" choice
+ * (dot entries such as a space's .apps), kept per browser; the view hands it
+ * to each <sac-file-browser> as show-hidden.
  */
 (function () {
     const MARKER = ".folder";
@@ -157,4 +161,8 @@
         };
         return store;
     };
+
+    // Show dot entries (".apps") — the Files view's toggle, kept per browser.
+    try { fb.filesStore.showHidden = localStorage.getItem("fb.files.showHidden") === "1"; }
+    catch { fb.filesStore.showHidden = false; }
 })();
