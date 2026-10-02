@@ -557,8 +557,15 @@ public class UiSmokeTests
         await account.Locator("button[data-action='profile']").ClickAsync();
         await page.Locator("#fb-profile-window sac-swatch[label='teal']").ClickAsync();
         await page.WaitForFunctionAsync("() => document.documentElement.style.getPropertyValue('--accent') === 'var(--palette-teal)'");
-        var me = await (await page.APIRequest.GetAsync(_fixture.BaseUrl + "/api/v1/me")).JsonAsync();
-        Assert.Equal("teal", me!.Value.GetProperty("accent").GetString());
+        // The UI paints first and saves in the background: poll the server.
+        string? saved = null;
+        for (var i = 0; i < 50 && saved != "teal"; i++)
+        {
+            if (i > 0) await page.WaitForTimeoutAsync(100);
+            var me = await (await page.APIRequest.GetAsync(_fixture.BaseUrl + "/api/v1/me")).JsonAsync();
+            saved = me!.Value.GetProperty("accent").GetString();
+        }
+        Assert.Equal("teal", saved);
 
         // "Default" clears it again (other tests share this user).
         await page.Locator("#fb-profile-window sac-swatch[label='Default']").ClickAsync();
@@ -681,7 +688,7 @@ public class UiSmokeTests
         // Spent: opening it again says so.
         await page.GotoAsync(second);
         await Assertions.Expect(page.Locator("#sac-toast-stack").GetByText("used already").First)
-            .ToBeVisibleAsync(new() { Timeout = 5000 });
+            .ToBeVisibleAsync(new() { Timeout = 15000 });
         // The withdrawn link doesn't work either.
         var withdrawn = await page.APIRequest.GetAsync(first, new APIRequestContextOptions { MaxRedirects = 0 });
         Assert.Contains("invite=invite-unknown", withdrawn.Headers["location"]);

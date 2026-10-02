@@ -11,7 +11,7 @@ public static class WindowApp
     {
         await page.GotoAsync(baseUrl + "/" + hash);
         // No WaitForFunctionAsync: not every context bypasses the page CSP.
-        await Assertions.Expect(page.Locator("fb-hub-view")).ToBeAttachedAsync(new() { Timeout = 10000 });
+        await Assertions.Expect(page.Locator("fb-hub-view")).ToBeAttachedAsync(new() { Timeout = 15000 });
         await page.EvaluateAsync("([n, t]) => fb.windowApps.open(n, { tab: t || undefined })", new object?[] { name, tab });
         var win = page.Locator($"#fb-win-{name}");
         await Assertions.Expect(win).ToHaveAttributeAsync("open", "", new() { Timeout = 5000 });

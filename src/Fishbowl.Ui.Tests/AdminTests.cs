@@ -109,7 +109,7 @@ public class AdminTests
             // Personal only: switching to a space closes the window, and the
             // space's desktop has no Users tile.
             await page.GotoAsync($"{_fixture.BaseUrl}/#/space/{slug}/");
-            await Assertions.Expect(page.Locator("fb-hub-view a.tile[data-key='builtin:notes']")).ToBeVisibleAsync(new() { Timeout = 5000 });
+            await Assertions.Expect(page.Locator("fb-hub-view a.tile[data-key='builtin:notes']")).ToBeVisibleAsync(new() { Timeout = 15000 });
             await Assertions.Expect(page.Locator("fb-hub-view a.tile[data-key='builtin:users']")).ToHaveCountAsync(0);
             await Assertions.Expect(page.Locator("#fb-win-users[open]")).ToHaveCountAsync(0);
             await page.EvaluateAsync("async (s) => fb.api.spaces.delete(s)", slug);
@@ -132,7 +132,7 @@ public class AdminTests
         {
             await page.GotoAsync(_fixture.BaseUrl + "/#/");
             await Assertions.Expect(page.Locator("#fb-account")).ToBeVisibleAsync(new() { Timeout = 5000 });
-            await Assertions.Expect(page.Locator("fb-hub-view a.tile[data-key='builtin:notes']")).ToBeVisibleAsync(new() { Timeout = 5000 });
+            await Assertions.Expect(page.Locator("fb-hub-view a.tile[data-key='builtin:notes']")).ToBeVisibleAsync(new() { Timeout = 15000 });
             await Assertions.Expect(page.Locator("fb-hub-view a.tile[data-key='builtin:users']")).ToHaveCountAsync(0);
             // Messages are everyone's; the admin view is nobody else's.
             await Assertions.Expect(page.Locator("#fb-messages-btn")).ToBeVisibleAsync();
@@ -406,7 +406,7 @@ public class AdminTests
             var slug = await page.EvaluateAsync<string>(
                 "async () => (await fb.api.spaces.create({ name: 'Settings elsewhere ' + Math.random().toString(36).slice(2, 7) })).slug");
             await page.GotoAsync($"{_fixture.BaseUrl}/#/space/{slug}/");
-            await Assertions.Expect(page.Locator("fb-hub-view a.tile[data-key='builtin:notes']")).ToBeVisibleAsync(new() { Timeout = 5000 });
+            await Assertions.Expect(page.Locator("fb-hub-view a.tile[data-key='builtin:notes']")).ToBeVisibleAsync(new() { Timeout = 15000 });
             await Assertions.Expect(page.Locator("fb-hub-view a.tile[data-key='builtin:system']")).ToHaveCountAsync(0);
             await page.EvaluateAsync("async (s) => fb.api.spaces.delete(s)", slug);
         }

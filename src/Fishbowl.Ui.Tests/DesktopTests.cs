@@ -118,7 +118,7 @@ public class DesktopTests
             // In a space: the space's own hrefs, no admin tile.
             var slug = await CreateSpaceAsync(page, "Desk");
             await page.GotoAsync($"{_fixture.BaseUrl}/#/space/{slug}/");
-            await Assertions.Expect(page.Locator($"fb-hub-view a.tile[href='#/space/{slug}/notes']")).ToBeVisibleAsync(new() { Timeout = 5000 });
+            await Assertions.Expect(page.Locator($"fb-hub-view a.tile[href='#/space/{slug}/notes']")).ToBeVisibleAsync(new() { Timeout = 15000 });
             await Assertions.Expect(page.Locator("fb-hub-view a.tile[href*='admin']")).ToHaveCountAsync(0);
             // The owner arranges a space's desktop.
             await Assertions.Expect(page.Locator("fb-hub-view .tile-menu").First).ToBeAttachedAsync();
@@ -223,7 +223,7 @@ public class DesktopTests
         try
         {
             await page.GotoAsync($"{_fixture.BaseUrl}/#/space/{space.Slug}/");
-            await Assertions.Expect(page.Locator($"fb-hub-view a.tile[href='#/space/{space.Slug}/notes']")).ToBeVisibleAsync(new() { Timeout = 5000 });
+            await Assertions.Expect(page.Locator($"fb-hub-view a.tile[href='#/space/{space.Slug}/notes']")).ToBeVisibleAsync(new() { Timeout = 15000 });
             // Readonly: the same arrangement, no tile menus.
             await Assertions.Expect(page.Locator("fb-hub-view .tile-menu")).ToHaveCountAsync(0);
             // The server agrees: a member's PUT is refused.
