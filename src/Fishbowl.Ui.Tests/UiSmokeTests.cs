@@ -614,7 +614,7 @@ public class UiSmokeTests
 
         // And the row's open button switches into it.
         await row.Locator(".open-btn").ClickAsync();
-        await page.WaitForURLAsync(u => u.Contains($"#/space/{slug}/notes"), new PageWaitForURLOptions { Timeout = 3000 });
+        await page.WaitForURLAsync(u => u.EndsWith($"#/space/{slug}/"), new PageWaitForURLOptions { Timeout = 3000 });
         await Assertions.Expect(pill).ToContainTextAsync(name);
 
         // API keys opened from inside the space default to that space, and

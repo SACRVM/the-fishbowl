@@ -211,13 +211,13 @@ class FbSpacesSettingsView extends HTMLElement {
             });
         });
 
-        // Open = switch the workspace to that space and land on its notes.
+        // Open = switch the workspace to that space and land on its desktop.
         list.querySelectorAll(".open-btn").forEach(btn => {
             btn.addEventListener("click", (e) => {
                 const slug = e.currentTarget.closest(".space-row")?.dataset.slug;
                 if (!slug) return;
                 this.closest("sac-window")?.close?.();   // the space is what you came for
-                sac.router.navigate(`#/space/${encodeURIComponent(slug)}/notes`);
+                sac.router.navigate(`#/space/${encodeURIComponent(slug)}/`);
             });
         });
 

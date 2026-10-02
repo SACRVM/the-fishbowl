@@ -48,6 +48,7 @@
         "lib/identity.js",// who is at this desktop (rides on the fs backend)
         "lib/files.js",   // the user's files — open / save (context.files)
         "lib/app.js",     // the app-side toolkit (apps.js is the host side)
+        "lib/showcase.js",// API-page helpers (pair with css/showcase.css) — docs pages only
 
         // components — any order, except where a comment says otherwise
         "components/sac-icon.js",
