@@ -851,6 +851,7 @@ app.MapArchiveApi();
 app.MapVaultApi();
 app.MapFilesApi();
 app.MapDesktopApi();
+app.MapSpaceAppsApi();
 app.MapMcpEndpoint();
 
 // Root route — gate the hub behind setup + authentication so the first click

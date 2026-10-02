@@ -102,16 +102,18 @@ class FbAppsSettingsView extends HTMLElement {
         const where = document.createElement("span");
         let host = app.origin;
         try { host = new URL(app.origin).host; } catch { /* keep */ }
-        where.textContent = app.mode === "trusted" ? fb.t("fb.apps.page-follows", "{host} · follows latest", { host }) : `${host}${app.version ? ` · v${app.version}` : ""}`;
+        where.textContent = app.mode === "space" ? `${app.folder}${app.version ? ` · v${app.version}` : ""}`
+            : app.mode === "trusted" ? fb.t("fb.apps.page-follows", "{host} · follows latest", { host }) : `${host}${app.version ? ` · v${app.version}` : ""}`;
         const chip = document.createElement("sac-chip");
-        chip.setAttribute("label", app.mode === "trusted" ? fb.t("fb.apps.page-mode-trusted", "trusted") : fb.t("fb.apps.page-mode-sandboxed", "sandboxed"));
+        chip.setAttribute("label", app.mode === "space" ? fb.t("fb.apps.page-mode-space", "space app")
+            : app.mode === "trusted" ? fb.t("fb.apps.page-mode-trusted", "trusted") : fb.t("fb.apps.page-mode-sandboxed", "sandboxed"));
         const grants = document.createElement("span");
         grants.textContent = this.grantsText(app);
         meta.append(where, chip, grants);
         info.append(name, meta);
 
         row.append(icon, info);
-        if (canWrite) {
+        if (canWrite && app.mode !== "space") {
             const tools = document.createElement("div");
             tools.className = "toolbar";
             const fresh = fb.desktopApps.updateFor(app.id);
@@ -148,6 +150,7 @@ class FbAppsSettingsView extends HTMLElement {
     }
 
     grantsText(app) {
+        if (app.mode === "space") return "";
         if (app.mode === "trusted") return fb.t("fb.apps.page-full-access", "Full access, personal only");
         const parts = [];
         if ((app.granted || []).includes("files")) parts.push(fb.t("fb.apps.page-grant-files", "Files"));

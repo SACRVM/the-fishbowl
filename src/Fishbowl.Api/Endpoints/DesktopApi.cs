@@ -135,11 +135,18 @@ public static class DesktopApi
             if (err is not null) return err;
             var allow = await AllowanceAsync(http, t!, ct);
             var tiles = await repo.ListTilesAsync(t!.Ctx, ct);
-            var apps = await repo.ListAppsAsync(t.Ctx, ct);
+            var apps = (await repo.ListAppsAsync(t.Ctx, ct)).Select(Dto).ToList();
+            if (t.IsSpace)
+            {
+                var files = http.RequestServices.GetRequiredService<IFileService>();
+                var key = await SpaceAppsApi.KeyAsync(http.RequestServices.GetRequiredService<ISystemRepository>(), ct);
+                foreach (var (m, changed) in await SpaceAppsApi.ListAsync(files, t.Ctx, ct))
+                    apps.Add(SpaceAppsApi.Dto(http, key, t.Ctx.Id, m, changed));
+            }
             return Results.Ok(new
             {
                 tiles = tiles.Select(TileDto),
-                apps = apps.Select(Dto),
+                apps,
                 canArrange = t.CanWrite,
                 canInstall = allow.Install,
                 canTrust = allow.Trust,
@@ -334,6 +341,10 @@ public static class DesktopApi
             return Results.NotFound();
         }
 
+        // A space's own app (.apps/<folder>, SpaceAppsApi).
+        if (ctx.Type == ContextType.Space && SpaceApps.FolderOf(appId) is { } folder)
+            return await SpaceAppsApi.FrameAsync(http, ctx.Id, folder, http.RequestServices.GetRequiredService<IFileService>());
+
         var app = await repo.GetAppAsync(ctx, appId, ct);
         if (app is null || app.Mode != AppModes.Sandboxed || !AppManifestValidator.IsValidIntegrity(app.EntryIntegrity))
             return Results.NotFound();
@@ -351,28 +362,33 @@ public static class DesktopApi
         try { csp = FrameCsp.Build(app.Origin, m.Connect, hostOrigin, app.EntryUrl); }
         catch (ArgumentException) { return Results.NotFound(); }
 
+        return Frame(http, csp, m.Name, m.Tag);
+    }
+
+    internal static IResult Frame(HttpContext http, string csp, string? name, string? tag)
+    {
         var headers = http.Response.Headers;
         headers.ContentSecurityPolicy = csp;
         headers.XContentTypeOptions = "nosniff";
         headers["Referrer-Policy"] = "no-referrer";
         headers.XFrameOptions = "SAMEORIGIN";
         headers.CacheControl = "no-store";
-        return Results.Content(FrameHtml(m), "text/html; charset=utf-8", Encoding.UTF8);
+        return Results.Content(FrameHtml(name, tag), "text/html; charset=utf-8", Encoding.UTF8);
     }
 
     // The kit's harness shape: <html data-sac-guest>, ui.css, all.js, then
     // the guest runtime. No entry script — the guest injects it from the
     // boot message, with the pin, once the kit is ready.
-    private static string FrameHtml(ValidatedManifest m)
+    private static string FrameHtml(string? name, string? tag)
     {
         static string E(string? s) => WebUtility.HtmlEncode(s ?? "");
         return $"""
             <!DOCTYPE html>
-            <html lang="en" data-sac-guest data-app-tag="{E(m.Tag)}">
+            <html lang="en" data-sac-guest data-app-tag="{E(tag)}">
             <head>
             <meta charset="utf-8">
             <meta name="viewport" content="width=device-width, initial-scale=1">
-            <title>{E(m.Name)}</title>
+            <title>{E(name)}</title>
             <link rel="stylesheet" href="/kit/css/ui.css">
             <script src="/kit/js/all.js"></script>
             <script src="{GuestScript}"></script>

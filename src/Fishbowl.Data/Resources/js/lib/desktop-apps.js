@@ -34,6 +34,12 @@
  * has one picker per page, not one per app, so it can't be limited to an
  * app's folder.
  *
+ * A space's own apps (mode "space", id "space.<folder>") come with the
+ * desktop too: the code in the space's files/.apps/<folder>/, served by the
+ * server under a signed URL (the frame has no cookie). They run sandboxed
+ * and unpinned — a Designer changes the code, the next open runs it — and
+ * aren't installed, so there is nothing to update, grant or remove here.
+ *
  * Every installed app opens as a kit window above the desktop (the host's
  * choice, whatever `kind` the manifest says): a "view" app would take over
  * the hash, and the hash is Fishbowl's router's.
@@ -75,7 +81,7 @@
     /** The frame document for an app of the ACTIVE workspace (kit hook). */
     function frameUrlOf(manifest) {
         const app = byId(manifest?.id);
-        if (!app || app.mode !== "sandboxed" || !user) return null;
+        if (!app || app.mode === "trusted" || !user) return null;
         const s = sac.scope.get();
         const [type, id] = s.type === "scoped" ? ["space", s.slug] : ["user", user.id];
         return `/apps/frame/${type}/${encodeURIComponent(id)}/${encodeURIComponent(app.id)}`;
@@ -106,6 +112,7 @@
         const files = allowed(app) && window.sac?.files?.virtual
             ? { provider: () => sac.files.virtual({ store: fb.filesStore({ workspace: ws }), root: folder, label: nameOf(app) }) }
             : false;
+        if (app.mode === "space") return { isolated: true, integrity: false, grant: { files: false, identity: false, connect: [] } };
         return app.mode === "trusted"
             ? { isolated: false, integrity: false, grant: { files, identity: true, connect } }
             : { isolated: true, integrity: app.entryIntegrity, grant: { files, identity, connect } };
@@ -174,7 +181,7 @@
         const ws = state.ws;
         for (const app of state.apps) {
             const key = `${ws}|${app.id}`;
-            if (checked.has(key)) continue;
+            if (app.mode === "space" || checked.has(key)) continue;
             checked.add(key);
             let fresh;
             try { fresh = await sac.apps.inspect(app.manifestUrl); }

@@ -270,6 +270,55 @@ public class AppsTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Apps_SpaceApp_FromDotApps_OpensSandboxed_Test()
+    {
+        var (context, page, errors) = await OpenAsync();
+        string? slug = null;
+        try
+        {
+            var res = await page.APIRequest.PostAsync($"{_fixture.BaseUrl}/api/v1/spaces", new() { DataObject = new { name = "Code " + Guid.NewGuid().ToString("N")[..6] } });
+            slug = (await res.JsonAsync())!.Value.GetProperty("slug").GetString();
+            async Task Put(string path, string content)
+            {
+                var put = await page.APIRequest.PutAsync($"{_fixture.BaseUrl}/api/v1/spaces/{slug}/files/content?path={Uri.EscapeDataString(path)}&parents=1",
+                    new APIRequestContextOptions
+                    {
+                        Headers = new Dictionary<string, string> { ["X-Fishbowl-Upload"] = "1", ["If-None-Match"] = "*" },
+                        DataByte = System.Text.Encoding.UTF8.GetBytes(content),
+                    });
+                Assert.True(put.Ok, $"PUT {path}: {put.Status} {await put.TextAsync()}");
+            }
+            await Put(".apps/hello/app.json", "{\"name\":\"Hello\",\"tag\":\"hello-space-app\",\"version\":\"0.1.0\",\"icon\":\"star\"}");
+            await Put(".apps/hello/app.js",
+                "customElements.define('hello-space-app', class extends HTMLElement { connectedCallback() { this.innerHTML = '<p id=hi>hello from .apps</p>'; } });");
+
+            // A tile on the space's desktop, opened in the sandboxed frame.
+            await page.GotoAsync($"{_fixture.BaseUrl}/#/space/{slug}/");
+            var tile = page.Locator("fb-hub-view a.tile[data-key='app:space.hello']");
+            await Assertions.Expect(tile).ToBeVisibleAsync(new() { Timeout = 15000 });
+            await tile.ClickAsync();
+            var frame = page.FrameLocator("sac-window iframe");
+            await Assertions.Expect(frame.Locator("#hi")).ToHaveTextAsync("hello from .apps", new() { Timeout = 15000 });
+            Assert.Equal("allow-scripts allow-forms allow-popups allow-downloads",
+                await page.Locator("sac-window iframe").GetAttributeAsync("sandbox"));
+            await page.ScreenshotAsync(new() { Path = Path.Combine(Shots, "desk-5-space-app.png") });
+
+            // The Apps window lists it, with nothing to update or remove.
+            await WindowApp.CloseAllAsync(page);
+            await WindowApp.OpenAsync(page, _fixture.BaseUrl, "apps", $"#/space/{slug}/");
+            var row = page.Locator("fb-apps-settings-view .fb-row[data-app='space.hello']");
+            await Assertions.Expect(row).ToContainTextAsync(".apps/hello · v0.1.0");
+            await Assertions.Expect(row.Locator("button[data-action]")).ToHaveCountAsync(0);
+            Assert.Empty(errors);
+        }
+        finally
+        {
+            if (slug is not null) await page.APIRequest.DeleteAsync($"{_fixture.BaseUrl}/api/v1/spaces/{slug}?archive=false");
+            await context.CloseAsync();
+        }
+    }
+
+    [Fact]
     public async Task Apps_Phone_Screenshots_Test()
     {
         var (context, page, _) = await OpenAsync(390, 800, phone: true);

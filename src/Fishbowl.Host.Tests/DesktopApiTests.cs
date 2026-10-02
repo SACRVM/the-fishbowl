@@ -391,4 +391,59 @@ public class DesktopApiTests : IClassFixture<WebApplicationFactory<Program>>, ID
         var none = await Json(await c.DeleteAsync("/api/v1/desktop/apps/third?purgeData=true", Ct));
         Assert.False(none.GetProperty("purged").GetBoolean());
     }
+
+    [Fact]
+    public async Task SpaceApps_FromDotApps_CodeUnderASignedUrl_FrameForMembers()
+    {
+        var space = await new SpaceRepository(_db).CreateAsync(Alice, "Code Space", Ct);
+        using (var sys = _db.CreateSystemConnection())
+            sys.Execute("INSERT INTO space_members(space_id, user_id, role, joined_at) VALUES (@s, @u, 'reader', @now)",
+                new { s = space.Id, u = Bob, now = DateTime.UtcNow.ToString("o") });
+        // The disk is the truth: app code is files in .apps/<folder>/.
+        var apps = Path.Combine(_dataDir, "spaces", space.Id, "files", ".apps");
+        Directory.CreateDirectory(Path.Combine(apps, "hello"));
+        Directory.CreateDirectory(Path.Combine(apps, "broken"));
+        File.WriteAllText(Path.Combine(apps, "hello", "app.json"), "{\"name\":\"Hello\",\"tag\":\"hello-app\",\"version\":\"1.0.0\"}");
+        File.WriteAllText(Path.Combine(apps, "hello", "app.js"), "customElements.define('hello-app', class extends HTMLElement {});");
+        File.WriteAllText(Path.Combine(apps, "hello", "page.html"), "<script>alert(1)</script>");
+        File.WriteAllText(Path.Combine(apps, "broken", "app.json"), "{\"name\":\"No tag\"}");
+
+        // Every member's desktop lists it, with the installed apps' shape.
+        var desk = await Json(await As(Bob).GetAsync($"/api/v1/spaces/{space.Slug}/desktop", Ct));
+        var app = Assert.Single(desk.GetProperty("apps").EnumerateArray());
+        Assert.Equal("space.hello", app.GetProperty("id").GetString());
+        Assert.Equal("space", app.GetProperty("mode").GetString());
+        Assert.Equal("Hello", app.GetProperty("manifest").GetProperty("name").GetString());
+        var entry = app.GetProperty("entryUrl").GetString()!;
+        Assert.StartsWith($"http://localhost/apps/code/{space.Id}/hello/", entry);
+        Assert.EndsWith("/app.js", entry);
+        Assert.Empty((await Json(await As(Alice).GetAsync("/api/v1/desktop", Ct))).GetProperty("apps").EnumerateArray());
+
+        // The code: no cookie (the frame is opaque) — the signature is the key.
+        var anon = _factory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
+        var code = await anon.GetAsync(entry, Ct);
+        Assert.Equal(HttpStatusCode.OK, code.StatusCode);
+        Assert.Equal("text/javascript", code.Content.Headers.ContentType!.MediaType);
+        Assert.Equal("*", code.Headers.GetValues("Access-Control-Allow-Origin").Single());
+        Assert.Equal("nosniff", code.Headers.GetValues("X-Content-Type-Options").Single());
+        Assert.Contains("sandbox", string.Join(" ", code.Headers.GetValues("Content-Security-Policy")));
+        Assert.Contains("hello-app", await code.Content.ReadAsStringAsync(Ct));
+
+        var bas = entry[..^"app.js".Length];
+        var sig = bas.TrimEnd('/').Split('/')[^1];
+        Assert.Equal(HttpStatusCode.NotFound, (await anon.GetAsync(bas + "page.html", Ct)).StatusCode);       // never HTML
+        Assert.Equal(HttpStatusCode.NotFound, (await anon.GetAsync(bas + "nope.js", Ct)).StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, (await anon.GetAsync(bas.Replace(sig, "x" + sig[1..]) + "app.js", Ct)).StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, (await anon.GetAsync(bas.Replace("/hello/", "/broken/") + "app.json", Ct)).StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, (await anon.GetAsync(bas + "..%2Fbroken%2Fapp.json", Ct)).StatusCode);
+
+        // The frame document: members only, its scripts limited to the code folder.
+        var frame = await As(Bob).GetAsync($"/apps/frame/space/{space.Slug}/space.hello", Ct);
+        Assert.Equal(HttpStatusCode.OK, frame.StatusCode);
+        var csp = string.Join(" ", frame.Headers.GetValues("Content-Security-Policy"));
+        Assert.Contains($"script-src http://localhost/kit/js/ {bas};", csp);
+        Assert.Contains("data-app-tag=\"hello-app\"", await frame.Content.ReadAsStringAsync(Ct));
+        Assert.Equal(HttpStatusCode.NotFound, (await As(Carol).GetAsync($"/apps/frame/space/{space.Slug}/space.hello", Ct)).StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, (await As(Bob).GetAsync($"/apps/frame/space/{space.Slug}/space.broken", Ct)).StatusCode);
+    }
 }

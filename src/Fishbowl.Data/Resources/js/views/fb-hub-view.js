@@ -182,7 +182,9 @@ class FbHubView extends HTMLElement {
                 const meta = document.createElement("p");
                 meta.className = "tile-meta";
                 const version = e.app.version ? ` · v${e.app.version}` : "";
-                meta.textContent = `${hostOf(e.app.origin)}${version} · ${e.app.mode}`;
+                meta.textContent = e.app.mode === "space"
+                    ? `${e.app.folder}${version}`
+                    : `${hostOf(e.app.origin)}${version} · ${e.app.mode}`;
                 body.appendChild(meta);
             }
 
@@ -306,7 +308,7 @@ class FbHubView extends HTMLElement {
             document.createElement("hr"),
             item("hide", fb.t("fb.desk.hide", "Hide from this desktop")),
         );
-        if (e.app) {
+        if (e.app && e.app.mode !== "space") {
             // Items are added only when they apply — no dead entries.
             const fresh = fb.desktopApps.updateFor(e.app.id);
             const extra = [];

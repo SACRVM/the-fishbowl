@@ -222,6 +222,7 @@ window.sac?.i18n?.add?.("de", {
     "fb.apps.page-empty-none": "Auf diesem Desktop ist nichts installiert.",
     "fb.apps.page-follows": "{host} · folgt der neuesten Version",
     "fb.apps.page-mode-trusted": "vertraut",
+    "fb.apps.page-mode-space": "Space-App",
     "fb.apps.page-mode-sandboxed": "abgeschirmt",
     "fb.apps.page-update-to": "Auf v{version} aktualisieren",
     "fb.apps.page-permissions": "Berechtigungen",

@@ -10,7 +10,11 @@ public static class AppModes
     // Same-realm, acts as the user, follows the origin's current code.
     // Personal desktops only.
     public const string Trusted = "trusted";
+    // A space's own app from its .apps folder (SpaceApps): sandboxed, never
+    // pinned, never installed — listed by the desktop, not stored.
+    public const string Space = "space";
 
+    // What an install may ask for.
     public static bool IsValid(string? mode) => mode is Sandboxed or Trusted;
 }
 
