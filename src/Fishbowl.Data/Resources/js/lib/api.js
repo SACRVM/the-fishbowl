@@ -529,7 +529,8 @@
                 request(`/spaces/${encodeURIComponent(slug)}?archive=${archive ? "true" : "false"}`, { method: "DELETE" })
                 .then(spacesChanged),
             // Owner-only. `color` is a palette slot name or null (default).
-            update: (slug, { color }) => request(`/spaces/${encodeURIComponent(slug)}`, { method: "PATCH", body: JSON.stringify({ color }) })
+            // Partial: only the fields given change.
+            update: (slug, fields) => request(`/spaces/${encodeURIComponent(slug)}`, { method: "PATCH", body: JSON.stringify(fields) })
                 .then(spacesChanged),
             // Who is in a space: { role, canManage, items: [{ userId, name, avatarUrl, role, joinedAt, you }] }.
             members: (slug) => request(`/spaces/${encodeURIComponent(slug)}/members`),

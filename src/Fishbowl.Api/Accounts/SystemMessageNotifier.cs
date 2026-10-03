@@ -34,7 +34,33 @@ public class SystemMessageNotifier
     public static string SubjectFor(string kind, string? language)
         => ChatText.Get(ChatText.Has("subject." + kind) ? "subject." + kind : "subject.other", language);
 
-    public async Task NotifyAsync(IEnumerable<string> recipientIds, string kind, CancellationToken ct = default)
+    // An app's message (app.message): the fixed line, or — when the space's
+    // owner chose it — "<space> · <app>: <text>".
+    public async Task NotifyAppMessageAsync(IEnumerable<string> recipientIds, string? spaceId, string? data, CancellationToken ct = default)
+    {
+        string? line = null;
+        try
+        {
+            using var scope = _scopes.CreateScope();
+            var spaces = scope.ServiceProvider.GetService<ISpaceRepository>();
+            var space = spaceId is null || spaces is null ? null : await spaces.GetByIdAsync(spaceId, ct);
+            if (space?.AppMessageText == true && data is not null)
+            {
+                using var doc = System.Text.Json.JsonDocument.Parse(data);
+                var d = doc.RootElement;
+                var app = d.TryGetProperty("appName", out var a) ? a.GetString() : null;
+                var text = d.TryGetProperty("text", out var t) ? t.GetString() : null;
+                if (!string.IsNullOrEmpty(text)) line = $"{space.Name} · {app}: {text}";
+            }
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogWarning(ex, "App message line for space {SpaceId} fell back to the fixed one", spaceId);
+        }
+        await NotifyAsync(recipientIds, MessageKinds.AppMessage, ct, line);
+    }
+
+    public async Task NotifyAsync(IEnumerable<string> recipientIds, string kind, CancellationToken ct = default, string? line = null)
     {
         using var scope = _scopes.CreateScope();
         var bots = scope.ServiceProvider.GetServices<IBotClient>().ToList();
@@ -47,7 +73,7 @@ public class SystemMessageNotifier
             string? language = null;
             try { language = system is null ? null : (await system.GetUserAsync(userId, ct))?.Language; }
             catch (Exception ex) when (ex is not OperationCanceledException) { /* English then */ }
-            var subject = SubjectFor(kind, language);
+            var subject = line ?? SubjectFor(kind, language);
             foreach (var bot in bots)
             {
                 try
@@ -87,7 +113,9 @@ public class NotifyingMessageRepository : IMessageRepository
         var recipients = recipientIds.ToList();
         var ids = await _inner.CreateAsync(recipients, kind, subjectType, subjectId, data, ct);
         if (ids.Count > 0)
-            _ = Task.Run(() => _notifier.NotifyAsync(recipients, kind, CancellationToken.None), CancellationToken.None);
+            _ = kind == MessageKinds.AppMessage
+                ? Task.Run(() => _notifier.NotifyAppMessageAsync(recipients, subjectId, data, CancellationToken.None), CancellationToken.None)
+                : Task.Run(() => _notifier.NotifyAsync(recipients, kind, CancellationToken.None), CancellationToken.None);
         return ids;
     }
 

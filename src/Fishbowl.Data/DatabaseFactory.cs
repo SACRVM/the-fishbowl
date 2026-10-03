@@ -679,7 +679,24 @@ public class DatabaseFactory
             ApplySystemV15(connection);
             connection.Execute("PRAGMA user_version = 15");
             _logger.LogInformation("Applied system schema v15");
+            version = 15;
         }
+
+        if (version < 16)
+        {
+            ApplySystemV16(connection);
+            connection.Execute("PRAGMA user_version = 16");
+            _logger.LogInformation("Applied system schema v16");
+        }
+    }
+
+    // A space owner's choice: messages from the space's apps reach chat with
+    // their text (default: a fixed line without it).
+    private void ApplySystemV16(IDbConnection connection)
+    {
+        var cols = connection.Query<string>("SELECT name FROM pragma_table_info('spaces')").ToList();
+        if (cols.Count > 0 && !cols.Contains("app_message_text"))
+            connection.Execute("ALTER TABLE spaces ADD COLUMN app_message_text INTEGER NOT NULL DEFAULT 0;");
     }
 
     // A session stamp per account: every password change rotates it, and the

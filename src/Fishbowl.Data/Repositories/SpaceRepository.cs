@@ -136,6 +136,20 @@ public class SpaceRepository : ISpaceRepository
         return true;
     }
 
+    public async Task<bool> SetAppMessageTextAsync(string spaceId, string actingUserId, bool on, CancellationToken ct = default)
+    {
+        using var db = _dbFactory.CreateSystemConnection();
+        var role = await db.QuerySingleOrDefaultAsync<string?>(new CommandDefinition(
+            "SELECT role FROM space_members WHERE space_id = @spaceId AND user_id = @actingUserId",
+            new { spaceId, actingUserId }, cancellationToken: ct));
+        if (role != SpaceRole.Owner.ToDbValue()) return false;
+
+        await db.ExecuteAsync(new CommandDefinition(
+            "UPDATE spaces SET app_message_text = @on WHERE id = @spaceId",
+            new { spaceId, on = on ? 1 : 0 }, cancellationToken: ct));
+        return true;
+    }
+
     public async Task<bool> DeleteAsync(string spaceId, string actingUserId, CancellationToken ct = default)
     {
         using var db = _dbFactory.CreateSystemConnection();

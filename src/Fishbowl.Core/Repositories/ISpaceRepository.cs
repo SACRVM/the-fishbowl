@@ -33,6 +33,9 @@ public interface ISpaceRepository
     // false if the user isn't the owner. Callers validate the slot.
     Task<bool> SetColorAsync(string spaceId, string actingUserId, string? color, CancellationToken ct = default);
 
+    // Owner only, like the colour: false if the actor isn't the owner.
+    Task<bool> SetAppMessageTextAsync(string spaceId, string actingUserId, bool on, CancellationToken ct = default);
+
     // Everyone in the space, owner first, then by role (highest first) and name.
     Task<IReadOnlyList<SpaceMemberRow>> ListMembersAsync(string spaceId, CancellationToken ct = default);
 

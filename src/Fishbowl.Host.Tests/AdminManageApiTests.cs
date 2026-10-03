@@ -367,6 +367,38 @@ public class AdminManageApiTests : IClassFixture<WebApplicationFactory<Program>>
     }
 
     [Fact]
+    public async Task AppMessage_ReachesChat_WithItsText_OnlyWhenTheOwnerSaysSo()
+    {
+        await SeedUserAsync("owner");
+        await SeedUserAsync("ada");
+        var space = await new SpaceRepository(_db).CreateAsync("owner", "Club", Ct);
+        await new SpaceRepository(_db).AddMemberAsync(space.Id, "ada", SpaceRole.Member, Ct);
+        await new NotificationChannelRepository(_db).UpsertAsync("ada", _bot.Name, "dm-ada", Ct);
+        var app = Path.Combine(_dir, "spaces", space.Id, "files", ".apps", "board");
+        Directory.CreateDirectory(app);
+        File.WriteAllText(Path.Combine(app, "app.json"), "{\"name\":\"Board\",\"tag\":\"board-app\"}");
+        var notify = $"/api/v1/spaces/{space.Slug}/apps/board/notify";
+
+        // Default: the fixed line, no text, no names.
+        await As("owner").PostAsJsonAsync(notify, new { to = "all", text = "Lunch is here" }, Ct);
+        var sent = await _bot.WaitForAsync("ada");
+        Assert.Equal(SystemMessageNotifier.SubjectFor(MessageKinds.AppMessage), sent);
+        Assert.DoesNotContain("Lunch", sent);
+
+        // The owner turns the text on (a member can't); the setting is partial.
+        Assert.Equal(HttpStatusCode.Forbidden, (await As("ada").PatchAsJsonAsync($"/api/v1/spaces/{space.Slug}", new { appMessageText = true }, Ct)).StatusCode);
+        await As("owner").PatchAsJsonAsync($"/api/v1/spaces/{space.Slug}", new { color = "teal" }, Ct);
+        Assert.Equal(HttpStatusCode.NoContent, (await As("owner").PatchAsJsonAsync($"/api/v1/spaces/{space.Slug}", new { appMessageText = true }, Ct)).StatusCode);
+        var got = (await new SpaceRepository(_db).GetByIdAsync(space.Id, Ct))!;
+        Assert.True(got.AppMessageText);
+        Assert.Equal("teal", got.Color);
+
+        _bot.Sent.Clear();
+        await As("owner").PostAsJsonAsync(notify, new { to = "all", text = "Cake too" }, Ct);
+        Assert.Equal("Club · Board: Cake too", await _bot.WaitForAsync("ada"));
+    }
+
+    [Fact]
     public void Subjects_AreFixedSentences_PerKind()
     {
         Assert.Contains("approval", SystemMessageNotifier.SubjectFor(MessageKinds.UserPending));

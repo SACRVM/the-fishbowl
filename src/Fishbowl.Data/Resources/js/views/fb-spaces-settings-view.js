@@ -182,6 +182,11 @@ class FbSpacesSettingsView extends HTMLElement {
                         <code title="spaces/${escapeAttr(t.id)}/space.db">${escapeHtml(t.id)}</code>
                     </div>
                 </div>
+                ${t.role === "owner"
+                    ? `<button type="button" class="icon-btn settings-btn" title="${fb.t("fb.spaces.settings", "Settings")}" aria-label="${fb.t("fb.spaces.settings", "Settings")}">
+                           <sac-icon name="settings"></sac-icon>
+                       </button>`
+                    : ""}
                 <button type="button" class="icon-btn members-btn" title="${fb.t("fb.spaces.members", "Members")}" aria-label="${fb.t("fb.spaces.members", "Members")}">
                     <sac-icon name="users"></sac-icon>
                 </button>
@@ -200,6 +205,14 @@ class FbSpacesSettingsView extends HTMLElement {
             btn.addEventListener("click", (e) => {
                 const slug = e.currentTarget.closest(".space-row")?.dataset.slug;
                 if (slug) this._pickColor(slug);
+            });
+        });
+
+        list.querySelectorAll(".settings-btn").forEach(btn => {
+            btn.addEventListener("click", (e) => {
+                const slug = e.currentTarget.closest(".space-row")?.dataset.slug;
+                const space = this.spaces.find(t => t.slug === slug);
+                if (space) this._openSettings(space);
             });
         });
 
@@ -241,6 +254,42 @@ class FbSpacesSettingsView extends HTMLElement {
     // Colour picker window: the kit palette plus "Default". Picking one
     // saves it and closes; it tints the space's switcher pill and the
     // shared-data highlights while the space is active. Owner-only.
+    // The owner's settings for a space: today, whether messages from the
+    // space's apps reach chat with their text (default: a fixed line).
+    _openSettings(space) {
+        const dlg = document.createElement("sac-dialog");
+        dlg.id = "fb-space-settings";
+        dlg.setAttribute("title", fb.t("fb.spaces.settings-title", "{name} — settings", { name: space.name }));
+        const label = document.createElement("label");
+        label.className = "fb-check";
+        const toggle = document.createElement("sac-toggle");
+        toggle.id = "fb-space-app-text";
+        if (space.appMessageText) toggle.setAttribute("checked", "");
+        label.append(toggle, document.createTextNode(" " + fb.t("fb.spaces.app-message-text",
+            "Messages from this space's apps reach chat with their text (otherwise: a line without it)")));
+        toggle.addEventListener("change", async () => {
+            const on = !!toggle.checked;
+            try {
+                await fb.api.spaces.update(space.slug, { appMessageText: on });
+                space.appMessageText = on;
+            } catch (err) {
+                toggle.checked = !on;
+                sac.toast?.(fb.errors.text(err, fb.t("fb.spaces.settings-failed", "Couldn't save the setting.")), { kind: "error" });
+            }
+        });
+        dlg.appendChild(label);
+        const close = document.createElement("button");
+        close.type = "button";
+        close.slot = "footer";
+        close.className = "btn";
+        close.textContent = fb.t("fb.common.close", "Close");
+        close.addEventListener("click", () => dlg.close?.());
+        dlg.appendChild(close);
+        dlg.addEventListener("sac:close", () => dlg.remove());
+        document.body.appendChild(dlg);
+        setTimeout(() => dlg.open?.(), 0);
+    }
+
     _pickColor(slug) {
         const space = this.spaces.find(t => t.slug === slug);
         if (!space) return;

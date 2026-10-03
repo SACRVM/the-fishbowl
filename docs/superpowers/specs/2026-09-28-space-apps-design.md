@@ -225,12 +225,18 @@ in the implementation plan; the shape:
    Tables app. *3a built 2026-09-29* (tables, types, links, own rows, trash,
    aggregates, REST, MCP; table names get a hidden `t_` prefix — open
    question settled). Searchable columns built 2026-09-30 (a row search of
-   their own, `row_search`). Still open: the Tables app (on the kit's
-   `sac-data-grid`). The old per-app DB is removed (2026-09-30).
+   their own, `row_search`). The Tables app on the kit's `sac-data-grid`
+   built 2026-10-01. The old per-app DB is removed (2026-09-30). *Done.*
 4. **Space apps** — `.apps/` protection + hidden folders, tiles from
    `app.json`, frame serving from `.apps/`, the space API over the bridge
    (`context.*`, kit issue), messages from apps, the error store, the
-   server's guide.
+   server's guide. *Built 2026-10-02/03*: `.apps` Designer-only, kit
+   show-hidden; tiles from `app.json` (mode `space`); code under a signed
+   URL `/apps/code/…`; `context.space` over `grant.api`; the error store
+   (`app_errors`, MCP `app_errors`; frame runtime errors wait for
+   sacrvm-appkit#39); the guide (`GET …/guide`, MCP `space_guide`);
+   `context.space.notify` with mutes, a rate limit and the owner's
+   "text to chat" setting. *Done.*
 5. **Triggers** — Jint, before/after scripts, limits.
 6. **Contacts** — persons/organisations, the field set, history, vCard/CSV.
 7. **The way in** — guide page, OAuth for MCP (claude.ai), GitHub Action
@@ -239,7 +245,11 @@ in the implementation plan; the shape:
 
 ## Open questions
 
-- Does the **trusted** mode for third-party apps stay?
-- Table names: free, or a hidden internal prefix (`tbl_`) so they never
-  collide with Fishbowl's tables?
-- Contacts: one table per workspace for both kinds, or two?
+Settled 2026-10-03:
+- The **trusted** mode for third-party apps goes — spaceboxed apps cover
+  what it was for; third-party code only runs isolated.
+- Table names: a hidden `t_` prefix (phase 3).
+- Contacts: **one table** per workspace, `kind` = person | organisation; a
+  person points at its organisation.
+- The GitHub Action `deploy-to-fishbowl` lives in **its own repo**
+  (SACRVM/deploy-to-fishbowl); this repo builds the server side.

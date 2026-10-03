@@ -1,4 +1,5 @@
 using System.Security.Claims;
+using System.Text.Json;
 using Dapper;
 using Fishbowl.Core;
 using Fishbowl.Core.Files;
@@ -16,7 +17,8 @@ namespace Fishbowl.Api.Endpoints;
 public static class SpacesApi
 {
     public record CreateSpaceRequest(string Name);
-    public record UpdateSpaceRequest(string? Color);
+    // Partial: only what the body names changes (color: a slot or null).
+    public record UpdateSpaceRequest(string? Color, bool? AppMessageText);
 
     public static RouteGroupBuilder MapSpacesApi(this IEndpointRouteBuilder routes)
     {
@@ -39,6 +41,7 @@ public static class SpacesApi
                 role = m.Role.ToDbValue(),
                 createdAt = m.Space.CreatedAt,
                 color = m.Space.Color,
+                appMessageText = m.Space.AppMessageText,
             }));
         })
         .WithName("ListSpaces")
@@ -89,6 +92,7 @@ public static class SpacesApi
                 role = role.Value.ToDbValue(),
                 createdAt = space.CreatedAt,
                 color = space.Color,
+                appMessageText = space.AppMessageText,
             });
         })
         .WithName("GetSpace")
@@ -101,22 +105,31 @@ public static class SpacesApi
         // Space settings — for now just the colour. Owner-only; `color` is a
         // palette slot name or null for the default.
         group.MapPatch("/{slug}", async (
-            string slug, UpdateSpaceRequest body, ClaimsPrincipal user, ISpaceRepository repo, CancellationToken ct) =>
+            string slug, JsonElement body, ClaimsPrincipal user, ISpaceRepository repo, CancellationToken ct) =>
         {
+            if (body.ValueKind != JsonValueKind.Object)
+                return ApiErrors.BadRequest("invalid_value", "A JSON object with color and/or appMessageText.", new { field = "body" });
+            var hasColor = body.TryGetProperty("color", out var colorEl);
+            var color = hasColor && colorEl.ValueKind == JsonValueKind.String ? colorEl.GetString() : null;
+            bool? appText = body.TryGetProperty("appMessageText", out var textEl) && textEl.ValueKind is JsonValueKind.True or JsonValueKind.False
+                ? textEl.GetBoolean() : null;
             if (user.Identity?.AuthenticationType == McpContextClaims.BearerScheme) return Results.Forbid();   // a person's act, not a key's
             var userId = user.FindFirst("fishbowl_user_id")?.Value;
             if (string.IsNullOrEmpty(userId)) return Results.Unauthorized();
-            if (body.Color is not null && !TagPalette.IsSlot(body.Color))
+            if (color is not null && !TagPalette.IsSlot(color))
                 return ApiErrors.BadRequest("invalid_value", "color must be a palette slot or null", new { field = "color" });
 
             var space = await repo.GetBySlugAsync(slug, ct);
             if (space is null) return Results.NotFound();
 
-            var ok = await repo.SetColorAsync(space.Id, userId, body.Color, ct);
+            var ok = true;
+            if (hasColor) ok = await repo.SetColorAsync(space.Id, userId, color, ct);
+            if (ok && appText is bool on) ok = await repo.SetAppMessageTextAsync(space.Id, userId, on, ct);
             return ok ? Results.NoContent() : Results.Forbid();
         })
         .WithName("UpdateSpace")
-        .WithSummary("Updates a space's settings (its colour). Owner only.")
+        .Accepts<UpdateSpaceRequest>("application/json")
+        .WithSummary("Updates a space's settings — colour, whether app messages reach chat with their text. Partial. Owner only.")
         .Produces(StatusCodes.Status204NoContent)
         .Produces(StatusCodes.Status400BadRequest)
         .Produces(StatusCodes.Status401Unauthorized)
