@@ -8,7 +8,8 @@
  * desktop's tile menu (js/lib/desktop-apps.js), so both stay one thing.
  * "Install an app" sits in the toolbar for whoever may install here; a card
  * says what the admin's policy allows. Members of a space see its apps, no
- * write buttons.
+ * write buttons. In a space its Designers also see the app error store
+ * (what broke in the space's own apps) with Clear.
  *
  * Light-DOM so app.css tokens apply; page frame, cards and rows are the
  * kit's (app.css .fb-page / .fb-row).
@@ -44,6 +45,10 @@ class FbAppsSettingsView extends HTMLElement {
                 <sac-section title="${fb.t("fb.apps.page-installed", "Installed")}"></sac-section>
                 <div id="fb-apps-list"></div>
             </div>
+            <div class="card" id="fb-apps-errors-card" hidden>
+                <sac-section title="${fb.t("fb.apps.errors", "Errors")}"></sac-section>
+                <div id="fb-apps-errors"></div>
+            </div>
             <div class="card">
                 <sac-section title="${fb.t("fb.apps.page-who", "Who may install")}"></sac-section>
                 <p class="muted" id="fb-apps-policy"></p>
@@ -57,6 +62,7 @@ class FbAppsSettingsView extends HTMLElement {
         this.render();
         this.renderList();
         this.renderPolicy();
+        this.renderErrors();
         const st = fb.desktopApps.state;
         fb.windowApps.toolbar(this, st.canInstall ? [{ icon: "plus", title: fb.t("fb.apps.page-install", "Install an app"), onClick: () => fb.desktopApps.install() }] : []);
     }
@@ -83,6 +89,63 @@ class FbAppsSettingsView extends HTMLElement {
             return;
         }
         list.replaceChildren(...st.apps.map((app) => this.row(app, st.canArrange)));
+    }
+
+    // A space's app errors — only a Designer gets them (the server says 403
+    // to everyone else, and the card stays hidden).
+    async renderErrors() {
+        const scope = sac.scope.get();
+        const card = this.querySelector("#fb-apps-errors-card");
+        if (!card || scope.type !== "scoped") return;
+        let list;
+        try { list = (await fb.api.appErrors(scope.slug).list({ limit: 100 })).errors || []; }
+        catch { return; }
+        if (!this.isConnected) return;
+        card.hidden = false;
+        const box = this.querySelector("#fb-apps-errors");
+        if (!list.length) {
+            box.innerHTML = `<p class="muted">${fb.t("fb.apps.errors-none", "No errors.")}</p>`;
+            return;
+        }
+        const tools = document.createElement("div");
+        tools.className = "toolbar";
+        const clear = document.createElement("button");
+        clear.type = "button";
+        clear.className = "btn";
+        clear.dataset.action = "clear-errors";
+        clear.textContent = fb.t("fb.apps.errors-clear", "Clear");
+        clear.addEventListener("click", async () => {
+            try { await fb.api.appErrors(scope.slug).clear(); }
+            catch (err) { sac.toast?.(fb.errors.text(err, fb.t("fb.apps.errors-clear-failed", "Couldn't clear the errors.")), { kind: "error" }); }
+            this.renderErrors();
+        });
+        tools.appendChild(clear);
+        const kinds = {
+            manifest: fb.t("fb.apps.error-manifest", "app.json"),
+            load: fb.t("fb.apps.error-load", "start"),
+            runtime: fb.t("fb.apps.error-runtime", "running"),
+            call: fb.t("fb.apps.error-call", "refused call"),
+            reported: fb.t("fb.apps.error-reported", "reported"),
+        };
+        box.replaceChildren(tools, ...list.map((e) => {
+            const row = document.createElement("div");
+            row.className = "fb-row";
+            row.dataset.error = e.id;
+            const icon = document.createElement("sac-icon");
+            icon.setAttribute("name", "warn");
+            const info = document.createElement("div");
+            info.className = "fb-row-info";
+            const msg = document.createElement("p");
+            msg.className = "fb-row-name";
+            msg.textContent = e.message;
+            if (e.detail) msg.title = e.detail;
+            const meta = document.createElement("div");
+            meta.className = "fb-row-meta";
+            meta.textContent = `.apps/${e.app} · ${kinds[e.kind] || e.kind} · ${fb.format.dateTime(new Date(e.at))}`;
+            info.append(msg, meta);
+            row.append(icon, info);
+            return row;
+        }));
     }
 
     row(app, canWrite) {

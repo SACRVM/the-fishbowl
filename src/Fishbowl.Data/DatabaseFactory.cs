@@ -453,7 +453,33 @@ public class DatabaseFactory
             ApplyUserV16(connection);
             connection.Execute("PRAGMA user_version = 16");
             _logger.LogInformation("Applied user schema v16 to {DbPath}", ((SqliteConnection)connection).DataSource);
+            version = 16;
         }
+
+        if (version < 17)
+        {
+            ApplyUserV17(connection);
+            connection.Execute("PRAGMA user_version = 17");
+            _logger.LogInformation("Applied user schema v17 to {DbPath}", ((SqliteConnection)connection).DataSource);
+        }
+    }
+
+    // A space's error store for its own apps (AppErrors): the newest few
+    // hundred, newest first. Personal DBs get the table too (one schema).
+    private static void ApplyUserV17(IDbConnection connection)
+    {
+        connection.Execute(@"
+            CREATE TABLE IF NOT EXISTS app_errors (
+                id TEXT PRIMARY KEY,
+                at TEXT NOT NULL,
+                app TEXT NOT NULL,
+                kind TEXT NOT NULL,
+                message TEXT NOT NULL,
+                detail TEXT,
+                user_id TEXT
+            );
+            CREATE INDEX IF NOT EXISTS ix_app_errors_at ON app_errors(at DESC);
+            CREATE INDEX IF NOT EXISTS ix_app_errors_app ON app_errors(app, kind, at);");
     }
 
     // Tiles have a default size per app now (the housekeeping ones start

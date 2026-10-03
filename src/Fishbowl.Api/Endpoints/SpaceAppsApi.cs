@@ -5,6 +5,8 @@ using System.Text.Json;
 using Fishbowl.Core;
 using Fishbowl.Core.Desktop;
 using Fishbowl.Core.Files;
+using Fishbowl.Core.Mcp;
+using Fishbowl.Core.Models;
 using Fishbowl.Core.Repositories;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
@@ -20,6 +22,10 @@ namespace Fishbowl.Api.Endpoints;
 // cookie), and the code comes from GET /apps/code/<spaceId>/<folder>/<sig>/<file>
 // — no cookie (the frame is opaque), the signature is the key. Anything it
 // can't serve is a 404.
+//
+// The error store (AppErrors) under /api/v1/spaces/<slug>/apps/errors:
+// GET and DELETE for a Designer (a key needs design:apps), POST for any
+// member's browser (cookie) — what broke in the frame.
 public static class SpaceAppsApi
 {
     public static IEndpointRouteBuilder MapSpaceAppsApi(this IEndpointRouteBuilder routes)
@@ -27,8 +33,45 @@ public static class SpaceAppsApi
         routes.MapGet("/apps/code/{spaceId}/{folder}/{sig}/{**file}", CodeAsync)
             .WithName("GetSpaceAppCode")
             .ExcludeFromDescription();
+
+        var g = routes.MapGroup("/api/v1/spaces/{slug}/apps/errors").RequireAuthorization();
+        g.MapGet("/", async (string slug, string? app, int? limit, HttpContext http, ISpaceRepository spaces, IAppErrorRepository errors, CancellationToken ct) =>
+        {
+            var resolved = await SpacesApi.ResolveSpaceAsync(slug, http.User, spaces, ct);
+            if (resolved.Error is not null) return resolved.Error;
+            if (!resolved.Role!.Value.CanDesign()) return DesignOnly();
+            var list = await errors.ListAsync(ContextRef.Space(resolved.Space!.Id), app, limit ?? 100, ct);
+            return Results.Ok(new { errors = list.Select(e => new { e.Id, e.At, e.App, e.Kind, e.Message, e.Detail, e.UserId }) });
+        }).RequireScope(ScopeCatalog.DesignApps)
+          .WithName("ListSpaceAppErrors").WithSummary("A space's app errors, newest first (?app=<folder>, ?limit=). Designer.");
+
+        g.MapPost("/", async (string slug, ReportRequest body, HttpContext http, ISpaceRepository spaces, IAppErrorRepository errors, CancellationToken ct) =>
+        {
+            if (http.User.Identity?.AuthenticationType == McpContextClaims.BearerScheme) return Results.Forbid();
+            var resolved = await SpacesApi.ResolveSpaceAsync(slug, http.User, spaces, ct);
+            if (resolved.Error is not null) return resolved.Error;
+            if (!SpaceApps.IsFolder(body.App) || body.Kind is null || !AppErrors.FromBrowser.Contains(body.Kind) || string.IsNullOrWhiteSpace(body.Message))
+                return ApiErrors.BadRequest("invalid_app_error", "An app error needs app (the folder), kind (load, runtime, call, reported) and message.");
+            await errors.AddAsync(ContextRef.Space(resolved.Space!.Id), body.App!, body.Kind, body.Message!, body.Detail,
+                http.User.FindFirst(McpContextClaims.UserId)?.Value, ct);
+            return Results.NoContent();
+        }).WithName("ReportSpaceAppError").WithSummary("Stores what broke in an app's frame. Cookie only.");
+
+        g.MapDelete("/", async (string slug, string? app, HttpContext http, ISpaceRepository spaces, IAppErrorRepository errors, CancellationToken ct) =>
+        {
+            var resolved = await SpacesApi.ResolveSpaceAsync(slug, http.User, spaces, ct);
+            if (resolved.Error is not null) return resolved.Error;
+            if (!resolved.Role!.Value.CanDesign()) return DesignOnly();
+            return Results.Ok(new { removed = await errors.ClearAsync(ContextRef.Space(resolved.Space!.Id), app, ct) });
+        }).RequireScope(ScopeCatalog.DesignApps)
+          .WithName("ClearSpaceAppErrors").WithSummary("Clears a space's app errors (?app=<folder> for one). Designer.");
         return routes;
     }
+
+    public sealed record ReportRequest(string? App, string? Kind, string? Message, string? Detail);
+
+    private static IResult DesignOnly() =>
+        Results.Json(new { error = "apps_design_only", message = "App errors are for the space's Designers." }, statusCode: StatusCodes.Status403Forbidden);
 
     // The instance's signing key, made on first use.
     internal static async Task<byte[]> KeyAsync(ISystemRepository system, CancellationToken ct)
@@ -51,7 +94,7 @@ public static class SpaceAppsApi
 
     /// <summary>The apps in a space's .apps — those whose app.json reads.</summary>
     internal static async Task<IReadOnlyList<(SpaceAppManifest Manifest, DateTime? Changed)>> ListAsync(
-        IFileService files, ContextRef ctx, CancellationToken ct)
+        IFileService files, ContextRef ctx, CancellationToken ct, IAppErrorRepository? errors = null)
     {
         FileListPage page;
         try { page = await files.ListAsync(ctx, AppsFolder.Name, null, 500, ct); }
@@ -60,26 +103,36 @@ public static class SpaceAppsApi
         var apps = new List<(SpaceAppManifest, DateTime?)>();
         foreach (var dir in page.Entries.Where(e => e.Kind == "folder" && SpaceApps.IsFolder(e.Name)))
         {
-            var m = await ReadAsync(files, ctx, dir.Name, ct);
+            var m = await ReadAsync(files, ctx, dir.Name, ct, errors);
             if (m is not null) apps.Add(m.Value);
         }
         return apps.OrderBy(a => a.Item1.Name, StringComparer.OrdinalIgnoreCase).ToList();
     }
 
+    // A folder without app.json is no app (nothing to report); one whose
+    // app.json doesn't read is a broken app — into the error store with why.
     internal static async Task<(SpaceAppManifest Manifest, DateTime? Changed)?> ReadAsync(
-        IFileService files, ContextRef ctx, string folder, CancellationToken ct)
+        IFileService files, ContextRef ctx, string folder, CancellationToken ct, IAppErrorRepository? errors = null)
     {
+        string? problem;
         try
         {
             var h = await files.OpenReadAsync(ctx, $"{AppsFolder.Name}/{folder}/{SpaceApps.ManifestFile}", ct);
             await using var stream = h.Stream;
-            if (h.Entry.Size > SpaceApps.MaxManifestBytes) return null;
-            using var doc = await JsonDocument.ParseAsync(stream, cancellationToken: ct);
-            var m = SpaceApps.Parse(folder, doc.RootElement);
-            return m is null ? null : (m, h.Entry.Mtime);
+            if (h.Entry.Size > SpaceApps.MaxManifestBytes) problem = $"app.json is larger than {SpaceApps.MaxManifestBytes / 1024} KB.";
+            else
+            {
+                using var doc = await JsonDocument.ParseAsync(stream, cancellationToken: ct);
+                var m = SpaceApps.Parse(folder, doc.RootElement, out problem);
+                if (m is not null) return (m, h.Entry.Mtime);
+            }
         }
         catch (FileStoreException) { return null; }
-        catch (JsonException) { return null; }
+        catch (JsonException ex) { problem = $"app.json isn't valid JSON: {ex.Message}"; }
+
+        if (errors is not null && problem is not null)
+            await errors.AddAsync(ctx, folder, AppErrors.Manifest, problem, null, null, ct);
+        return null;
     }
 
     // The desktop's record of a space app — the install record's shape, so

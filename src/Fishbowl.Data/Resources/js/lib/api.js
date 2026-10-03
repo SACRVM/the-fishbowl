@@ -439,6 +439,18 @@
         };
     }
 
+    // A space's app error store (AppErrors): Designers list and clear, any
+    // member's browser reports what broke in an app's frame.
+    function appErrors(slug) {
+        const p = `/spaces/${encodeURIComponent(slug)}/apps/errors`;
+        const q = (o) => { const s = new URLSearchParams(Object.entries(o).filter(([, v]) => v != null)).toString(); return s ? `?${s}` : ""; };
+        return {
+            list:   ({ app, limit } = {}) => request(p + q({ app, limit })),
+            report: ({ app, kind, message, detail }) => request(p, { method: "POST", body: JSON.stringify({ app, kind, message, detail }) }),
+            clear:  (app)                 => request(p + q({ app }), { method: "DELETE" }),
+        };
+    }
+
     const todos = crud("todos");
     todos.list = (opts) => request(opts?.includeCompleted
         ? `${ctx("/todos")}?includeCompleted=true`
@@ -455,6 +467,7 @@
         trash,
         tables,
         spaceData,
+        appErrors,
         contacts,
         events,
         tags: {

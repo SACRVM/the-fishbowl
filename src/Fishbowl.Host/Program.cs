@@ -178,6 +178,7 @@ builder.Services.AddScoped<IMessageRepository>(sp => new Fishbowl.Api.Accounts.N
     sp.GetRequiredService<MessageRepository>(), sp.GetRequiredService<Fishbowl.Api.Accounts.SystemMessageNotifier>()));
 builder.Services.AddScoped<IUserAdminRepository, UserAdminRepository>();
 builder.Services.AddScoped<IDesktopRepository, DesktopRepository>();
+builder.Services.AddScoped<IAppErrorRepository, AppErrorRepository>();
 // Every sign-in (Google, local) goes through the account rules here.
 builder.Services.AddScoped<AccountGate>();
 builder.Services.AddScoped<Fishbowl.Core.Files.IFileService, Fishbowl.Data.Files.FileService>();
@@ -217,6 +218,7 @@ builder.Services.AddScoped<IMcpTool, FindContactTool>();
 builder.Services.AddScoped<IMcpTool, ListEventsTool>();
 // Space tables (space-apps spec, phase 3).
 builder.Services.AddScoped<IMcpTool, Fishbowl.Mcp.Tools.Tables.TableListTool>();
+builder.Services.AddScoped<IMcpTool, Fishbowl.Mcp.Tools.Apps.AppErrorsTool>();
 builder.Services.AddScoped<IMcpTool, Fishbowl.Mcp.Tools.Tables.TableDescribeTool>();
 builder.Services.AddScoped<IMcpTool, Fishbowl.Mcp.Tools.Tables.TableCreateTool>();
 builder.Services.AddScoped<IMcpTool, Fishbowl.Mcp.Tools.Tables.TableAlterTool>();

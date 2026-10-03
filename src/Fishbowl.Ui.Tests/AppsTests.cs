@@ -302,6 +302,7 @@ public class AppsTests : IAsyncLifetime
                     const rows = Array.isArray(r) ? r : (r.rows || r.items || []);
                     let refused = '';
                     try { await context.space.describe('nope'); } catch (e) { refused = e.code; }
+                    await context.space.error('boom from the app', 'detail');
                     this.querySelector('#data').textContent = `${rows.length} ${rows[0]?.title} ${refused}`;
                   }
                 });
@@ -327,6 +328,12 @@ public class AppsTests : IAsyncLifetime
             var row = page.Locator("fb-apps-settings-view .fb-row[data-app='space.hello']");
             await Assertions.Expect(row).ToContainTextAsync(".apps/hello · v0.1.0");
             await Assertions.Expect(row.Locator("button[data-action]")).ToHaveCountAsync(0);
+            // Its Designer sees what broke: the refused call and its own report.
+            var errorsCard = page.Locator("#fb-apps-errors-card");
+            await Assertions.Expect(errorsCard).ToContainTextAsync("boom from the app");
+            await Assertions.Expect(errorsCard).ToContainTextAsync("describe:");
+            await errorsCard.Locator("button[data-action='clear-errors']").ClickAsync();
+            await Assertions.Expect(errorsCard).ToContainTextAsync("No errors.");
             Assert.Empty(errors);
         }
         finally

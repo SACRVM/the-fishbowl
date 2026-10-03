@@ -83,19 +83,30 @@ public static partial class SpaceApps
     /// Reads an app.json. Null when it isn't an app: no `tag` that is a custom
     /// element name, or an `entry` that isn't a .js/.mjs file in the folder.
     /// </summary>
-    public static SpaceAppManifest? Parse(string folder, JsonElement json)
+    public static SpaceAppManifest? Parse(string folder, JsonElement json) => Parse(folder, json, out _);
+
+    /// <summary>As <see cref="Parse(string, JsonElement)"/>, saying why not (for the error store).</summary>
+    public static SpaceAppManifest? Parse(string folder, JsonElement json, out string? problem)
     {
-        if (json.ValueKind != JsonValueKind.Object) return null;
+        problem = null;
+        if (json.ValueKind != JsonValueKind.Object) { problem = "app.json must be a JSON object."; return null; }
         string? Str(string name, int max) =>
             json.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.String && v.GetString()!.Length <= max
                 ? v.GetString() : null;
 
         var tag = Str("tag", 100);
-        if (tag is null || !TagShape().IsMatch(tag)) return null;
+        if (tag is null || !TagShape().IsMatch(tag))
+        {
+            problem = "app.json needs \"tag\": the app's custom element name, lower-case with a dash (e.g. \"booking-app\").";
+            return null;
+        }
         var entry = Str("entry", 200) ?? Str("src", 200) ?? "app.js";
         if (entry.StartsWith("./", StringComparison.Ordinal)) entry = entry[2..];
         if (!IsFile(entry) || !(entry.EndsWith(".js", StringComparison.Ordinal) || entry.EndsWith(".mjs", StringComparison.Ordinal)))
+        {
+            problem = $"\"entry\" must be a .js or .mjs file inside the app's folder (got \"{entry}\").";
             return null;
+        }
         var name = Str("name", 100);
         return new SpaceAppManifest(
             Folder: folder,

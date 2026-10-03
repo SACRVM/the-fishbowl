@@ -53,6 +53,7 @@
         "range_incomplete": "Give both a start and an end, or neither.",
         "resource_invalid": "The server refused that ({field}).",
         "resource_too_large": "That's too large ({field}).",
+        "invalid_app_error": "An app error needs app (the folder), kind (load, runtime, call, reported) and message.",
         // System settings and setup
         "unknown_config_key": "That setting doesn't exist.",
         "value_required": "Enter a value — or remove the setting to use the default.",

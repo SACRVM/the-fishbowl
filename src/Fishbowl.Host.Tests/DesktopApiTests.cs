@@ -446,4 +446,43 @@ public class DesktopApiTests : IClassFixture<WebApplicationFactory<Program>>, ID
         Assert.Equal(HttpStatusCode.NotFound, (await As(Carol).GetAsync($"/apps/frame/space/{space.Slug}/space.hello", Ct)).StatusCode);
         Assert.Equal(HttpStatusCode.NotFound, (await As(Bob).GetAsync($"/apps/frame/space/{space.Slug}/space.broken", Ct)).StatusCode);
     }
+
+    [Fact]
+    public async Task SpaceApps_ErrorStore_ManifestProblems_ReportsAndClear()
+    {
+        var space = await new SpaceRepository(_db).CreateAsync(Alice, "Error Space", Ct);
+        using (var sys = _db.CreateSystemConnection())
+            sys.Execute("INSERT INTO space_members(space_id, user_id, role, joined_at) VALUES (@s, @u, 'reader', @now)",
+                new { s = space.Id, u = Bob, now = DateTime.UtcNow.ToString("o") });
+        var apps = Path.Combine(_dataDir, "spaces", space.Id, "files", ".apps");
+        Directory.CreateDirectory(Path.Combine(apps, "notag"));
+        Directory.CreateDirectory(Path.Combine(apps, "badjson"));
+        Directory.CreateDirectory(Path.Combine(apps, "plain"));       // no app.json: no app, no error
+        File.WriteAllText(Path.Combine(apps, "notag", "app.json"), "{\"name\":\"No tag\"}");
+        File.WriteAllText(Path.Combine(apps, "badjson", "app.json"), "{ nope");
+        var errors = $"/api/v1/spaces/{space.Slug}/apps/errors";
+
+        // The server records what it can't read — once, however often the desktop loads.
+        await As(Bob).GetAsync($"/api/v1/spaces/{space.Slug}/desktop", Ct);
+        await As(Alice).GetAsync($"/api/v1/spaces/{space.Slug}/desktop", Ct);
+        var list = (await Json(await As(Alice).GetAsync(errors, Ct))).GetProperty("errors").EnumerateArray().ToList();
+        Assert.Equal(2, list.Count);
+        Assert.All(list, e => Assert.Equal("manifest", e.GetProperty("kind").GetString()));
+        Assert.Contains(list, e => e.GetProperty("app").GetString() == "notag" && e.GetProperty("message").GetString()!.Contains("\"tag\""));
+        Assert.Contains(list, e => e.GetProperty("app").GetString() == "badjson" && e.GetProperty("message").GetString()!.Contains("valid JSON"));
+
+        // Designers read and clear; any member's browser reports.
+        Assert.Equal(HttpStatusCode.Forbidden, (await As(Bob).GetAsync(errors, Ct)).StatusCode);
+        Assert.Equal(HttpStatusCode.NoContent, (await As(Bob).PostAsJsonAsync(errors, new { app = "notag", kind = "reported", message = "boom", detail = "at line 3" }, Ct)).StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, (await As(Bob).PostAsJsonAsync(errors, new { app = "notag", kind = "manifest", message = "fake" }, Ct)).StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, (await As(Bob).PostAsJsonAsync(errors, new { app = "../x", kind = "load", message = "x" }, Ct)).StatusCode);
+        Assert.NotEqual(HttpStatusCode.NoContent, (await As(Carol).PostAsJsonAsync(errors, new { app = "notag", kind = "load", message = "x" }, Ct)).StatusCode);   // not a member
+        var newest = (await Json(await As(Alice).GetAsync($"{errors}?app=notag", Ct))).GetProperty("errors")[0];
+        Assert.Equal("boom", newest.GetProperty("message").GetString());
+        Assert.Equal("at line 3", newest.GetProperty("detail").GetString());
+
+        Assert.Equal(HttpStatusCode.Forbidden, (await As(Bob).DeleteAsync(errors, Ct)).StatusCode);
+        Assert.Equal(3, (await Json(await As(Alice).DeleteAsync(errors, Ct))).GetProperty("removed").GetInt32());
+        Assert.Empty((await Json(await As(Alice).GetAsync(errors, Ct))).GetProperty("errors").EnumerateArray());
+    }
 }

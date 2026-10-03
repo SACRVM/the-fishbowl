@@ -44,6 +44,10 @@
  * events, contacts, members — as the signed-in user, so the server's role
  * checks hold (a Reader's app can't write); a refusal reaches the app as
  * { code, message } with the server's code (underscores as dashes).
+ * What breaks goes to the space's error store (fb.api.appErrors) for its
+ * Designers: an entry that doesn't start (load), a refused call (call),
+ * context.space.error(message, detail) (reported) — the server adds an
+ * app.json it can't read itself.
  *
  * Every installed app opens as a kit window above the desktop (the host's
  * choice, whatever `kind` the manifest says): a "view" app would take over
@@ -118,7 +122,7 @@
             ? { provider: () => sac.files.virtual({ store: fb.filesStore({ workspace: ws }), root: folder, label: nameOf(app) }) }
             : false;
         if (app.mode === "space") {
-            return { isolated: true, integrity: false, grant: { files: false, identity: false, connect: [], api: { space: spaceApi(ws) } } };
+            return { isolated: true, integrity: false, grant: { files: false, identity: false, connect: [], api: { space: spaceApi(ws, app) } } };
         }
         return app.mode === "trusted"
             ? { isolated: false, integrity: false, grant: { files, identity: true, connect } }
@@ -126,16 +130,32 @@
     }
 
     /** context.space for a space app: the space's data, refusals as { code, message }. */
-    function spaceApi(ws) {
+    function spaceApi(ws, app) {
         const data = fb.api.spaceData(ws.slice("space:".length));
         const api = {};
         for (const [name, fn] of Object.entries(data)) {
             api[name] = async (...args) => {
                 try { return await fn(...args); }
-                catch (err) { throw spaceError(err); }
+                catch (err) {
+                    const e = spaceError(err);
+                    report(app, "call", `${name}: ${e.code} — ${e.message}`);
+                    throw e;
+                }
             };
         }
+        // The app's own report, for its Designers.
+        api.error = async (message, detail) => {
+            report(app, "reported", String(message ?? ""), detail == null ? null : String(detail));
+        };
         return api;
+    }
+
+    /** Into the space's error store; never in the way of the app. */
+    function report(app, kind, message, detail = null) {
+        const slug = state.ws?.startsWith("space:") ? state.ws.slice(6) : null;
+        if (!slug || app?.mode !== "space" || !message) return;
+        fb.api.appErrors(slug).report({ app: app.folder.replace(/^\.apps\//, ""), kind, message: message.slice(0, 1000), detail: detail?.slice(0, 4000) ?? null })
+            .catch(() => { /* the store is best effort */ });
     }
 
     function spaceError(err) {
@@ -198,6 +218,7 @@
         }
         catch (err) {
             const code = err?.code;
+            report(byId(id), "load", `${code || "error"}: ${err?.message || "couldn't start"}`);
             sac.toast?.(code === "integrity"
                 ? fb.t("fb.apps.changed", "{name} changed since you installed it — review the update first.", { name: nameOf(byId(id)) })
                 : fb.t("fb.apps.no-start", "{name} couldn't start.", { name: nameOf(byId(id)) }), { kind: "error" });
