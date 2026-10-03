@@ -164,7 +164,9 @@ builder.Services.AddScoped<IEventRepository, EventRepository>();
 builder.Services.AddScoped<ISpaceRepository, SpaceRepository>();
 builder.Services.AddScoped<ISpaceInviteRepository, SpaceInviteRepository>();
 builder.Services.AddScoped<ITrashRepository, TrashRepository>();
-builder.Services.AddScoped<ITableRepository, Fishbowl.Data.Tables.TableRepository>();
+builder.Services.AddScoped<Fishbowl.Data.Tables.TableRepository>();
+// Triggers (.apps/<app>/triggers/<table>.js) wrap every row write.
+builder.Services.AddScoped<ITableRepository, Fishbowl.Data.Tables.TriggeringTableRepository>();
 builder.Services.AddScoped<IApiKeyRepository, ApiKeyRepository>();
 builder.Services.AddScoped<INotificationChannelRepository, NotificationChannelRepository>();
 builder.Services.AddScoped<IDiscordLinkRepository, DiscordLinkRepository>();

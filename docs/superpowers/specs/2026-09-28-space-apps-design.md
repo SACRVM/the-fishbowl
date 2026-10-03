@@ -237,7 +237,10 @@ in the implementation plan; the shape:
    sacrvm-appkit#39); the guide (`GET …/guide`, MCP `space_guide`);
    `context.space.notify` with mutes, a rate limit and the owner's
    "text to chat" setting. *Done.*
-5. **Triggers** — Jint, before/after scripts, limits.
+5. **Triggers** — Jint, before/after scripts, limits. *Built 2026-10-03*:
+   `.apps/<app>/triggers/<table>.js`, a decorator around every row write,
+   before may change/refuse/keep, after errors into the error store, depth
+   3, ~1 s / 50 000 statements / 32 MB. *Done.*
 6. **Contacts** — persons/organisations, the field set, history, vCard/CSV.
 7. **The way in** — guide page, OAuth for MCP (claude.ai), GitHub Action
    `deploy-to-fishbowl`.

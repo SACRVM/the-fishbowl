@@ -85,6 +85,24 @@ public static class SpaceGuide
 
             """);
 
+        sb.AppendLine("## Triggers");
+        sb.AppendLine("""
+            JavaScript that runs on the server around every row write of a table — whoever writes (an app, an agent, the Tables app, the API). One file per table and app: `.apps/<folder>/triggers/<table>.js`, with any of these functions:
+            ```js
+            function beforeInsert(row, ctx) { row.number = 'N-' + (ctx.count('orders') + 1); return row; }  // change the row, or throw to refuse
+            function beforeUpdate(row, old, ctx) { /* row = the changed columns */ }
+            function beforeDelete(old, ctx) { ctx.update('orders', old.id, { archived: true }); return false; }  // false keeps the row
+            function afterInsert(row, old, ctx) { ctx.insert('audit', { title: 'new ' + row.number }); }        // after the write
+            function afterUpdate(row, old, ctx) {}
+            function afterDelete(row, old, ctx) {}
+            ```
+            - A `throw new Error('…')` in a before-function refuses the write; the writer sees your message.
+            - After-functions run once the write is saved; their errors go to the error store (kind `trigger`), the write stands.
+            - `ctx`: `get(table, id)`, `query(table, { where, orderBy, limit })`, `count(table, where?)`, `insert(table, values)`, `update(table, id, values)`, `remove(table, id)` — with the writer's role, and through triggers again (at most 3 deep); `ctx.user` `{ id, canWrite, canDesign }`, `ctx.table`, `ctx.log(message)` into the error store.
+            - Synchronous, plain JavaScript: no `fetch`, no files, no modules. Each run gets about 1 s, 50 000 statements and 32 MB.
+
+            """);
+
         sb.AppendLine("## This space's tables");
         var defs = await tables.ListAsync(ctx, ct);
         if (defs.Count == 0)

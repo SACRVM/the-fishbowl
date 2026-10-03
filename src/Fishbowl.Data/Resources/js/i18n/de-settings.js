@@ -236,6 +236,7 @@ window.sac?.i18n?.add?.("de", {
     "fb.apps.error-runtime": "Laufzeit",
     "fb.apps.error-call": "abgelehnter Aufruf",
     "fb.apps.error-reported": "gemeldet",
+    "fb.apps.error-trigger": "Trigger",
     "fb.apps.page-mode-sandboxed": "abgeschirmt",
     "fb.apps.page-update-to": "Auf v{version} aktualisieren",
     "fb.apps.page-permissions": "Berechtigungen",

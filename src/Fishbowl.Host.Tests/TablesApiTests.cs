@@ -282,4 +282,53 @@ public class TablesApiTests : IClassFixture<WebApplicationFactory<Program>>, IDi
         var r = await As(Owner).GetAsync("/api/v1/tables", Ct);
         Assert.Equal(HttpStatusCode.NotFound, r.StatusCode);
     }
+
+    [Fact]
+    public async Task Triggers_ChangeRefuseArchive_AfterSteps_AndLimits()
+    {
+        var space = await ClubAsync();
+        var t = $"/api/v1/spaces/{space.Slug}/tables";
+        await Ok(await As(Owner).PostAsync(t, Body("""{ "name": "orders", "columns": [ { "name": "number", "type": "text" }, { "name": "archived", "type": "yesno" } ] }"""), Ct));
+        await Ok(await As(Owner).PostAsync(t, Body("""{ "name": "audit", "columns": [] }"""), Ct));
+        await Ok(await As(Owner).PostAsync(t, Body("""{ "name": "loop", "columns": [] }"""), Ct));
+        await Ok(await As(Owner).PostAsync(t, Body("""{ "name": "slow", "columns": [] }"""), Ct));
+        var triggers = Path.Combine(_dataDir, "spaces", space.Id, "files", ".apps", "shop", "triggers");
+        Directory.CreateDirectory(triggers);
+        File.WriteAllText(Path.Combine(triggers, "orders.js"), """
+            function beforeInsert(row, ctx) {
+              if (row.title === 'bad') throw new Error('No bad orders, ' + ctx.user.id);
+              row.number = 'N-' + (ctx.count('orders') + 1);
+              return row;
+            }
+            function afterInsert(row, old, ctx) { ctx.insert('audit', { title: 'new ' + row.number }); }
+            function beforeDelete(old, ctx) { ctx.update('orders', old.id, { archived: true }); return false; }
+            """);
+        File.WriteAllText(Path.Combine(triggers, "loop.js"), "function afterInsert(row, old, ctx) { ctx.insert('loop', { title: 'again' }); }");
+        File.WriteAllText(Path.Combine(triggers, "slow.js"), "function beforeInsert(row) { while (true) {} }");
+
+        // before: the trigger fills a column, or refuses with its message.
+        var order = await Ok(await As(Member).PostAsync($"{t}/orders/rows", Body("""{ "title": "Chairs" }"""), Ct));
+        Assert.Equal("N-1", order.GetProperty("number").GetString());
+        var bad = await As(Member).PostAsync($"{t}/orders/rows", Body("""{ "title": "bad" }"""), Ct);
+        Assert.Equal("trigger_refused", await Error(bad));
+
+        // after: acts on the space with the writer's role.
+        var audit = await Ok(await As(Owner).PostAsync($"{t}/audit/query", Body("{}"), Ct));
+        Assert.Equal("new N-1", Assert.Single(audit.EnumerateArray()).GetProperty("title").GetString());
+
+        // beforeDelete may keep the row — here, archive it instead.
+        await Ok(await As(Owner).DeleteAsync($"{t}/orders/rows/{order.GetProperty("id").GetString()}", Ct));
+        var kept = await Ok(await As(Owner).GetAsync($"{t}/orders/rows/{order.GetProperty("id").GetString()}", Ct));
+        Assert.Contains(kept.GetProperty("archived").ToString(), new[] { "1", "True", "true" });
+
+        // Bounded: a chain stops at its depth (the first writes stand, the
+        // error store says why), an endless loop at its time/statement limit.
+        await Ok(await As(Owner).PostAsync($"{t}/loop/rows", Body("""{ "title": "start" }"""), Ct));
+        var loops = await Ok(await As(Owner).PostAsync($"{t}/loop/count", Body("{}"), Ct));
+        Assert.Equal(Fishbowl.Data.Tables.TriggeringTableRepository.MaxDepth, loops.GetProperty("count").GetInt32());
+        var errors = await Ok(await As(Owner).GetAsync($"/api/v1/spaces/{space.Slug}/apps/errors?app=shop", Ct));
+        Assert.Contains(errors.GetProperty("errors").EnumerateArray(), e => e.GetProperty("kind").GetString() == "trigger" && e.GetProperty("message").GetString()!.Contains("deep"));
+        var slow = await As(Owner).PostAsync($"{t}/slow/rows", Body("""{ "title": "x" }"""), Ct);
+        Assert.Equal("trigger_failed", await Error(slow));
+    }
 }

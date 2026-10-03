@@ -126,6 +126,7 @@ class FbAppsSettingsView extends HTMLElement {
             runtime: fb.t("fb.apps.error-runtime", "running"),
             call: fb.t("fb.apps.error-call", "refused call"),
             reported: fb.t("fb.apps.error-reported", "reported"),
+            trigger: fb.t("fb.apps.error-trigger", "trigger"),
         };
         box.replaceChildren(tools, ...list.map((e) => {
             const row = document.createElement("div");
