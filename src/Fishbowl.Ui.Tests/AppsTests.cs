@@ -289,8 +289,23 @@ public class AppsTests : IAsyncLifetime
                 Assert.True(put.Ok, $"PUT {path}: {put.Status} {await put.TextAsync()}");
             }
             await Put(".apps/hello/app.json", "{\"name\":\"Hello\",\"tag\":\"hello-space-app\",\"version\":\"0.1.0\",\"icon\":\"star\"}");
-            await Put(".apps/hello/app.js",
-                "customElements.define('hello-space-app', class extends HTMLElement { connectedCallback() { this.innerHTML = '<p id=hi>hello from .apps</p>'; } });");
+            // The app reads and writes the space's data over the bridge (context.space).
+            var table = await page.APIRequest.PostAsync($"{_fixture.BaseUrl}/api/v1/spaces/{slug}/tables",
+                new() { DataObject = new { name = "tasks", columns = Array.Empty<object>() } });
+            Assert.True(table.Ok, await table.TextAsync());
+            await Put(".apps/hello/app.js", """
+                customElements.define('hello-space-app', class extends HTMLElement {
+                  async mount(context) {
+                    this.innerHTML = '<p id=hi>hello from .apps</p><p id=data></p>';
+                    await context.space.insert('tasks', { title: 'from the app' });
+                    const r = await context.space.query('tasks', {});
+                    const rows = Array.isArray(r) ? r : (r.rows || r.items || []);
+                    let refused = '';
+                    try { await context.space.describe('nope'); } catch (e) { refused = e.code; }
+                    this.querySelector('#data').textContent = `${rows.length} ${rows[0]?.title} ${refused}`;
+                  }
+                });
+                """);
 
             // A tile on the space's desktop, opened in the sandboxed frame.
             await page.GotoAsync($"{_fixture.BaseUrl}/#/space/{slug}/");
@@ -299,6 +314,9 @@ public class AppsTests : IAsyncLifetime
             await tile.ClickAsync();
             var frame = page.FrameLocator("sac-window iframe");
             await Assertions.Expect(frame.Locator("#hi")).ToHaveTextAsync("hello from .apps", new() { Timeout = 15000 });
+            await Assertions.Expect(frame.Locator("#data")).ToHaveTextAsync(new System.Text.RegularExpressions.Regex("^1 from the app [a-z-]+$"), new() { Timeout = 15000 });
+            Assert.Equal(1, (await (await page.APIRequest.PostAsync($"{_fixture.BaseUrl}/api/v1/spaces/{slug}/tables/tasks/count",
+                new() { DataObject = new { } })).JsonAsync())!.Value.GetProperty("count").GetInt32());
             Assert.Equal("allow-scripts allow-forms allow-popups allow-downloads",
                 await page.Locator("sac-window iframe").GetAttributeAsync("sandbox"));
             await page.ScreenshotAsync(new() { Path = Path.Combine(Shots, "desk-5-space-app.png") });

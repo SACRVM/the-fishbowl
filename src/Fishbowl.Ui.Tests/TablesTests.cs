@@ -70,6 +70,15 @@ public class TablesTests
             var row = await page.APIRequest.GetAsync($"{_fixture.BaseUrl}{t}/rooms/rows/{hall}");
             Assert.Equal(90, (await row.JsonAsync())!.Value.GetProperty("seats").GetInt64());
 
+            // A new row: what was typed into it reaches the server.
+            await page.EvaluateAsync("() => document.querySelector('fb-tables-view sac-data-grid').addRow()");
+            await page.Keyboard.TypeAsync("Attic");
+            await page.Keyboard.PressAsync("Enter");
+            saved = await page.EvaluateAsync<JsonElement>("() => document.querySelector('fb-tables-view sac-data-grid').save()");
+            Assert.True(saved.GetProperty("errors").GetArrayLength() == 0, saved.ToString());
+            var attic = await page.APIRequest.PostAsync($"{_fixture.BaseUrl}{t}/rooms/count", new() { DataObject = new { where = new { title = "Attic" } } });
+            Assert.Equal(1, (await attic.JsonAsync())!.Value.GetProperty("count").GetInt32());
+
             // Tables exist only in spaces: the burger lists them there, not in
             // the personal workspace.
             await Assertions.Expect(page.Locator($"sac-nav a[href='#/space/{slug}/tables']")).ToHaveCountAsync(1);

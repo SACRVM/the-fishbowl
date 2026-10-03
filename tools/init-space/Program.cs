@@ -146,7 +146,7 @@ else
 }
 
 var keys = new ApiKeyRepository(factory);
-var issued = await keys.IssueAsync(userId, ContextRef.Space(space.Id), keyName, scopes);
+var issued = await keys.IssueAsync(userId, ContextRef.Space(space.Slug), keyName, scopes);
 
 // Bearer goes to stdout so it can be piped/captured; the status banner
 // goes to stderr so it won't poison a captured token. Downstream wiring

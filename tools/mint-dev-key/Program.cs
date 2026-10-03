@@ -113,7 +113,7 @@ else if (contextArg == "space")
         return 7;
     }
 
-    context = ContextRef.Space(spaceRow.Id);
+    context = ContextRef.Space(spaceRow.Slug);   // a space key names its space by slug (ApiKeyAuthenticationHandler)
     contextDisplay = $"space:{spaceRow.Slug}";
 }
 else

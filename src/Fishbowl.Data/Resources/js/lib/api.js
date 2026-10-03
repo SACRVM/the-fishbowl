@@ -402,6 +402,43 @@
         remove:   (name, id)     => request(`${t(name)}/rows/${encodeURIComponent(id)}`, { method: "DELETE" }),
     };
 
+    // One space's data, pinned to it whatever workspace is active — what a
+    // space app gets over the bridge (fb.desktopApps, grant.api "space").
+    // The cookie decides: every call runs with the user's role there.
+    function spaceData(slug) {
+        const p = (path) => wsPath(`space:${slug}`, path);
+        const tb = (name) => p(`/tables/${encodeURIComponent(name)}`);
+        const row = (name, id) => `${tb(name)}/rows/${encodeURIComponent(id)}`;
+        const post = (path, body) => request(path, { method: "POST", body: JSON.stringify(body ?? {}) });
+        const range = (from, to) => {
+            const q = new URLSearchParams();
+            if (from) q.set("from", new Date(from).toISOString());
+            if (to) q.set("to", new Date(to).toISOString());
+            const s = q.toString();
+            return p("/events") + (s ? `?${s}` : "");
+        };
+        return {
+            info:      ()                  => request(`/spaces/${encodeURIComponent(slug)}`),
+            members:   ()                  => request(p("/members")),
+            tables:    ()                  => request(p("/tables")),
+            describe:  (name)              => request(tb(name)),
+            query:     (name, spec)        => post(`${tb(name)}/query`, spec),
+            count:     (name, where)       => post(`${tb(name)}/count`, { where }),
+            aggregate: (name, spec)        => post(`${tb(name)}/aggregate`, spec),
+            search:    (q, table)          => request(`${p("/tables/search")}?${new URLSearchParams(table ? { q, table } : { q })}`),
+            get:       (name, id)          => request(row(name, id)),
+            insert:    (name, values)      => post(`${tb(name)}/rows`, values),
+            update:    (name, id, values, rowVersion) => request(row(name, id) + (rowVersion != null ? `?rowVersion=${encodeURIComponent(rowVersion)}` : ""),
+                                                  { method: "PATCH", body: JSON.stringify(values ?? {}) }),
+            remove:    (name, id)          => request(row(name, id), { method: "DELETE" }),
+            notes:     ()                  => request(p("/notes")),
+            note:      (id)                => request(p(`/notes/${encodeURIComponent(id)}`)),
+            todos:     (includeCompleted)  => request(p(includeCompleted ? "/todos?includeCompleted=true" : "/todos")),
+            events:    (from, to)          => request(range(from, to)),
+            contacts:  ()                  => request(p("/contacts")),
+        };
+    }
+
     const todos = crud("todos");
     todos.list = (opts) => request(opts?.includeCompleted
         ? `${ctx("/todos")}?includeCompleted=true`
@@ -417,6 +454,7 @@
         todos,
         trash,
         tables,
+        spaceData,
         contacts,
         events,
         tags: {

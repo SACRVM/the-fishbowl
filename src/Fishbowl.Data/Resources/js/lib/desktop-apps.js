@@ -39,6 +39,11 @@
  * server under a signed URL (the frame has no cookie). They run sandboxed
  * and unpinned — a Designer changes the code, the next open runs it — and
  * aren't installed, so there is nothing to update, grant or remove here.
+ * They get the space's data as context.space (grant.api, kit 2.25):
+ * fb.api.spaceData(<slug>) — tables and rows, read-only notes, todos,
+ * events, contacts, members — as the signed-in user, so the server's role
+ * checks hold (a Reader's app can't write); a refusal reaches the app as
+ * { code, message } with the server's code (underscores as dashes).
  *
  * Every installed app opens as a kit window above the desktop (the host's
  * choice, whatever `kind` the manifest says): a "view" app would take over
@@ -112,10 +117,36 @@
         const files = allowed(app) && window.sac?.files?.virtual
             ? { provider: () => sac.files.virtual({ store: fb.filesStore({ workspace: ws }), root: folder, label: nameOf(app) }) }
             : false;
-        if (app.mode === "space") return { isolated: true, integrity: false, grant: { files: false, identity: false, connect: [] } };
+        if (app.mode === "space") {
+            return { isolated: true, integrity: false, grant: { files: false, identity: false, connect: [], api: { space: spaceApi(ws) } } };
+        }
         return app.mode === "trusted"
             ? { isolated: false, integrity: false, grant: { files, identity: true, connect } }
             : { isolated: true, integrity: app.entryIntegrity, grant: { files, identity, connect } };
+    }
+
+    /** context.space for a space app: the space's data, refusals as { code, message }. */
+    function spaceApi(ws) {
+        const data = fb.api.spaceData(ws.slice("space:".length));
+        const api = {};
+        for (const [name, fn] of Object.entries(data)) {
+            api[name] = async (...args) => {
+                try { return await fn(...args); }
+                catch (err) { throw spaceError(err); }
+            };
+        }
+        return api;
+    }
+
+    function spaceError(err) {
+        let body = null;
+        try { body = typeof err?.body === "string" ? JSON.parse(err.body) : err?.body; } catch { /* plain text */ }
+        const byStatus = { 400: "bad-request", 401: "denied", 403: "forbidden", 404: "not-found", 409: "conflict", 413: "too-large", 429: "rate-limited" };
+        const code = typeof body?.error === "string" ? body.error.replace(/_/g, "-").toLowerCase()
+            : byStatus[err?.status] || "internal";
+        const e = new Error(typeof body?.message === "string" ? body.message : err?.message || "Request failed");
+        e.code = code;
+        return e;
     }
 
     /** Hand the active workspace's apps to the kit; drop what left. */

@@ -180,14 +180,17 @@
                 for (const c of changes) {
                     try {
                         if (c.op === "create") {
-                            const created = await fb.api.tables.insert(def.name, toServer(c.row));
+                            // A new row's typed values are in c.fields; c.row is the blank it started from.
+                            const created = await fb.api.tables.insert(def.name, toServer({ ...c.row, ...c.fields }));
                             Object.assign(c.row, fromServer(created));
                             total = total == null ? null : total + 1;
                         } else if (c.op === "update") {
                             const updated = await fb.api.tables.update(def.name, c.id, toServer(c.fields));
                             Object.assign(c.row, fromServer(updated));
                         }
-                        saved.push(c.row?.id ?? c.id);
+                        // The id the grid knows the change by — a new row's
+                        // temporary "new-<n>", whatever id the server gave it.
+                        saved.push(c.id);
                     } catch (err) {
                         errors.push(refusal(c.id, err));
                     }
