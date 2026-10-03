@@ -260,6 +260,14 @@
         const qs = new URLSearchParams({ q: query, limit: String(limit) });
         return request(`${ctx("/contacts/search")}?${qs.toString()}`);
     };
+    // The Contacts app's tools (ContactToolsApi): what links here, merging a
+    // duplicate in, finding duplicates, vCard / CSV out and in.
+    contacts.links      = (id)          => request(ctx(`/contacts/${encodeURIComponent(id)}/links`));
+    contacts.merge      = (id, from)    => request(ctx(`/contacts/${encodeURIComponent(id)}/merge`), { method: "POST", body: JSON.stringify({ from }) });
+    contacts.duplicates = ()            => request(ctx("/contacts/duplicates"));
+    contacts.exportUrl  = (format)      => `${base}${ctx("/contacts/export")}?format=${encodeURIComponent(format)}`;
+    contacts.import     = (text, format) => request(`${ctx("/contacts/import")}?format=${encodeURIComponent(format)}`,
+        { method: "POST", body: text, headers: { "Content-Type": "text/plain; charset=utf-8" } });
 
     // Events list accepts { from, to } as a chronological range — maps to
     // the server's half-open [from, to) query. Both must be Date-ish

@@ -37,6 +37,7 @@
         { key: "builtin:notes",    hash: "#/notes",       name: "Notes",    icon: "note",     desc: "Write freely. Find anything.", size: "medium" },
         { key: "builtin:todos",    hash: "#/todos",       name: "Todos",    icon: "check",    desc: "Fast to-dos, always at hand.", size: "medium" },
         { key: "builtin:calendar", hash: "#/calendar",    name: "Calendar", icon: "calendar", desc: "Events and reminders, yours.", size: "medium" },
+        { key: "builtin:contacts", hash: "#/contacts",    name: "Contacts", icon: "contact",  desc: "People and organisations." },
         { key: "builtin:files",    hash: "#/files",       name: "Files",    icon: "folder",   desc: "Real files, two panes, any workspace." },
         { key: "builtin:tables",   hash: "#/tables",      name: "Tables",   icon: "grid",     desc: "This space's own tables, like a spreadsheet.", space: true },
         // Window apps (fb.windowApps): `open`, no address.
@@ -86,7 +87,7 @@
      * (fb.desktopApps; key "app:<id>", `app` = the install record) merged
      * with its stored tile, sorted by position. Hidden tiles are included
      * (flagged) so the desktop can offer them back.
-     * { entries, canArrange, canInstall, canTrust }.
+     * { entries, canArrange, canInstall }.
      */
     async function load() {
         const [apps, stored] = await Promise.all([
@@ -121,7 +122,6 @@
             entries,
             canArrange: !!stored.canArrange,
             canInstall: !!stored.canInstall,
-            canTrust: !!stored.canTrust,
         };
     }
 

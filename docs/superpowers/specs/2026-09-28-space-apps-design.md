@@ -242,9 +242,20 @@ in the implementation plan; the shape:
    before may change/refuse/keep, after errors into the error store, depth
    3, ~1 s / 50 000 statements / 32 MB. *Done.*
 6. **Contacts** — persons/organisations, the field set, history, vCard/CSV.
+   *Built 2026-10-03*: one table (v18), the vCard field set, people of an
+   organisation + linking table rows, merge, duplicates, vCard/CSV in and
+   out, the Contacts app. History from notes/events/todos waits until those
+   can link to a contact. *Done.*
 7. **The way in** — guide page, OAuth for MCP (claude.ai), GitHub Action
-   `deploy-to-fishbowl`.
-8. **Sandboxed apps** — reopen the picker, "Open with".
+   `deploy-to-fishbowl`. *Built 2026-10-03*: "Connect an agent" on the API
+   keys page; OAuth 2.1 (discovery, dynamic registration, consent, PKCE) whose
+   token is an ordinary API key; `POST …/apps/<folder>/deploy` (a ZIP). The
+   action itself lives in its own repo. *Done (server side).*
+8. **Sandboxed apps** — reopen the picker, "Open with". *Built 2026-10-03*:
+   the picker covers the whole workspace again (the app holds handles to
+   what was picked only; storage stays in `Apps/<name>`); the trusted mode
+   is gone (v19 turns old installs into sandboxed ones to re-pin). "Open
+   with" waits for the kit (sacrvm-appkit#40).
 
 ## Open questions
 

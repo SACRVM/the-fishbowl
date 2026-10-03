@@ -171,6 +171,7 @@ public class I18nKeyTableTests
         // Phase 2: the main apps (German in js/i18n/de-apps.js).
         "js/views/fb-notes-view.js",
         "js/views/fb-todos-view.js",
+        "js/views/fb-contacts-view.js",
         "js/views/fb-calendar-view.js",
         "js/views/fb-files-view.js",
         "js/lib/tag-manager.js",

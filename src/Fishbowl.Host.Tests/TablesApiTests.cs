@@ -331,4 +331,19 @@ public class TablesApiTests : IClassFixture<WebApplicationFactory<Program>>, IDi
         var slow = await As(Owner).PostAsync($"{t}/slow/rows", Body("""{ "title": "x" }"""), Ct);
         Assert.Equal("trigger_failed", await Error(slow));
     }
+
+    [Fact]
+    public async Task ContactLinks_ListTheRowsThatPointAtAContact()
+    {
+        var space = await ClubAsync();
+        var contact = await Ok(await As(Owner).PostAsync($"/api/v1/spaces/{space.Slug}/contacts", Body("""{ "firstName": "Ada", "lastName": "L" }"""), Ct));
+        var cid = contact.GetProperty("id").GetString();
+        var t = $"/api/v1/spaces/{space.Slug}/tables";
+        await Ok(await As(Owner).PostAsync(t, Body("""{ "name": "deals", "columns": [ { "name": "customer", "type": "link", "link": "contacts" } ] }"""), Ct));
+        await Ok(await As(Member).PostAsync($"{t}/deals/rows", Body($$"""{ "title": "Big deal", "customer": "{{cid}}" }"""), Ct));
+        var links = await Ok(await As(Reader).GetAsync($"/api/v1/spaces/{space.Slug}/contacts/{cid}/links", Ct));
+        var row = Assert.Single(links.GetProperty("links").EnumerateArray());
+        Assert.Equal("deals", row.GetProperty("table").GetString());
+        Assert.Equal("Big deal", row.GetProperty("title").GetString());
+    }
 }

@@ -130,7 +130,7 @@ public class DesktopApiTests : IClassFixture<WebApplicationFactory<Program>>, ID
         var desk = await Json(await c.GetAsync("/api/v1/desktop", Ct));
         Assert.Single(desk.GetProperty("apps").EnumerateArray());
         Assert.True(desk.GetProperty("canInstall").GetBoolean());
-        Assert.False(desk.GetProperty("canTrust").GetBoolean());   // trusted: admins by default
+        Assert.False(desk.TryGetProperty("canTrust", out _));   // the trusted mode is gone
 
         // Another user never sees it.
         Assert.Empty((await Json(await As(Bob).GetAsync("/api/v1/desktop", Ct))).GetProperty("apps").EnumerateArray());
@@ -151,14 +151,8 @@ public class DesktopApiTests : IClassFixture<WebApplicationFactory<Program>>, ID
         var grants = await c.PatchAsJsonAsync("/api/v1/desktop/apps/color-bucket", new { granted = new[] { "files", "identity" } }, Ct);
         Assert.Equal(2, (await Json(grants)).GetProperty("granted").GetArrayLength());
 
-        // Sandboxed → trusted drops pin and grants; back needs a pin again.
-        // (Trusted is admins-only by default; this instance lets everyone.)
-        await Config(DesktopPolicy.TrustedKey, "everyone");
-        var trusted = await Json(await c.PatchAsJsonAsync("/api/v1/desktop/apps/color-bucket", new { mode = "trusted" }, Ct));
-        Assert.Equal("trusted", trusted.GetProperty("mode").GetString());
-        Assert.Equal(JsonValueKind.Null, trusted.GetProperty("entryIntegrity").ValueKind);
-        Assert.Equal("integrity_required", await ErrorOf(await c.PatchAsJsonAsync("/api/v1/desktop/apps/color-bucket", new { mode = "sandboxed" }, Ct)));
-        Assert.Equal(HttpStatusCode.OK, (await c.PatchAsJsonAsync("/api/v1/desktop/apps/color-bucket", new { mode = "sandboxed", integrity = Pin }, Ct)).StatusCode);
+        // There is no other mode to switch to.
+        Assert.Equal("invalid_mode", await ErrorOf(await c.PatchAsJsonAsync("/api/v1/desktop/apps/color-bucket", new { mode = "trusted" }, Ct)));
 
         Assert.Equal(HttpStatusCode.OK, (await c.DeleteAsync("/api/v1/desktop/apps/color-bucket", Ct)).StatusCode);
         Assert.Equal(HttpStatusCode.NotFound, (await c.DeleteAsync("/api/v1/desktop/apps/color-bucket", Ct)).StatusCode);
@@ -178,12 +172,28 @@ public class DesktopApiTests : IClassFixture<WebApplicationFactory<Program>>, ID
     }
 
     [Fact]
-    public async Task Trusted_DefaultsToAdmins()
+    public async Task Trusted_IsGone_EvenForAdmins()
     {
-        Assert.False((await Json(await As(Alice).GetAsync("/api/v1/desktop", Ct))).GetProperty("canTrust").GetBoolean());
-        Assert.True((await Json(await As(Admin).GetAsync("/api/v1/desktop", Ct))).GetProperty("canTrust").GetBoolean());
-        Assert.Equal(HttpStatusCode.Forbidden,
-            (await As(Alice).PostAsJsonAsync("/api/v1/desktop/apps", Install("t", integrity: null, mode: "trusted"), Ct)).StatusCode);
+        var r = await As(Admin).PostAsJsonAsync("/api/v1/desktop/apps", Install("t", integrity: null, mode: "trusted"), Ct);
+        Assert.Equal("invalid_mode", await ErrorOf(r));
+    }
+
+    [Fact]
+    public async Task OldTrustedInstalls_ComeBackSandboxedWithoutAPin()
+    {
+        // A desktop DB from before v19 with a trusted install.
+        var dir = Path.Combine(_dataDir, "users", "legacy_trusted");
+        Directory.CreateDirectory(dir);
+        using (var c = _db.CreateContextConnection(ContextRef.User("legacy_trusted")))
+        {
+            c.Execute(@"INSERT INTO desktop_apps(id, manifest_url, manifest, origin, entry_url, entry_integrity, version, mode, granted, installed_at, updated_at)
+                        VALUES ('old', 'https://o.github.io/old/app.json', '{}', 'https://o.github.io', 'https://o.github.io/old/app.js', NULL, '1', 'trusted', '[]', '2026-01-01', '2026-01-01')");
+            c.Execute("PRAGMA user_version = 18");
+        }
+        SqliteConnection.ClearAllPools();
+        using var db = new DatabaseFactory(_dataDir).CreateContextConnection(ContextRef.User("legacy_trusted"));
+        Assert.Equal("sandboxed", db.ExecuteScalar<string>("SELECT mode FROM desktop_apps WHERE id = 'old'"));
+        Assert.Null(db.ExecuteScalar<string?>("SELECT entry_integrity FROM desktop_apps WHERE id = 'old'"));
     }
 
     [Fact]
@@ -207,28 +217,21 @@ public class DesktopApiTests : IClassFixture<WebApplicationFactory<Program>>, ID
     }
 
     [Theory]
-    // install level, trusted level, caller is admin, expected install / trusted
-    [InlineData("everyone", "everyone", false, true, true)]
-    [InlineData("everyone", "admins", false, true, false)]
-    [InlineData("everyone", "admins", true, true, true)]
-    [InlineData("everyone", "off", true, true, false)]
-    [InlineData("admins", "everyone", false, false, false)]
-    [InlineData("admins", "everyone", true, true, true)]
-    [InlineData("off", "everyone", true, false, false)]
-    public async Task Policy_Personal(string install, string trusted, bool admin, bool canInstall, bool canTrust)
+    // install level, caller is admin, expected install
+    [InlineData("everyone", false, true)]
+    [InlineData("admins", false, false)]
+    [InlineData("admins", true, true)]
+    [InlineData("off", true, false)]
+    public async Task Policy_Personal(string install, bool admin, bool canInstall)
     {
         await Config(DesktopPolicy.InstallKey, install);
-        await Config(DesktopPolicy.TrustedKey, trusted);
         var c = As(admin ? Admin : Alice);
 
         var desk = await Json(await c.GetAsync("/api/v1/desktop", Ct));
         Assert.Equal(canInstall, desk.GetProperty("canInstall").GetBoolean());
-        Assert.Equal(canTrust, desk.GetProperty("canTrust").GetBoolean());
 
         var sandboxed = await c.PostAsJsonAsync("/api/v1/desktop/apps", Install("one"), Ct);
         Assert.Equal(canInstall ? HttpStatusCode.Created : HttpStatusCode.Forbidden, sandboxed.StatusCode);
-        var trust = await c.PostAsJsonAsync("/api/v1/desktop/apps", Install("two", integrity: null, mode: "trusted"), Ct);
-        Assert.Equal(canTrust ? HttpStatusCode.Created : HttpStatusCode.Forbidden, trust.StatusCode);
     }
 
     [Theory]
@@ -242,11 +245,6 @@ public class DesktopApiTests : IClassFixture<WebApplicationFactory<Program>>, ID
         var c = As(Alice);
         var r = await c.PostAsJsonAsync($"/api/v1/spaces/{space.Slug}/desktop/apps", Install(), Ct);
         Assert.Equal(allowed ? HttpStatusCode.Created : HttpStatusCode.Forbidden, r.StatusCode);
-
-        // Trusted never goes into a space, whatever the policy says.
-        var trusted = await c.PostAsJsonAsync($"/api/v1/spaces/{space.Slug}/desktop/apps", Install("t", integrity: null, mode: "trusted"), Ct);
-        Assert.Equal(allowed ? HttpStatusCode.BadRequest : HttpStatusCode.Forbidden, trusted.StatusCode);
-        if (allowed) Assert.Equal("trusted_personal_only", await ErrorOf(trusted));
     }
 
     [Fact]
@@ -316,8 +314,6 @@ public class DesktopApiTests : IClassFixture<WebApplicationFactory<Program>>, ID
     {
         var c = As(Alice);
         await c.PostAsJsonAsync("/api/v1/desktop/apps", Install(extra: ",\"connect\":[\"https://api.example.com\"]"), Ct);
-        await Config(DesktopPolicy.TrustedKey, "everyone");
-        await c.PostAsJsonAsync("/api/v1/desktop/apps", Install("mine", integrity: null, mode: "trusted"), Ct);
 
         var frame = await c.GetAsync($"/apps/frame/user/{Alice}/color-bucket", Ct);
         Assert.Equal(HttpStatusCode.OK, frame.StatusCode);
@@ -335,15 +331,13 @@ public class DesktopApiTests : IClassFixture<WebApplicationFactory<Program>>, ID
         Assert.Contains(Fishbowl.Api.Endpoints.DesktopApi.GuestScript, html);
         Assert.DoesNotContain("app.js\"", html);
 
-        // Fishbowl's own pages carry PageCsp: only its own scripts, plus the
-        // viewer's trusted apps (same realm) — nobody else's.
+        // Fishbowl's own pages carry PageCsp: only its own scripts, for everyone.
         static string ScriptSrc(HttpResponseMessage r) => string.Join(" ", r.Headers.GetValues("Content-Security-Policy"))
             .Split("; ").Single(d => d.StartsWith("script-src "));
-        Assert.Equal("script-src 'self' https://owner.github.io", ScriptSrc(await c.GetAsync("/csp-probe", Ct)));
+        Assert.Equal("script-src 'self'", ScriptSrc(await c.GetAsync("/csp-probe", Ct)));
         Assert.Equal("script-src 'self'", ScriptSrc(await As(Bob).GetAsync("/csp-probe", Ct)));
 
         Assert.Equal(HttpStatusCode.NotFound, (await c.GetAsync($"/apps/frame/user/{Alice}/nope", Ct)).StatusCode);
-        Assert.Equal(HttpStatusCode.NotFound, (await c.GetAsync($"/apps/frame/user/{Alice}/mine", Ct)).StatusCode);   // trusted: no frame
         Assert.Equal(HttpStatusCode.NotFound, (await As(Bob).GetAsync($"/apps/frame/user/{Alice}/color-bucket", Ct)).StatusCode);
         Assert.Equal(HttpStatusCode.NotFound, (await c.GetAsync($"/apps/frame/team/{Alice}/color-bucket", Ct)).StatusCode);
         Assert.Equal(HttpStatusCode.NotFound, (await _factory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false })
@@ -585,5 +579,117 @@ public class DesktopApiTests : IClassFixture<WebApplicationFactory<Program>>, ID
         var limited = await As(Bob).PostAsJsonAsync(notify, new { to = "all", text = "one more" }, Ct);
         Assert.Equal((HttpStatusCode)429, limited.StatusCode);
         Assert.Equal("rate_limited", await Code(limited));
+    }
+
+    [Fact]
+    public async Task OAuth_RegisterAuthorizeToken_TheTokenIsAKeyForTheChosenWorkspace()
+    {
+        var anon = _factory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
+
+        // Discovery, and the 401 that points at it.
+        var meta = await Json(await anon.GetAsync("/.well-known/oauth-authorization-server", Ct));
+        Assert.Equal("http://localhost/oauth/token", meta.GetProperty("token_endpoint").GetString());
+        Assert.Contains("S256", meta.GetProperty("code_challenge_methods_supported").EnumerateArray().Select(e => e.GetString()));
+        var resource = await Json(await anon.GetAsync("/.well-known/oauth-protected-resource", Ct));
+        Assert.Equal("http://localhost/mcp", resource.GetProperty("resource").GetString());
+        var unauth = await anon.PostAsync("/mcp", new StringContent("{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/list\"}", Encoding.UTF8, "application/json"), Ct);
+        Assert.Equal(HttpStatusCode.Unauthorized, unauth.StatusCode);
+        Assert.Contains("resource_metadata=\"http://localhost/.well-known/oauth-protected-resource\"", unauth.Headers.WwwAuthenticate.ToString());
+
+        // Dynamic registration: https callbacks only (loopback http for dev).
+        Assert.Equal(HttpStatusCode.BadRequest, (await anon.PostAsJsonAsync("/oauth/register", new { client_name = "Evil", redirect_uris = new[] { "http://evil.example/cb" } }, Ct)).StatusCode);
+        var reg = await anon.PostAsJsonAsync("/oauth/register", new { client_name = "Claude", redirect_uris = new[] { "https://claude.ai/api/mcp/auth_callback" } }, Ct);
+        Assert.Equal(HttpStatusCode.Created, reg.StatusCode);
+        var clientId = (await Json(reg)).GetProperty("client_id").GetString()!;
+        const string Callback = "https://claude.ai/api/mcp/auth_callback";
+
+        // The consent page asks a signed-in person; the decision is a one-time code.
+        Assert.Equal(HttpStatusCode.Redirect, (await anon.GetAsync($"/oauth/authorize?client_id={clientId}", Ct)).StatusCode);
+        var space = await new SpaceRepository(_db).CreateAsync(Alice, "OAuth Space", Ct);
+        var request = await Json(await As(Alice).GetAsync($"/api/v1/oauth/request?client_id={clientId}&redirect_uri={Uri.EscapeDataString(Callback)}", Ct));
+        Assert.Equal("Claude", request.GetProperty("client").GetString());
+        Assert.Contains(request.GetProperty("workspaces").EnumerateArray(), w => w.GetProperty("id").GetString() == "space:" + space.Slug);
+        Assert.Equal(HttpStatusCode.BadRequest, (await As(Alice).GetAsync($"/api/v1/oauth/request?client_id={clientId}&redirect_uri=https://evil.example/", Ct)).StatusCode);
+
+        var verifier = Convert.ToBase64String(System.Security.Cryptography.RandomNumberGenerator.GetBytes(48)).TrimEnd('=').Replace('+', '-').Replace('/', '_');
+        var challenge = Convert.ToBase64String(System.Security.Cryptography.SHA256.HashData(Encoding.ASCII.GetBytes(verifier))).TrimEnd('=').Replace('+', '-').Replace('/', '_');
+        var decision = await As(Alice).PostAsJsonAsync("/api/v1/oauth/authorize", new
+        {
+            clientId,
+            redirectUri = Callback,
+            codeChallenge = challenge,
+            state = "xyz",
+            workspace = "space:" + space.Slug,
+            access = "build",
+        }, Ct);
+        var redirect = new Uri((await Json(decision)).GetProperty("redirect").GetString()!);
+        Assert.StartsWith(Callback, redirect.GetLeftPart(UriPartial.Path));
+        var query = System.Web.HttpUtility.ParseQueryString(redirect.Query);
+        Assert.Equal("xyz", query["state"]);
+
+        async Task<HttpResponseMessage> Token(string code, string v) => await anon.PostAsync("/oauth/token", new FormUrlEncodedContent(new Dictionary<string, string>
+        {
+            ["grant_type"] = "authorization_code",
+            ["code"] = code,
+            ["redirect_uri"] = Callback,
+            ["client_id"] = clientId,
+            ["code_verifier"] = v,
+        }), Ct);
+        var token = await Token(query["code"]!, verifier);
+        Assert.Equal(HttpStatusCode.OK, token.StatusCode);
+        var body = await Json(token);
+        var access = body.GetProperty("access_token").GetString()!;
+        Assert.StartsWith("fb_live_", access);
+        Assert.Contains("design:apps", body.GetProperty("scope").GetString());
+        Assert.Equal("invalid_grant", (await Json(await Token(query["code"]!, verifier))).GetProperty("error").GetString());   // one time
+
+        // The token is an API key of that space: MCP answers it.
+        var mcp = _factory.CreateClient();
+        mcp.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", access);
+        mcp.DefaultRequestHeaders.Accept.ParseAdd("application/json");
+        mcp.DefaultRequestHeaders.Accept.ParseAdd("text/event-stream");
+        var guide = await mcp.PostAsync("/mcp", new StringContent(JsonSerializer.Serialize(new
+        {
+            jsonrpc = "2.0",
+            id = 1,
+            method = "tools/call",
+            @params = new { name = "space_guide", arguments = new { } },
+        }), Encoding.UTF8, "application/json"), Ct);
+        Assert.Contains("OAuth Space", (await Json(guide)).GetProperty("result").GetProperty("content")[0].GetProperty("text").GetString());
+    }
+
+    [Fact]
+    public async Task SpaceApps_Deploy_AZipReplacesTheFolder_DesignersOnly()
+    {
+        var space = await new SpaceRepository(_db).CreateAsync(Alice, "Deploy Space", Ct);
+        using (var sys = _db.CreateSystemConnection())
+            sys.Execute("INSERT INTO space_members(space_id, user_id, role, joined_at) VALUES (@s, @u, 'member', @now)",
+                new { s = space.Id, u = Bob, now = DateTime.UtcNow.ToString("o") });
+        static ByteArrayContent Zip(params (string Path, string Text)[] files)
+        {
+            using var ms = new MemoryStream();
+            using (var zip = new System.IO.Compression.ZipArchive(ms, System.IO.Compression.ZipArchiveMode.Create, leaveOpen: true))
+                foreach (var (path, text) in files)
+                {
+                    using var w = new StreamWriter(zip.CreateEntry(path).Open());
+                    w.Write(text);
+                }
+            return new ByteArrayContent(ms.ToArray());
+        }
+        var url = $"/api/v1/spaces/{space.Slug}/apps/board/deploy";
+        var manifest = "{\"name\":\"Board\",\"tag\":\"board-app\"}";
+
+        Assert.Equal(HttpStatusCode.Forbidden, (await As(Bob).PostAsync(url, Zip(("app.json", manifest), ("app.js", "1")), Ct)).StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, (await As(Alice).PostAsync(url, Zip(("app.js", "1")), Ct)).StatusCode);       // no app.json
+        Assert.Equal(HttpStatusCode.BadRequest, (await As(Alice).PostAsync(url, Zip(("app.json", manifest), ("../x.js", "1")), Ct)).StatusCode);
+
+        Assert.Equal(HttpStatusCode.OK, (await As(Alice).PostAsync(url, Zip(("app.json", manifest), ("app.js", "v1"), ("old.css", "x")), Ct)).StatusCode);
+        var deployed = await As(Alice).PostAsync(url, Zip(("app.json", manifest), ("app.js", "v2")), Ct);
+        Assert.Equal(2, (await Json(deployed)).GetProperty("files").GetInt32());
+        var dir = Path.Combine(_dataDir, "spaces", space.Id, "files", ".apps", "board");
+        Assert.Equal("v2", File.ReadAllText(Path.Combine(dir, "app.js")));
+        Assert.False(File.Exists(Path.Combine(dir, "old.css")));     // the old version is in the trash
+        var desk = await Json(await As(Bob).GetAsync($"/api/v1/spaces/{space.Slug}/desktop", Ct));
+        Assert.Contains(desk.GetProperty("apps").EnumerateArray(), a => a.GetProperty("id").GetString() == "space.board");
     }
 }

@@ -2,6 +2,12 @@
 // English / German, before the SPA's i18n exists: the language the user
 // picked last (the SPA mirrors it into localStorage "sac-lang"), else the
 // browser's. English is the markup and the fallback.
+// Where to go after signing in: a path on this Fishbowl only (an OAuth
+// consent page, say) — never a URL a link chose.
+const RETURN = (() => {
+    const r = new URLSearchParams(window.location.search).get("returnUrl") || "/";
+    return r.startsWith("/") && !r.startsWith("//") && !r.startsWith("/\\") ? r : "/";
+})();
 const LANG = (() => {
     let chosen = "";
     try { chosen = String(localStorage.getItem("sac-lang") || "").toLowerCase().split(/[-_]/)[0]; } catch { /* storage off */ }
@@ -97,7 +103,7 @@ if (LANG === "de") {
         // OAuth providers (everything except local) get a button each.
         const oauthProviders = providers.filter(p => p.id !== "local");
         providersEl.innerHTML = oauthProviders.map(p => `
-            <a class="btn" href="/login/challenge/${p.id}">
+            <a class="btn" href="/login/challenge/${p.id}${RETURN === "/" ? "" : "?returnUrl=" + encodeURIComponent(RETURN)}">
                 <span>${T("continue-with", "Continue with {name}", { name: p.name })}</span>
             </a>
         `).join("");
@@ -126,7 +132,7 @@ if (LANG === "de") {
                 body: JSON.stringify({ username, password })
             });
             if (res.status === 204) {
-                window.location.href = "/";
+                window.location.href = RETURN;
                 return;
             }
             if (res.status === 200) {
@@ -183,7 +189,7 @@ if (LANG === "de") {
                 body: JSON.stringify({ username, currentPassword, newPassword })
             });
             if (res.status === 204) {
-                window.location.href = "/";
+                window.location.href = RETURN;
                 return;
             }
             if (res.status === 401) {

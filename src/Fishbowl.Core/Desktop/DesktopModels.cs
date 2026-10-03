@@ -7,15 +7,15 @@ public static class AppModes
     // The default: an opaque-origin frame, host-granted capabilities, the
     // entry pinned by its SRI hash.
     public const string Sandboxed = "sandboxed";
-    // Same-realm, acts as the user, follows the origin's current code.
-    // Personal desktops only.
+    // The retired same-realm mode (gone 2026-10-03): only the v19 migration
+    // still looks for it.
     public const string Trusted = "trusted";
     // A space's own app from its .apps folder (SpaceApps): sandboxed, never
     // pinned, never installed — listed by the desktop, not stored.
     public const string Space = "space";
 
     // What an install may ask for.
-    public static bool IsValid(string? mode) => mode is Sandboxed or Trusted;
+    public static bool IsValid(string? mode) => mode is Sandboxed;
 }
 
 public static class AppPermissions

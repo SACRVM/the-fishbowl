@@ -71,8 +71,9 @@ public static class ContactsApi
         {
             var userId = user.FindFirst("fishbowl_user_id")?.Value;
             if (string.IsNullOrEmpty(userId)) return Results.Unauthorized();
+            Fishbowl.Data.Repositories.ContactRepository.Normalize(contact);   // a person's name may come from first + last
             if (string.IsNullOrWhiteSpace(contact.Name))
-                return ApiErrors.BadRequest("required", "name is required", new { field = "name" });
+                return ApiErrors.BadRequest("required", "name is required (or a first or last name for a person)", new { field = "name" });
 
             try
             {
@@ -97,8 +98,9 @@ public static class ContactsApi
         {
             var userId = user.FindFirst("fishbowl_user_id")?.Value;
             if (string.IsNullOrEmpty(userId)) return Results.Unauthorized();
+            Fishbowl.Data.Repositories.ContactRepository.Normalize(contact);   // a person's name may come from first + last
             if (string.IsNullOrWhiteSpace(contact.Name))
-                return ApiErrors.BadRequest("required", "name is required", new { field = "name" });
+                return ApiErrors.BadRequest("required", "name is required (or a first or last name for a person)", new { field = "name" });
 
             contact.Id = id;
             try

@@ -380,4 +380,87 @@ public class ContactsApiTests : IClassFixture<WebApplicationFactory<Program>>, I
             try { Directory.Delete(_dataDir, true); } catch { }
         }
     }
+
+    [Fact]
+    public async Task PersonsAndOrganisations_Links_Merge_Duplicates_VCardAndCsv()
+    {
+        var c = _factory.CreateClient();
+        var ct = TestContext.Current.CancellationToken;
+        async Task<System.Text.Json.JsonElement> Send(HttpMethod m, string path, object? body = null, HttpStatusCode expect = HttpStatusCode.OK)
+        {
+            var r = await c.SendAsync(Req(m, path, UserA, body), ct);
+            Assert.True(r.StatusCode == expect || (expect == HttpStatusCode.OK && r.IsSuccessStatusCode), $"{m} {path}: {(int)r.StatusCode} {await r.Content.ReadAsStringAsync(ct)}");
+            var text = await r.Content.ReadAsStringAsync(ct);
+            return text.Length == 0 ? default : System.Text.Json.JsonDocument.Parse(text).RootElement.Clone();
+        }
+
+        // An organisation, and a person who belongs to it — name from first + last.
+        var acme = await Send(HttpMethod.Post, "/api/v1/contacts", new { kind = "organisation", name = "Acme GmbH", legalForm = "GmbH", vatId = "DE123", phones = new[] { new { label = "work", value = "+49 30 1" } } });
+        var acmeId = acme.GetProperty("id").GetString()!;
+        var ada = await Send(HttpMethod.Post, "/api/v1/contacts", new
+        {
+            firstName = "Ada",
+            lastName = "Lovelace",
+            honorific = "Dr.",
+            organisationId = acmeId,
+            role = "Engineer",
+            birthday = "1815-12-10",
+            emails = new[] { new { label = "work", value = "ada@acme.test" }, new { label = "home", value = "ada@home.test" } },
+            addresses = new[] { new { label = "work", street = "Main St 1", postalCode = "10115", city = "Berlin", country = "DE" } },
+            tags = new[] { "vip" },
+        });
+        var adaId = ada.GetProperty("id").GetString()!;
+        var got = await Send(HttpMethod.Get, $"/api/v1/contacts/{adaId}");
+        Assert.Equal("Ada Lovelace", got.GetProperty("name").GetString());
+        Assert.Equal("ada@acme.test", got.GetProperty("email").GetString());
+        Assert.Equal(2, got.GetProperty("emails").GetArrayLength());
+        Assert.Equal("Berlin", got.GetProperty("addresses")[0].GetProperty("city").GetString());
+
+        // A person only belongs to an organisation; an organisation with people stays.
+        await Send(HttpMethod.Post, "/api/v1/contacts", new { name = "X", organisationId = adaId }, HttpStatusCode.BadRequest);
+        await Send(HttpMethod.Delete, $"/api/v1/contacts/{acmeId}", expect: HttpStatusCode.Conflict);
+        var links = await Send(HttpMethod.Get, $"/api/v1/contacts/{acmeId}/links");
+        Assert.Equal(adaId, Assert.Single(links.GetProperty("people").EnumerateArray()).GetProperty("id").GetString());
+
+        // Search finds a person by their organisation.
+        var hits = await Send(HttpMethod.Get, "/api/v1/contacts/search?q=acme");
+        Assert.Contains(hits.EnumerateArray(), h => h.GetProperty("id").GetString() == adaId);
+
+        // A duplicate (same email) is found and merged: data and people move, it goes to the trash.
+        var dup = await Send(HttpMethod.Post, "/api/v1/contacts", new { name = "A. Lovelace", email = "ada@acme.test", phone = "+44 1", website = "https://ada.test" });
+        var dupId = dup.GetProperty("id").GetString()!;
+        var pairs = await Send(HttpMethod.Get, "/api/v1/contacts/duplicates");
+        Assert.Contains(pairs.GetProperty("pairs").EnumerateArray(), p => p.GetProperty("reason").GetString() == "email");
+        var merged = await Send(HttpMethod.Post, $"/api/v1/contacts/{adaId}/merge", new { from = dupId });
+        Assert.Equal("https://ada.test", merged.GetProperty("website").GetString());
+        Assert.Equal("+44 1", merged.GetProperty("phones")[0].GetProperty("value").GetString());
+        await Send(HttpMethod.Get, $"/api/v1/contacts/{dupId}", expect: HttpStatusCode.NotFound);
+
+        // Out and back in: vCard and CSV.
+        var vcf = await (await c.SendAsync(Req(HttpMethod.Get, "/api/v1/contacts/export?format=vcf", UserA), ct)).Content.ReadAsStringAsync(ct);
+        Assert.Contains("FN:Ada Lovelace", vcf);
+        Assert.Contains("ORG:Acme GmbH", vcf);
+        Assert.Contains("KIND:org", vcf);
+        var csv = await (await c.SendAsync(Req(HttpMethod.Get, "/api/v1/contacts/export?format=csv", UserA), ct)).Content.ReadAsStringAsync(ct);
+        Assert.Contains("Ada Lovelace", csv);
+
+        // Into another account: the organisation is made once, the person points at it.
+        var import = new HttpRequestMessage(HttpMethod.Post, "/api/v1/contacts/import?format=vcf") { Content = new StringContent(vcf) };
+        import.Headers.Add(TestAuthHandler.UserIdHeader, UserB);
+        var result = System.Text.Json.JsonDocument.Parse(await (await c.SendAsync(import, ct)).Content.ReadAsStringAsync(ct)).RootElement;
+        Assert.Equal(2, result.GetProperty("created").GetInt32());
+        var imported = System.Text.Json.JsonDocument.Parse(await (await c.SendAsync(Req(HttpMethod.Get, "/api/v1/contacts", UserB), ct)).Content.ReadAsStringAsync(ct)).RootElement;
+        var bAcme = imported.EnumerateArray().Single(x => x.GetProperty("kind").GetString() == "organisation");
+        var bAda = imported.EnumerateArray().Single(x => x.GetProperty("kind").GetString() == "person");
+        Assert.Equal(bAcme.GetProperty("id").GetString(), bAda.GetProperty("organisationId").GetString());
+        Assert.Equal("1815-12-10", bAda.GetProperty("birthday").GetString());
+        Assert.Equal("Berlin", bAda.GetProperty("addresses")[0].GetProperty("city").GetString());
+
+        var csvImport = new HttpRequestMessage(HttpMethod.Post, "/api/v1/contacts/import?format=csv")
+        { Content = new StringContent("name,first_name,last_name,email,organisation\r\n,Grace,Hopper,grace@navy.test,Navy\r\n") };
+        csvImport.Headers.Add(TestAuthHandler.UserIdHeader, UserB);
+        var csvResult = System.Text.Json.JsonDocument.Parse(await (await c.SendAsync(csvImport, ct)).Content.ReadAsStringAsync(ct)).RootElement;
+        Assert.Equal(1, csvResult.GetProperty("created").GetInt32());
+        Assert.Equal(1, csvResult.GetProperty("organisations").GetInt32());
+    }
 }

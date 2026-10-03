@@ -53,6 +53,7 @@
         "range_incomplete": "Give both a start and an end, or neither.",
         "resource_invalid": "The server refused that ({field}).",
         "resource_too_large": "That's too large ({field}).",
+        "oauth_invalid_request": "This sign-in link isn't valid — start again from the app.",
         "invalid_app_message": "A message needs text (at most 500 characters) and members to go to.",
         "not_members": "An app can only message members of its own space.",
         "app_missing": "There is no such app in this space.",

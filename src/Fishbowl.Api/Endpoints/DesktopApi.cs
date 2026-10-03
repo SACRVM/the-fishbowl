@@ -27,7 +27,10 @@ namespace Fishbowl.Api.Endpoints;
 // validates the manifest and entry hash the owner's browser read and posts,
 // against the admin's policy (DesktopPolicy) and the mode rules:
 //   sandboxed  the default; needs the entry's SRI hash (the pin)
-//   trusted    personal desktops only, when Apps:Trusted allows; no pin
+// (The trusted mode — third-party code in the page — is gone, space-apps
+// spec 2026-10-03: a space's own apps cover it. User/space schema v19 turned
+// old trusted installs into sandboxed ones without a pin; their owner re-pins
+// them through the update review.)
 //
 // GET /apps/frame/{ctxType}/{ctxId}/{appId} serves a sandboxed app's frame
 // document — the kit's harness (sac.apps.frameUrl points here): the kit and
@@ -80,20 +83,18 @@ public static class DesktopApi
     }
 
     // What the admin's policy lets this caller do in this workspace.
-    private sealed record Allowance(bool Install, bool Trust, IReadOnlyList<string> AllowedOrigins, string InstallPolicy);
+    private sealed record Allowance(bool Install, IReadOnlyList<string> AllowedOrigins, string InstallPolicy);
 
     private static async Task<Allowance> AllowanceAsync(HttpContext http, Target t, CancellationToken ct)
     {
         var system = http.RequestServices.GetRequiredService<ISystemRepository>();
         var install = DesktopPolicy.ParseLevel(await system.GetConfigAsync(DesktopPolicy.InstallKey, ct));
-        var trusted = DesktopPolicy.ParseLevel(await system.GetConfigAsync(DesktopPolicy.TrustedKey, ct), DesktopPolicy.DefaultTrusted);
         var origins = DesktopPolicy.ParseOrigins(await system.GetConfigAsync(DesktopPolicy.AllowedOriginsKey, ct));
         var isAdmin = (await system.GetUserAsync(t.UserId, ct))?.IsAdmin == true;
 
         // A space desktop is its owner's call; only `off` stops it there.
         var canInstall = t.CanWrite && (t.IsSpace ? install != DesktopPolicy.Off : DesktopPolicy.Allows(install, isAdmin));
-        var canTrust = canInstall && !t.IsSpace && DesktopPolicy.Allows(trusted, isAdmin);
-        return new Allowance(canInstall, canTrust, origins, install);
+        return new Allowance(canInstall, origins, install);
     }
 
     private static object Dto(DesktopApp a) => new
@@ -150,7 +151,6 @@ public static class DesktopApi
                 apps,
                 canArrange = t.CanWrite,
                 canInstall = allow.Install,
-                canTrust = allow.Trust,
                 // Apps:Install, so the page can say why installing isn't offered.
                 installPolicy = allow.InstallPolicy,
             });
@@ -187,17 +187,17 @@ public static class DesktopApi
             try
             {
                 m = AppManifestValidator.Validate(body.ManifestUrl, body.Manifest);
-                var modeError = CheckMode(mode, t, allow, body.Integrity);
+                var modeError = CheckMode(mode, body.Integrity);
                 if (modeError is not null) return modeError;
                 if (!DesktopPolicy.IsOriginAllowed(m.Origin, allow.AllowedOrigins))
                     return Error(403, "origin_not_allowed", "Apps from this origin aren't allowed on this Fishbowl.", "manifestUrl");
-                granted = mode == AppModes.Trusted ? Array.Empty<string>() : AppManifestValidator.ValidateGrants(body.Granted, m.Permissions);
+                granted = AppManifestValidator.ValidateGrants(body.Granted, m.Permissions);
             }
             catch (DesktopValidationException ex) { return Error(400, ex.Code, ex.Message, ex.Field); }
 
             var now = DateTime.UtcNow;
             var app = new DesktopApp(m.Id, m.ManifestUrl, m.Json, m.Origin, m.EntryUrl,
-                mode == AppModes.Sandboxed ? body.Integrity : null, m.Version, mode, granted, now, now);
+                body.Integrity, m.Version, mode, granted, now, now);
             if (!await repo.InsertAppAsync(t.Ctx, app, ct))
                 return Error(409, "already_installed", "An app with this id is already installed here.", "id");
             return Results.Created($"{http.Request.Path}/{app.Id}", Dto(app));
@@ -213,9 +213,9 @@ public static class DesktopApi
 
             var allow = await AllowanceAsync(http, t, ct);
             var newCode = body.Manifest is not null || body.Integrity is not null;
-            var mode = body.Mode ?? current.Mode;
-            // New code, or more power, is an install decision again.
-            if ((newCode || (mode == AppModes.Trusted && current.Mode != AppModes.Trusted)) && !allow.Install)
+            var mode = body.Mode ?? AppModes.Sandboxed;
+            // New code is an install decision again.
+            if (newCode && !allow.Install)
                 return Error(403, "install_not_allowed", "Installing apps isn't allowed here.");
 
             try
@@ -235,20 +235,17 @@ public static class DesktopApi
                     m = AppManifestValidator.Validate(current.ManifestUrl, doc.RootElement);
                 }
 
-                // A switch to sandboxed needs a pin; staying sandboxed keeps the
-                // old one unless a new hash came with new code.
-                var integrity = mode == AppModes.Trusted ? null : body.Integrity ?? (newCode ? null : current.EntryIntegrity);
-                if (body.Manifest is not null && mode == AppModes.Sandboxed && body.Integrity is null)
+                // The old pin stays unless a new hash came with new code.
+                var integrity = body.Integrity ?? (newCode ? null : current.EntryIntegrity);
+                if (body.Manifest is not null && body.Integrity is null)
                     return Error(400, "integrity_required", "New code needs its entry hash (re-pin).", "integrity");
-                var modeError = CheckMode(mode, t, allow, integrity, switching: mode != current.Mode);
+                var modeError = CheckMode(mode, integrity);
                 if (modeError is not null) return modeError;
                 if (!DesktopPolicy.IsOriginAllowed(m.Origin, allow.AllowedOrigins))
                     return Error(403, "origin_not_allowed", "Apps from this origin aren't allowed on this Fishbowl.", "manifestUrl");
 
-                var granted = mode == AppModes.Trusted
-                    ? Array.Empty<string>()
-                    : AppManifestValidator.ValidateGrants(
-                        body.Granted ?? current.Granted.Where(g => m.Permissions.Contains(g)), m.Permissions);
+                var granted = AppManifestValidator.ValidateGrants(
+                    body.Granted ?? current.Granted.Where(g => m.Permissions.Contains(g)), m.Permissions);
 
                 var updated = current with
                 {
@@ -298,18 +295,10 @@ public static class DesktopApi
         });
     }
 
-    private static IResult? CheckMode(string mode, Target t, Allowance allow, string? integrity, bool switching = true)
+    private static IResult? CheckMode(string mode, string? integrity)
     {
         if (!AppModes.IsValid(mode))
-            return Error(400, "invalid_mode", "mode is sandboxed or trusted.", "mode");
-        if (mode == AppModes.Trusted)
-        {
-            if (t.IsSpace)
-                return Error(400, "trusted_personal_only", "Trusted apps run as the viewer — a space can only hold sandboxed apps.", "mode");
-            if (switching && !allow.Trust)
-                return Error(403, "trusted_not_allowed", "The trusted mode isn't allowed on this Fishbowl.", "mode");
-            return null;
-        }
+            return Error(400, "invalid_mode", "Installed apps run sandboxed (mode sandboxed).", "mode");
         if (!AppManifestValidator.IsValidIntegrity(integrity))
             return Error(400, "integrity_required", "A sandboxed app needs its entry's SRI hash (sha256-…).", "integrity");
         return null;

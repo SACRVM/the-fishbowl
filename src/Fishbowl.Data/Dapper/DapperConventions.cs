@@ -19,6 +19,8 @@ public static class DapperConventions
 
             DefaultTypeMap.MatchNamesWithUnderscores = true;
             SqlMapper.AddTypeHandler(new JsonTagsHandler());
+            SqlMapper.AddTypeHandler(new JsonListHandler<Fishbowl.Core.Models.ContactValue>());
+            SqlMapper.AddTypeHandler(new JsonListHandler<Fishbowl.Core.Models.ContactAddress>());
 
             _installed = true;
         }

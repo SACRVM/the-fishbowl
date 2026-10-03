@@ -23,6 +23,13 @@ public interface IContactRepository
     // transaction. `deletedBy` defaults to the personal workspace's owner.
     Task<bool> DeleteAsync(ContextRef ctx, string id, CancellationToken ct = default, string? deletedBy = null);
 
+    // An organisation's people.
+    Task<IReadOnlyList<Contact>> GetMembersAsync(ContextRef ctx, string organisationId, CancellationToken ct = default);
+    // What points at a contact from the workspace's tables (newest first).
+    Task<IReadOnlyList<ContactLink>> GetLinksAsync(ContextRef ctx, string id, CancellationToken ct = default);
+    // `keep` takes what it lacks from `merge`; links move; `merge` goes to the trash.
+    Task<Contact> MergeAsync(ContextRef ctx, string keepId, string mergeId, string actor, CancellationToken ct = default);
+
     // Legacy personal-context aliases. Cookie-auth callers that only hold
     // a userId keep a one-line signature.
     Task<Contact?> GetByIdAsync(string userId, string id, CancellationToken ct = default);
@@ -31,3 +38,6 @@ public interface IContactRepository
     Task<bool> UpdateAsync(string userId, Contact contact, CancellationToken ct = default);
     Task<bool> DeleteAsync(string userId, string id, CancellationToken ct = default);
 }
+
+// A table row that links to a contact: its table, the link column, the row.
+public sealed record ContactLink(string Kind, string Table, string Column, string RowId, string Title, string At);

@@ -25,6 +25,10 @@ public static class ContactLimits
     // here.
     public const int MaxNotesLength = 16 * 1024;
 
+    // Every other text field (names, numbers, the bank, an address line).
+    public const int MaxFieldLength = 256;
+    public const int MaxListItems = 20;
+
     public static ResourceValidationError? Validate(Contact contact)
     {
         if (contact.Name is { Length: > MaxNameLength })
@@ -38,6 +42,33 @@ public static class ContactLimits
 
         if (contact.Notes is { Length: > MaxNotesLength })
             return new ResourceValidationError(Resource, "notes", $"exceeds {MaxNotesLength} characters");
+
+        if (!ContactKinds.IsValid(contact.Kind))
+            return new ResourceValidationError(Resource, "kind", "must be person or organisation", ResourceValidationKind.Invalid);
+        if (contact.Birthday is { Length: > 0 } b && !DateOnly.TryParseExact(b, "yyyy-MM-dd", out _))
+            return new ResourceValidationError(Resource, "birthday", "must be a date, YYYY-MM-DD", ResourceValidationKind.Invalid);
+
+        foreach (var (field, value) in new (string, string?)[]
+        {
+            ("salutation", contact.Salutation), ("honorific", contact.Honorific), ("firstName", contact.FirstName),
+            ("lastName", contact.LastName), ("role", contact.Role), ("legalForm", contact.LegalForm), ("industry", contact.Industry),
+            ("customerNumber", contact.CustomerNumber), ("vatId", contact.VatId), ("taxNumber", contact.TaxNumber),
+            ("tradeRegister", contact.TradeRegister), ("website", contact.Website), ("iban", contact.Iban), ("bic", contact.Bic),
+            ("accountHolder", contact.AccountHolder), ("language", contact.Language), ("photo", contact.Photo),
+        })
+            if (value is { Length: > MaxFieldLength })
+                return new ResourceValidationError(Resource, field, $"exceeds {MaxFieldLength} characters");
+
+        if (contact.Emails.Count > MaxListItems || contact.Phones.Count > MaxListItems || contact.Addresses.Count > MaxListItems || contact.Tags.Count > MaxListItems)
+            return new ResourceValidationError(Resource, "lists", $"at most {MaxListItems} emails, phones, addresses and tags each");
+        if (contact.Emails.Any(e => e.Value is { Length: > MaxEmailLength } || e.Label is { Length: > MaxFieldLength }))
+            return new ResourceValidationError(Resource, "emails", $"an email exceeds {MaxEmailLength} characters");
+        if (contact.Phones.Any(p => p.Value is { Length: > MaxPhoneLength } || p.Label is { Length: > MaxFieldLength }))
+            return new ResourceValidationError(Resource, "phones", $"a phone number exceeds {MaxPhoneLength} characters");
+        if (contact.Addresses.Any(a => new[] { a.Label, a.Street, a.PostalCode, a.City, a.Region, a.Country }.Any(v => v is { Length: > MaxFieldLength })))
+            return new ResourceValidationError(Resource, "addresses", $"an address field exceeds {MaxFieldLength} characters");
+        if (contact.Tags.Any(t => t is { Length: > MaxFieldLength }))
+            return new ResourceValidationError(Resource, "tags", $"a tag exceeds {MaxFieldLength} characters");
 
         return null;
     }

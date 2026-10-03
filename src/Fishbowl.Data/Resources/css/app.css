@@ -372,3 +372,11 @@ label.fb-quota-field input { width: 6em; }
 .fb-invite-hint { margin: 0; color: var(--text-muted); font-size: 13px; }
 .fb-invite-link-row { display: flex; gap: 8px; }
 .fb-invite-link-row input { flex: 1; min-width: 0; }
+
+/* The OAuth consent card (oauth.html): the workspace select and the access
+   choice, stacked like the sign-in form. */
+.fb-oauth-field { display: grid; gap: 6px; margin: 0 0 14px; border: 0; padding: 0; text-align: left; }
+.fb-oauth-field legend { margin-bottom: 6px; color: var(--text-muted); }
+.fb-oauth-field select { width: 100%; }
+.fb-oauth-field label { display: flex; align-items: center; gap: 8px; }
+.fb-oauth-field [hidden] { display: none; }

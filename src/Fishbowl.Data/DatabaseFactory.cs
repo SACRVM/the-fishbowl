@@ -461,7 +461,53 @@ public class DatabaseFactory
             ApplyUserV17(connection);
             connection.Execute("PRAGMA user_version = 17");
             _logger.LogInformation("Applied user schema v17 to {DbPath}", ((SqliteConnection)connection).DataSource);
+            version = 17;
         }
+
+        if (version < 18)
+        {
+            ApplyUserV18(connection);
+            connection.Execute("PRAGMA user_version = 18");
+            _logger.LogInformation("Applied user schema v18 to {DbPath}", ((SqliteConnection)connection).DataSource);
+            version = 18;
+        }
+
+        if (version < 19)
+        {
+            // The trusted mode is gone (space-apps spec, 2026-10-03): an app
+            // installed that way becomes sandboxed without a pin — it won't
+            // start until its owner reviews the update the desktop offers
+            // and re-pins it.
+            var hasApps = connection.ExecuteScalar<long>("SELECT COUNT(*) FROM sqlite_master WHERE name = 'desktop_apps'") > 0;
+            if (hasApps)
+                connection.Execute("UPDATE desktop_apps SET mode = 'sandboxed', entry_integrity = NULL WHERE mode = 'trusted';");
+            connection.Execute("PRAGMA user_version = 19");
+            _logger.LogInformation("Applied user schema v19 to {DbPath}", ((SqliteConnection)connection).DataSource);
+        }
+    }
+
+    // Contacts become persons and organisations with one vCard-based field
+    // set (space-apps spec, phase 6). The single email/phone stay as "the
+    // first one" and seed the new lists.
+    private static void ApplyUserV18(IDbConnection connection)
+    {
+        var cols = connection.Query<string>("SELECT name FROM pragma_table_info('contacts')").ToList();
+        if (cols.Count == 0) return;   // a test DB that never had contacts
+        void Add(string name, string type)
+        {
+            if (!cols.Contains(name)) connection.Execute($"ALTER TABLE contacts ADD COLUMN {name} {type};");
+        }
+        Add("kind", "TEXT NOT NULL DEFAULT 'person'");
+        foreach (var c in new[] { "salutation", "honorific", "first_name", "last_name", "organisation_id", "role", "birthday",
+                     "legal_form", "industry", "customer_number", "vat_id", "tax_number", "trade_register",
+                     "emails", "phones", "addresses", "website", "iban", "bic", "account_holder", "language", "tags", "photo" })
+            Add(c, "TEXT");
+        connection.Execute(@"
+            UPDATE contacts SET emails = json_array(json_object('label', NULL, 'value', email))
+                WHERE emails IS NULL AND email IS NOT NULL AND email <> '';
+            UPDATE contacts SET phones = json_array(json_object('label', NULL, 'value', phone))
+                WHERE phones IS NULL AND phone IS NOT NULL AND phone <> '';
+            CREATE INDEX IF NOT EXISTS idx_contacts_organisation ON contacts(organisation_id);");
     }
 
     // A space's error store for its own apps (AppErrors): the newest few
@@ -687,7 +733,41 @@ public class DatabaseFactory
             ApplySystemV16(connection);
             connection.Execute("PRAGMA user_version = 16");
             _logger.LogInformation("Applied system schema v16");
+            version = 16;
         }
+
+        if (version < 17)
+        {
+            ApplySystemV17(connection);
+            connection.Execute("PRAGMA user_version = 17");
+            _logger.LogInformation("Applied system schema v17");
+        }
+    }
+
+    // OAuth for MCP clients (space-apps spec phase 7, claude.ai connectors):
+    // dynamically registered clients and one-time authorization codes (only
+    // the code's SHA-256 is kept). The access token is an ordinary API key.
+    private static void ApplySystemV17(IDbConnection connection)
+    {
+        connection.Execute(@"
+            CREATE TABLE IF NOT EXISTS oauth_clients (
+                client_id     TEXT PRIMARY KEY,
+                name          TEXT NOT NULL,
+                redirect_uris TEXT NOT NULL,
+                created_at    TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS oauth_codes (
+                code_hash      TEXT PRIMARY KEY,
+                client_id      TEXT NOT NULL,
+                user_id        TEXT NOT NULL,
+                context_type   TEXT NOT NULL,
+                context_id     TEXT NOT NULL,
+                scopes         TEXT NOT NULL,
+                redirect_uri   TEXT NOT NULL,
+                code_challenge TEXT NOT NULL,
+                expires_at     TEXT NOT NULL,
+                used           INTEGER NOT NULL DEFAULT 0
+            );");
     }
 
     // A space owner's choice: messages from the space's apps reach chat with

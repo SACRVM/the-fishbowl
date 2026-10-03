@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Connect an app · The Fishbowl</title>
+    <link rel="stylesheet" href="/css/app.css">
+    <link rel="stylesheet" href="/kit/css/ui.css">
+</head>
+<body>
+    <div class="orb"></div>
+
+    <!-- OAuth consent (OAuthApi): an MCP client — claude.ai, say — asks for a
+         key to one workspace. Server-rendered like /login. -->
+    <div class="center-shell">
+        <div class="center-card">
+            <h1>THE FISHBOWL</h1>
+            <p class="tagline" id="oauth-ask"></p>
+            <form id="oauth-form" hidden>
+                <label class="fb-oauth-field"><span data-t="workspace">Workspace</span>
+                    <select id="oauth-workspace"></select>
+                </label>
+                <fieldset class="fb-oauth-field" id="oauth-access">
+                    <legend data-t="access">It may</legend>
+                    <label><input type="radio" name="access" value="read"> <span data-t="read">read</span></label>
+                    <label><input type="radio" name="access" value="write" checked> <span data-t="write">read and write</span></label>
+                    <label id="oauth-build"><input type="radio" name="access" value="build"> <span data-t="build">read, write and build tables and apps</span></label>
+                </fieldset>
+                <p class="auth-note" id="oauth-back"></p>
+                <div class="auth-actions">
+                    <button type="submit" class="btn primary" id="oauth-allow" data-t="allow">Allow</button>
+                    <button type="button" class="btn" id="oauth-deny" data-t="deny">Cancel</button>
+                </div>
+            </form>
+            <p class="auth-note" id="oauth-error" hidden></p>
+        </div>
+    </div>
+    <script src="/js/pages/oauth.js"></script>
+</body>
+</html>

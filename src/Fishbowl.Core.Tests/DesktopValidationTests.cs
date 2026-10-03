@@ -144,8 +144,8 @@ public class DesktopValidationTests
     public void Policy_Levels()
     {
         Assert.Equal(DesktopPolicy.Everyone, DesktopPolicy.ParseLevel(null));
-        Assert.Equal(DesktopPolicy.Admins, DesktopPolicy.ParseLevel(null, DesktopPolicy.DefaultTrusted));
-        Assert.Equal(DesktopPolicy.Everyone, DesktopPolicy.ParseLevel("everyone", DesktopPolicy.DefaultTrusted));
+        Assert.Equal(DesktopPolicy.Admins, DesktopPolicy.ParseLevel(null, DesktopPolicy.Admins));
+        Assert.Equal(DesktopPolicy.Everyone, DesktopPolicy.ParseLevel("everyone", DesktopPolicy.Admins));
         Assert.Equal(DesktopPolicy.Admins, DesktopPolicy.ParseLevel(" Admins "));
         Assert.Equal(DesktopPolicy.Off, DesktopPolicy.ParseLevel("off"));
         Assert.True(DesktopPolicy.Allows(DesktopPolicy.Everyone, false));

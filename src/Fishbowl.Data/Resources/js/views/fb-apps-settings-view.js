@@ -2,7 +2,7 @@
  * <fb-apps-settings-view>  (a window app, fb.windowApps "apps")
  *
  * The apps installed on the active workspace's desktop, in one list: where
- * each comes from, its version, how it runs (a sandboxed / trusted chip) and
+ * each comes from, its version, how it runs (a sandboxed / space-app chip) and
  * what it was given — with Update (only when fb.desktopApps found a newer
  * version), Permissions (sandboxed apps) and Remove. The same flows as the
  * desktop's tile menu (js/lib/desktop-apps.js), so both stay one thing.
@@ -167,10 +167,10 @@ class FbAppsSettingsView extends HTMLElement {
         let host = app.origin;
         try { host = new URL(app.origin).host; } catch { /* keep */ }
         where.textContent = app.mode === "space" ? `${app.folder}${app.version ? ` · v${app.version}` : ""}`
-            : app.mode === "trusted" ? fb.t("fb.apps.page-follows", "{host} · follows latest", { host }) : `${host}${app.version ? ` · v${app.version}` : ""}`;
+            : `${host}${app.version ? ` · v${app.version}` : ""}`;
         const chip = document.createElement("sac-chip");
         chip.setAttribute("label", app.mode === "space" ? fb.t("fb.apps.page-mode-space", "space app")
-            : app.mode === "trusted" ? fb.t("fb.apps.page-mode-trusted", "trusted") : fb.t("fb.apps.page-mode-sandboxed", "sandboxed"));
+            : fb.t("fb.apps.page-mode-sandboxed", "sandboxed"));
         const grants = document.createElement("span");
         grants.textContent = this.grantsText(app);
         meta.append(where, chip, grants);
@@ -215,7 +215,6 @@ class FbAppsSettingsView extends HTMLElement {
 
     grantsText(app) {
         if (app.mode === "space") return "";
-        if (app.mode === "trusted") return fb.t("fb.apps.page-full-access", "Full access, personal only");
         const parts = [];
         if ((app.granted || []).includes("files")) parts.push(fb.t("fb.apps.page-grant-files", "Files"));
         const id = fb.desktopApps.identityOf(app);
@@ -245,9 +244,7 @@ class FbAppsSettingsView extends HTMLElement {
                 : fb.t("fb.apps.page-policy-admins", "Only Global Admins may install apps on this Fishbowl.");
             return;
         }
-        p.textContent = st.canTrust
-            ? fb.t("fb.apps.page-policy-trust", "You can install apps sandboxed or, for your own apps, trusted.")
-            : fb.t("fb.apps.page-policy-sandboxed", "You can install sandboxed apps. Trusted apps are kept to admins.");
+        p.textContent = fb.t("fb.apps.page-policy-sandboxed", "You can install apps. They run sandboxed: their own frame, pinned code, only what you allow.");
     }
 }
 

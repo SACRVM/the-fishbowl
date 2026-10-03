@@ -488,8 +488,9 @@ public static class SpacesApi
             var resolved = await ResolveSpaceAsync(slug, user, spaces, ct);
             if (resolved.Error is not null) return resolved.Error;
             if (!resolved.Role!.Value.CanWrite()) return Results.Forbid();
+            Fishbowl.Data.Repositories.ContactRepository.Normalize(contact);   // a person's name may come from first + last
             if (string.IsNullOrWhiteSpace(contact.Name))
-                return ApiErrors.BadRequest("required", "name is required", new { field = "name" });
+                return ApiErrors.BadRequest("required", "name is required (or a first or last name for a person)", new { field = "name" });
 
             var actorId = user.FindFirst(McpContextClaims.UserId)!.Value;
             try
@@ -514,8 +515,9 @@ public static class SpacesApi
             var resolved = await ResolveSpaceAsync(slug, user, spaces, ct);
             if (resolved.Error is not null) return resolved.Error;
             if (!resolved.Role!.Value.CanWrite()) return Results.Forbid();
+            Fishbowl.Data.Repositories.ContactRepository.Normalize(contact);   // a person's name may come from first + last
             if (string.IsNullOrWhiteSpace(contact.Name))
-                return ApiErrors.BadRequest("required", "name is required", new { field = "name" });
+                return ApiErrors.BadRequest("required", "name is required (or a first or last name for a person)", new { field = "name" });
 
             contact.Id = id;
             try

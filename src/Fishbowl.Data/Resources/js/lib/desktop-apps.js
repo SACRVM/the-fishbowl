@@ -9,30 +9,28 @@
  * install posts that manifest and its entry hash to the server
  * (fb.api.desktop.install), which validates both against the admin's policy.
  *
- * Two modes (the server enforces them too):
- *   sandboxed  the default — the kit's isolated runtime: an opaque-origin
- *              frame (sac.apps.frameUrl → /apps/frame/…, a real CSP header),
- *              the entry pinned by its SRI hash, only what was granted. A
- *              new version waits for the owner to review and re-pin it.
- *   trusted    same-realm, acts as the user, always runs the origin's current
- *              code (no pin, no update review). Personal desktops only, and
- *              only when the admin's Apps:Trusted allows (default: admins).
+ * Every installed app runs sandboxed (the server enforces it): the kit's
+ * isolated runtime — an opaque-origin frame (sac.apps.frameUrl →
+ * /apps/frame/…, a real CSP header), the entry pinned by its SRI hash, only
+ * what was granted. A new version waits for the owner to review and re-pin
+ * it. (The trusted, same-realm mode is gone; an app installed that way came
+ * back unpinned and asks for that review.)
  *
  * Grants, as the owner chose them at install (never more than the manifest
  * asked for):
- *   files      the app's own folder in this workspace's Files, Apps/<name>
- *              — its storage (context.fs, backed here by the Files API) and,
- *              since kit 2.20, its own picker (context.files, "scoped": the
- *              kit's virtual dialog jailed in that folder).
- *              Without it the app runs, but nothing it writes is kept.
+ *   files      its storage — the app's own folder in this workspace's
+ *              Files, Apps/<name> (context.fs, backed here by the Files API)
+ *              — and the picker (context.files): the kit's dialog over the
+ *              whole workspace, where the person picks; the isolated app
+ *              holds only opaque handles to what was picked (space-apps
+ *              spec phase 8 — the picker is open again, the storage stays
+ *              jailed). Without it the app runs, but nothing it writes is
+ *              kept and it can't open your files.
  *   identity   nothing (the default, whatever the manifest asks), a stable
  *              anonymous id per app ("identity:pseudonymous"), or your name
  *              and picture ("identity").
  *   connect    the servers the manifest declared — shown, not choosable;
  *              the frame's CSP allows exactly those.
- * The user's own files picker (context.files) is never handed over: the kit
- * has one picker per page, not one per app, so it can't be limited to an
- * app's folder.
  *
  * A space's own apps (mode "space", id "space.<folder>") come with the
  * desktop too: the code in the space's files/.apps/<folder>/, served by the
@@ -58,8 +56,7 @@
  * Updates: when the desktop opens, each sandboxed app's manifest is read
  * again (once per session); a changed entry hash or version shows as
  * "Update to v…" in the tile menu and on Settings → Apps — never as a
- * message. A trusted app follows its origin anyway; its stored manifest is
- * refreshed quietly.
+ * message.
  */
 (function () {
     const ID = "identity";
@@ -67,7 +64,7 @@
     const INDEX = ".fishbowl-app.json";      // an app's non-file entries, in its folder
 
     let user = null;
-    let state = { ws: null, apps: [], canInstall: false, canTrust: false, canArrange: false };
+    let state = { ws: null, apps: [], canInstall: false, canArrange: false };
     const registered = new Map();           // app id → signature of what we handed the kit
     const adding = new Map();               // app id → the kit's add() in flight
     const updates = new Map();              // `${ws}|${id}` → inspected manifest
@@ -92,7 +89,7 @@
     /** The frame document for an app of the ACTIVE workspace (kit hook). */
     function frameUrlOf(manifest) {
         const app = byId(manifest?.id);
-        if (!app || app.mode === "trusted" || !user) return null;
+        if (!app || !user) return null;
         const s = sac.scope.get();
         const [type, id] = s.type === "scoped" ? ["space", s.slug] : ["user", user.id];
         return `/apps/frame/${type}/${encodeURIComponent(id)}/${encodeURIComponent(app.id)}`;
@@ -115,20 +112,17 @@
     function kitOptions(app) {
         const connect = Array.isArray(app.manifest?.connect) ? app.manifest.connect : [];
         const identity = has(app, ID) ? true : has(app, ID_ANON) ? "pseudonymous" : false;
-        // The files grant also gives the app a picker of its own (kit 2.20):
-        // the kit's virtual dialog jailed in the app's folder, so what it
-        // opens and saves is what its storage holds — never the rest of Files.
+        // The files grant also gives the app the picker (a provider of its
+        // own, kit 2.20): the kit's dialog over the workspace's whole Files —
+        // the person picks, the app gets handles to just that.
         const ws = state.ws;
-        const folder = app.dataFolder || `Apps/${nameOf(app)}`;
         const files = allowed(app) && window.sac?.files?.virtual
-            ? { provider: () => sac.files.virtual({ store: fb.filesStore({ workspace: ws }), root: folder, label: nameOf(app) }) }
+            ? { provider: () => sac.files.virtual({ store: fb.filesStore({ workspace: ws }), label: fb.t("fb.apps.picker-label", "Files") }) }
             : false;
         if (app.mode === "space") {
             return { isolated: true, integrity: false, grant: { files: false, identity: false, connect: [], api: { space: spaceApi(ws, app) } } };
         }
-        return app.mode === "trusted"
-            ? { isolated: false, integrity: false, grant: { files, identity: true, connect } }
-            : { isolated: true, integrity: app.entryIntegrity, grant: { files, identity, connect } };
+        return { isolated: true, integrity: app.entryIntegrity, grant: { files, identity, connect } };
     }
 
     /** context.space for a space app: the space's data, refusals as { code, message }. */
@@ -213,7 +207,6 @@
             ws: workspace(),
             apps: Array.isArray(stored?.apps) ? stored.apps : [],
             canInstall: !!stored?.canInstall,
-            canTrust: !!stored?.canTrust,
             canArrange: !!stored?.canArrange,
             installPolicy: stored?.installPolicy || "everyone",
         };
@@ -250,13 +243,6 @@
             try { fresh = await sac.apps.inspect(app.manifestUrl); }
             catch { continue; }                       // offline, moved: nothing to offer
             if (fresh.id !== app.id) continue;
-            if (app.mode === "trusted") {
-                // Trusted follows its origin; keep the stored manifest current.
-                if ((fresh.version || null) !== (app.version || null)) {
-                    fb.api.desktop.updateApp(app.id, { manifestUrl: app.manifestUrl, manifest: clean(fresh) }).catch(() => {});
-                }
-                continue;
-            }
             const changed = fresh.entryIntegrity && fresh.entryIntegrity !== app.entryIntegrity;
             if (changed || (fresh.version || null) !== (app.version || null)) {
                 updates.set(key, fresh);
@@ -396,7 +382,7 @@
         return app ? [app, cut < 0 ? "" : rest.slice(cut + 1)] : null;
     }
 
-    const allowed = (app) => app.mode === "trusted" || has(app, "files");
+    const allowed = (app) => has(app, "files");
 
     const backend = {
         async get(key) {
@@ -577,36 +563,7 @@
             : fb.t("fb.apps.into-personal", "Your personal desktop"));
         r.appendChild(dl);
 
-        let mode = app?.mode || "sandboxed";
-        if (kind === "install") {
-            r.appendChild(el("h4", null, fb.t("fb.apps.how", "How it runs")));
-            const modes = el("div", "fb-app-modes");
-            const option = (value, label, sub, disabled) => {
-                const lab = el("label", "fb-check");
-                const inp = el("input");
-                inp.type = "radio";
-                inp.name = "fb-app-mode";
-                inp.value = value;
-                inp.checked = value === "sandboxed";
-                inp.disabled = disabled;
-                inp.addEventListener("change", () => { mode = value; paintGrants(); });
-                const txt = el("span");
-                txt.append(el("strong", null, label), el("br"), el("span", "fb-app-hint", sub));
-                lab.append(inp, txt);
-                return lab;
-            };
-            modes.append(
-                option("sandboxed", fb.t("fb.apps.sandboxed", "Sandboxed (recommended)"),
-                    fb.t("fb.apps.sandboxed-sub", "Own frame, pinned code, only what you allow below."), false),
-                option("trusted", fb.t("fb.apps.trusted", "Trusted"),
-                    inSpace ? fb.t("fb.apps.trusted-space", "Not in a space — trusted apps are personal only.")
-                        : !state.canTrust ? fb.t("fb.apps.trusted-admins", "Your admin keeps trusted apps to admins.")
-                        : fb.t("fb.apps.trusted-sub", "Runs inside Fishbowl with your access. For your own apps; updates without asking."),
-                    inSpace || !state.canTrust),
-            );
-            r.appendChild(modes);
-        }
-
+        const mode = "sandboxed";
         const grantsBox = el("div");
         r.appendChild(grantsBox);
         const current = app ? new Set(app.granted || []) : new Set();
@@ -618,11 +575,6 @@
 
         function paintGrants() {
             grantsBox.replaceChildren();
-            if (mode === "trusted") {
-                grantsBox.append(el("h4", null, fb.t("fb.apps.gets", "What it gets")),
-                    el("p", "fb-app-hint", fb.t("fb.apps.gets-all", "Everything you can do in Fishbowl — it runs as you. Only for apps you wrote or fully trust.")));
-                return;
-            }
             grantsBox.append(el("h4", null, fb.t("fb.apps.asks", "It asks for")));
             const grid = el("div", "fb-app-grants");
             if (asks(manifest, "files")) {
@@ -632,7 +584,7 @@
                 box.id = "fb-app-files";
                 box.checked = files;
                 box.addEventListener("change", () => { files = box.checked; });
-                lab.append(box, el("span", null, fb.t("fb.apps.files", "Files — its own folder only")));
+                lab.append(box, el("span", null, fb.t("fb.apps.files", "Files — its own folder, and what you pick")));
                 grid.append(lab, el("code", null, folder));
             }
             if (asks(manifest, ID)) {
@@ -699,8 +651,8 @@
             await fb.api.desktop.install({
                 manifestUrl: inspected.manifestUrl,
                 manifest: clean(inspected),
-                integrity: choice.mode === "sandboxed" ? inspected.entryIntegrity : null,
-                mode: choice.mode,
+                integrity: inspected.entryIntegrity,
+                mode: "sandboxed",
                 granted: choice.granted,
             });
             sac.toast?.(fb.t("fb.apps.installed", "{name} is on your desktop.", { name: inspected.name }), { kind: "success" });

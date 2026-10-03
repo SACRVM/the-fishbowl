@@ -10,7 +10,7 @@ namespace Fishbowl.Ui.Tests;
 // the network outside `connect` blocked by the frame's CSP), the update
 // found on the next visit and re-pinned through review, permissions,
 // remove keeping or deleting the data, the admin's policy hiding every
-// install control, and trusted refused in a space. Every test leaves no
+// install control, and the space owner installing. Every test leaves no
 // app behind (other classes count desktop tiles).
 [Collection(UiCollection.Name)]
 public class AppsTests : IAsyncLifetime
@@ -111,7 +111,7 @@ public class AppsTests : IAsyncLifetime
             // Identity starts at "Nothing", whatever the manifest asks; files is on offer.
             await Assertions.Expect(review.Locator("#fb-app-identity")).ToHaveValueAsync("none");
             await Assertions.Expect(review.Locator("#fb-app-files")).ToBeCheckedAsync();
-            await Assertions.Expect(review.Locator("input[value='trusted']")).ToBeEnabledAsync();   // the test user is an admin
+            await Assertions.Expect(review.Locator("input[name='fb-app-mode']")).ToHaveCountAsync(0);   // one mode: sandboxed
             await page.WaitForTimeoutAsync(400);   // the dialog's fade-in, for the picture
             await page.ScreenshotAsync(new() { Path = Path.Combine(Shots, "desk-3-review.png") });
             await review.Locator("button[data-action='ok']").ClickAsync();
@@ -228,7 +228,7 @@ public class AppsTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task Apps_PolicyOff_NoInstallControls_TrustedNotInASpace_Test()
+    public async Task Apps_PolicyOff_NoInstallControls_SpaceOwnerInstalls_Test()
     {
         var (context, page, _) = await OpenAsync();
         string? slug = null;
@@ -255,8 +255,7 @@ public class AppsTests : IAsyncLifetime
             await url.Locator("#fb-app-url").FillAsync(_app.AppUrl);
             await url.Locator("button[data-action='read']").ClickAsync();
             var review = page.Locator("#fb-app-review");
-            await Assertions.Expect(review.Locator("input[value='trusted']")).ToBeDisabledAsync(new() { Timeout = 10000 });
-            await Assertions.Expect(review).ToContainTextAsync("every member sees it");
+            await Assertions.Expect(review).ToContainTextAsync("every member sees it", new() { Timeout = 10000 });
             await page.WaitForTimeoutAsync(400);   // the dialog's fade-in, for the picture
             await page.ScreenshotAsync(new() { Path = Path.Combine(Shots, "desk-3b-review-space.png") });
             await review.Locator("button[data-action='cancel']").ClickAsync();

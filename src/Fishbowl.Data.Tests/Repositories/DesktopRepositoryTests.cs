@@ -41,10 +41,9 @@ public class DesktopRepositoryTests : IDisposable
         Assert.Equal(new[] { "files" }, got!.Granted);
         Assert.Equal(AppModes.Sandboxed, got.Mode);
 
-        Assert.True(await _repo.UpdateAppAsync(Ctx, got with { Mode = AppModes.Trusted, EntryIntegrity = null, Granted = Array.Empty<string>() }, Ct));
+        Assert.True(await _repo.UpdateAppAsync(Ctx, got with { EntryIntegrity = null, Granted = Array.Empty<string>() }, Ct));
         var updated = await _repo.GetAppAsync(Ctx, "a", Ct);
-        Assert.Equal(AppModes.Trusted, updated!.Mode);
-        Assert.Null(updated.EntryIntegrity);
+        Assert.Null(updated!.EntryIntegrity);
         Assert.Empty(updated.Granted);
 
         await _repo.UpsertTileAsync(Ctx, new DesktopTile("app:a", 1, "wide", null, false), Ct);

@@ -3,8 +3,8 @@ namespace Fishbowl.Core.Desktop;
 // The Content-Security-Policy of Fishbowl's own pages — the SPA shell and the
 // server-rendered /login, /setup, /pending. The point is script-src: only
 // Fishbowl's own files run (no inline script, no eval), so HTML that slips
-// past sanitising can't execute. Trusted apps run in the page's realm, so
-// their origins join script-src.
+// past sanitising can't execute. Installed apps run in their own frame, never
+// in the page, so nobody else's origin joins it.
 //
 // connect-src stays open to https (and loopback http by name, which AppOrigins
 // accepts for app development; CSP can't express an IPv6 literal): installing an app reads its app.json and
@@ -16,19 +16,11 @@ public static class PageCsp
 {
     private const string Loopback = "http://localhost:* http://127.0.0.1:*";
 
-    /// <param name="trustedOrigins">Origins of the viewer's trusted apps;
-    /// anything that isn't a safe origin is dropped.</param>
-    public static string Build(IEnumerable<string>? trustedOrigins = null)
+    public static string Build()
     {
-        var trusted = (trustedOrigins ?? Array.Empty<string>())
-            .Where(AppOrigins.IsSafe)
-            .Distinct(StringComparer.Ordinal)
-            .ToArray();
-        var scriptSrc = string.Join(' ', new[] { "'self'" }.Concat(trusted));
-
         return string.Join("; ",
             "default-src 'self'",
-            $"script-src {scriptSrc}",
+            "script-src 'self'",
             "style-src 'self' 'unsafe-inline'",
             "img-src 'self' data: blob: https:",
             "font-src 'self' data:",

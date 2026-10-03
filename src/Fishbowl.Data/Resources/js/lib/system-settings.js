@@ -34,7 +34,6 @@
     const CHOICES = {
         "Auth:SignUp":     ["approval", "open", "closed"],
         "Apps:Install":    ["everyone", "admins", "off"],
-        "Apps:Trusted":    ["admins", "everyone", "off"],
         "Logging:Format":  ["plain", "json"],
         "Digest:Enabled":  ["false", "true"],
         "Acme:AcceptTos":  ["false", "true"],
@@ -50,7 +49,6 @@
         "Archive:RetentionDays": "Keep archived spaces (days)",
         "Export:CombinedMaxBytes": "One-ZIP export up to",
         "Apps:Install": "Who may install apps",
-        "Apps:Trusted": "Who may trust an app",
         "Apps:AllowedOrigins": "Allowed app origins",
         "Apps:StoreOwners": "App Store owners",
         "Apps:StoreTopic": "App Store topic",

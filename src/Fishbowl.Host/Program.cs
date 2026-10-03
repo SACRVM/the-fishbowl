@@ -181,6 +181,7 @@ builder.Services.AddScoped<IMessageRepository>(sp => new Fishbowl.Api.Accounts.N
 builder.Services.AddScoped<IUserAdminRepository, UserAdminRepository>();
 builder.Services.AddScoped<IDesktopRepository, DesktopRepository>();
 builder.Services.AddScoped<IAppErrorRepository, AppErrorRepository>();
+builder.Services.AddScoped<IOAuthRepository, OAuthRepository>();
 // Every sign-in (Google, local) goes through the account rules here.
 builder.Services.AddScoped<AccountGate>();
 builder.Services.AddScoped<Fishbowl.Core.Files.IFileService, Fishbowl.Data.Files.FileService>();
@@ -528,6 +529,23 @@ if (app.Environment.IsDevelopment())
     });
 }
 
+// An MCP client that isn't signed in learns where to sign in (MCP
+// authorization spec / RFC 9728): every 401 from /mcp names the
+// protected-resource metadata.
+app.Use(async (context, next) =>
+{
+    if (context.Request.Path.StartsWithSegments("/mcp"))
+    {
+        context.Response.OnStarting(() =>
+        {
+            if (context.Response.StatusCode == StatusCodes.Status401Unauthorized)
+                context.Response.Headers.WWWAuthenticate =
+                    $"Bearer resource_metadata=\"{Fishbowl.Api.Endpoints.OAuthApi.Origin(context)}/.well-known/oauth-protected-resource\"";
+            return Task.CompletedTask;
+        });
+    }
+    await next();
+});
 app.UseAuthentication();
 app.UseRateLimiter();
 // Account state after authentication: a pending account is kept to /pending,
@@ -838,6 +856,7 @@ app.MapNotesApi();
 app.MapTagsApi();
 app.MapTodoApi();
 app.MapContactsApi();
+app.MapContactToolsApi();
 app.MapEventsApi();
 app.MapSpacesApi();
 app.MapSpaceMembersApi();
@@ -858,6 +877,7 @@ app.MapFilesApi();
 app.MapDesktopApi();
 app.MapSpaceAppsApi();
 app.MapAppMessagesApi();
+app.MapOAuthApi();
 app.MapMcpEndpoint();
 
 // Root route — gate the hub behind setup + authentication so the first click

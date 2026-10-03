@@ -46,6 +46,15 @@ public static class SpaceAppsApi
         }).RequireAuthorization().RequireScope(ScopeCatalog.ReadTables)
           .WithName("GetSpaceGuide").WithSummary("How to build this space's own apps, written from the live space (markdown).");
 
+        // Deploy (space-apps spec phase 7, the deploy-to-fishbowl action): a
+        // ZIP of the app's files replaces .apps/<folder> — the old folder goes
+        // to the trash first (restorable), then every entry is written. A
+        // Designer; a key needs design:apps and write:files.
+        routes.MapPost("/api/v1/spaces/{slug}/apps/{folder}/deploy", DeployAsync)
+            .RequireAuthorization()
+            .WithName("DeploySpaceApp")
+            .WithSummary("Replaces .apps/<folder> with the files of a ZIP (the body). Designer; a key needs design:apps and write:files.");
+
         var g = routes.MapGroup("/api/v1/spaces/{slug}/apps/errors").RequireAuthorization();
         g.MapGet("/", async (string slug, string? app, int? limit, HttpContext http, ISpaceRepository spaces, IAppErrorRepository errors, CancellationToken ct) =>
         {
@@ -78,6 +87,64 @@ public static class SpaceAppsApi
         }).RequireScope(ScopeCatalog.DesignApps)
           .WithName("ClearSpaceAppErrors").WithSummary("Clears a space's app errors (?app=<folder> for one). Designer.");
         return routes;
+    }
+
+    public const long MaxDeployBytes = 50L * 1024 * 1024;
+    public const int MaxDeployFiles = 500;
+
+    private static async Task<IResult> DeployAsync(string slug, string folder, HttpContext http,
+        ISpaceRepository spaces, IFileService files, CancellationToken ct)
+    {
+        var user = http.User;
+        if (user.Identity?.AuthenticationType == McpContextClaims.BearerScheme
+            && !(user.HasClaim(McpContextClaims.Scope, ScopeCatalog.DesignApps) && user.HasClaim(McpContextClaims.Scope, ScopeCatalog.WriteFiles)))
+            return Results.Forbid();
+        var resolved = await SpacesApi.ResolveSpaceAsync(slug, user, spaces, ct);
+        if (resolved.Error is not null) return resolved.Error;
+        if (!resolved.Role!.Value.CanDesign()) return DesignOnly();
+        if (!SpaceApps.IsFolder(folder))
+            return ApiErrors.BadRequest("invalid_value", "The app folder is lower-case letters, digits and -.", new { field = "folder" });
+        if (http.Request.ContentLength is > MaxDeployBytes)
+            return ApiErrors.Json(413, "too_large", $"A deploy is at most {MaxDeployBytes / (1024 * 1024)} MB.");
+
+        // Read the whole ZIP first (bounded) so a broken one changes nothing.
+        using var buffer = new MemoryStream();
+        await http.Request.Body.CopyToAsync(buffer, ct);
+        if (buffer.Length > MaxDeployBytes) return ApiErrors.Json(413, "too_large", $"A deploy is at most {MaxDeployBytes / (1024 * 1024)} MB.");
+        buffer.Position = 0;
+        List<(string Path, byte[] Bytes)> entries;
+        try
+        {
+            using var zip = new System.IO.Compression.ZipArchive(buffer, System.IO.Compression.ZipArchiveMode.Read, leaveOpen: true);
+            entries = new();
+            foreach (var e in zip.Entries.Where(e => !e.FullName.EndsWith('/')))
+            {
+                var path = e.FullName.Replace('\\', '/');
+                if (!SpaceApps.IsFile(path))
+                    return ApiErrors.BadRequest("invalid_value", $"\"{path}\" isn't a plain path inside the app folder.", new { field = "zip" });
+                if (entries.Count >= MaxDeployFiles)
+                    return ApiErrors.BadRequest("invalid_value", $"At most {MaxDeployFiles} files.", new { field = "zip" });
+                using var s = e.Open();
+                using var m = new MemoryStream();
+                await s.CopyToAsync(m, ct);
+                entries.Add((path, m.ToArray()));
+            }
+        }
+        catch (InvalidDataException) { return ApiErrors.BadRequest("invalid_value", "The body isn't a ZIP file.", new { field = "zip" }); }
+        if (!entries.Any(e => e.Path == SpaceApps.ManifestFile))
+            return ApiErrors.BadRequest("invalid_value", "The ZIP has no app.json at its top level.", new { field = "zip" });
+
+        var ctx = ContextRef.Space(resolved.Space!.Id);
+        var actor = user.FindFirst(McpContextClaims.UserId)!.Value;
+        var root = $"{AppsFolder.Name}/{folder}";
+        try { await files.StatAsync(ctx, root, ct); await files.TrashAsync(ctx, root, actor, ct); }
+        catch (FileStoreException ex) when (ex.Status == 404) { /* a first deploy */ }
+        foreach (var (path, bytes) in entries)
+        {
+            using var body = new MemoryStream(bytes);
+            await files.UploadAsync(ctx, $"{root}/{path}", body, bytes.Length, ifMatch: null, ifNoneMatchStar: true, parents: true, actor, ct);
+        }
+        return Results.Ok(new { app = SpaceApps.IdOf(folder), files = entries.Count });
     }
 
     public sealed record ReportRequest(string? App, string? Kind, string? Message, string? Detail);

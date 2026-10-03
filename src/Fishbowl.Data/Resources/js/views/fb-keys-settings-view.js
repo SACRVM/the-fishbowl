@@ -35,7 +35,115 @@ class FbKeysSettingsView extends HTMLElement {
             this.spaces = [];
         }
         this.renderForm();
+        this.renderGuide();
         this.renderList();
+    }
+
+    // "Connect an agent" (space-apps spec, decision 21): pick the workspace,
+    // what the agent may do and the client — then exactly its steps.
+    renderGuide() {
+        const mount = this.querySelector("#guide-mount");
+        if (!mount) return;
+        const scope = sac.scope.get();
+        const active = scope.type === "scoped" ? scope.slug : null;
+        const t = (k, f, v) => fb.t(`fb.keys.${k}`, f, v);
+        mount.innerHTML = `
+            <div class="field">
+                <label for="guide-client">${t("guide-client", "Client")}</label>
+                <span class="select"><select id="guide-client">
+                    <option value="connector">${t("guide-connector", "claude.ai or Claude Desktop (connector)")}</option>
+                    <option value="code">Claude Code</option>
+                    <option value="other">${t("guide-other", "Another MCP client or a script")}</option>
+                </select></span>
+            </div>
+            <div class="field guide-key">
+                <label for="guide-workspace">${t("context", "Context")}</label>
+                <span class="select"><select id="guide-workspace">
+                    <option value="user::">${t("personal", "Personal")}</option>
+                    ${this.spaces.map((sp) => `<option value="space::${escapeAttr(sp.slug)}" data-role="${escapeAttr(sp.role || "")}"${sp.slug === active ? " selected" : ""}>${t("space-option", "Space — {name}", { name: escapeHtml(sp.name) })}</option>`).join("")}
+                </select></span>
+            </div>
+            <div class="field guide-key">
+                <label for="guide-access">${t("guide-access", "It may")}</label>
+                <span class="select"><select id="guide-access">
+                    <option value="read">${t("guide-read", "read")}</option>
+                    <option value="write" selected>${t("guide-write", "read and write")}</option>
+                    <option value="build">${t("guide-build", "read, write and build tables and apps")}</option>
+                </select></span>
+            </div>
+            <div id="guide-steps"></div>`;
+        const client = mount.querySelector("#guide-client");
+        const ws = mount.querySelector("#guide-workspace");
+        const access = mount.querySelector("#guide-access");
+        const paint = () => {
+            const role = ws.selectedOptions[0]?.dataset.role;
+            const canBuild = ws.value !== "user::" && ["designer", "admin", "owner"].includes(role);
+            access.querySelector("option[value=build]").disabled = !canBuild;
+            if (!canBuild && access.value === "build") access.value = "write";
+            for (const f of mount.querySelectorAll(".guide-key")) f.hidden = client.value === "connector";
+            this._paintSteps(client.value, access.value);
+        };
+        for (const el of [client, ws, access]) el.addEventListener("change", paint);
+        paint();
+    }
+
+    _paintSteps(client, access) {
+        const t = (k, f, v) => fb.t(`fb.keys.${k}`, f, v);
+        const steps = this.querySelector("#guide-steps");
+        const mcp = `${location.origin}/mcp`;
+        const tryLine = access === "build"
+            ? t("try-build", "Read the space guide, then build a small app for this space that lists our open orders.")
+            : access === "write" ? t("try-write", "Remember that the team meeting moved to Thursdays.")
+            : t("try-read", "What do I have on my calendar this week?");
+        if (client === "connector") {
+            steps.innerHTML = `
+                <ol class="guide-steps">
+                    <li>${t("step-connector-1", "In claude.ai: Settings → Connectors → Add custom connector.")}</li>
+                    <li>${t("step-connector-2", "URL:")} <code class="guide-url"></code> <sac-copy-button></sac-copy-button></li>
+                    <li>${t("step-connector-3", "Sign in when asked, then pick the workspace and what it may do.")}</li>
+                </ol>
+                <p class="muted">${t("try", "Try:")} <em class="guide-try"></em></p>`;
+            steps.querySelector(".guide-url").textContent = mcp;
+            steps.querySelector("sac-copy-button").setAttribute("value", mcp);
+        } else {
+            steps.innerHTML = `
+                <p>${client === "code"
+                    ? t("step-code", "Makes a key for this and shows the command to add it to Claude Code — once.")
+                    : t("step-other", "Makes a key for this and shows it with the MCP and API addresses — once.")}</p>
+                <div class="toolbar"><button type="button" class="btn primary" id="guide-create">${t("guide-create", "Create key")}</button></div>
+                <p class="muted">${t("try", "Try:")} <em class="guide-try"></em></p>`;
+            steps.querySelector("#guide-create").addEventListener("click", () => this._guideCreate(client, access));
+        }
+        steps.querySelector(".guide-try").textContent = tryLine;
+    }
+
+    // Scopes per access level — the server's OAuthApi.ScopesFor.
+    static scopesFor(access, space) {
+        const read = ["read:notes", "read:tags", "read:tasks", "read:contacts", "read:events", "read:files", ...(space ? ["read:tables"] : [])];
+        if (access === "read") return read;
+        const write = [...read, "write:notes", "write:tags", "write:tasks", "write:contacts", "write:events", "write:files", ...(space ? ["write:tables"] : [])];
+        return access === "build" && space ? [...write, "design:tables", "design:apps"] : write;
+    }
+
+    async _guideCreate(client, access) {
+        const [contextType, contextId] = this.querySelector("#guide-workspace").value.split("::");
+        const space = contextType === "space";
+        try {
+            const created = await fb.api.keys.create({
+                name: client === "code" ? "Claude Code" : fb.t("fb.keys.guide-key-name", "MCP client"),
+                contextType,
+                contextId: space ? contextId : null,
+                scopes: FbKeysSettingsView.scopesFor(access, space),
+            });
+            const mcp = `${location.origin}/mcp`;
+            const text = client === "code"
+                ? `claude mcp add --transport http fishbowl ${mcp} --header "Authorization: Bearer ${created.rawToken}"`
+                : `MCP:   ${mcp}\nAPI:   ${location.origin}/api/v1${space ? `/spaces/${contextId}` : ""}\nToken: ${created.rawToken}`;
+            await this._revealToken(created, text);
+            await this.refresh();
+        } catch (err) {
+            sac.toast?.(fb.errors.text(err, fb.t("fb.keys.create-failed", "Failed to create key.")), { kind: "error" });
+        }
     }
 
     render() {
@@ -68,8 +176,13 @@ class FbKeysSettingsView extends HTMLElement {
                     border-radius: var(--radius-m);
                     padding: 12px 14px;
                     word-break: break-all;
+                    white-space: pre-wrap;
                     user-select: all;
                 }
+                /* "Connect an agent": numbered steps, the URL in mono. */
+                .guide-steps { margin: 8px 0 12px; padding-left: 20px; display: grid; gap: 6px; }
+                .guide-steps code { font-family: var(--font-mono); }
+                .guide-steps sac-copy-button { vertical-align: middle; }
             </style>
 
             <header><div>
@@ -78,6 +191,12 @@ class FbKeysSettingsView extends HTMLElement {
                     ${fb.t("fb.keys.subtitle", "Bearer tokens for MCP and programmatic clients. The raw token is shown exactly once when you create it — copy it immediately.")}
                 </p>
             </div></header>
+
+            <div class="card" id="agent-guide">
+                <sac-section title="${fb.t("fb.keys.agent", "Connect an agent")}">
+                    <div id="guide-mount"></div>
+                </sac-section>
+            </div>
 
             <div class="card">
                 <sac-section title="${fb.t("fb.keys.new", "New key")}">
@@ -117,7 +236,7 @@ class FbKeysSettingsView extends HTMLElement {
                 <label>${fb.t("fb.keys.scopes", "Scopes")}</label>
                 <div class="scopes">
                     ${["read:notes","write:notes","read:tags","write:tags",
-                       "read:tasks","write:tasks","read:events","write:events",
+                       "read:tasks","write:tasks","read:contacts","write:contacts","read:events","write:events",
                        "read:files","write:files","read:tables","write:tables","design:tables","design:apps"].map(s => `
                         <label class="fb-check">
                             <input type="checkbox" value="${s}"
@@ -301,7 +420,7 @@ class FbKeysSettingsView extends HTMLElement {
     // saved it. A sac-dialog also closes on Escape and on a backdrop click —
     // for a token that is never shown again, one slip would lose it for good,
     // so any close other than "I've saved it" shows the dialog again.
-    async _revealToken(created) {
+    async _revealToken(created, text = created.rawToken) {
         const show = () => new Promise((resolve) => {
             const dlg = document.createElement("sac-dialog");
             dlg.setAttribute("title", fb.t("fb.keys.created", "Key created"));
@@ -314,8 +433,8 @@ class FbKeysSettingsView extends HTMLElement {
                     <sac-copy-button label="${fb.t("fb.keys.copy-token", "Copy token")}"></sac-copy-button>
                 </div>`;
             // The token goes in as text / an attribute value, never markup.
-            dlg.querySelector(".fb-token-block").textContent = created.rawToken;
-            dlg.querySelector("sac-copy-button").setAttribute("value", created.rawToken);
+            dlg.querySelector(".fb-token-block").textContent = text;
+            dlg.querySelector("sac-copy-button").setAttribute("value", text);
             dlg.addEventListener("sac:action", (e) => {
                 setTimeout(() => { dlg.remove(); resolve(e.detail.action); }, 120);
             }, { once: true });
