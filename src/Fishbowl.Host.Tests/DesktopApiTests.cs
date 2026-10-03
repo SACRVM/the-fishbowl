@@ -485,4 +485,51 @@ public class DesktopApiTests : IClassFixture<WebApplicationFactory<Program>>, ID
         Assert.Equal(3, (await Json(await As(Alice).DeleteAsync(errors, Ct))).GetProperty("removed").GetInt32());
         Assert.Empty((await Json(await As(Alice).GetAsync(errors, Ct))).GetProperty("errors").EnumerateArray());
     }
+
+    [Fact]
+    public async Task SpaceGuide_WrittenFromTheLiveSpace_RestAndMcp()
+    {
+        var space = await new SpaceRepository(_db).CreateAsync(Alice, "Guide Space", Ct);
+        using (var sys = _db.CreateSystemConnection())
+            sys.Execute("INSERT INTO space_members(space_id, user_id, role, joined_at) VALUES (@s, @u, 'member', @now)",
+                new { s = space.Id, u = Bob, now = DateTime.UtcNow.ToString("o") });
+        var created = await As(Alice).PostAsJsonAsync($"/api/v1/spaces/{space.Slug}/tables",
+            new { name = "rooms", description = "Rooms of the club", columns = new[] { new { name = "seats", type = "integer", description = "How many fit" } } }, Ct);
+        Assert.Equal(HttpStatusCode.Created, created.StatusCode);
+        var apps = Path.Combine(_dataDir, "spaces", space.Id, "files", ".apps");
+        Directory.CreateDirectory(Path.Combine(apps, "booking"));
+        File.WriteAllText(Path.Combine(apps, "booking", "app.json"), "{\"name\":\"Booking\",\"tag\":\"booking-app\",\"version\":\"2.0.0\"}");
+
+        var guide = await As(Alice).GetAsync($"/api/v1/spaces/{space.Slug}/guide", Ct);
+        Assert.Equal(HttpStatusCode.OK, guide.StatusCode);
+        Assert.Equal("text/markdown", guide.Content.Headers.ContentType!.MediaType);
+        var md = await guide.Content.ReadAsStringAsync(Ct);
+        Assert.Contains("Your role here: **owner**", md);
+        Assert.Contains("context.space", md);
+        Assert.Contains("rooms", md);
+        Assert.Contains("seats", md);
+        Assert.Contains("`.apps/booking/` — **Booking** v2.0.0, `<booking-app>`", md);
+        Assert.Contains($"PUT /api/v1/spaces/{space.Slug}/files/content", md);
+
+        // A member is told what they may not do; a stranger gets nothing.
+        Assert.Contains("needs the Designer role", await (await As(Bob).GetAsync($"/api/v1/spaces/{space.Slug}/guide", Ct)).Content.ReadAsStringAsync(Ct));
+        Assert.NotEqual(HttpStatusCode.OK, (await As(Carol).GetAsync($"/api/v1/spaces/{space.Slug}/guide", Ct)).StatusCode);
+
+        // The same over MCP, for a space key.
+        var token = (await new ApiKeyRepository(_db).IssueAsync(Alice, ContextRef.Space(space.Slug), "agent", new[] { "read:tables" }, Ct)).RawToken;
+        var mcp = _factory.CreateClient();
+        mcp.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        mcp.DefaultRequestHeaders.Accept.ParseAdd("application/json");
+        mcp.DefaultRequestHeaders.Accept.ParseAdd("text/event-stream");
+        var rpc = await mcp.PostAsync("/mcp", new StringContent(JsonSerializer.Serialize(new
+        {
+            jsonrpc = "2.0",
+            id = 1,
+            method = "tools/call",
+            @params = new { name = "space_guide", arguments = new { } },
+        }), Encoding.UTF8, "application/json"), Ct);
+        var body = await Json(rpc);
+        var text = body.GetProperty("result").GetProperty("content")[0].GetProperty("text").GetString()!;
+        Assert.Contains("booking-app", JsonDocument.Parse(text).RootElement.GetProperty("markdown").GetString());
+    }
 }

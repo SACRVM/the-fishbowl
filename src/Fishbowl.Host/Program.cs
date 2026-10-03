@@ -219,6 +219,7 @@ builder.Services.AddScoped<IMcpTool, ListEventsTool>();
 // Space tables (space-apps spec, phase 3).
 builder.Services.AddScoped<IMcpTool, Fishbowl.Mcp.Tools.Tables.TableListTool>();
 builder.Services.AddScoped<IMcpTool, Fishbowl.Mcp.Tools.Apps.AppErrorsTool>();
+builder.Services.AddScoped<IMcpTool, Fishbowl.Mcp.Tools.Apps.SpaceGuideTool>();
 builder.Services.AddScoped<IMcpTool, Fishbowl.Mcp.Tools.Tables.TableDescribeTool>();
 builder.Services.AddScoped<IMcpTool, Fishbowl.Mcp.Tools.Tables.TableCreateTool>();
 builder.Services.AddScoped<IMcpTool, Fishbowl.Mcp.Tools.Tables.TableAlterTool>();

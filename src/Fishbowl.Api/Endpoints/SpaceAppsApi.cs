@@ -34,6 +34,18 @@ public static class SpaceAppsApi
             .WithName("GetSpaceAppCode")
             .ExcludeFromDescription();
 
+        // The guide the server writes from the live space (SpaceGuide):
+        // how to build its apps, its tables, its apps and their errors.
+        routes.MapGet("/api/v1/spaces/{slug}/guide", async (string slug, HttpContext http, ISpaceRepository spaces,
+            ITableRepository tables, IFileService files, IAppErrorRepository errors, CancellationToken ct) =>
+        {
+            var resolved = await SpacesApi.ResolveSpaceAsync(slug, http.User, spaces, ct);
+            if (resolved.Error is not null) return resolved.Error;
+            var md = await SpaceGuide.BuildAsync(resolved.Space!, resolved.Role!.Value, ContextRef.Space(resolved.Space!.Id), tables, files, errors, ct);
+            return Results.Text(md, "text/markdown; charset=utf-8");
+        }).RequireAuthorization().RequireScope(ScopeCatalog.ReadTables)
+          .WithName("GetSpaceGuide").WithSummary("How to build this space's own apps, written from the live space (markdown).");
+
         var g = routes.MapGroup("/api/v1/spaces/{slug}/apps/errors").RequireAuthorization();
         g.MapGet("/", async (string slug, string? app, int? limit, HttpContext http, ISpaceRepository spaces, IAppErrorRepository errors, CancellationToken ct) =>
         {
@@ -92,49 +104,6 @@ public static class SpaceAppsApi
     internal static string CodeBase(HttpContext http, byte[] key, string spaceId, string folder) =>
         $"{HostOrigin(http)}/apps/code/{spaceId}/{folder}/{SpaceApps.Sign(key, spaceId, folder)}/";
 
-    /// <summary>The apps in a space's .apps — those whose app.json reads.</summary>
-    internal static async Task<IReadOnlyList<(SpaceAppManifest Manifest, DateTime? Changed)>> ListAsync(
-        IFileService files, ContextRef ctx, CancellationToken ct, IAppErrorRepository? errors = null)
-    {
-        FileListPage page;
-        try { page = await files.ListAsync(ctx, AppsFolder.Name, null, 500, ct); }
-        catch (FileStoreException) { return Array.Empty<(SpaceAppManifest, DateTime?)>(); }
-
-        var apps = new List<(SpaceAppManifest, DateTime?)>();
-        foreach (var dir in page.Entries.Where(e => e.Kind == "folder" && SpaceApps.IsFolder(e.Name)))
-        {
-            var m = await ReadAsync(files, ctx, dir.Name, ct, errors);
-            if (m is not null) apps.Add(m.Value);
-        }
-        return apps.OrderBy(a => a.Item1.Name, StringComparer.OrdinalIgnoreCase).ToList();
-    }
-
-    // A folder without app.json is no app (nothing to report); one whose
-    // app.json doesn't read is a broken app — into the error store with why.
-    internal static async Task<(SpaceAppManifest Manifest, DateTime? Changed)?> ReadAsync(
-        IFileService files, ContextRef ctx, string folder, CancellationToken ct, IAppErrorRepository? errors = null)
-    {
-        string? problem;
-        try
-        {
-            var h = await files.OpenReadAsync(ctx, $"{AppsFolder.Name}/{folder}/{SpaceApps.ManifestFile}", ct);
-            await using var stream = h.Stream;
-            if (h.Entry.Size > SpaceApps.MaxManifestBytes) problem = $"app.json is larger than {SpaceApps.MaxManifestBytes / 1024} KB.";
-            else
-            {
-                using var doc = await JsonDocument.ParseAsync(stream, cancellationToken: ct);
-                var m = SpaceApps.Parse(folder, doc.RootElement, out problem);
-                if (m is not null) return (m, h.Entry.Mtime);
-            }
-        }
-        catch (FileStoreException) { return null; }
-        catch (JsonException ex) { problem = $"app.json isn't valid JSON: {ex.Message}"; }
-
-        if (errors is not null && problem is not null)
-            await errors.AddAsync(ctx, folder, AppErrors.Manifest, problem, null, null, ct);
-        return null;
-    }
-
     // The desktop's record of a space app — the install record's shape, so
     // tiles, the burger, the palette and the Apps window take it as is.
     internal static object Dto(HttpContext http, byte[] key, string spaceId, SpaceAppManifest m, DateTime? changed) => new
@@ -191,7 +160,7 @@ public static class SpaceAppsApi
     internal static async Task<IResult> FrameAsync(HttpContext http, string spaceId, string folder, IFileService files)
     {
         var ct = http.RequestAborted;
-        var app = await ReadAsync(files, ContextRef.Space(spaceId), folder, ct);
+        var app = await SpaceAppCatalog.ReadAsync(files, ContextRef.Space(spaceId), folder, ct);
         if (app is null) return Results.NotFound();
         var system = http.RequestServices.GetRequiredService<ISystemRepository>();
         var key = await KeyAsync(system, ct);
