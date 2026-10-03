@@ -53,6 +53,11 @@
         "range_incomplete": "Give both a start and an end, or neither.",
         "resource_invalid": "The server refused that ({field}).",
         "resource_too_large": "That's too large ({field}).",
+        "invalid_app_message": "A message needs text (at most 500 characters) and members to go to.",
+        "not_members": "An app can only message members of its own space.",
+        "app_missing": "There is no such app in this space.",
+        "rate_limited": "Too many messages from this app — try again later.",
+        "invalid_mute": "That can't be muted.",
         "invalid_app_error": "An app error needs app (the folder), kind (load, runtime, call, reported) and message.",
         // System settings and setup
         "unknown_config_key": "That setting doesn't exist.",

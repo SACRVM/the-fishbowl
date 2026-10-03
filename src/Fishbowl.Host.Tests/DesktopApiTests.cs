@@ -532,4 +532,58 @@ public class DesktopApiTests : IClassFixture<WebApplicationFactory<Program>>, ID
         var text = body.GetProperty("result").GetProperty("content")[0].GetProperty("text").GetString()!;
         Assert.Contains("booking-app", JsonDocument.Parse(text).RootElement.GetProperty("markdown").GetString());
     }
+
+    [Fact]
+    public async Task SpaceApps_Notify_MembersOnly_Muting_RateLimit()
+    {
+        var space = await new SpaceRepository(_db).CreateAsync(Alice, "Notify Space", Ct);
+        using (var sys = _db.CreateSystemConnection())
+        {
+            var now = DateTime.UtcNow.ToString("o");
+            sys.Execute("INSERT INTO space_members(space_id, user_id, role, joined_at) VALUES (@s, @u, @r, @now)",
+                new[] { new { s = space.Id, u = Bob, r = "member", now }, new { s = space.Id, u = Carol, r = "reader", now } });
+        }
+        var apps = Path.Combine(_dataDir, "spaces", space.Id, "files", ".apps", "board");
+        Directory.CreateDirectory(apps);
+        File.WriteAllText(Path.Combine(apps, "app.json"), "{\"name\":\"Board\",\"tag\":\"board-app\"}");
+        var notify = $"/api/v1/spaces/{space.Slug}/apps/board/notify";
+        async Task<int> Send(HttpClient c, object to, string text = "Lunch is here")
+        {
+            var r = await c.PostAsJsonAsync(notify, new { to, text }, Ct);
+            Assert.Equal(HttpStatusCode.OK, r.StatusCode);
+            return (await Json(r)).GetProperty("sent").GetInt32();
+        }
+        async Task<string?> Code(HttpResponseMessage r) => (await Json(r)).GetProperty("error").GetString();
+
+        // "all" is every member but the sender; the server sets space and app.
+        Assert.Equal(2, await Send(As(Bob), "all"));
+        var inbox = (await Json(await As(Alice).GetAsync("/api/v1/messages", Ct))).GetProperty("items").EnumerateArray()
+            .Single(m => m.GetProperty("kind").GetString() == "app.message");
+        Assert.Equal("Notify Space", inbox.GetProperty("subject").GetProperty("name").GetString());
+        Assert.Equal("Board", inbox.GetProperty("data").GetProperty("appName").GetString());
+        Assert.Equal("Lunch is here", inbox.GetProperty("data").GetProperty("text").GetString());
+
+        // Members only; a real app; text; a writer; a person.
+        Assert.Equal("not_members", await Code(await As(Bob).PostAsJsonAsync(notify, new { to = new[] { Admin }, text = "hi" }, Ct)));
+        Assert.Equal("app_missing", await Code(await As(Bob).PostAsJsonAsync($"/api/v1/spaces/{space.Slug}/apps/nope/notify", new { to = "all", text = "hi" }, Ct)));
+        Assert.Equal("invalid_app_message", await Code(await As(Bob).PostAsJsonAsync(notify, new { to = "all", text = " " }, Ct)));
+        Assert.Equal(HttpStatusCode.Forbidden, (await As(Carol).PostAsJsonAsync(notify, new { to = "all", text = "hi" }, Ct)).StatusCode);
+        Assert.NotEqual(HttpStatusCode.OK, (await As(Admin).PostAsJsonAsync(notify, new { to = "all", text = "hi" }, Ct)).StatusCode);
+
+        // Muting the app, or the whole space, silences it for that person only.
+        Assert.Equal(HttpStatusCode.NoContent, (await As(Alice).PutAsJsonAsync("/api/v1/messages/muted", new { space = space.Id, app = "board", muted = true }, Ct)).StatusCode);
+        Assert.Equal(1, await Send(As(Bob), "all"));                       // Carol only
+        var muted = (await Json(await As(Alice).GetAsync("/api/v1/messages/muted", Ct))).GetProperty("muted")[0];
+        Assert.Equal("board", muted.GetProperty("app").GetString());
+        Assert.Equal("Notify Space", muted.GetProperty("spaceName").GetString());
+        await As(Alice).PutAsJsonAsync("/api/v1/messages/muted", new { space = space.Id, app = "board", muted = false }, Ct);
+        await As(Carol).PutAsJsonAsync("/api/v1/messages/muted", new { space = space.Id, muted = true }, Ct);
+        Assert.Equal(1, await Send(As(Bob), "all"));                       // Alice only
+
+        // 30 an hour per app.
+        for (var n = 3; n < Fishbowl.Api.Endpoints.AppMessagesApi.PerHour; n++) await Send(As(Bob), new[] { Alice });
+        var limited = await As(Bob).PostAsJsonAsync(notify, new { to = "all", text = "one more" }, Ct);
+        Assert.Equal((HttpStatusCode)429, limited.StatusCode);
+        Assert.Equal("rate_limited", await Code(limited));
+    }
 }

@@ -5,6 +5,9 @@
  * (admins, with Approve / Reject / Block right in the row) and "your
  * account was approved". A message another admin already handled shows
  * as done. Rows hold ids only; the server adds who a request is about.
+ * A space's own apps write here too (app.message: "Space · App" and the
+ * app's text), each with a menu to mute that app or the whole space; what
+ * is muted comes back from the toolbar's "Muted (n)".
  * Messages are personal: the same list in every workspace.
  */
 class FbMessagesView extends HTMLElement {
@@ -52,6 +55,7 @@ class FbMessagesView extends HTMLElement {
             return;
         }
         const items = data?.items || [];
+        this._paintToolbar();
         if (!items.length) {
             mount.innerHTML = `
                 <div class="empty-state">
@@ -69,6 +73,84 @@ class FbMessagesView extends HTMLElement {
         }
 
         mount.replaceChildren(...items.map(m => this._row(m, defaultQuota)));
+    }
+
+    // An app message's "…": mute this app, or the whole space.
+    _muteMenu(spaceId, app, appName, spaceName) {
+        const menu = document.createElement("sac-menu");
+        menu.className = "msg-mute";
+        menu.innerHTML = `<button slot="trigger" type="button" class="icon-btn" aria-label="${fb.t("fb.messages.more", "More")}" title="${fb.t("fb.messages.more", "More")}"><sac-icon name="more"></sac-icon></button>`;
+        const item = (action, label) => {
+            const b = document.createElement("button");
+            b.type = "button";
+            b.dataset.action = action;
+            b.textContent = label;
+            return b;
+        };
+        menu.append(
+            item("mute-app", fb.t("fb.messages.mute-app", "Mute {app}", { app: appName || app })),
+            item("mute-space", fb.t("fb.messages.mute-space", "Mute everything from {space}", { space: spaceName })));
+        menu.addEventListener("sac:select", async (ev) => {
+            const whole = ev.detail.action === "mute-space";
+            try {
+                await fb.api.messages.mute(spaceId, whole ? null : app, true);
+                sac.toast?.(fb.t("fb.messages.muted-toast", "Muted. “Muted” above the list undoes it."));
+            } catch (err) {
+                sac.toast?.(fb.errors.text(err, fb.t("fb.messages.mute-failed", "Couldn't mute it.")), { kind: "error" });
+            }
+        });
+        return menu;
+    }
+
+    // "Muted…" in the toolbar only while something is muted.
+    async _paintToolbar() {
+        let muted = [];
+        try { muted = (await fb.api.messages.muted()).muted || []; } catch { /* nothing to offer */ }
+        if (!this.isConnected) return;
+        fb.windowApps.toolbar(this, muted.length
+            ? [{ id: "fb-messages-muted", icon: "eye-off", title: fb.t("fb.messages.muted", "Muted ({n})", { n: muted.length }), onClick: () => this._openMuted(muted) }]
+            : []);
+    }
+
+    _openMuted(muted) {
+        const dlg = document.createElement("sac-dialog");
+        dlg.setAttribute("title", fb.t("fb.messages.muted-title", "Muted"));
+        dlg.id = "fb-muted-dialog";
+        const list = document.createElement("div");
+        for (const m of muted) {
+            const row = document.createElement("div");
+            row.className = "fb-row";
+            const info = document.createElement("div");
+            info.className = "fb-row-info";
+            const name = document.createElement("p");
+            name.className = "fb-row-name";
+            const space = m.spaceName || fb.t("fb.messages.a-space", "A space");
+            name.textContent = m.app ? `${space} · ${m.app}` : fb.t("fb.messages.muted-space", "{space} — all apps", { space });
+            info.appendChild(name);
+            const un = document.createElement("button");
+            un.type = "button";
+            un.className = "btn";
+            un.dataset.action = "unmute";
+            un.textContent = fb.t("fb.messages.unmute", "Unmute");
+            un.addEventListener("click", async () => {
+                try { await fb.api.messages.mute(m.space, m.app, false); row.remove(); }
+                catch (err) { sac.toast?.(fb.errors.text(err, fb.t("fb.messages.mute-failed", "Couldn't mute it.")), { kind: "error" }); }
+                if (!list.children.length) dlg.close?.();
+            });
+            row.append(info, un);
+            list.appendChild(row);
+        }
+        dlg.appendChild(list);
+        const close = document.createElement("button");
+        close.type = "button";
+        close.slot = "footer";
+        close.className = "btn";
+        close.textContent = fb.t("fb.common.close", "Close");
+        close.addEventListener("click", () => dlg.close?.());
+        dlg.appendChild(close);
+        dlg.addEventListener("sac:close", () => dlg.remove());
+        document.body.appendChild(dlg);
+        setTimeout(() => dlg.open?.(), 0);
     }
 
     _row(m, defaultQuota) {
@@ -124,6 +206,13 @@ class FbMessagesView extends HTMLElement {
             icon.setAttribute("name", "success");
             text.textContent = fb.t("fb.messages.welcome", "Your account was approved. Welcome to this Fishbowl.");
             meta.textContent = when;
+        } else if (m.kind === "app.message") {
+            const d = m.data || {};
+            const space = m.subject?.name || fb.t("fb.messages.a-space", "A space");
+            icon.setAttribute("name", "grid");
+            text.textContent = d.text || "";
+            meta.textContent = `${space} · ${d.appName || d.app || ""} · ${when}`;
+            row.appendChild(this._muteMenu(m.subject?.id, d.app, d.appName, space));
         } else if (m.kind === "quota.warning") {
             const d = m.data || {};
             const gb = (n) => `${fb.format.num((Number(n) || 0) / 1073741824, 1)} GB`;

@@ -47,7 +47,9 @@
  * What breaks goes to the space's error store (fb.api.appErrors) for its
  * Designers: an entry that doesn't start (load), a refused call (call),
  * context.space.error(message, detail) (reported) — the server adds an
- * app.json it can't read itself.
+ * app.json it can't read itself. context.space.notify(to, text) sends
+ * members of the space a message from the app (to: member ids or "all");
+ * the server sets the sender, skips who muted it and limits the rate.
  *
  * Every installed app opens as a kit window above the desktop (the host's
  * choice, whatever `kind` the manifest says): a "view" app would take over
@@ -143,6 +145,15 @@
                 }
             };
         }
+        // A message to members of the space, from this app.
+        api.notify = async (to, text) => {
+            try { return await fb.api.appMessage(ws.slice("space:".length), app.folder.replace(/^\.apps\//, ""), to, text); }
+            catch (err) {
+                const e = spaceError(err);
+                report(app, "call", `notify: ${e.code} — ${e.message}`);
+                throw e;
+            }
+        };
         // The app's own report, for its Designers.
         api.error = async (message, detail) => {
             report(app, "reported", String(message ?? ""), detail == null ? null : String(detail));

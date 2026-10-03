@@ -303,6 +303,8 @@ public class AppsTests : IAsyncLifetime
                     let refused = '';
                     try { await context.space.describe('nope'); } catch (e) { refused = e.code; }
                     await context.space.error('boom from the app', 'detail');
+                    const members = await context.space.members();
+                    await context.space.notify([members.items.find((m) => m.you).userId], 'hello members');
                     this.querySelector('#data').textContent = `${rows.length} ${rows[0]?.title} ${refused}`;
                   }
                 });
@@ -334,6 +336,21 @@ public class AppsTests : IAsyncLifetime
             await Assertions.Expect(errorsCard).ToContainTextAsync("describe:");
             await errorsCard.Locator("button[data-action='clear-errors']").ClickAsync();
             await Assertions.Expect(errorsCard).ToContainTextAsync("No errors.");
+
+            // Its message is in the inbox as "Space · App"; muting it is one menu away.
+            await WindowApp.CloseAllAsync(page);
+            await WindowApp.OpenAsync(page, _fixture.BaseUrl, "messages", $"#/space/{slug}/");
+            var msg = page.Locator("fb-messages-view .msg-row[data-kind='app.message']", new() { HasText = "hello members" });
+            await Assertions.Expect(msg).ToContainTextAsync("Hello");
+            await msg.Locator(".msg-mute .icon-btn").ClickAsync();
+            await msg.Locator(".msg-mute button[data-action='mute-app']").ClickAsync();
+            var mutedBtn = page.Locator("#fb-messages-muted");
+            await Assertions.Expect(mutedBtn).ToBeVisibleAsync();
+            await mutedBtn.ClickAsync();
+            var dialog = page.Locator("#fb-muted-dialog");
+            await Assertions.Expect(dialog).ToContainTextAsync("hello");
+            await dialog.Locator("button[data-action='unmute']").ClickAsync();
+            await Assertions.Expect(mutedBtn).ToHaveCountAsync(0);
             Assert.Empty(errors);
         }
         finally

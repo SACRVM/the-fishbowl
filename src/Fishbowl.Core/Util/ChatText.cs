@@ -26,6 +26,7 @@ public static class ChatText
         ["password.resetCode"] = "Your Fishbowl password was reset. Sign in with this temporary password and choose your own: {0}",
         ["subject.space.added"] = "Fishbowl: you were added to a space.",
         ["subject.app.update"] = "Fishbowl: an app on your desktop has an update to confirm.",
+        ["subject.app.message"] = "Fishbowl: an app in one of your spaces sent you a message.",
         ["subject.other"] = "Fishbowl: you have a new message.",
 
         // Discord bot — shared.
@@ -116,6 +117,7 @@ public static class ChatText
         ["password.resetCode"] = "Dein Fishbowl-Passwort wurde zurückgesetzt. Melde dich mit diesem vorläufigen Passwort an und wähl ein eigenes: {0}",
         ["subject.space.added"] = "Fishbowl: du wurdest zu einem Space hinzugefügt.",
         ["subject.app.update"] = "Fishbowl: eine App auf deinem Desktop hat ein Update, das du bestätigen musst.",
+        ["subject.app.message"] = "Fishbowl: eine App in einem deiner Spaces hat dir geschrieben.",
         ["subject.other"] = "Fishbowl: du hast eine neue Nachricht.",
 
         ["bot.notLinked"] = "Dieses Discord-Konto kenne ich noch nicht. Erzeuge in deinen Fishbowl-Benachrichtigungseinstellungen einen Code und schick hier `/link <code>`.",

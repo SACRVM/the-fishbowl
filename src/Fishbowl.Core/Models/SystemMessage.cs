@@ -41,4 +41,10 @@ public static class MessageKinds
     // To the user: their storage crossed 90% of the quota. Data:
     // { usedBytes, quotaBytes }. Once per crossing.
     public const string QuotaWarning = "quota.warning";
+
+    // To members of a space: one of its own apps says something
+    // (AppMessagesApi). Subject: the space. Data: { app (folder), appName,
+    // text, from (the user whose session sent it) } — the app's text is the
+    // one thing here that isn't an id; the server sets everything else.
+    public const string AppMessage = "app.message";
 }

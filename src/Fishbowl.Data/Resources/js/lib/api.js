@@ -439,6 +439,11 @@
         };
     }
 
+    // A space app's messages to members of its space (AppMessagesApi).
+    const appMessage = (slug, folder, to, text) =>
+        request(`/spaces/${encodeURIComponent(slug)}/apps/${encodeURIComponent(folder)}/notify`,
+            { method: "POST", body: JSON.stringify({ to, text }) }).then(messagesChanged);
+
     // A space's app error store (AppErrors): Designers list and clear, any
     // member's browser reports what broke in an app's frame.
     function appErrors(slug) {
@@ -468,6 +473,7 @@
         tables,
         spaceData,
         appErrors,
+        appMessage,
         contacts,
         events,
         tags: {
@@ -607,6 +613,10 @@
         // System messages — personal, never context-prefixed, cookie-only.
         // Every change fires `fb:messages-changed` so the nav badge follows.
         messages: {
+            // Spaces and space apps whose messages I muted (AppMessagesApi).
+            muted:   ()                  => request("/messages/muted"),
+            mute:    (space, app, muted) => request("/messages/muted", { method: "PUT", body: JSON.stringify({ space, app: app || null, muted }) })
+                .then(messagesChanged),
             list:        (unread) => request(`/messages${unread ? "?unread=true" : ""}`),
             unreadCount: ()       => request("/messages/unread-count"),
             read:        (id)     => request(`/messages/${encodeURIComponent(id)}/read`, { method: "POST" })

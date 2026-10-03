@@ -29,6 +29,7 @@ public static class MessagesApi
             ClaimsPrincipal user,
             IMessageRepository messages,
             ISystemRepository system,
+            ISpaceRepository spaces,
             CancellationToken ct) =>
         {
             if (user.Identity?.AuthenticationType == McpContextClaims.BearerScheme) return Results.Forbid();
@@ -36,6 +37,7 @@ public static class MessagesApi
             if (string.IsNullOrEmpty(userId)) return Results.Unauthorized();
 
             var rows = await messages.ListAsync(userId, unread == true, ct);
+            var spaceNames = new Dictionary<string, string?>(StringComparer.Ordinal);
             var me = await system.GetUserAsync(userId, ct);
             var items = new List<object>();
             foreach (var m in rows)
@@ -47,6 +49,13 @@ public static class MessagesApi
                     subject = about is null
                         ? new { type = "user", id = m.SubjectId, exists = false }
                         : new { type = "user", id = about.Id, exists = true, name = about.Name, email = about.Email, state = about.State };
+                }
+                else if (m.SubjectType == "space" && m.SubjectId is not null)
+                {
+                    // An app message names its space at read time (it may have been renamed).
+                    if (!spaceNames.TryGetValue(m.SubjectId, out var name))
+                        spaceNames[m.SubjectId] = name = (await spaces.GetByIdAsync(m.SubjectId, ct))?.Name;
+                    subject = new { type = "space", id = m.SubjectId, exists = name is not null, name };
                 }
                 else if (m.SubjectType is not null)
                 {

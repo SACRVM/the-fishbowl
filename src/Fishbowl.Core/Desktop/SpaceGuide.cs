@@ -66,7 +66,7 @@ public static class SpaceGuide
             | Method | What |
             |---|---|
             | `info()` | `{ name, slug, role, … }` — the space and the user's role |
-            | `members()` | the members: id, name, picture, role |
+            | `members()` | `{ role, items: [{ userId, name, avatarUrl, role, you }] }` — `role` is the user's own |
             | `tables()` | the space's tables |
             | `describe(table)` | one table: columns, types, rules |
             | `query(table, { where, orderBy, limit, offset })` | rows; `where` is a MongoDB-style filter: `{ col: value }` or `{ col: { $eq $ne $lt $lte $gt $gte $in $like $isNull $isNotNull } }`, combined with `$and $or $not`; `orderBy: [{ field, direction: "asc" \| "desc" }]`; `limit` ≤ 500 |
@@ -78,6 +78,7 @@ public static class SpaceGuide
             | `update(table, id, values, rowVersion?)` | partial; with `rowVersion` it refuses a stale write |
             | `remove(table, id)` | to the space's trash |
             | `notes()`, `note(id)`, `todos(includeCompleted?)`, `events(from?, to?)`, `contacts()` | the space's built-ins, read-only |
+            | `notify(to, text)` | a message from your app to members of this space — `to`: member ids (`userId` from `members().items`) or `"all"` (everyone but the sender); text ≤ 500 characters; 30 an hour per app; members can mute an app |
             | `error(message, detail?)` | your own entry in the error store, for the space's Designers |
 
             Every row has `id`, `title`, `author`, `created_at`, `last_modified`, `row_version` besides its columns.
