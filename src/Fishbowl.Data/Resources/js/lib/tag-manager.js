@@ -27,6 +27,7 @@
         if (win) return win;
         win = document.createElement("sac-window");
         win.id = "fb-tag-manager";
+        win.classList.add("fb-window");
         win.setAttribute("title", fb.t("fb.notes.manage-tags", "Manage tags"));
         win.setAttribute("width", "640px");
         win.setAttribute("height", "480px");

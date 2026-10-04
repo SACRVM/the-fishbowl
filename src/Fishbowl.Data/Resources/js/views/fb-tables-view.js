@@ -47,10 +47,19 @@ class FbTablesView extends HTMLElement {
                     padding: 12px;
                     gap: 4px;
                 }
-                fb-tables-view .tb-list h2 { margin: 0 0 8px; font-size: 13px; color: var(--text-muted); font-weight: 600; }
+                /* The list header like Todos' and Calendar's: a small muted label on the rows' text edge. */
+                fb-tables-view .tb-list-title {
+                    margin: 0 0 6px 12px;
+                    font-family: 'Outfit', sans-serif;
+                    font-weight: 700;
+                    font-size: 11px;
+                    text-transform: uppercase;
+                    letter-spacing: 0.1em;
+                    color: var(--text-muted);
+                }
                 fb-tables-view .tb-item {
                     display: block;
-                    padding: 8px 10px;
+                    padding: 8px 12px;
                     border-radius: var(--radius-m);
                     color: var(--text);
                     text-decoration: none;
@@ -63,18 +72,18 @@ class FbTablesView extends HTMLElement {
                     height: 100%;
                     display: flex;
                     flex-direction: column;
-                    padding: 12px;
+                    padding: 24px;
                     gap: 8px;
                     box-sizing: border-box;
                 }
-                fb-tables-view .tb-head h1 { margin: 0; font-size: 18px; }
+                fb-tables-view .tb-head h2 { margin: 0; }
                 fb-tables-view .tb-head p { margin: 2px 0 0; color: var(--text-muted); font-size: 13px; }
                 fb-tables-view sac-data-grid { flex: 1; min-height: 240px; --grid-bg: var(--bg); }
             </style>
-            <sac-split id="split" collapse show="start" position="${this._splitPosition()}" min-start="200px" min-end="360px"
+            <sac-split id="split" collapse show="start" position="${this._splitPosition()}" min-start="260px" min-end="360px"
                        aria-label="${fb.t("fb.tables.resize", "Resize the table list")}">
                 <aside class="tb-list" slot="start">
-                    <h2>${fb.t("fb.tables.title", "Tables")}</h2>
+                    <div class="tb-list-title">${fb.t("fb.tables.title", "Tables")}</div>
                     <div id="tb-items"></div>
                 </aside>
                 <section class="tb-main" slot="end">
@@ -83,7 +92,7 @@ class FbTablesView extends HTMLElement {
                         <h3 id="tb-empty-title"></h3>
                         <p id="tb-empty-text"></p>
                     </div>
-                    <div class="tb-head" id="tb-head" hidden><h1 id="tb-name"></h1><p id="tb-desc"></p></div>
+                    <div class="tb-head" id="tb-head" hidden><h2 id="tb-name"></h2><p id="tb-desc"></p></div>
                     <div id="tb-grid-slot"></div>
                 </section>
             </sac-split>`;
@@ -91,7 +100,7 @@ class FbTablesView extends HTMLElement {
 
     // The list's share of the width, as the user left it (sac-split takes a percentage).
     _splitPosition() {
-        try { return localStorage.getItem("fb.tables.split") || "20%"; } catch { return "20%"; }
+        try { return localStorage.getItem("fb.tables.split") || "28%"; } catch { return "28%"; }
     }
 
     async loadTables() {

@@ -31,12 +31,14 @@ class FbSystemView extends HTMLElement {
     render() {
         this.innerHTML = `
             <style>
-                fb-system-view { display: block; padding: 4px 20px 20px; }
-                fb-system-view .card { margin-bottom: 16px; }
-                fb-system-view .card p { margin: 0 0 12px; }
+                /* The window's padding is the edge (app.css .fb-window). */
+                fb-system-view { display: block; }
+                fb-system-view .fb-block { display: block; margin-bottom: 24px; }
+                fb-system-view .fb-block[hidden] { display: none; }
+                fb-system-view .fb-block p { margin: 0 0 12px; }
                 fb-system-view .muted { color: var(--text-muted); font-size: 13px; }
                 fb-system-view .restart-note { margin-bottom: 12px; }
-                fb-system-view sac-tab-panel > .card:first-child { margin-top: 16px; }
+                fb-system-view sac-tab-panel > .fb-block:first-child { margin-top: 24px; }
                 fb-system-view .cfg-row { padding: 14px 0; }
                 fb-system-view .cfg-row + .cfg-row { border-top: 1px solid var(--border); }
                 fb-system-view .cfg-head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
@@ -88,7 +90,7 @@ class FbSystemView extends HTMLElement {
         await this.renderInfo(info);
         if (!rows) {
             const p = document.createElement("div");
-            p.className = "card";
+            p.className = "fb-block";
             p.innerHTML = `<p>${fb.t("fb.admin.settings-unavailable", "The settings can't be loaded right now.")}</p>`;
             info.appendChild(p);
         }
@@ -105,7 +107,7 @@ class FbSystemView extends HTMLElement {
             const p = this._tabs.querySelector(`sac-tab-panel[name="${s.id}"]`);
             if (!p) continue;
             const card = document.createElement("div");
-            card.className = "card";
+            card.className = "fb-block";
             card.dataset.section = s.id;
             for (const r of s.rows) card.appendChild(fb.systemSettings.row(r, {
                 refresh: () => this._reloadSettings(),
@@ -138,7 +140,7 @@ class FbSystemView extends HTMLElement {
             s = await fb.api.admin.system();
         } catch (err) {
             console.warn("[fb-system-view] load failed:", err?.status);
-            mount.innerHTML = `<div class="card"><p class="muted">${fb.t("fb.admin.system-unavailable", "System information can't be loaded right now.")}</p></div>`;
+            mount.innerHTML = `<div class="fb-block"><p class="muted">${fb.t("fb.admin.system-unavailable", "System information can't be loaded right now.")}</p></div>`;
             return;
         }
         if (!this.isConnected) return;
@@ -196,7 +198,7 @@ class FbSystemView extends HTMLElement {
 // A kit card headed by a <sac-section>; rows go into the section.
 function section(title) {
     const card = document.createElement("div");
-    card.className = "card";
+    card.className = "fb-block";
     const panel = document.createElement("sac-section");
     panel.setAttribute("title", title);
     card.appendChild(panel);

@@ -267,8 +267,7 @@ class FbTodosView extends HTMLElement {
                 }
 
                 fb-todos-view .tv-empty-list {
-                    padding: 40px 16px;
-                    text-align: center;
+                    padding: 10px 12px;
                     color: var(--text-muted);
                     font-size: 13px;
                 }
@@ -293,12 +292,13 @@ class FbTodosView extends HTMLElement {
                 fb-todos-view .tv-editor-body {
                     flex: 1;
                     overflow: auto;
-                    /* clamp(), not a breakpoint: roomy on a monitor, tight
-                       on a phone. */
-                    padding: clamp(1.25rem, 4vw, 36px) clamp(1rem, 5vw, 56px);
+                    /* Like every editor pane: centred, at most 760px, 24px around. */
+                    padding: 24px;
                     display: flex;
                     flex-direction: column;
+                    align-items: center;
                 }
+                fb-todos-view .tv-editor-body > * { width: 100%; max-width: 760px; }
                 fb-todos-view .tv-title-input {
                     width: 100%;
                     font-family: 'Outfit', sans-serif;
@@ -616,7 +616,7 @@ class FbTodosView extends HTMLElement {
 
         const list = this.querySelector("#todo-list");
         if (filtered.length === 0) {
-            list.innerHTML = `<div class="tv-empty-list">${fb.t("fb.todos.empty-list", "No todos. Click + to create one.")}</div>`;
+            list.innerHTML = `<div class="tv-empty-list">${fb.t("fb.todos.empty-list", "No todos.")}</div>`;
             return;
         }
 

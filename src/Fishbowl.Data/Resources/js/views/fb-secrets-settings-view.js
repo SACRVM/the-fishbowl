@@ -61,18 +61,18 @@ class FbSecretsSettingsView extends HTMLElement {
 
         if (sac.scope.get().type === "scoped") {
             mount.innerHTML = `
-                <div class="card">
+                <div class="fb-block">
                     <p>${fb.t("fb.secrets.space-none", "Secrets are personal for now — a space has no vault.")}</p>
                 </div>`;
             return;
         }
         if (!status.available) {
-            mount.innerHTML = `<div class="card"><p class="muted">${fb.t("fb.secrets.unavailable", "The vault can't be reached right now.")}</p></div>`;
+            mount.innerHTML = `<div class="fb-block"><p class="muted">${fb.t("fb.secrets.unavailable", "The vault can't be reached right now.")}</p></div>`;
             return;
         }
         if (!status.initialized) {
             mount.innerHTML = `
-                <div class="card"><sac-section title="${fb.t("fb.secrets.not-set-up", "Not set up yet")}">
+                <div class="fb-block"><sac-section title="${fb.t("fb.secrets.not-set-up", "Not set up yet")}">
                     <p>${fb.t("fb.secrets.setup-hint", "Write <code>:::secret</code> … <code>:::end</code> in a note, or set up now: you choose a passphrase and get a recovery key to keep somewhere safe.")}</p>
                     <div class="toolbar"><button type="button" class="btn primary" id="setup">${fb.t("fb.secrets.setup", "Set up secrets")}</button></div>
                 </sac-section></div>`;
@@ -88,7 +88,7 @@ class FbSecretsSettingsView extends HTMLElement {
         slots.sort((a, b) => order[a.kind] - order[b.kind] || String(a.createdAt).localeCompare(String(b.createdAt)));
 
         mount.innerHTML = `
-            <div class="card"><sac-section title="${fb.t("fb.secrets.status", "Status")}">
+            <div class="fb-block"><sac-section title="${fb.t("fb.secrets.status", "Status")}">
                 <div class="status-row">
                     <span class="status-text">${status.unlocked
                         ? `<sac-icon name="unlock"></sac-icon>${fb.t("fb.secrets.unlocked", "Unlocked in this tab")}`
@@ -102,7 +102,7 @@ class FbSecretsSettingsView extends HTMLElement {
                     <span>${fb.t("fb.secrets.autolock-after", "without using a secret")}</span>
                 </div>
             </sac-section></div>
-            <div class="card"><sac-section title="${fb.t("fb.secrets.ways", "Ways to unlock")}">
+            <div class="fb-block"><sac-section title="${fb.t("fb.secrets.ways", "Ways to unlock")}">
                 <div id="slot-list"></div>
                 <div class="toolbar panel-foot">
                     ${slots.some(s => s.kind === "passphrase") ? "" : `<button type="button" class="btn" id="add-passphrase"><sac-icon name="key"></sac-icon> ${fb.t("fb.secrets.set-passphrase", "Set a passphrase")}</button>`}

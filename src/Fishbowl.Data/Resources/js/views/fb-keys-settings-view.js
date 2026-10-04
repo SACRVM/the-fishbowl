@@ -192,13 +192,13 @@ class FbKeysSettingsView extends HTMLElement {
                 </p>
             </div></header>
 
-            <div class="card" id="agent-guide">
+            <div class="fb-block" id="agent-guide">
                 <sac-section title="${fb.t("fb.keys.agent", "Connect an agent")}">
                     <div id="guide-mount"></div>
                 </sac-section>
             </div>
 
-            <div class="card">
+            <div class="fb-block">
                 <sac-section title="${fb.t("fb.keys.new", "New key")}">
                     <sac-status-banner id="form-status"></sac-status-banner>
                     <div id="form-mount"></div>
@@ -273,7 +273,7 @@ class FbKeysSettingsView extends HTMLElement {
 
         if (this.keys.length === 0) {
             list.innerHTML = `
-                <div class="card"><div class="empty-state">
+                <div class="fb-block"><div class="empty-state">
                     <sac-icon name="key"></sac-icon>
                     <h3>${fb.t("fb.keys.empty", "No keys yet")}</h3>
                     <p>${fb.t("fb.keys.empty-hint", "Create one above.")}</p>
@@ -329,7 +329,7 @@ class FbKeysSettingsView extends HTMLElement {
         };
         // One card per workspace, headed by its name.
         list.innerHTML = ordered.map(g => `
-            <div class="card">
+            <div class="fb-block">
                 <sac-section class="key-group" data-context="${escapeAttr(g.key)}" title="${escapeAttr(g.label)}">
                     ${g.keys.map(row).join("")}
                 </sac-section>

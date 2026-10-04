@@ -24,7 +24,7 @@ class FbTrashView extends HTMLElement {
                 <h1>${fb.t("fb.trash.title", "Trash")}</h1>
                 <p class="subtitle">${fb.t("fb.trash.subtitle", "What was deleted in this workspace. Items are removed for good after 30 days.")}</p>
             </div></header>
-            <div class="card"><div id="trash-list"></div></div>`;
+            <div class="fb-block" id="trash-list"></div>`;
         this._onScope = () => this.refresh();
         window.addEventListener("sac:scope-changed", this._onScope);
         this.refresh();

@@ -79,7 +79,7 @@ class FbUsersAdminView extends HTMLElement {
         if (sac.scope.get().type === "scoped") {
             fb.windowApps.toolbar(this, []);
             mount.innerHTML = `
-                <div class="card">
+                <div class="fb-block">
                     <p>${fb.t("fb.admin.users-personal-only", "Users are managed for the whole Fishbowl, from your personal workspace.")}</p>
                 </div>`;
             return;
@@ -90,7 +90,7 @@ class FbUsersAdminView extends HTMLElement {
             data = await fb.api.admin.users();
         } catch (err) {
             console.warn("[fb-users-admin-view] load failed:", err?.status);
-            mount.innerHTML = `<div class="card"><p class="muted">${fb.t("fb.admin.users-unavailable", "The user list can't be loaded right now.")}</p></div>`;
+            mount.innerHTML = `<div class="fb-block"><p class="muted">${fb.t("fb.admin.users-unavailable", "The user list can't be loaded right now.")}</p></div>`;
             return;
         }
         if (!this.isConnected) return; // closed while loading
@@ -133,7 +133,7 @@ class FbUsersAdminView extends HTMLElement {
     // A kit card headed by a <sac-section>; rows go into the section.
     _panel(title) {
         const card = document.createElement("div");
-        card.className = "card";
+        card.className = "fb-block";
         const panel = document.createElement("sac-section");
         panel.setAttribute("title", title);
         card.appendChild(panel);

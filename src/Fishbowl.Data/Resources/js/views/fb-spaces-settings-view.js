@@ -83,13 +83,13 @@ class FbSpacesSettingsView extends HTMLElement {
                 </p>
             </div></header>
 
-            <div class="card">
+            <div class="fb-block">
                 <sac-section title="${fb.t("fb.spaces.personal", "Personal workspace")}">
                     <div id="personal-row"></div>
                 </sac-section>
             </div>
 
-            <div class="card">
+            <div class="fb-block">
                 <sac-section title="${fb.t("fb.spaces.new", "New space")}">
                     <sac-status-banner id="form-status"></sac-status-banner>
                     <div class="create-row">
@@ -101,13 +101,13 @@ class FbSpacesSettingsView extends HTMLElement {
                 </sac-section>
             </div>
 
-            <div class="card">
+            <div class="fb-block">
                 <sac-section title="${fb.t("fb.spaces.yours", "Your spaces")}">
                     <div id="space-list"></div>
                 </sac-section>
             </div>
 
-            <div class="card" id="archive-section" hidden>
+            <div class="fb-block" id="archive-section" hidden>
                 <sac-section title="${fb.t("fb.spaces.archived", "Archived spaces")}">
                     <div id="archive-list"></div>
                 </sac-section>

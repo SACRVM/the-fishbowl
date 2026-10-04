@@ -144,12 +144,16 @@
 .center-card details > summary { cursor: pointer; color: var(--text-muted); font-size: 0.9rem; }
 .center-card details > p { color: var(--text-muted); font-size: 0.85rem; margin: 0.75rem 0; }
 
-/* ───── Settings pages (#/keys, #/spaces, #/secrets, #/data, #/messages,
-   #/admin/users, #/admin/settings) ─────
-   The kit has no "page with a title" recipe for an SPA view, so the frame
-   is one rule set here instead of a copy per view. Inside it: kit parts —
-   .card panels headed by <sac-section>, .btn in a .toolbar strip,
-   .empty-state, <sac-chip>, <sac-status-banner>, <sac-progress>. */
+/* ───── Window apps (fb.windowApps: Messages, Trash, Spaces, Apps, API keys,
+   Secrets, Users, System) and the other windows of ours (Your data,
+   Profile) ─────
+   One frame for all: the window's own padding is the edge (24px, the same
+   left and right for the action bar, sections and rows); inside, sections
+   (.fb-block, headed by <sac-section>) sit straight in the window, 24px
+   apart — no card inside a window. The view element is the same .fb-page a
+   page would be; parts are the kit's: .btn in a .toolbar, .empty-state,
+   <sac-chip>, <sac-status-banner>, <sac-progress>. */
+sac-window.fb-window { --window-padding: 24px; }
 .fb-page {
     display: block;
     max-width: 860px;
@@ -159,20 +163,24 @@
 .fb-page > header > div { flex: 1; min-width: 0; }
 .fb-page > header h1 { font-size: 28px; margin: 0 0 6px; }
 .fb-page > header .subtitle { color: var(--text-muted); margin: 0; }
-.fb-page .card { margin-bottom: 20px; }
-.fb-page .card > sac-section { margin-bottom: 0; }
-.fb-page .card p { margin: 0 0 12px; }
+.fb-page .fb-block { display: block; margin: 0 0 24px; }
+.fb-page .fb-block[hidden] { display: none; }
+.fb-page .fb-block:last-child { margin-bottom: 0; }
+.fb-page .fb-block > sac-section { margin-bottom: 0; }
+.fb-page .fb-block p { margin: 0 0 12px; }
+/* Nothing to list: the empty state in the window's free space, not a box. */
+.fb-page.in-window .fb-block > .empty-state { min-height: 40vh; justify-content: center; }
 .fb-page .muted { color: var(--text-muted); font-size: 13px; }
 .fb-page .field { margin-bottom: 14px; }
 .fb-page code { font-family: var(--font-mono); overflow-wrap: anywhere; }
 /* The same view in a window app (fb.windowApps): no page frame, and the
    window's title replaces the heading; the window's actions sit above. */
-.fb-page.in-window { max-width: none; padding: 4px 20px 20px; }
+.fb-page.in-window { max-width: none; padding: 0; }
 .fb-page.in-window > header { display: none; }
 /* Secrets keeps its one line: it says what the operator can and can't read. */
 fb-secrets-settings-view.in-window > header { display: flex; margin-bottom: 16px; }
 fb-secrets-settings-view.in-window > header h1 { display: none; }
-sac-window > .wa-bar { padding: 12px 20px 0; }
+sac-window > .wa-bar { padding: 0 0 16px; }
 
 /* One row style: the kit's list-detail row — flat, a divider between. */
 .fb-row { display: flex; align-items: center; gap: 14px; padding: 12px 0; }
@@ -365,7 +373,7 @@ label.fb-quota-field input { width: 6em; }
 }
 
 /* Space members window (fb.spaceMembers) and its invitation dialogs. */
-.fb-members { display: flex; flex-direction: column; gap: 12px; padding: 12px; }
+.fb-members { display: flex; flex-direction: column; gap: 12px; }
 .fb-members-bar:empty { display: none; }
 .fb-invite-form { display: flex; flex-direction: column; gap: 12px; }
 .fb-invite-field { display: flex; align-items: center; justify-content: space-between; gap: 12px; }

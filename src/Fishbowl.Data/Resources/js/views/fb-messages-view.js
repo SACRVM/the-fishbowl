@@ -39,7 +39,7 @@ class FbMessagesView extends HTMLElement {
                 <h1>${fb.t("fb.messages.title", "Messages")}</h1>
                 <p class="subtitle">${fb.t("fb.messages.subtitle", "What this Fishbowl has to tell you.")}</p>
             </div></header>
-            <div class="card" id="messages-body"><p class="muted">${fb.t("fb.common.loading", "Loading…")}</p></div>
+            <div class="fb-block" id="messages-body"><p class="muted">${fb.t("fb.common.loading", "Loading…")}</p></div>
         `;
     }
 

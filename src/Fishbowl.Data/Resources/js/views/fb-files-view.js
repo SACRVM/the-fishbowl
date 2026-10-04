@@ -279,7 +279,7 @@
                     fb-files-view .fv-bottom sac-shortcut-bar { flex: 1; min-width: 0; }
                     fb-files-view .fv-bottom sac-progress { width: 12rem; }
                     .fv-all { display: flex; align-items: center; gap: 6px; margin-top: 12px; }
-                    .fv-trash-body { display: flex; flex-direction: column; gap: 12px; padding: 12px; }
+                    .fv-trash-body { display: flex; flex-direction: column; gap: 12px; }
                     .fv-trash-list { list-style: none; margin: 0; padding: 0; }
                     .fv-trash-row {
                         display: flex;
@@ -1279,6 +1279,7 @@
         async _openTrash(pane) {
             this._trashWin?.remove();
             const win = document.createElement("sac-window");
+            win.classList.add("fb-window");
             win.setAttribute("title", t("fb.files.trash-title", "Trash — {ws}", { ws: this._label(pane.workspace) }));
             win.setAttribute("width", "640px");
             win.setAttribute("height", "520px");

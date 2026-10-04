@@ -19,6 +19,7 @@
     function ensureWindow() {
         if (win?.isConnected) return win;
         win = document.createElement("sac-window");
+        win.classList.add("fb-window");
         win.id = "fb-your-data";
         win.setAttribute("width", "520px");
         win.setAttribute("height", "auto");
@@ -34,8 +35,8 @@
         w.setAttribute("title", fb.t("fb.data.title", "Your data"));
         w.innerHTML = `
             <style>
-                #fb-your-data .yd-body { padding: 4px 16px 12px; }
-                #fb-your-data sac-section { margin-bottom: 16px; }
+                /* The window's padding is the edge (app.css .fb-window); sections 24px apart like every window's. */
+                #fb-your-data sac-section { margin-bottom: 24px; }
                 #fb-your-data .yd-text { margin: 0 0 4px; }
                 #fb-your-data sac-progress { margin: 4px 0 8px; }
                 #fb-your-data .muted { color: var(--text-muted); font-size: 13px; margin: 8px 0 0; }

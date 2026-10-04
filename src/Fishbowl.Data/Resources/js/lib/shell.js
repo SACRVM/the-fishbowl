@@ -327,6 +327,7 @@
         if (!win) {
             win = document.createElement("sac-window");
             win.id = "fb-profile-window";
+            win.classList.add("fb-window");
             win.setAttribute("title", fb.t("fb.profile.title", "Profile"));
             win.setAttribute("width", "380px");
             win.setAttribute("height", "auto");

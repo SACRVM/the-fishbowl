@@ -32,6 +32,7 @@
         if (win) return win;
         win = document.createElement("sac-window");
         win.id = "fb-space-members";
+        win.classList.add("fb-window");
         win.setAttribute("width", "560px");
         win.setAttribute("height", "520px");
         win.setAttribute("top", "80px");

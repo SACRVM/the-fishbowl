@@ -2,7 +2,7 @@
  * <fb-contacts-view>  (mounted at #/contacts, personal and space)
  *
  * People and organisations (space-apps spec, phase 6) on the kit's
- * <sac-split>, like Todos: the list (search, All / People / Organisations,
+ * <sac-split>, like Todos: the list (search, a People / Organisations filter,
  * "+" for a new person or organisation) and the open contact's fields in
  * sections — saved as you type. A person belongs to at most one
  * organisation; an organisation shows its people; both show the table rows
@@ -39,6 +39,11 @@ class FbContactsView extends HTMLElement {
 
     t(key, fallback, vars) { return fb.t(`fb.contacts.${key}`, fallback, vars); }
 
+    // The list's share of the width, as the user left it (like Notes and Todos).
+    _splitPosition() {
+        try { return localStorage.getItem("fb.contacts.split") || "28%"; } catch { return "28%"; }
+    }
+
     async load() {
         try { this.contacts = await fb.api.contacts.list(); }
         catch (err) { console.error("[fb-contacts-view] list failed:", err); this.contacts = []; }
@@ -63,8 +68,22 @@ class FbContactsView extends HTMLElement {
                 fb-contacts-view .cv-list-pane { min-height: 100%; background: var(--panel); display: flex; flex-direction: column; }
                 fb-contacts-view .cv-search { padding: 12px 12px 0; }
                 fb-contacts-view .cv-search input { width: 100%; box-sizing: border-box; }
-                fb-contacts-view .cv-head { display: flex; align-items: center; gap: 8px; padding: 10px 12px 6px; }
-                fb-contacts-view .cv-head sac-segmented-control { flex: 1; }
+                /* The list header like Todos': a small muted label on the rows' text edge, icon actions on the right. */
+                fb-contacts-view .cv-head { display: flex; align-items: center; gap: 2px; padding: 12px 12px 6px 24px; }
+                fb-contacts-view .cv-head-title {
+                    flex: 1;
+                    font-family: 'Outfit', sans-serif;
+                    font-weight: 700;
+                    font-size: 11px;
+                    text-transform: uppercase;
+                    letter-spacing: 0.1em;
+                    color: var(--text-muted);
+                }
+                fb-contacts-view .cv-head .icon-btn { color: var(--text-muted); }
+                fb-contacts-view .cv-head .icon-btn.active {
+                    background: var(--accent-tint);
+                    color: var(--accent);
+                }
                 fb-contacts-view .cv-items { flex: 1; overflow-y: auto; padding: 2px 12px 12px; }
                 fb-contacts-view .cv-item {
                     display: flex; align-items: center; gap: 10px;
@@ -78,7 +97,7 @@ class FbContactsView extends HTMLElement {
                 fb-contacts-view .cv-item-sub { color: var(--text-muted); font-size: 0.8125rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
                 fb-contacts-view .cv-item sac-icon { color: var(--text-muted); flex: none; }
                 fb-contacts-view .cv-editor-pane { height: 100%; overflow-y: auto; }
-                fb-contacts-view .cv-editor { max-width: 760px; margin: 0 auto; padding: 16px 20px 40px; }
+                fb-contacts-view .cv-editor { max-width: 760px; margin: 0 auto; padding: 24px 24px 40px; }
                 fb-contacts-view .cv-empty { min-height: 60%; justify-content: center; }
                 fb-contacts-view .cv-title { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
                 fb-contacts-view .cv-title h2 { margin: 0; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
@@ -98,18 +117,16 @@ class FbContactsView extends HTMLElement {
                 fb-contacts-view .cv-links a { cursor: pointer; }
                 fb-contacts-view[readonly] .cv-write { display: none !important; }
             </style>
-            <sac-split id="split" collapse show="start" position="30%" min-start="260px" min-end="360px"
+            <sac-split id="split" collapse show="start" position="${this._splitPosition()}" min-start="260px" min-end="360px"
                        aria-label="${t("resize", "Resize the contact list")}">
                 <aside class="cv-list-pane" slot="start">
                     <div class="cv-search">
                         <input type="search" id="cv-search" placeholder="${t("search", "Search contacts")}"/>
                     </div>
                     <div class="cv-head">
-                        <sac-segmented-control id="cv-filter" value="all">
-                            <button type="button" data-value="all">${t("all", "All")}</button>
-                            <button type="button" data-value="person">${t("people", "People")}</button>
-                            <button type="button" data-value="organisation">${t("organisations", "Organisations")}</button>
-                        </sac-segmented-control>
+                        <span class="cv-head-title" id="cv-head-title"></span>
+                        <button type="button" class="icon-btn" data-filter="person" title="${t("only-people", "Only people")}" aria-label="${t("only-people", "Only people")}"><sac-icon name="user"></sac-icon></button>
+                        <button type="button" class="icon-btn" data-filter="organisation" title="${t("only-organisations", "Only organisations")}" aria-label="${t("only-organisations", "Only organisations")}"><sac-icon name="users"></sac-icon></button>
                         <sac-menu id="cv-new">
                             <button slot="trigger" type="button" class="icon-btn" title="${t("new", "New contact")}" aria-label="${t("new", "New contact")}"><sac-icon name="plus"></sac-icon></button>
                             <button type="button" data-action="person"><sac-icon name="user"></sac-icon> ${t("new-person", "New person")}</button>
@@ -127,7 +144,23 @@ class FbContactsView extends HTMLElement {
                 </main>
             </sac-split>`;
 
-        this.querySelector("#cv-filter").addEventListener("sac:change", (e) => { this.filter = e.detail.value || "all"; this.renderList(); });
+        // People / organisations only: one toggle at a time, the label says what the list shows.
+        const titles = { all: t("all-contacts", "All contacts"), person: t("people", "People"), organisation: t("organisations", "Organisations") };
+        const showFilter = () => {
+            for (const b of this.querySelectorAll(".cv-head [data-filter]")) b.classList.toggle("active", b.dataset.filter === this.filter);
+            this.querySelector("#cv-head-title").textContent = titles[this.filter];
+        };
+        showFilter();
+        for (const btn of this.querySelectorAll(".cv-head [data-filter]")) {
+            btn.addEventListener("click", () => {
+                this.filter = this.filter === btn.dataset.filter ? "all" : btn.dataset.filter;
+                showFilter();
+                this.renderList();
+            });
+        }
+        this.querySelector("#split").addEventListener("sac:resize", (e) => {
+            try { localStorage.setItem("fb.contacts.split", e.detail.position); } catch { /* storage off */ }
+        });
         this.querySelector("#cv-search").addEventListener("input", (e) => { this.query = e.target.value.trim().toLowerCase(); this.renderList(); });
         this.querySelector("#cv-new").addEventListener("sac:select", (e) => this.create(e.detail.action));
     }

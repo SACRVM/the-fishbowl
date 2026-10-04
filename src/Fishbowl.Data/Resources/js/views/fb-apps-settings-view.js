@@ -41,15 +41,15 @@ class FbAppsSettingsView extends HTMLElement {
                     ? fb.t("fb.apps.page-subtitle-space", "Apps on this space's desktop. A sandboxed app gets only what you allowed it.")
                     : fb.t("fb.apps.page-subtitle", "Apps on your desktop. A sandboxed app gets only what you allowed it.")}</p>
             </div></header>
-            <div class="card">
+            <div class="fb-block">
                 <sac-section title="${fb.t("fb.apps.page-installed", "Installed")}"></sac-section>
                 <div id="fb-apps-list"></div>
             </div>
-            <div class="card" id="fb-apps-errors-card" hidden>
+            <div class="fb-block" id="fb-apps-errors-card" hidden>
                 <sac-section title="${fb.t("fb.apps.errors", "Errors")}"></sac-section>
                 <div id="fb-apps-errors"></div>
             </div>
-            <div class="card">
+            <div class="fb-block">
                 <sac-section title="${fb.t("fb.apps.page-who", "Who may install")}"></sac-section>
                 <p class="muted" id="fb-apps-policy"></p>
             </div>`;

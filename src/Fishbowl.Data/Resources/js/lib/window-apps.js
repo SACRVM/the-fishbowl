@@ -44,6 +44,7 @@
             win.setAttribute("top", "60px");
             win.setAttribute("left", `max(3vw, calc(50vw - ${app.w / 2}px))`);
             win.setAttribute("controls", "max close");
+            win.classList.add("fb-window");
             document.body.appendChild(win);
         }
         win.setAttribute("title", fb.t(app.key, app.title));

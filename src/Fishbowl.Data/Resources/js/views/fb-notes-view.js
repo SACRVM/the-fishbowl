@@ -450,8 +450,7 @@ class FbNotesView extends HTMLElement {
                     flex: 1;
                 }
                 fb-notes-view .nv-empty-list {
-                    padding: 40px 16px;
-                    text-align: center;
+                    padding: 10px 12px;
                     color: var(--text-muted);
                     font-size: 13px;
                 }
@@ -918,7 +917,7 @@ class FbNotesView extends HTMLElement {
 
         const list = this.querySelector("#note-list");
         if (filtered.length === 0) {
-            list.innerHTML = `<div class="nv-empty-list">${fb.t("fb.notes.empty-list", "No notes. Click + to create one.")}</div>`;
+            list.innerHTML = `<div class="nv-empty-list">${fb.t("fb.notes.empty-list", "No notes.")}</div>`;
             return;
         }
 
