@@ -32,13 +32,35 @@ public class OAuthRepository : IOAuthRepository
         public string ExpiresAt { get; set; } = "";
     }
 
+    // Registration is anonymous (RFC 7591), so a client only stays while it
+    // is in use: one that never completed a token exchange (no used code)
+    // and has no code in flight goes after UnusedClientLifetime. The newest
+    // used code of a client is kept as that marker (SaveCodeAsync).
+    public static readonly TimeSpan UnusedClientLifetime = TimeSpan.FromHours(24);
+
+    // A client that counts: younger than UnusedClientLifetime, or with a used
+    // or still-valid code.
+    private const string InUse = @"
+        (oauth_clients.created_at >= @Cutoff
+         OR EXISTS (SELECT 1 FROM oauth_codes c
+                    WHERE c.client_id = oauth_clients.client_id AND (c.used = 1 OR c.expires_at >= @Now)))";
+
     public async Task<OAuthClient> RegisterClientAsync(string name, IReadOnlyList<string> redirectUris, CancellationToken ct = default)
     {
         var client = new OAuthClient("fbc_" + Ulid.NewUlid().ToString().ToLowerInvariant(), name, redirectUris, DateTime.UtcNow);
         using var db = _db.CreateSystemConnection();
         await db.ExecuteAsync(new CommandDefinition(
-            "INSERT INTO oauth_clients(client_id, name, redirect_uris, created_at) VALUES (@ClientId, @Name, @Uris, @At)",
-            new { client.ClientId, client.Name, Uris = JsonSerializer.Serialize(redirectUris), At = client.CreatedAt.ToString("o") }, cancellationToken: ct));
+            "DELETE FROM oauth_clients WHERE NOT " + InUse + @";
+            INSERT INTO oauth_clients(client_id, name, redirect_uris, created_at) VALUES (@ClientId, @Name, @Uris, @At)",
+            new
+            {
+                client.ClientId,
+                client.Name,
+                Uris = JsonSerializer.Serialize(redirectUris),
+                At = client.CreatedAt.ToString("o"),
+                Cutoff = (client.CreatedAt - UnusedClientLifetime).ToString("o"),
+                Now = client.CreatedAt.ToString("o"),
+            }, cancellationToken: ct));
         return client;
     }
 
@@ -51,17 +73,26 @@ public class OAuthRepository : IOAuthRepository
             DateTime.Parse(r.CreatedAt, null, DateTimeStyles.RoundtripKind));
     }
 
+    // Only the clients in use — what the registration cap is about.
     public async Task<long> CountClientsAsync(CancellationToken ct = default)
     {
+        var now = DateTime.UtcNow;
         using var db = _db.CreateSystemConnection();
-        return await db.ExecuteScalarAsync<long>(new CommandDefinition("SELECT COUNT(*) FROM oauth_clients", cancellationToken: ct));
+        return await db.ExecuteScalarAsync<long>(new CommandDefinition(
+            "SELECT COUNT(*) FROM oauth_clients WHERE " + InUse,
+            new { Cutoff = (now - UnusedClientLifetime).ToString("o"), Now = now.ToString("o") }, cancellationToken: ct));
     }
 
+    // Expired codes go, except each client's newest used one: it says the
+    // client completed a token exchange (InUse).
     public async Task SaveCodeAsync(OAuthCode code, CancellationToken ct = default)
     {
         using var db = _db.CreateSystemConnection();
         await db.ExecuteAsync(new CommandDefinition(@"
-            DELETE FROM oauth_codes WHERE expires_at < @Now;
+            DELETE FROM oauth_codes WHERE expires_at < @Now
+              AND (used = 0 OR EXISTS (SELECT 1 FROM oauth_codes n
+                                       WHERE n.client_id = oauth_codes.client_id AND n.used = 1
+                                         AND n.expires_at > oauth_codes.expires_at));
             INSERT INTO oauth_codes(code_hash, client_id, user_id, context_type, context_id, scopes, redirect_uri, code_challenge, expires_at)
             VALUES (@CodeHash, @ClientId, @UserId, @ContextType, @ContextId, @Scopes, @RedirectUri, @CodeChallenge, @ExpiresAt)",
             new

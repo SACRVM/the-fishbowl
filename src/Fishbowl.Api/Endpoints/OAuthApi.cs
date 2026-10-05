@@ -3,6 +3,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Fishbowl.Core;
+using Fishbowl.Core.Auth;
 using Fishbowl.Core.Mcp;
 using Fishbowl.Core.Models;
 using Fishbowl.Core.Repositories;
@@ -28,8 +29,11 @@ namespace Fishbowl.Api.Endpoints;
 // key lives until it is revoked.
 public static class OAuthApi
 {
+    // At most this many clients in use (OAuthRepository: unused ones expire).
     public const int MaxClients = 1000;
     public static readonly TimeSpan CodeLifetime = TimeSpan.FromMinutes(5);
+    // Applied to the anonymous registration; the host defines it (per address).
+    public const string RegisterRateLimitPolicy = "oauth-register";
 
     public sealed record RegisterRequest(
         [property: JsonPropertyName("client_name")] string? ClientName,
@@ -96,7 +100,7 @@ public static class OAuthApi
                 response_types = new[] { "code" },
                 client_id_issued_at = new DateTimeOffset(client.CreatedAt).ToUnixTimeSeconds(),
             }, statusCode: 201);
-        }).ExcludeFromDescription();
+        }).RequireRateLimiting(RegisterRateLimitPolicy).ExcludeFromDescription();
 
         // The consent page: signed in, else sign in and come back.
         routes.MapGet("/oauth/authorize", async (HttpContext http, IResourceProvider resources, CancellationToken ct) =>
@@ -158,7 +162,8 @@ public static class OAuthApi
             return Results.Ok(new { redirect });
         }).RequireAuthorization().ExcludeFromDescription();
 
-        routes.MapPost("/oauth/token", async (HttpContext http, IOAuthRepository repo, IApiKeyRepository keys, CancellationToken ct) =>
+        routes.MapPost("/oauth/token", async (HttpContext http, IOAuthRepository repo, IApiKeyRepository keys,
+            ISystemRepository system, CancellationToken ct) =>
         {
             if (!http.Request.HasFormContentType) return OAuthError(400, "invalid_request", "Send the token request as application/x-www-form-urlencoded.");
             var form = await http.Request.ReadFormAsync(ct);
@@ -173,6 +178,10 @@ public static class OAuthApi
             var challenge = Base64Url(SHA256.HashData(Encoding.ASCII.GetBytes(verifier)));
             if (!CryptographicOperations.FixedTimeEquals(Encoding.ASCII.GetBytes(challenge), Encoding.ASCII.GetBytes(taken.CodeChallenge)))
                 return OAuthError(400, "invalid_grant", "The code_verifier doesn't match.");
+            // The code may predate a disable, block or delete: only an
+            // account that may still sign in gets a key from it.
+            if (await system.GetUserAsync(taken.UserId, ct) is not { State: UserStates.Active })
+                return OAuthError(400, "invalid_grant", "The account behind this code can't sign in.");
 
             var client = await repo.GetClientAsync(taken.ClientId, ct);
             var ctx = taken.ContextType == "space" ? ContextRef.Space(taken.ContextId) : ContextRef.User(taken.ContextId);

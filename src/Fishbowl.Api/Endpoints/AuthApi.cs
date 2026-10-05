@@ -28,6 +28,7 @@ namespace Fishbowl.Api.Endpoints;
 public static class AuthApi
 {
     // Applied to the password endpoints; the host defines it (per address).
+    // Each attempt also spends from the account name's budget (SignInThrottle).
     public const string RateLimitPolicy = "auth";
 
     public static IEndpointRouteBuilder MapAuthApi(this IEndpointRouteBuilder routes)
@@ -40,10 +41,12 @@ public static class AuthApi
             ISystemRepository system,
             IPasswordHasher hasher,
             AccountGate gate,
+            SignInThrottle throttle,
             CancellationToken ct) =>
         {
             if (string.IsNullOrWhiteSpace(request?.Username) || string.IsNullOrEmpty(request.Password))
                 return ApiErrors.BadRequest("required", "Username and password are required.", new { field = "username, password" });
+            if (!throttle.TryAcquire(request.Username)) return TooManyAttempts();
 
             var user = await system.GetUserByLocalUsernameAsync(request.Username, ct);
             if (!VerifyOrSpendDummyTime(hasher, user, request.Password))
@@ -96,6 +99,7 @@ public static class AuthApi
             IPasswordHasher hasher,
             AccountGate gate,
             IMessageRepository messages,
+            SignInThrottle throttle,
             CancellationToken ct) =>
         {
             if (string.IsNullOrWhiteSpace(request?.Username)
@@ -111,6 +115,7 @@ public static class AuthApi
             if (string.Equals(request.NewPassword, request.CurrentPassword, StringComparison.Ordinal))
                 return ApiErrors.BadRequest("password_unchanged", "New password must differ from the current password.");
 
+            if (!throttle.TryAcquire(request.Username)) return TooManyAttempts();
             var user = await system.GetUserByLocalUsernameAsync(request.Username, ct);
             if (!VerifyOrSpendDummyTime(hasher, user, request.CurrentPassword))
                 return Results.Unauthorized();
@@ -146,6 +151,11 @@ public static class AuthApi
 
         return routes;
     }
+
+    // The per-name budget is spent: the same answer as the per-address limit.
+    private static IResult TooManyAttempts() =>
+        ApiErrors.Json(StatusCodes.Status429TooManyRequests, "too_many_attempts",
+            "Too many sign-in attempts — wait a minute and try again.");
 
     // Returns true iff `user` is non-null with valid hash/salt AND `password`
     // verifies. Else runs the hasher against a dummy hash to spend roughly the

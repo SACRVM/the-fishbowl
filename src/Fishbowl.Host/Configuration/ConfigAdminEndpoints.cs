@@ -70,6 +70,7 @@ public static class ConfigAdminEndpoints
             ConfigurationCache cache,
             IOptionsMonitorCache<GoogleOptions> googleCache,
             IUserAdminRepository admin,
+            IConfiguration configuration,
             CancellationToken ct) =>
         {
             if (!await IsCookieAdminAsync(user, system, ct)) return Results.Forbid();
@@ -81,6 +82,11 @@ public static class ConfigAdminEndpoints
             var value = request?.Value?.Trim() ?? string.Empty;
             if (string.IsNullOrEmpty(value))
                 return ApiErrors.BadRequest("value_required", "Value required (use DELETE to clear).", new { field = spec.Key });
+
+            // With `urls` set the boot skips ACME (Program.cs): saying yes to
+            // a Let's Encrypt key would promise something that never happens.
+            if (spec.Key.StartsWith("Acme:", StringComparison.Ordinal) && !string.IsNullOrEmpty(configuration["urls"]))
+                return ConfigSchema.AcmeBehindUrls.ToResult(spec.Key);
 
             var err = spec.Validate(value);
             if (err is not null) return err.ToResult(spec.Key);
@@ -248,6 +254,12 @@ internal static class ConfigSchema
         if (value.Length <= 8) return new string('*', value.Length);
         return $"{value[..3]}…****{value[^4..]}";
     }
+
+    // Let's Encrypt keys while the listening addresses come from `urls`
+    // (host.config.json, --urls, ASPNETCORE_URLS): a reverse proxy owns the
+    // public ports and HTTPS there, and the boot skips ACME.
+    public static readonly ConfigError AcmeBehindUrls =
+        new("acme_urls_set", "This Fishbowl listens where its urls setting says (host.config.json) — HTTPS is the reverse proxy's job there, so Let's Encrypt settings would be ignored. Remove urls first to use them.");
 
     // Shared refusals: one code each, the English sentence as before.
     private static ConfigError OneOf(params string[] allowed) =>

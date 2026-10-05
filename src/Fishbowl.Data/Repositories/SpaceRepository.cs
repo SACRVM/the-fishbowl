@@ -72,11 +72,11 @@ public class SpaceRepository : ISpaceRepository
     public async Task<IReadOnlyList<SpaceMembership>> ListByMemberAsync(string userId, CancellationToken ct = default)
     {
         using var db = _dbFactory.CreateSystemConnection();
-        var rows = await db.QueryAsync<(string Id, string Slug, string Name, string CreatedBy, string CreatedAt, string Role, string? Color)>(
+        var rows = await db.QueryAsync<(string Id, string Slug, string Name, string CreatedBy, string CreatedAt, string Role, string? Color, long AppMessageText)>(
             new CommandDefinition(@"
                 SELECT t.id AS Id, t.slug AS Slug, t.name AS Name,
                        t.created_by AS CreatedBy, t.created_at AS CreatedAt,
-                       m.role AS Role, t.color AS Color
+                       m.role AS Role, t.color AS Color, t.app_message_text AS AppMessageText
                 FROM spaces t
                 JOIN space_members m ON m.space_id = t.id
                 WHERE m.user_id = @userId
@@ -93,6 +93,7 @@ public class SpaceRepository : ISpaceRepository
                 CreatedAt = DateTime.Parse(r.CreatedAt, System.Globalization.CultureInfo.InvariantCulture,
                     System.Globalization.DateTimeStyles.RoundtripKind),
                 Color = r.Color,
+                AppMessageText = r.AppMessageText != 0,
             },
             SpaceRoleExtensions.FromDbValue(r.Role))).ToList();
     }

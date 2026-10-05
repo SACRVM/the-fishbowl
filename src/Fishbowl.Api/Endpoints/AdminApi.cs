@@ -11,6 +11,7 @@ using Fishbowl.Core.Repositories;
 using Fishbowl.Core.Util;
 using Fishbowl.Data;
 using Fishbowl.Data.Files;
+using Fishbowl.Data.Repositories;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
@@ -50,8 +51,10 @@ public static class AdminApi
             if (!Directory.Exists(usersRoot))
                 return Results.Ok(Array.Empty<object>());
 
+            // Ignoring case, like the file system on Windows: a folder whose
+            // name differs from a registered id only by case is that user's.
             var existing = await system.ListUserIdsAsync(ct);
-            var existingSet = new HashSet<string>(existing, StringComparer.Ordinal);
+            var existingSet = new HashSet<string>(existing, StringComparer.OrdinalIgnoreCase);
 
             var candidates = new List<object>();
             foreach (var dir in Directory.EnumerateDirectories(usersRoot))
@@ -81,6 +84,7 @@ public static class AdminApi
             DatabaseFactory dbFactory,
             IPasswordHasher hasher,
             IUserAdminRepository admin,
+            UserAdminRepository accounts,
             IMessageRepository messages,
             CancellationToken ct) =>
         {
@@ -90,17 +94,27 @@ public static class AdminApi
             // Strict path-component validation. Reject anything that could
             // walk outside the users root — no separators, no traversal,
             // no nulls. Folder names are typically GUIDs or local usernames.
+            // A tombstone covers its id in any case (IsDeletedAsync).
             var folder = request?.FolderName?.Trim() ?? string.Empty;
             if (!IsSafePathComponent(folder) || folder.StartsWith('.') || await admin.IsDeletedAsync(folder, ct))
                 return ApiErrors.BadRequest("invalid_folder_name", "folderName must be a single path component (no '/', '\\', '..').");
 
-            var existing = await system.GetUserAsync(folder, ct);
-            if (existing is not null)
+            // Windows (and macOS) match names ignoring case and drop trailing
+            // dots: users/ABCD/ or users/abcd./ would open a registered
+            // user's folder. A registered id in any case is that user.
+            var existing = await system.ListUserIdsAsync(ct);
+            if (existing.Any(id => string.Equals(id, folder, StringComparison.OrdinalIgnoreCase)))
                 return ApiErrors.Conflict("user_exists", "A user with this id is already registered.");
 
+            // Only a folder that is really there under exactly this name —
+            // never one the file system would find under another spelling.
+            var entry = Directory.Exists(dbFactory.UsersRoot)
+                ? Directory.EnumerateDirectories(dbFactory.UsersRoot).Select(Path.GetFileName)
+                    .FirstOrDefault(n => string.Equals(n, folder, StringComparison.Ordinal))
+                : null;
             var userFolder = Path.Combine(dbFactory.UsersRoot, folder);
             var dbPath = Path.Combine(userFolder, DatabaseFactory.PersonalDbFileName);
-            if (!Directory.Exists(userFolder) || !File.Exists(dbPath))
+            if (entry is null || !File.Exists(dbPath))
                 return ApiErrors.NotFound("no_personal_db", "No personal.db found at users/" + folder + "/.", new { folder });
 
             // Sanity-open the SQLite to make sure it's not corrupt before we
@@ -146,10 +160,17 @@ public static class AdminApi
             using (var _ = dbFactory.CreateContextConnection(ContextRef.User(folder)))
             { /* opened-and-migrated, drop the connection */ }
 
-            await system.CreateUserAsync(folder, name: request.DisplayName ?? username, email: null, avatarUrl: null, ct);
-            await system.CreateUserMappingAsync(folder, "local", username, ct);
+            // Imported by an admin = approved by that admin (a later unblock
+            // restores it to active), and the password the admin typed is
+            // only a way in: it must be changed at the first sign-in.
             var hash = hasher.Hash(request.Password);
-            await system.SetPasswordAsync(folder, hash.Hash, hash.Salt, ct: ct);
+            if (!await accounts.CreateLocalAccountAsync(folder, request.DisplayName ?? username, username,
+                    hash.Hash, hash.Salt, ActorId(user), quotaBytes: null, ct))
+            {
+                return await system.GetUserByLocalUsernameAsync(username, ct) is not null
+                    ? ApiErrors.Conflict("username_taken", "Username is already taken.")
+                    : ApiErrors.Conflict("user_exists", "A user with this id is already registered.");
+            }
             // The account's owner learns that an admin gave it a password.
             await messages.CreateAsync(new[] { folder }, MessageKinds.PasswordReset, "user", folder, "{\"via\":\"import\"}", ct);
             await admin.RecordAdminActionAsync(ActorId(user), AdminActions.ImportUser, "user", folder, ct);
@@ -158,7 +179,8 @@ public static class AdminApi
             {
                 userId = folder,
                 username,
-                message = "User imported. They can sign in with /api/auth/login."
+                mustChangeOnNextLogin = true,
+                message = "User imported. They sign in with /api/auth/login and choose their own password."
             });
         })
         .WithName("ImportUser")
@@ -374,8 +396,12 @@ public static class AdminApi
                 return Results.Conflict(new { error = "last-admin" });
 
             // Kept as a row, so the same identity can't ask again; the request
-            // gate ends a live session at its next request.
-            await admin.SetStateAsync(userId, UserStates.Blocked, ct);
+            // gate ends a live session at its next request. The write itself
+            // refuses the last active admin (two admins blocking each other).
+            if (!await admin.SetStateAsync(userId, UserStates.Blocked, ct))
+                return await system.GetUserAsync(userId, ct) is null
+                    ? ApiErrors.NotFound("no_such_user", "No such user.")
+                    : Results.Conflict(new { error = "last-admin" });
             await messages.ResolveAsync(MessageKinds.UserPending, "user", userId, ct);
             await admin.RecordAdminActionAsync(ActorId(caller), AdminActions.Block, "user", userId, ct);
             return Results.NoContent();
@@ -424,6 +450,7 @@ public static class AdminApi
             ClaimsPrincipal caller,
             ISystemRepository system,
             IUserAdminRepository admin,
+            UserAdminRepository accounts,
             IPasswordHasher hasher,
             CancellationToken ct) =>
         {
@@ -444,17 +471,16 @@ public static class AdminApi
             if (await system.GetUserByLocalUsernameAsync(username, ct) is not null)
                 return ApiErrors.Conflict("username_taken", "Username is already taken.");
 
-            // Created by an admin = approved by that admin: the row goes
-            // through pending -> approve so approved_by/approved_at say who,
-            // and a later unblock restores it to active, not to pending.
+            // Created by an admin = approved by that admin: approved_by /
+            // approved_at say who, and a later unblock restores it to active,
+            // not to pending. One transaction — the same username asked for
+            // twice at once leaves one account and a 409, nothing else.
             var userId = Guid.NewGuid().ToString();
-            await system.CreateUserAsync(userId, displayName, email: null, avatarUrl: null, ct);
-            await system.CreateUserMappingAsync(userId, "local", username, ct);
-            await admin.SetStateAsync(userId, UserStates.Pending, ct);
-            await admin.ApproveAsync(userId, ActorId(caller), body.QuotaBytes, ct);
             var tempPassword = GenerateTempPassword();
             var hash = hasher.Hash(tempPassword);
-            await system.SetPasswordAsync(userId, hash.Hash, hash.Salt, mustChange: true, ct);
+            if (!await accounts.CreateLocalAccountAsync(userId, displayName, username, hash.Hash, hash.Salt,
+                    ActorId(caller), body.QuotaBytes, ct))
+                return ApiErrors.Conflict("username_taken", "Username is already taken.");
             await admin.RecordAdminActionAsync(ActorId(caller), AdminActions.CreateLocal, "user", userId, ct);
 
             return Results.Ok(new
@@ -541,7 +567,27 @@ public static class AdminApi
             if (disabled == false && target.State is not (UserStates.Disabled or UserStates.Active))
                 return Results.Conflict(new { error = "not-disabled", state = target.State });
 
+            // The writes that can lose the last active admin go first: they
+            // re-check it themselves (another admin may be demoting at the
+            // same moment), and a refusal then leaves the rest unwritten.
             var actor = ActorId(caller);
+            if (revoke)
+            {
+                if (!await system.SetAdminAsync(userId, false, ct))
+                    return Results.Conflict(new { error = "last-admin" });
+                await admin.RecordAdminActionAsync(actor, AdminActions.RemoveAdmin, "user", userId, ct);
+            }
+            if (disable)
+            {
+                // Sign-in is refused and the request gate ends a live session
+                // at its next request; the keys go too, so nothing keeps
+                // working behind the admin's back. The data stays.
+                if (!await admin.SetStateAsync(userId, UserStates.Disabled, ct))
+                    return Results.Conflict(new { error = "last-admin" });
+                foreach (var key in await keys.ListByUserAsync(userId, ct))
+                    await keys.RevokeAsync(key.Id, userId, ct);
+                await admin.RecordAdminActionAsync(actor, AdminActions.Disable, "user", userId, ct);
+            }
             if (setQuota && quota != target.QuotaBytes)
             {
                 await admin.SetQuotaAsync(userId, quota, ct);
@@ -551,21 +597,6 @@ public static class AdminApi
             {
                 await system.SetAdminAsync(userId, true, ct);
                 await admin.RecordAdminActionAsync(actor, AdminActions.MakeAdmin, "user", userId, ct);
-            }
-            if (revoke)
-            {
-                await system.SetAdminAsync(userId, false, ct);
-                await admin.RecordAdminActionAsync(actor, AdminActions.RemoveAdmin, "user", userId, ct);
-            }
-            if (disable)
-            {
-                // Sign-in is refused and the request gate ends a live session
-                // at its next request; the keys go too, so nothing keeps
-                // working behind the admin's back. The data stays.
-                await admin.SetStateAsync(userId, UserStates.Disabled, ct);
-                foreach (var key in await keys.ListByUserAsync(userId, ct))
-                    await keys.RevokeAsync(key.Id, userId, ct);
-                await admin.RecordAdminActionAsync(actor, AdminActions.Disable, "user", userId, ct);
             }
             if (enable)
             {
@@ -646,17 +677,47 @@ public static class AdminApi
                     spaces = owned.Select(sp => new { slug = sp.Slug, name = sp.Name }),
                 });
 
-            // Archive first: only a verified ZIP lets the delete go on.
-            ArchivedUser? archived = null;
-            if (archive != false)
+            // The account stops first: disabled, its sessions and keys answer
+            // 403 from the next request on, so nothing is written after the
+            // archive's copy. (The write refuses the last active admin.) If
+            // the delete doesn't go through, it is active again.
+            var stopped = false;
+            if (target.State == UserStates.Active)
             {
-                try { archived = await archiver.ArchiveAsync(userId, target.Name, target.CreatedAt, actor, ct); }
-                catch (FileStoreException ex) { return FilesApi.Fail(ex); }
+                if (!await admin.SetStateAsync(userId, UserStates.Disabled, ct))
+                    return Results.Conflict(new { error = "last-admin" });
+                stopped = true;
+            }
+            var deleted = false;
+            ArchivedUser? archived = null;
+            try
+            {
+                // Archive first: only a verified ZIP lets the delete go on.
+                if (archive != false)
+                {
+                    try { archived = await archiver.ArchiveAsync(userId, target.Name, target.CreatedAt, actor, ct); }
+                    catch (FileStoreException ex) { return FilesApi.Fail(ex); }
+                }
+
+                // Re-checks inside its transaction: a space the account
+                // created or restored meanwhile keeps it (and the admin hears why).
+                if (!await admin.DeleteUserAsync(userId, ct))
+                {
+                    if (await system.GetUserAsync(userId, CancellationToken.None) is null)
+                        return ApiErrors.NotFound("no_such_user", "No such user.");
+                    var nowOwned = await admin.ListSolelyOwnedSpacesAsync(userId, CancellationToken.None);
+                    return nowOwned.Count > 0
+                        ? Results.Conflict(new { error = "owns-spaces", spaces = nowOwned.Select(sp => new { slug = sp.Slug, name = sp.Name }) })
+                        : Results.Conflict(new { error = "last-admin" });
+                }
+                deleted = true;
+            }
+            finally
+            {
+                if (stopped && !deleted) await admin.SetStateAsync(userId, UserStates.Active, CancellationToken.None);
             }
 
             await messages.ResolveAsync(MessageKinds.UserPending, "user", userId, ct);
-            if (!await admin.DeleteUserAsync(userId, ct))
-                return ApiErrors.NotFound("no_such_user", "No such user.");
             await archiver.DeleteUserFolderAsync(userId, ct);
             await admin.RecordAdminActionAsync(actor, AdminActions.Delete, "user", userId, ct);
 

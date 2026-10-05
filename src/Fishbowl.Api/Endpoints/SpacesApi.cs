@@ -110,9 +110,14 @@ public static class SpacesApi
             if (body.ValueKind != JsonValueKind.Object)
                 return ApiErrors.BadRequest("invalid_value", "A JSON object with color and/or appMessageText.", new { field = "body" });
             var hasColor = body.TryGetProperty("color", out var colorEl);
+            // A slot name or null (the default) — anything else is refused, not read as null.
+            if (hasColor && colorEl.ValueKind is not (JsonValueKind.String or JsonValueKind.Null))
+                return ApiErrors.BadRequest("invalid_value", "color must be a palette slot or null", new { field = "color" });
             var color = hasColor && colorEl.ValueKind == JsonValueKind.String ? colorEl.GetString() : null;
-            bool? appText = body.TryGetProperty("appMessageText", out var textEl) && textEl.ValueKind is JsonValueKind.True or JsonValueKind.False
-                ? textEl.GetBoolean() : null;
+            var hasAppText = body.TryGetProperty("appMessageText", out var textEl);
+            if (hasAppText && textEl.ValueKind is not (JsonValueKind.True or JsonValueKind.False))
+                return ApiErrors.BadRequest("invalid_value", "appMessageText must be true or false", new { field = "appMessageText" });
+            bool? appText = hasAppText ? textEl.GetBoolean() : null;
             if (user.Identity?.AuthenticationType == McpContextClaims.BearerScheme) return Results.Forbid();   // a person's act, not a key's
             var userId = user.FindFirst("fishbowl_user_id")?.Value;
             if (string.IsNullOrEmpty(userId)) return Results.Unauthorized();

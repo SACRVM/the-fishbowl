@@ -66,13 +66,66 @@ public class UserAdminRepository : IUserAdminRepository
             "SELECT COUNT(*) FROM users WHERE is_admin = 1 AND state = 'active'", cancellationToken: ct));
     }
 
+    // The instance never loses its last active admin through a state change:
+    // the count sits in the UPDATE's own WHERE, so two admins taking each
+    // other out at once can't both pass (one statement = one write lock).
+    // False when the account is missing or is that last admin. Leaving
+    // `active` also drops the account's open OAuth codes — a code issued
+    // before a disable/block must not become a key afterwards.
     public async Task<bool> SetStateAsync(string userId, string state, CancellationToken ct = default)
     {
         if (!UserStates.IsKnown(state)) throw new ArgumentException("Unknown account state.", nameof(state));
         using var db = _dbFactory.CreateSystemConnection();
-        var affected = await db.ExecuteAsync(new CommandDefinition(
-            "UPDATE users SET state = @state WHERE id = @userId", new { userId, state }, cancellationToken: ct));
+        if (db.State != System.Data.ConnectionState.Open) db.Open();
+        using var tx = db.BeginTransaction();
+        var affected = await db.ExecuteAsync(new CommandDefinition(@"
+            UPDATE users SET state = @state
+            WHERE id = @userId
+              AND (@state = 'active' OR is_admin = 0 OR state <> 'active'
+                   OR (SELECT COUNT(*) FROM users WHERE is_admin = 1 AND state = 'active') > 1)",
+            new { userId, state }, tx, cancellationToken: ct));
+        if (affected > 0 && state != UserStates.Active)
+            await db.ExecuteAsync(new CommandDefinition(
+                "DELETE FROM oauth_codes WHERE user_id = @userId AND used = 0", new { userId }, tx, cancellationToken: ct));
+        tx.Commit();
         return affected > 0;
+    }
+
+    // An approved, active local-password account in one transaction: the
+    // users row (approved by `approverId`, the password to be changed at the
+    // first sign-in) and its local mapping. False — and nothing written —
+    // when the id or the username is taken. Used by the admin's "Add local
+    // user" and by the cold import.
+    public async Task<bool> CreateLocalAccountAsync(
+        string userId, string? name, string username, string passwordHash, string passwordSalt,
+        string approverId, long? quotaBytes, CancellationToken ct = default)
+    {
+        if (quotaBytes is < 0) throw new ArgumentOutOfRangeException(nameof(quotaBytes));
+        using var db = _dbFactory.CreateSystemConnection();
+        if (db.State != System.Data.ConnectionState.Open) db.Open();
+        using var tx = db.BeginTransaction();
+        var now = DateTime.UtcNow.ToString("o");
+        var taken = await db.ExecuteScalarAsync<long>(new CommandDefinition(@"
+            SELECT (SELECT COUNT(*) FROM users WHERE id = @userId)
+                 + (SELECT COUNT(*) FROM user_mappings WHERE provider = 'local' AND provider_id = @username)",
+            new { userId, username }, tx, cancellationToken: ct));
+        if (taken > 0)
+        {
+            tx.Rollback();
+            return false;
+        }
+        await db.ExecuteAsync(new CommandDefinition(@"
+            INSERT INTO users (id, name, email, avatar_url, created_at, state, approved_by, approved_at, quota_bytes,
+                               password_hash, password_salt, must_change_password, session_stamp)
+            VALUES (@userId, @name, NULL, NULL, @now, 'active', @approverId, @now, @quotaBytes,
+                    @passwordHash, @passwordSalt, 1, @stamp)",
+            new { userId, name, now, approverId, quotaBytes, passwordHash, passwordSalt, stamp = Ulid.NewUlid().ToString() },
+            tx, cancellationToken: ct));
+        await db.ExecuteAsync(new CommandDefinition(
+            "INSERT INTO user_mappings (provider, provider_id, user_id) VALUES ('local', @username, @userId)",
+            new { username, userId }, tx, cancellationToken: ct));
+        tx.Commit();
+        return true;
     }
 
     public async Task<bool> ApproveAsync(string userId, string approverId, long? quotaBytes, CancellationToken ct = default)
@@ -139,14 +192,27 @@ public class UserAdminRepository : IUserAdminRepository
         return rows.ToList();
     }
 
+    // Refuses (false) inside the same write transaction when the account is
+    // the last active admin or the only owner of a space — the caller's
+    // checks ran before a possibly long archive, and a space created or
+    // restored meanwhile must not end up without members.
     public async Task<bool> DeleteUserAsync(string userId, CancellationToken ct = default)
     {
         using var db = _dbFactory.CreateSystemConnection();
         if (db.State != System.Data.ConnectionState.Open) db.Open();
         using var tx = db.BeginTransaction();
-        var exists = await db.ExecuteScalarAsync<long>(new CommandDefinition(
-            "SELECT COUNT(*) FROM users WHERE id = @userId", new { userId }, tx, cancellationToken: ct));
-        if (exists == 0)
+        var blocked = await db.ExecuteScalarAsync<long?>(new CommandDefinition(@"
+            SELECT CASE
+                WHEN u.is_admin = 1 AND u.state = 'active'
+                     AND (SELECT COUNT(*) FROM users WHERE is_admin = 1 AND state = 'active') <= 1 THEN 1
+                WHEN EXISTS (
+                    SELECT 1 FROM space_members m
+                    WHERE m.user_id = u.id AND m.role = 'owner'
+                      AND NOT EXISTS (SELECT 1 FROM space_members o
+                                      WHERE o.space_id = m.space_id AND o.role = 'owner' AND o.user_id <> u.id)) THEN 1
+                ELSE 0 END
+            FROM users u WHERE u.id = @userId", new { userId }, tx, cancellationToken: ct));
+        if (blocked is null or 1)
         {
             tx.Rollback();
             return false;
@@ -154,6 +220,7 @@ public class UserAdminRepository : IUserAdminRepository
         foreach (var sql in new[]
         {
             "DELETE FROM api_keys WHERE user_id = @userId OR (owner_type = 'user' AND owner_id = @userId) OR (context_type = 'user' AND context_id = @userId)",
+            "DELETE FROM oauth_codes WHERE user_id = @userId",
             "DELETE FROM notification_channels WHERE user_id = @userId",
             "DELETE FROM discord_link_codes WHERE user_id = @userId",
             "DELETE FROM space_members WHERE user_id = @userId",
@@ -168,11 +235,13 @@ public class UserAdminRepository : IUserAdminRepository
         return true;
     }
 
+    // Ignoring case: on Windows (and macOS) users/<ID>/ and users/<id>/ are
+    // one folder, so a tombstone covers every spelling of its id.
     public async Task<bool> IsDeletedAsync(string userId, CancellationToken ct = default)
     {
         using var db = _dbFactory.CreateSystemConnection();
         return await db.ExecuteScalarAsync<long>(new CommandDefinition(
-            "SELECT COUNT(*) FROM deleted_users WHERE id = @userId", new { userId }, cancellationToken: ct)) > 0;
+            "SELECT COUNT(*) FROM deleted_users WHERE id = @userId COLLATE NOCASE", new { userId }, cancellationToken: ct)) > 0;
     }
 
     public async Task RecordAdminActionAsync(string actorId, string action, string? targetType, string? targetId, CancellationToken ct = default)

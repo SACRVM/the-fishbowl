@@ -124,12 +124,18 @@ public class SystemRepository : ISystemRepository
         return affected > 0;
     }
 
+    // Removing the flag never leaves the instance without an active admin:
+    // the count is part of the UPDATE, so two admins demoting each other at
+    // once can't both pass. False when refused or the account is missing.
     public async Task<bool> SetAdminAsync(string userId, bool isAdmin, CancellationToken ct = default)
     {
         using var db = _dbFactory.CreateSystemConnection();
         var affected = await db.ExecuteAsync(
             new CommandDefinition(
-                "UPDATE users SET is_admin = @flag WHERE id = @userId",
+                @"UPDATE users SET is_admin = @flag
+                  WHERE id = @userId
+                    AND (@flag = 1 OR is_admin = 0 OR state <> 'active'
+                         OR (SELECT COUNT(*) FROM users WHERE is_admin = 1 AND state = 'active') > 1)",
                 new { userId, flag = isAdmin ? 1 : 0 },
                 cancellationToken: ct));
         return affected > 0;

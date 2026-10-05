@@ -111,7 +111,20 @@ builder.Host.UseSerilog();
 // boot HTTP-only so the operator can reach /setup on a fresh install.
 // Cert + state persist under fishbowl-data/acme/ so they survive restarts.
 // Renewal requires port 80 to stay reachable from the internet (HTTP-01).
+//
+// An explicit `urls` (host.config.json, --urls, ASPNETCORE_URLS) wins over
+// ACME: it means something else owns the public ports — a reverse proxy
+// terminating TLS in front of a loopback bind — and binding 80/443 here
+// would collide with it and stop the host from booting.
+var urlsConfigured = !string.IsNullOrEmpty(builder.Configuration["urls"]);
 var acme = Fishbowl.Host.Configuration.BootConfig.LoadAcme(dataPath);
+if (acme is { IsValid: true } && urlsConfigured)
+{
+    Serilog.Log.Warning(
+        "Let's Encrypt (Acme:*) is configured but the listening addresses come from `urls`; skipping ACME and binding {Urls}",
+        builder.Configuration["urls"]);
+    acme = null;
+}
 if (acme is { IsValid: true })
 {
     builder.Services.AddLettuceEncrypt(options =>
@@ -133,8 +146,7 @@ if (acme is { IsValid: true })
         kestrel.ListenAnyIP(443, lo => lo.UseHttps());
     });
 }
-else if (!builder.Environment.IsDevelopment()
-         && string.IsNullOrEmpty(builder.Configuration["urls"]))
+else if (!builder.Environment.IsDevelopment() && !urlsConfigured)
 {
     // First-boot fallback: no ACME config in system.db (yet) and the operator
     // hasn't overridden the URL bindings — bind HTTP on all interfaces so
@@ -178,7 +190,10 @@ builder.Services.AddScoped<MessageRepository>();
 builder.Services.AddSingleton<Fishbowl.Api.Accounts.SystemMessageNotifier>();
 builder.Services.AddScoped<IMessageRepository>(sp => new Fishbowl.Api.Accounts.NotifyingMessageRepository(
     sp.GetRequiredService<MessageRepository>(), sp.GetRequiredService<Fishbowl.Api.Accounts.SystemMessageNotifier>()));
-builder.Services.AddScoped<IUserAdminRepository, UserAdminRepository>();
+// The concrete type too: creating a local account (admin "Add local user",
+// cold import) is one transaction that only UserAdminRepository offers.
+builder.Services.AddScoped<UserAdminRepository>();
+builder.Services.AddScoped<IUserAdminRepository>(sp => sp.GetRequiredService<UserAdminRepository>());
 builder.Services.AddScoped<IDesktopRepository, DesktopRepository>();
 builder.Services.AddScoped<IAppErrorRepository, AppErrorRepository>();
 builder.Services.AddScoped<IOAuthRepository, OAuthRepository>();
@@ -389,24 +404,48 @@ builder.Services.AddSingleton<Fishbowl.Core.Auth.IPasswordHasher, Fishbowl.Host.
 
 builder.Services.AddAuthorization();
 
-// Password guessing against local accounts: a few tries a minute per address.
+// Password guessing against local accounts: a few tries a minute per address
+// (an IPv6 client by its /64), and a few per account name whoever asks
+// (SignInThrottle, checked by AuthApi). Anonymous OAuth client registration
+// gets its own small budget per address. The address is the real peer —
+// forwarded headers count only from a proxy on loopback (below).
+var testing = builder.Environment.IsEnvironment("Testing");
+builder.Services.AddSingleton(_ => new SignInThrottle(testing ? 1000 : 10, TimeSpan.FromMinutes(5)));
 builder.Services.AddRateLimiter(o =>
 {
     o.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
     o.OnRejected = async (ctx, ct) =>
+    {
+        if (ctx.HttpContext.Request.Path.StartsWithSegments("/oauth"))
+        {
+            await ctx.HttpContext.Response.WriteAsJsonAsync(new
+            {
+                error = "too_many_requests",
+                error_description = "Too many client registrations from this address — try again later.",
+            }, ct);
+            return;
+        }
         await ctx.HttpContext.Response.WriteAsJsonAsync(new
         {
             error = "too_many_attempts",
             message = "Too many sign-in attempts — wait a minute and try again.",
         }, ct);
-    var testing = builder.Environment.IsEnvironment("Testing");
+    };
     o.AddPolicy(Fishbowl.Api.Endpoints.AuthApi.RateLimitPolicy, http =>
         System.Threading.RateLimiting.RateLimitPartition.GetFixedWindowLimiter(
-            http.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+            SignInThrottle.AddressKey(http.Connection.RemoteIpAddress),
             _ => new System.Threading.RateLimiting.FixedWindowRateLimiterOptions
             {
                 PermitLimit = testing ? 1000 : 10,
                 Window = TimeSpan.FromMinutes(1),
+            }));
+    o.AddPolicy(Fishbowl.Api.Endpoints.OAuthApi.RegisterRateLimitPolicy, http =>
+        System.Threading.RateLimiting.RateLimitPartition.GetFixedWindowLimiter(
+            SignInThrottle.AddressKey(http.Connection.RemoteIpAddress),
+            _ => new System.Threading.RateLimiting.FixedWindowRateLimiterOptions
+            {
+                PermitLimit = testing ? 1000 : 10,
+                Window = TimeSpan.FromHours(1),
             }));
 });
 builder.Services.AddOpenApi();
@@ -416,16 +455,17 @@ builder.Services.AddOpenApi();
 // plain http — so request.Scheme would be "http" and the Google OAuth
 // redirect_uri (and the /setup redirect-URI check) would be built with the
 // wrong scheme, breaking login. UseForwardedHeaders rewrites Scheme/RemoteIp
-// from X-Forwarded-Proto / X-Forwarded-For. We clear KnownProxies/KnownNetworks
-// because the only thing that can reach a 127.0.0.1 bind is a process on the
-// box (the proxy) — so the immediate peer is trusted by construction. Host is
-// left alone: Caddy/nginx pass the original Host header through by default.
+// from X-Forwarded-Proto / X-Forwarded-For — but only when the immediate peer
+// is on loopback (the framework's default KnownIPNetworks 127.0.0.0/8 and
+// KnownProxies ::1, kept on purpose): that is the proxy on the same box. In
+// ACME mode or the first-boot :80 bind the peer is the client itself, and a
+// header it sends must not become its address (the sign-in rate limit is
+// keyed on it). Host is left alone: Caddy/nginx pass the original Host
+// header through by default.
 builder.Services.Configure<Microsoft.AspNetCore.Builder.ForwardedHeadersOptions>(options =>
 {
     options.ForwardedHeaders = Microsoft.AspNetCore.HttpOverrides.ForwardedHeaders.XForwardedProto
                              | Microsoft.AspNetCore.HttpOverrides.ForwardedHeaders.XForwardedFor;
-    options.KnownIPNetworks.Clear();
-    options.KnownProxies.Clear();
 });
 
 var app = builder.Build();
@@ -585,8 +625,13 @@ app.MapGet("/login", async (
     return Results.Bytes(resource.Data, "text/html");
 });
 
+// A path on this Fishbowl: "/" or "/x", never "//host" or "/\host" — and no
+// control character or whitespace anywhere (like ASP.NET's UrlHelper): a
+// browser drops a tab or newline, so "/\t/evil.example" would land on
+// "//evil.example".
 static bool IsLocalUrl(string? url) =>
-    !string.IsNullOrEmpty(url) && url[0] == '/' && (url.Length == 1 || (url[1] != '/' && url[1] != '\\'));
+    !string.IsNullOrEmpty(url) && url[0] == '/' && (url.Length == 1 || (url[1] != '/' && url[1] != '\\'))
+    && !url.Any(c => char.IsControl(c) || char.IsWhiteSpace(c));
 
 app.MapGet("/login/challenge/{provider}", (string provider, string? returnUrl) =>
 {
@@ -652,8 +697,11 @@ app.MapGet("/api/auth/providers", async (
     return Results.Ok(providers);
 });
 
-// Helper: is the host configured enough that a fresh user can sign in?
-// Either Google OAuth is wired up, OR there's at least one local-auth user.
+// Helper: is the host past setup? Google OAuth is wired up, OR any account
+// exists — whatever it signs in with. Accounts are what lock /setup for
+// good: config keys can be cleared later (an admin clearing Google:ClientId
+// on a Google-only install must not reopen setup to anonymous visitors, who
+// would create a local admin), but the last active admin can't be deleted.
 // Used for both the /setup lockout and the root-route gate.
 static async Task<bool> IsConfiguredAsync(
     Fishbowl.Host.Configuration.ConfigurationCache cache,
@@ -662,8 +710,12 @@ static async Task<bool> IsConfiguredAsync(
 {
     var clientId = cache.Get("Google:ClientId");
     if (!string.IsNullOrEmpty(clientId) && clientId != "placeholder") return true;
-    return await system.HasLocalUserAsync(ct);
+    return (await system.ListUserIdsAsync(ct)).Count > 0;
 }
+
+// One setup at a time: two first-boot POSTs racing past the lock would
+// create two admins.
+var setupGate = new SemaphoreSlim(1, 1);
 
 app.MapGet("/setup", async (
     HttpContext context,
@@ -812,6 +864,11 @@ app.MapPost("/api/setup", async (
         discordConfigured = hasDiscord,
         restartRequired = anyAcme || hasDiscord,
     });
+}).AddEndpointFilter(async (context, next) =>
+{
+    await setupGate.WaitAsync(context.HttpContext.RequestAborted);
+    try { return await next(context); }
+    finally { setupGate.Release(); }
 });
 
 // The waiting page of a pending account (server-rendered, like /login).

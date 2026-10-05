@@ -3,10 +3,17 @@
 // picked last (the SPA mirrors it into localStorage "sac-lang"), else the
 // browser's. English is the markup and the fallback.
 // Where to go after signing in: a path on this Fishbowl only (an OAuth
-// consent page, say) — never a URL a link chose.
+// consent page, say) — never a URL a link chose. No control characters or
+// whitespace (a browser drops a tab: "/\t/evil.example" is "//evil.example"),
+// and what the browser resolves it to must stay on this origin.
 const RETURN = (() => {
     const r = new URLSearchParams(window.location.search).get("returnUrl") || "/";
-    return r.startsWith("/") && !r.startsWith("//") && !r.startsWith("/\\") ? r : "/";
+    if (!r.startsWith("/") || r.startsWith("//") || r.startsWith("/\\") || /[\u0000-\u001f\u007f-\u009f\s]/.test(r)) return "/";
+    try {
+        const u = new URL(r, window.location.origin);
+        if (u.origin !== window.location.origin || !u.pathname.startsWith("/") || u.pathname.startsWith("//")) return "/";
+        return u.pathname + u.search + u.hash;
+    } catch { return "/"; }
 })();
 const LANG = (() => {
     let chosen = "";
