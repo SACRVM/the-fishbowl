@@ -5,9 +5,9 @@
  * (admins, with Approve / Reject / Block right in the row) and "your
  * account was approved". A message another admin already handled shows
  * as done. Rows hold ids only; the server adds who a request is about.
- * A space's own apps write here too (app.message: "Space · App" and the
- * app's text), each with a menu to mute that app or the whole space; what
- * is muted comes back from the toolbar's "Muted (n)".
+ * A space's own apps write here too (app.message: "Space · App · from
+ * <member>" and the app's text), each with a menu to mute that app or the
+ * whole space; what is muted comes back from the toolbar's "Muted (n)".
  * Messages are personal: the same list in every workspace.
  */
 class FbMessagesView extends HTMLElement {
@@ -141,14 +141,10 @@ class FbMessagesView extends HTMLElement {
             list.appendChild(row);
         }
         dlg.appendChild(list);
-        const close = document.createElement("button");
-        close.type = "button";
-        close.slot = "footer";
-        close.className = "btn";
-        close.textContent = fb.t("fb.common.close", "Close");
-        close.addEventListener("click", () => dlg.close?.());
-        dlg.appendChild(close);
-        dlg.addEventListener("sac:close", () => dlg.remove());
+        // The kit dialog's own buttons; every way out (Close, Escape, the
+        // backdrop, the last Unmute) is one sac:action, and the dialog goes.
+        dlg.buttons = [{ action: "close", label: fb.t("fb.common.close", "Close"), kind: "default" }];
+        dlg.addEventListener("sac:action", () => setTimeout(() => dlg.remove(), 120), { once: true });
         document.body.appendChild(dlg);
         setTimeout(() => dlg.open?.(), 0);
     }
@@ -211,7 +207,10 @@ class FbMessagesView extends HTMLElement {
             const space = m.subject?.name || fb.t("fb.messages.a-space", "A space");
             icon.setAttribute("name", "grid");
             text.textContent = d.text || "";
-            meta.textContent = `${space} · ${d.appName || d.app || ""} · ${when}`;
+            // Who sent it: any member's browser can speak for any app of the
+            // space, so the person is named (the server adds it at read time).
+            const from = m.sender?.name ? fb.t("fb.messages.app-from", "from {name}", { name: m.sender.name }) : null;
+            meta.textContent = [space, d.appName || d.app || "", from, when].filter(Boolean).join(" · ");
             row.appendChild(this._muteMenu(m.subject?.id, d.app, d.appName, space));
         } else if (m.kind === "quota.warning") {
             const d = m.data || {};

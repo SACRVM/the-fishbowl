@@ -251,9 +251,6 @@ class FbSpacesSettingsView extends HTMLElement {
         return fb.accents.cssVar(fb.tags.SLOTS.includes(slot) ? slot : "orange");
     }
 
-    // Colour picker window: the kit palette plus "Default". Picking one
-    // saves it and closes; it tints the space's switcher pill and the
-    // shared-data highlights while the space is active. Owner-only.
     // The owner's settings for a space: today, whether messages from the
     // space's apps reach chat with their text (default: a fixed line).
     _openSettings(space) {
@@ -278,18 +275,17 @@ class FbSpacesSettingsView extends HTMLElement {
             }
         });
         dlg.appendChild(label);
-        const close = document.createElement("button");
-        close.type = "button";
-        close.slot = "footer";
-        close.className = "btn";
-        close.textContent = fb.t("fb.common.close", "Close");
-        close.addEventListener("click", () => dlg.close?.());
-        dlg.appendChild(close);
-        dlg.addEventListener("sac:close", () => dlg.remove());
+        // The kit dialog's own buttons; Close, Escape and the backdrop are
+        // one sac:action, and the dialog goes (its ids with it).
+        dlg.buttons = [{ action: "close", label: fb.t("fb.common.close", "Close"), kind: "default" }];
+        dlg.addEventListener("sac:action", () => setTimeout(() => dlg.remove(), 120), { once: true });
         document.body.appendChild(dlg);
         setTimeout(() => dlg.open?.(), 0);
     }
 
+    // Colour picker window: the kit palette plus "Default". Picking one
+    // saves it and closes; it tints the space's switcher pill and the
+    // shared-data highlights while the space is active. Owner-only.
     _pickColor(slug) {
         const space = this.spaces.find(t => t.slug === slug);
         if (!space) return;

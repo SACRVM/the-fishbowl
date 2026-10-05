@@ -110,7 +110,11 @@ public class AppsTests : IAsyncLifetime
             await Assertions.Expect(review).ToHaveAttributeAsync("title", $"Install {FixtureAppServer.AppName}?", new() { Timeout = 10000 });
             // Identity starts at "Nothing", whatever the manifest asks; files is on offer.
             await Assertions.Expect(review.Locator("#fb-app-identity")).ToHaveValueAsync("none");
+            // No "anonymous id" on offer while the kit's would hand the name over.
+            await Assertions.Expect(review.Locator("#fb-app-identity option[value='pseudonymous']")).ToHaveCountAsync(0);
             await Assertions.Expect(review.Locator("#fb-app-files")).ToBeCheckedAsync();
+            // The data folder the app will use is shown.
+            await Assertions.Expect(review.Locator("code", new() { HasText = "Apps/" })).ToHaveCountAsync(1);
             await Assertions.Expect(review.Locator("input[name='fb-app-mode']")).ToHaveCountAsync(0);   // one mode: sandboxed
             await page.WaitForTimeoutAsync(400);   // the dialog's fade-in, for the picture
             await page.ScreenshotAsync(new() { Path = Path.Combine(Shots, "desk-3-review.png") });
@@ -216,7 +220,9 @@ public class AppsTests : IAsyncLifetime
             await page.GotoAsync(_fixture.BaseUrl + "/#/");
             await Tile(page).ClickAsync();
             var frame = page.FrameLocator("sac-window iframe");
-            await Assertions.Expect(frame.Locator("#granted")).ToHaveTextAsync("identity=pseudonymous files=false isolated=true", new() { Timeout = 15000 });
+            // A pseudonymous grant hands nothing while the kit's pseudonymous
+            // mode still passes the name and picture (desktop-apps.js ANON).
+            await Assertions.Expect(frame.Locator("#granted")).ToHaveTextAsync("identity=false files=false isolated=true", new() { Timeout = 15000 });
             await Assertions.Expect(frame.Locator("#stored")).ToContainTextAsync("no storage", new() { Timeout = 10000 });
             Assert.Equal(404, await StatAsync(page, Folder + "/.fishbowl-app.json"));
         }

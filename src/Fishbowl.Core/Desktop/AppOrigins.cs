@@ -5,7 +5,8 @@ namespace Fishbowl.Core.Desktop;
 // Where an app may come from. An origin is scheme + host (+ port), nothing
 // else — no path, query, fragment, user info or wildcard. HTTPS only; plain
 // HTTP is accepted for loopback hosts so an app can be developed (and
-// tested) against a local server.
+// tested) against a local server — and for Fishbowl's own origin when it
+// runs without TLS (anyHttp), which only its own space apps live on.
 public static partial class AppOrigins
 {
     // What survives into a CSP source list: no whitespace, quotes, semicolons
@@ -17,15 +18,22 @@ public static partial class AppOrigins
         host is "localhost" or "127.0.0.1" or "[::1]" or "::1";
 
     // Accepts an origin or any absolute URL; returns its origin, lower-case.
-    public static bool TryNormalize(string? value, out string origin)
+    public static bool TryNormalize(string? value, out string origin) => TryNormalize(value, out origin, anyHttp: false);
+
+    public static bool TryNormalize(string? value, out string origin, bool anyHttp)
     {
         origin = "";
         if (string.IsNullOrWhiteSpace(value)) return false;
         if (!Uri.TryCreate(value.Trim(), UriKind.Absolute, out var uri)) return false;
-        return TryOriginOf(uri, out origin);
+        return TryOriginOf(uri, out origin, anyHttp);
     }
 
-    public static bool TryOriginOf(Uri uri, out string origin)
+    public static bool TryOriginOf(Uri uri, out string origin) => TryOriginOf(uri, out origin, anyHttp: false);
+
+    /// <param name="anyHttp">Plain HTTP on any host — only for Fishbowl's
+    /// OWN origin (a LAN install without TLS serves its space apps that
+    /// way), never for an app's.</param>
+    public static bool TryOriginOf(Uri uri, out string origin, bool anyHttp)
     {
         origin = "";
         if (!string.IsNullOrEmpty(uri.UserInfo)) return false;
@@ -34,7 +42,7 @@ public static partial class AppOrigins
         if (host.Length == 0) return false;
         if (scheme == "http")
         {
-            if (!IsLoopback(host)) return false;
+            if (!anyHttp && !IsLoopback(host)) return false;
         }
         else if (scheme != "https")
         {

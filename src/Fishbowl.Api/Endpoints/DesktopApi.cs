@@ -2,6 +2,7 @@ using System.Net;
 using System.Security.Claims;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using Fishbowl.Core;
 using Fishbowl.Core.Desktop;
 using Fishbowl.Core.Files;
@@ -101,7 +102,7 @@ public static class DesktopApi
     {
         id = a.Id,
         manifestUrl = a.ManifestUrl,
-        manifest = JsonSerializer.Deserialize<JsonElement>(a.Manifest),
+        manifest = ManifestOut(a.Manifest),
         origin = a.Origin,
         entryUrl = a.EntryUrl,
         entryIntegrity = a.EntryIntegrity,
@@ -113,11 +114,32 @@ public static class DesktopApi
         updatedAt = a.UpdatedAt,
     };
 
+    // The stored manifest as the page gets it: an `icon` that isn't a kit
+    // icon name is left out (the default shows) — the burger, the tiles and
+    // the palette render it, and installs before this check may carry one.
+    private static JsonNode? ManifestOut(string json)
+    {
+        var node = JsonNode.Parse(json);
+        if (node is JsonObject o && o.TryGetPropertyValue("icon", out var icon)
+            && !(icon is JsonValue v && v.TryGetValue<string>(out var s) && AppIcons.IsValid(s)))
+            o.Remove("icon");
+        return node;
+    }
+
     private static string NameOf(DesktopApp a)
     {
         using var doc = JsonDocument.Parse(a.Manifest);
         return doc.RootElement.TryGetProperty("name", out var n) && n.ValueKind == JsonValueKind.String ? n.GetString()! : a.Id;
     }
+
+    // An app's data folder is by name (AppDataFolders.For), so two apps whose
+    // names clean to the same folder would share — and purge — one another's
+    // data. Refused at install and update; existing installs keep theirs.
+    private static async Task<bool> FolderTakenAsync(IDesktopRepository repo, ContextRef ctx, string folder, string exceptId, CancellationToken ct) =>
+        (await repo.ListAppsAsync(ctx, ct)).Any(a => a.Id != exceptId && AppDataFolders.Same(AppDataFolders.For(NameOf(a), a.Id), folder));
+
+    private static IResult FolderTaken(string folder) =>
+        ApiErrors.Conflict("app_folder_taken", $"Another app on this desktop keeps its data in {folder}.", new { field = "name", folder });
 
     private static object TileDto(DesktopTile t) => new
     {
@@ -137,10 +159,10 @@ public static class DesktopApi
             var allow = await AllowanceAsync(http, t!, ct);
             var tiles = await repo.ListTilesAsync(t!.Ctx, ct);
             var apps = (await repo.ListAppsAsync(t.Ctx, ct)).Select(Dto).ToList();
+            var key = await SpaceAppsApi.KeyAsync(http.RequestServices.GetRequiredService<ISystemRepository>(), ct);
             if (t.IsSpace)
             {
                 var files = http.RequestServices.GetRequiredService<IFileService>();
-                var key = await SpaceAppsApi.KeyAsync(http.RequestServices.GetRequiredService<ISystemRepository>(), ct);
                 var appErrors = http.RequestServices.GetRequiredService<IAppErrorRepository>();
                 foreach (var (m, changed) in await SpaceAppCatalog.ListAsync(files, t.Ctx, ct, appErrors))
                     apps.Add(SpaceAppsApi.Dto(http, key, t.Ctx.Id, m, changed));
@@ -153,6 +175,9 @@ public static class DesktopApi
                 canInstall = allow.Install,
                 // Apps:Install, so the page can say why installing isn't offered.
                 installPolicy = allow.InstallPolicy,
+                // The kit's salt for pseudonymous app ids (sac.apps.identitySalt):
+                // the caller's own, the same on every device.
+                identitySalt = AppIdentity.Salt(key, t.UserId),
             });
         });
 
@@ -194,6 +219,8 @@ public static class DesktopApi
                 granted = AppManifestValidator.ValidateGrants(body.Granted, m.Permissions);
             }
             catch (DesktopValidationException ex) { return Error(400, ex.Code, ex.Message, ex.Field); }
+            var folder = AppDataFolders.For(m.Name, m.Id);
+            if (await FolderTakenAsync(repo, t.Ctx, folder, m.Id, ct)) return FolderTaken(folder);
 
             var now = DateTime.UtcNow;
             var app = new DesktopApp(m.Id, m.ManifestUrl, m.Json, m.Origin, m.EntryUrl,
@@ -228,6 +255,9 @@ public static class DesktopApi
                         return Error(400, "id_changed", "The manifest belongs to a different app.", "id");
                     if (m.Origin != current.Origin)
                         return Error(400, "origin_changed", "The app moved to another origin — install it as a new app.", "manifestUrl");
+                    // A new name is a new folder: never another app's.
+                    var folder = AppDataFolders.For(m.Name, m.Id);
+                    if (await FolderTakenAsync(repo, t.Ctx, folder, current.Id, ct)) return FolderTaken(folder);
                 }
                 else
                 {
@@ -272,13 +302,17 @@ public static class DesktopApi
             var app = await repo.GetAppAsync(t.Ctx, id, ct);
             if (app is null) return Results.NotFound();
 
+            // "Delete data" moves the app's folder to the workspace's trash
+            // (restorable until the trash's retention) — never another app's.
             var purged = false;
             if (purgeData == true)
             {
                 var files = http.RequestServices.GetRequiredService<IFileService>();
+                var folder = AppDataFolders.For(NameOf(app), app.Id);
+                if (await FolderTakenAsync(repo, t.Ctx, folder, app.Id, ct)) return FolderTaken(folder);
                 try
                 {
-                    await files.DeletePermanentlyAsync(t.Ctx, AppDataFolders.For(NameOf(app), app.Id), t.UserId, ct);
+                    await files.TrashAsync(t.Ctx, folder, t.UserId, ct);
                     purged = true;
                 }
                 catch (FileStoreException ex) when (ex.Status == 404)

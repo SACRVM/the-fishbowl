@@ -430,8 +430,20 @@
     // The cookie decides: every call runs with the user's role there.
     function spaceData(slug) {
         const p = (path) => wsPath(`space:${slug}`, path);
-        const tb = (name) => p(`/tables/${encodeURIComponent(name)}`);
-        const row = (name, id) => `${tb(name)}/rows/${encodeURIComponent(id)}`;
+        // A table name, row id or note id the app passes is one plain path
+        // segment. The URL parser resolves "." and ".." (encodeURIComponent
+        // keeps them), so remove("..", "..") would be DELETE /spaces/<slug>/
+        // with the viewer's cookie — refused here, before any request.
+        const seg = (value, field) => {
+            const s = typeof value === "number" && Number.isFinite(value) ? String(value) : value;
+            if (typeof s !== "string" || s === "" || s === "." || s === ".." || s.length > 200) {
+                throw new ApiError(400, JSON.stringify({ error: "invalid_value", field,
+                    message: `${field} must be a plain name or id — not empty, "." or "..".` }));
+            }
+            return encodeURIComponent(s);
+        };
+        const tb = (name) => p(`/tables/${seg(name, "table")}`);
+        const row = (name, id) => `${tb(name)}/rows/${seg(id, "id")}`;
         const post = (path, body) => request(path, { method: "POST", body: JSON.stringify(body ?? {}) });
         const range = (from, to) => {
             const q = new URLSearchParams();
@@ -440,25 +452,26 @@
             const s = q.toString();
             return p("/events") + (s ? `?${s}` : "");
         };
+        // async, so a refused segment is a rejected promise like any refusal.
         return {
-            info:      ()                  => request(`/spaces/${encodeURIComponent(slug)}`),
-            members:   ()                  => request(p("/members")),
-            tables:    ()                  => request(p("/tables")),
-            describe:  (name)              => request(tb(name)),
-            query:     (name, spec)        => post(`${tb(name)}/query`, spec),
-            count:     (name, where)       => post(`${tb(name)}/count`, { where }),
-            aggregate: (name, spec)        => post(`${tb(name)}/aggregate`, spec),
-            search:    (q, table)          => request(`${p("/tables/search")}?${new URLSearchParams(table ? { q, table } : { q })}`),
-            get:       (name, id)          => request(row(name, id)),
-            insert:    (name, values)      => post(`${tb(name)}/rows`, values),
-            update:    (name, id, values, rowVersion) => request(row(name, id) + (rowVersion != null ? `?rowVersion=${encodeURIComponent(rowVersion)}` : ""),
+            info:      async ()            => request(`/spaces/${encodeURIComponent(slug)}`),
+            members:   async ()            => request(p("/members")),
+            tables:    async ()            => request(p("/tables")),
+            describe:  async (name)        => request(tb(name)),
+            query:     async (name, spec)  => post(`${tb(name)}/query`, spec),
+            count:     async (name, where) => post(`${tb(name)}/count`, { where }),
+            aggregate: async (name, spec)  => post(`${tb(name)}/aggregate`, spec),
+            search:    async (q, table)    => request(`${p("/tables/search")}?${new URLSearchParams(table ? { q, table } : { q })}`),
+            get:       async (name, id)    => request(row(name, id)),
+            insert:    async (name, values) => post(`${tb(name)}/rows`, values),
+            update:    async (name, id, values, rowVersion) => request(row(name, id) + (rowVersion != null ? `?rowVersion=${encodeURIComponent(rowVersion)}` : ""),
                                                   { method: "PATCH", body: JSON.stringify(values ?? {}) }),
-            remove:    (name, id)          => request(row(name, id), { method: "DELETE" }),
-            notes:     ()                  => request(p("/notes")),
-            note:      (id)                => request(p(`/notes/${encodeURIComponent(id)}`)),
-            todos:     (includeCompleted)  => request(p(includeCompleted ? "/todos?includeCompleted=true" : "/todos")),
-            events:    (from, to)          => request(range(from, to)),
-            contacts:  ()                  => request(p("/contacts")),
+            remove:    async (name, id)    => request(row(name, id), { method: "DELETE" }),
+            notes:     async ()            => request(p("/notes")),
+            note:      async (id)          => request(p(`/notes/${seg(id, "id")}`)),
+            todos:     async (includeCompleted) => request(p(includeCompleted ? "/todos?includeCompleted=true" : "/todos")),
+            events:    async (from, to)    => request(range(from, to)),
+            contacts:  async ()            => request(p("/contacts")),
         };
     }
 

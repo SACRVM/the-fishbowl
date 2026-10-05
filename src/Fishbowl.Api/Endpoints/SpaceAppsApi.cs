@@ -25,9 +25,14 @@ namespace Fishbowl.Api.Endpoints;
 //
 // The error store (AppErrors) under /api/v1/spaces/<slug>/apps/errors:
 // GET and DELETE for a Designer (a key needs design:apps), POST for any
-// member's browser (cookie) — what broke in the frame.
+// member's browser (cookie) — what broke in the frame, for an app that is
+// there, at most ReportsPerHour per person and space.
 public static class SpaceAppsApi
 {
+    // A browser's error reports, per person and space (in memory).
+    public const int ReportsPerHour = 60;
+    private static readonly HourlyLimit Reports = new(ReportsPerHour);
+
     public static IEndpointRouteBuilder MapSpaceAppsApi(this IEndpointRouteBuilder routes)
     {
         routes.MapGet("/apps/code/{spaceId}/{folder}/{sig}/{**file}", CodeAsync)
@@ -66,15 +71,24 @@ public static class SpaceAppsApi
         }).RequireScope(ScopeCatalog.DesignApps)
           .WithName("ListSpaceAppErrors").WithSummary("A space's app errors, newest first (?app=<folder>, ?limit=). Designer.");
 
-        g.MapPost("/", async (string slug, ReportRequest body, HttpContext http, ISpaceRepository spaces, IAppErrorRepository errors, CancellationToken ct) =>
+        g.MapPost("/", async (string slug, ReportRequest body, HttpContext http, ISpaceRepository spaces, IAppErrorRepository errors,
+            IFileService files, CancellationToken ct) =>
         {
             if (http.User.Identity?.AuthenticationType == McpContextClaims.BearerScheme) return Results.Forbid();
             var resolved = await SpacesApi.ResolveSpaceAsync(slug, http.User, spaces, ct);
             if (resolved.Error is not null) return resolved.Error;
             if (!SpaceApps.IsFolder(body.App) || body.Kind is null || !AppErrors.FromBrowser.Contains(body.Kind) || string.IsNullOrWhiteSpace(body.Message))
                 return ApiErrors.BadRequest("invalid_app_error", "An app error needs app (the folder), kind (load, runtime, call, reported) and message.");
-            await errors.AddAsync(ContextRef.Space(resolved.Space!.Id), body.App!, body.Kind, body.Message!, body.Detail,
-                http.User.FindFirst(McpContextClaims.UserId)?.Value, ct);
+            // Any member may write here and the store keeps only the newest
+            // AppErrors.Keep: reports name an app that is there, and each
+            // person has a budget per space, so nobody floods out the real ones.
+            var ctx = ContextRef.Space(resolved.Space!.Id);
+            var userId = http.User.FindFirst(McpContextClaims.UserId)?.Value;
+            try { await files.StatAsync(ctx, $"{AppsFolder.Name}/{body.App}", ct); }
+            catch (FileStoreException) { return ApiErrors.Json(404, "app_missing", "There is no such app in this space."); }
+            if (!Reports.TryTake($"{resolved.Space.Id}/{userId}"))
+                return ApiErrors.Json(429, "rate_limited", $"At most {ReportsPerHour} app errors an hour from one person — try again later.");
+            await errors.AddAsync(ctx, body.App!, body.Kind, body.Message!, body.Detail, userId, ct);
             return Results.NoContent();
         }).WithName("ReportSpaceAppError").WithSummary("Stores what broke in an app's frame. Cookie only.");
 
@@ -162,10 +176,12 @@ public static class SpaceAppsApi
         return key;
     }
 
+    // Fishbowl's own origin — plain HTTP on any host too (a LAN install
+    // without TLS), where its space apps' code is served from.
     internal static string HostOrigin(HttpContext http)
     {
         var raw = $"{http.Request.Scheme}://{http.Request.Host}";
-        return AppOrigins.TryNormalize(raw, out var origin) ? origin : raw;
+        return AppOrigins.TryNormalize(raw, out var origin, anyHttp: true) ? origin : raw;
     }
 
     internal static string CodeBase(HttpContext http, byte[] key, string spaceId, string folder) =>

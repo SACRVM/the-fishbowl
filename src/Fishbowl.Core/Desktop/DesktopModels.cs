@@ -84,6 +84,32 @@ public static partial class AppDataFolders
         if (clean.Length == 0 || clean.All(c => c == '.')) clean = id;
         return Root + "/" + clean;
     }
+
+    // Two folders are one when a case-insensitive file system says so —
+    // the stricter reading, so no two apps of a workspace ever share one.
+    // (By name, not id: existing installs keep their data where it is.)
+    public static bool Same(string a, string b) => string.Equals(a, b, StringComparison.OrdinalIgnoreCase);
+}
+
+public static partial class AppIcons
+{
+    // A kit icon name (sac-icon): what an app's manifest may put in `icon`.
+    // Anything else is dropped, never echoed into the page — the burger, the
+    // tiles and the palette render it.
+    [GeneratedRegex("^[a-z0-9-]{1,40}$")]
+    private static partial Regex Shape();
+
+    public static bool IsValid(string? icon) => icon is not null && Shape().IsMatch(icon);
+}
+
+public static class AppIdentity
+{
+    // The salt the kit hashes pseudonymous app ids with (sac.apps.identitySalt):
+    // per account, the same on every device, and not the account's id — an
+    // HMAC with the instance's key (Apps:CodeKey) over a label of its own.
+    public static string Salt(byte[] key, string userId) =>
+        Convert.ToHexString(System.Security.Cryptography.HMACSHA256.HashData(key,
+            System.Text.Encoding.UTF8.GetBytes("sac.apps/identity-salt\n" + userId))).ToLowerInvariant();
 }
 
 public sealed class DesktopValidationException : Exception

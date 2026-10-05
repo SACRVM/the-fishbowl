@@ -39,8 +39,13 @@ public static partial class FrameCsp
         var appDir = appOrigin;
         if (entryUrl is not null)
         {
+            // An app's entry is https (loopback http for development) — or,
+            // for a space's own app, on Fishbowl's own origin, plain HTTP too
+            // on a LAN install without TLS. The entry stays on appOrigin.
             if (!Uri.TryCreate(entryUrl, UriKind.Absolute, out var entry)
-                || !AppOrigins.TryOriginOf(entry, out var entryOrigin) || entryOrigin != appOrigin)
+                || !(AppOrigins.TryOriginOf(entry, out var entryOrigin)
+                     || (hostOrigin is not null && AppOrigins.TryOriginOf(entry, out entryOrigin, anyHttp: true) && entryOrigin == hostOrigin))
+                || entryOrigin != appOrigin)
                 throw new ArgumentException("The entry must live on the app's origin.", nameof(entryUrl));
             var folder = entry.AbsolutePath[..(entry.AbsolutePath.LastIndexOf('/') + 1)];
             if (!SafePath().IsMatch(folder))

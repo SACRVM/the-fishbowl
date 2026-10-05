@@ -26,7 +26,8 @@ public static class SpaceAppCatalog
     }
 
     // A folder without app.json is no app (nothing to report); one whose
-    // app.json doesn't read is a broken app — into the error store with why.
+    // app.json doesn't read is a broken app — into the error store with why,
+    // like what was left out of one that reads.
     public static async Task<(SpaceAppManifest Manifest, DateTime? Changed)?> ReadAsync(
         IFileService files, ContextRef ctx, string folder, CancellationToken ct, IAppErrorRepository? errors = null)
     {
@@ -40,7 +41,13 @@ public static class SpaceAppCatalog
             {
                 using var doc = await JsonDocument.ParseAsync(stream, cancellationToken: ct);
                 var m = SpaceApps.Parse(folder, doc.RootElement, out problem);
-                if (m is not null) return (m, h.Entry.Mtime);
+                if (m is not null)
+                {
+                    // An app that reads, with something left out (an icon).
+                    if (errors is not null && problem is not null)
+                        await errors.AddAsync(ctx, folder, AppErrors.Manifest, problem, null, null, ct);
+                    return (m, h.Entry.Mtime);
+                }
             }
         }
         catch (FileStoreException) { return null; }

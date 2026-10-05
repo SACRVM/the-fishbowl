@@ -26,9 +26,13 @@
  *              spec phase 8 — the picker is open again, the storage stays
  *              jailed). Without it the app runs, but nothing it writes is
  *              kept and it can't open your files.
- *   identity   nothing (the default, whatever the manifest asks), a stable
- *              anonymous id per app ("identity:pseudonymous"), or your name
- *              and picture ("identity").
+ *   identity   nothing (the default, whatever the manifest asks) or your
+ *              name and picture ("identity"). A stable anonymous id per app
+ *              ("identity:pseudonymous") waits for the kit: its pseudonymous
+ *              mode (2.25) swaps only the id and passes the name and picture
+ *              through, so it isn't offered and such a grant hands nothing
+ *              (ANON below). The salt for its ids is already per account,
+ *              from the server (sac.apps.identitySalt, set in sync()).
  *   connect    the servers the manifest declared — shown, not choosable;
  *              the frame's CSP allows exactly those.
  *
@@ -62,6 +66,10 @@
     const ID = "identity";
     const ID_ANON = "identity:pseudonymous";
     const INDEX = ".fishbowl-app.json";      // an app's non-file entries, in its folder
+    // The kit's "pseudonymous" identity still hands over the name and the
+    // picture (it replaces only the id); until it hands { id } alone, a
+    // pseudonymous grant gets nothing and the choice isn't offered.
+    const ANON = false;
 
     let user = null;
     let state = { ws: null, apps: [], canInstall: false, canArrange: false };
@@ -78,7 +86,15 @@
     const nameOf = (app) => app?.manifest?.name || app?.id || fb.t("fb.apps.app", "App");
     const hostOf = (url) => { try { return new URL(url).host; } catch { return url; } };
     const has = (app, g) => (app.granted || []).includes(g);
-    const identityOf = (app) => has(app, ID) ? "full" : has(app, ID_ANON) ? "pseudonymous" : "none";
+    // What the app actually gets (see ANON).
+    const identityOf = (app) => has(app, ID) ? "full" : ANON && has(app, ID_ANON) ? "pseudonymous" : "none";
+    // The server's AppDataFolders.For: an app's folder in Files, by its name.
+    function dataFolderFor(name, id) {
+        let clean = String(name ?? "").replace(/[^A-Za-z0-9 ._-]+/g, " ").trim().replace(/\.+$/, "").trim();
+        if (clean.length > 64) clean = clean.slice(0, 64).trimEnd();
+        if (!clean || /^\.+$/.test(clean)) clean = id;
+        return `Apps/${clean}`;
+    }
     const asks = (manifest, p) => {
         const perms = manifest?.permissions;
         return Array.isArray(perms) ? perms.includes(p) : !!(perms && perms[p]);
@@ -111,7 +127,7 @@
 
     function kitOptions(app) {
         const connect = Array.isArray(app.manifest?.connect) ? app.manifest.connect : [];
-        const identity = has(app, ID) ? true : has(app, ID_ANON) ? "pseudonymous" : false;
+        const identity = has(app, ID) ? true : ANON && has(app, ID_ANON) ? "pseudonymous" : false;
         // The files grant also gives the app the picker (a provider of its
         // own, kit 2.20): the kit's dialog over the workspace's whole Files —
         // the person picks, the app gets handles to just that.
@@ -203,6 +219,8 @@
      * and starts the (once per session) update check.
      */
     function sync(stored) {
+        // Pseudonymous ids per account (the server's), not per browser.
+        if (window.sac?.apps && typeof stored?.identitySalt === "string" && stored.identitySalt) sac.apps.identitySalt = stored.identitySalt;
         state = {
             ws: workspace(),
             apps: Array.isArray(stored?.apps) ? stored.apps : [],
@@ -469,13 +487,8 @@
         return new Promise((resolve) => dlg.addEventListener("sac:action", (e) => resolve(e.detail.action), { once: true }));
     }
 
-    function errorText(err) {
-        try {
-            const body = JSON.parse(err?.body || "");
-            if (body?.message) return body.message;
-        } catch { /* not JSON */ }
-        return err?.message || String(err);
-    }
+    // A refusal in the page's language (fb.errors), else the server's text.
+    const errorText = (err) => fb.errors.text(err, err?.message || String(err));
 
     /** Step 1: the URL. Resolves with the inspected manifest, or null. */
     async function askUrl() {
@@ -571,7 +584,10 @@
         let identity = kind === "install" ? "none" : identityOf(app);   // never raised for you
         const oldConnect = new Set(Array.isArray(app?.manifest?.connect) ? app.manifest.connect : []);
         const connect = Array.isArray(manifest.connect) ? manifest.connect : [];
-        const folder = app?.dataFolder || `Apps/${name}`;
+        // Where its data lives — by name, so an update that renames it moves on.
+        const folder = kind === "perms" ? app?.dataFolder || dataFolderFor(name, app?.id)
+            : dataFolderFor(manifest.name, manifest.id || app?.id);
+        const oldFolder = kind === "update" ? app?.dataFolder || null : null;
 
         function paintGrants() {
             grantsBox.replaceChildren();
@@ -585,7 +601,7 @@
                 box.checked = files;
                 box.addEventListener("change", () => { files = box.checked; });
                 lab.append(box, el("span", null, fb.t("fb.apps.files", "Files — its own folder, and what you pick")));
-                grid.append(lab, el("code", null, folder));
+                grid.append(lab, el("code", null, oldFolder && oldFolder !== folder ? `${oldFolder} → ${folder}` : folder));
             }
             if (asks(manifest, ID)) {
                 const sel = el("span", "select");
@@ -594,7 +610,7 @@
                 s.setAttribute("aria-label", fb.t("fb.apps.who", "Who you are"));
                 for (const [v, t] of [
                     ["none", fb.t("fb.apps.who-none", "Nothing")],
-                    ["pseudonymous", fb.t("fb.apps.who-anon", "A stable anonymous id")],
+                    ...(ANON ? [["pseudonymous", fb.t("fb.apps.who-anon", "A stable anonymous id")]] : []),
                     ["full", fb.t("fb.apps.who-full", "Your name and picture")],
                 ]) {
                     const o = el("option", null, t);
@@ -630,7 +646,7 @@
         const granted = [];
         if (files && asks(manifest, "files")) granted.push("files");
         if (asks(manifest, ID) && identity === "full") granted.push(ID);
-        if (asks(manifest, ID) && identity === "pseudonymous") granted.push(ID_ANON);
+        if (ANON && asks(manifest, ID) && identity === "pseudonymous") granted.push(ID_ANON);
         return { mode, granted };
     }
 
@@ -715,9 +731,10 @@
         const action = await sac.dialog.confirm({ title: fb.t("fb.apps.remove-title", "Remove {name}?", { name: nameOf(app) }), message, buttons });
         if (action !== "keep" && action !== "purge") return;
         try {
+            // The server first: a refusal leaves the app as it was.
+            await fb.api.desktop.removeApp(id, { purgeData: action === "purge" });
             try { sac.apps.remove(id); } catch { /* not open */ }
             registered.delete(id);
-            await fb.api.desktop.removeApp(id, { purgeData: action === "purge" });
             changed();
         } catch (err) {
             sac.dialog.info({ title: fb.t("fb.apps.remove-failed", "Couldn't remove {name}", { name: nameOf(app) }), message: errorText(err) });

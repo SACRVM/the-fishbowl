@@ -113,7 +113,8 @@
             key: `app:${a.id}`,
             app: a,
             name: a.manifest?.name || a.id,
-            icon: a.manifest?.icon || "cube",
+            // A kit icon name, or the default (the server drops anything else).
+            icon: /^[a-z0-9-]{1,40}$/.test(a.manifest?.icon || "") ? a.manifest.icon : "cube",
             desc: a.manifest?.description || "",
             href: null,
         }, apps.length + j)));

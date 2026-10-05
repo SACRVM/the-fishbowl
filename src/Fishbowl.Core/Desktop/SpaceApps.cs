@@ -85,7 +85,8 @@ public static partial class SpaceApps
     /// </summary>
     public static SpaceAppManifest? Parse(string folder, JsonElement json) => Parse(folder, json, out _);
 
-    /// <summary>As <see cref="Parse(string, JsonElement)"/>, saying why not (for the error store).</summary>
+    /// <summary>As <see cref="Parse(string, JsonElement)"/>, saying why not (for the error store) —
+    /// or, alongside a manifest, what was left out of it.</summary>
     public static SpaceAppManifest? Parse(string folder, JsonElement json, out string? problem)
     {
         problem = null;
@@ -108,6 +109,14 @@ public static partial class SpaceApps
             return null;
         }
         var name = Str("name", 100);
+        // An icon that isn't a kit icon name is left out (the default shows),
+        // not the app — and the Designer learns why from the error store.
+        var icon = Str("icon", 200);
+        if (icon is not null && !AppIcons.IsValid(icon))
+        {
+            problem = "\"icon\" must be a kit icon name (lower-case letters, digits and -, at most 40) — it was left out.";
+            icon = null;
+        }
         return new SpaceAppManifest(
             Folder: folder,
             Name: string.IsNullOrWhiteSpace(name) ? folder : name.Trim(),
@@ -115,7 +124,7 @@ public static partial class SpaceApps
             Entry: entry,
             Version: Str("version", 40),
             Description: Str("description", 500),
-            Icon: Str("icon", 40),
+            Icon: icon,
             Width: Str("width", 20),
             Height: Str("height", 20));
     }

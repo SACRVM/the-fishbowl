@@ -78,8 +78,12 @@
             a.href = "#";
             a.dataset.key = e.key;
             a.setAttribute("data-nav-close", "");
-            a.innerHTML = `<sac-icon name="${e.icon || "cube"}"></sac-icon><span></span>`;
-            a.querySelector("span").textContent = e.name;
+            // The icon and name are the app's (an author's app.json): never markup.
+            const icon = document.createElement("sac-icon");
+            icon.setAttribute("name", e.icon || "cube");
+            const label = document.createElement("span");
+            label.textContent = e.name;
+            a.append(icon, label);
             a.addEventListener("click", (c) => {
                 c.preventDefault();
                 fb.desktopApps.open(e.app.id);

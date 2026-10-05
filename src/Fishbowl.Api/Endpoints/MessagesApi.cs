@@ -17,7 +17,8 @@ namespace Fishbowl.Api.Endpoints;
 // Rows hold ids and numbers only. The one thing a message needs to be
 // readable — who a user.pending message is about — is added here at read
 // time from system.db for admins (the recipient of user.pending is always an
-// admin), so no name or e-mail is ever copied into the messages table.
+// admin), so no name or e-mail is ever copied into the messages table. The
+// same goes for an app message's space and sender (`sender`, name only).
 public static class MessagesApi
 {
     public static IEndpointRouteBuilder MapMessagesApi(this IEndpointRouteBuilder routes)
@@ -38,6 +39,7 @@ public static class MessagesApi
 
             var rows = await messages.ListAsync(userId, unread == true, ct);
             var spaceNames = new Dictionary<string, string?>(StringComparer.Ordinal);
+            var senderNames = new Dictionary<string, string?>(StringComparer.Ordinal);
             var me = await system.GetUserAsync(userId, ct);
             var items = new List<object>();
             foreach (var m in rows)
@@ -61,12 +63,25 @@ public static class MessagesApi
                 {
                     subject = new { type = m.SubjectType, id = m.SubjectId };
                 }
+                var data = ParseData(m.Data);
+                // An app message names the member whose browser sent it: any
+                // member can speak for any app of the space, so the recipient
+                // sees who did. Read time, like the space — the row keeps the id.
+                object? sender = null;
+                if (m.Kind == MessageKinds.AppMessage && data is { ValueKind: JsonValueKind.Object } d
+                    && d.TryGetProperty("from", out var from) && from.ValueKind == JsonValueKind.String && from.GetString() is { Length: > 0 } fromId)
+                {
+                    if (!senderNames.TryGetValue(fromId, out var name))
+                        senderNames[fromId] = name = (await system.GetUserAsync(fromId, ct))?.Name;
+                    sender = new { id = fromId, exists = name is not null, name };
+                }
                 items.Add(new
                 {
                     id = m.Id,
                     kind = m.Kind,
                     subject,
-                    data = ParseData(m.Data),
+                    sender,
+                    data,
                     createdAt = m.CreatedAt,
                     readAt = m.ReadAt,
                     doneAt = m.DoneAt,

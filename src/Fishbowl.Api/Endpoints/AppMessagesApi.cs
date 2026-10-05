@@ -80,20 +80,7 @@ public static class AppMessagesApi
     }
 
     // Per app (space id + folder), the send times of the last hour.
-    private static readonly ConcurrentDictionary<string, Queue<DateTime>> Sent = new(StringComparer.Ordinal);
-
-    private static bool TryTake(string key)
-    {
-        var now = DateTime.UtcNow;
-        var q = Sent.GetOrAdd(key, _ => new Queue<DateTime>());
-        lock (q)
-        {
-            while (q.Count > 0 && q.Peek() < now.AddHours(-1)) q.Dequeue();
-            if (q.Count >= PerHour) return false;
-            q.Enqueue(now);
-            return true;
-        }
-    }
+    private static readonly HourlyLimit Sent = new(PerHour);
 
     private static async Task<IResult> NotifyAsync(string slug, string folder, NotifyRequest body, HttpContext http,
         ISpaceRepository spaces, ISystemRepository system, IFileService files, IMessageRepository messages, CancellationToken ct)
@@ -126,7 +113,7 @@ public static class AppMessagesApi
         else
             return ApiErrors.BadRequest("invalid_app_message", "`to` is a list of member ids or \"all\".");
 
-        if (!TryTake($"{space.Id}/{folder}"))
+        if (!Sent.TryTake($"{space.Id}/{folder}"))
             return ApiErrors.Json(429, "rate_limited", $"This app has sent {PerHour} messages in the last hour — try again later.");
 
         // Who muted the space or this app hears nothing.
@@ -142,5 +129,28 @@ public static class AppMessagesApi
             await messages.CreateAsync(recipients, MessageKinds.AppMessage, "space", space.Id, data, ct);
         }
         return Results.Ok(new { sent = recipients.Count });
+    }
+}
+
+// A budget per key over the last hour, in memory — a restart forgets it,
+// which is fine for a brake: app messages per app, error reports per person.
+internal sealed class HourlyLimit
+{
+    private readonly int _perHour;
+    private readonly ConcurrentDictionary<string, Queue<DateTime>> _taken = new(StringComparer.Ordinal);
+
+    public HourlyLimit(int perHour) => _perHour = perHour;
+
+    public bool TryTake(string key)
+    {
+        var now = DateTime.UtcNow;
+        var q = _taken.GetOrAdd(key, _ => new Queue<DateTime>());
+        lock (q)
+        {
+            while (q.Count > 0 && q.Peek() < now.AddHours(-1)) q.Dequeue();
+            if (q.Count >= _perHour) return false;
+            q.Enqueue(now);
+            return true;
+        }
     }
 }
