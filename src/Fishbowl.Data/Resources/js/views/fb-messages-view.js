@@ -166,11 +166,13 @@ class FbMessagesView extends HTMLElement {
         const body = row.querySelector(".msg-body");
         const when = fb.format.dateTime(m.createdAt);
 
+        // The icon and the line itself are shared with the desktop's Messages tile.
+        const line = fb.accounts.messageText(m);
+        icon.setAttribute("name", line.icon);
+        text.textContent = line.text;
+
         if (m.kind === "user.pending") {
             const u = m.subject || {};
-            const label = u.name && u.email ? `${u.name} (${u.email})` : (u.name || u.email || fb.t("fb.messages.someone", "Someone"));
-            icon.setAttribute("name", "user");
-            text.textContent = fb.t("fb.messages.wants-to-join", "{who} wants to join this Fishbowl.", { who: label });
             if (m.doneAt) {
                 const outcome = !u.exists ? fb.t("fb.messages.rejected", "rejected")
                     : u.state === "active" ? fb.t("fb.messages.approved", "approved")
@@ -181,42 +183,15 @@ class FbMessagesView extends HTMLElement {
                 meta.textContent = when;
                 body.appendChild(this._pendingActions(u, defaultQuota));
             }
-        } else if (m.kind === "user.invited") {
-            const u = m.subject || {};
-            const label = u.name && u.email ? `${u.name} (${u.email})` : (u.name || u.email || fb.t("fb.messages.someone", "Someone"));
-            icon.setAttribute("name", "user");
-            text.textContent = fb.t("fb.messages.joined-by-invite", "{who} joined this Fishbowl through a space invitation.", { who: label });
-            meta.textContent = when;
-        } else if (m.kind === "password.reset") {
-            icon.setAttribute("name", "key");
-            text.textContent = m.data?.via === "import"
-                ? fb.t("fb.messages.password-import", "A Global Admin set up your account with a password. Choose your own when you sign in.")
-                : fb.t("fb.messages.password-reset", "A Global Admin reset your password. If you didn't ask for it, tell them.");
-            meta.textContent = when;
-        } else if (m.kind === "password.reset-used") {
-            icon.setAttribute("name", "warn");
-            text.textContent = fb.t("fb.messages.password-reset-used",
-                "Someone signed in with the temporary password from the reset and chose a new one. If that wasn't you, an admin used your account — ask them, and change your password.");
-            meta.textContent = when;
-        } else if (m.kind === "user.approved") {
-            icon.setAttribute("name", "success");
-            text.textContent = fb.t("fb.messages.welcome", "Your account was approved. Welcome to this Fishbowl.");
-            meta.textContent = when;
         } else if (m.kind === "app.message") {
             const d = m.data || {};
             const space = m.subject?.name || fb.t("fb.messages.a-space", "A space");
-            icon.setAttribute("name", "grid");
-            text.textContent = d.text || "";
             // Who sent it: any member's browser can speak for any app of the
             // space, so the person is named (the server adds it at read time).
             const from = m.sender?.name ? fb.t("fb.messages.app-from", "from {name}", { name: m.sender.name }) : null;
             meta.textContent = [space, d.appName || d.app || "", from, when].filter(Boolean).join(" · ");
             row.appendChild(this._muteMenu(m.subject?.id, d.app, d.appName, space));
         } else if (m.kind === "quota.warning") {
-            const d = m.data || {};
-            const gb = (n) => `${fb.format.num((Number(n) || 0) / 1073741824, 1)} GB`;
-            icon.setAttribute("name", "warn");
-            text.textContent = fb.t("fb.messages.quota", "Your storage is almost full: {used} of {quota}.", { used: gb(d.usedBytes), quota: gb(d.quotaBytes) });
             meta.textContent = when;
             const link = document.createElement("a");
             link.href = "#";   // the quota is the user's own: the Your data window
@@ -225,8 +200,7 @@ class FbMessagesView extends HTMLElement {
             link.className = "msg-link";
             body.appendChild(link);
         } else {
-            icon.setAttribute("name", "info");
-            text.textContent = fb.t("fb.messages.unknown", "A message this version can't show yet.");
+            // user.invited, password.*, user.approved — and kinds this version doesn't know.
             meta.textContent = when;
         }
 

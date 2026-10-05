@@ -400,8 +400,51 @@
         return false;
     }
 
+    /**
+     * What a system message says — { icon, text } — in one place, for the
+     * Messages window (its rows add the date, actions and menus around it)
+     * and the desktop's Messages tile (its rows are just this text).
+     */
+    function messageText(m) {
+        const u = m.subject || {};
+        const d = m.data || {};
+        const who = u.name && u.email ? `${u.name} (${u.email})` : (u.name || u.email || fb.t("fb.messages.someone", "Someone"));
+        switch (m.kind) {
+            case "user.pending":
+                return { icon: "user", text: fb.t("fb.messages.wants-to-join", "{who} wants to join this Fishbowl.", { who }) };
+            case "user.invited":
+                return { icon: "user", text: fb.t("fb.messages.joined-by-invite", "{who} joined this Fishbowl through a space invitation.", { who }) };
+            case "password.reset":
+                return {
+                    icon: "key",
+                    text: d.via === "import"
+                        ? fb.t("fb.messages.password-import", "A Global Admin set up your account with a password. Choose your own when you sign in.")
+                        : fb.t("fb.messages.password-reset", "A Global Admin reset your password. If you didn't ask for it, tell them."),
+                };
+            case "password.reset-used":
+                return {
+                    icon: "warn",
+                    text: fb.t("fb.messages.password-reset-used",
+                        "Someone signed in with the temporary password from the reset and chose a new one. If that wasn't you, an admin used your account — ask them, and change your password."),
+                };
+            case "user.approved":
+                return { icon: "success", text: fb.t("fb.messages.welcome", "Your account was approved. Welcome to this Fishbowl.") };
+            case "app.message":
+                return { icon: "grid", text: d.text || "" };
+            case "quota.warning": {
+                const gb = (n) => `${fb.format.num((Number(n) || 0) / 1073741824, 1)} GB`;
+                return {
+                    icon: "warn",
+                    text: fb.t("fb.messages.quota", "Your storage is almost full: {used} of {quota}.", { used: gb(d.usedBytes), quota: gb(d.quotaBytes) }),
+                };
+            }
+            default:
+                return { icon: "info", text: fb.t("fb.messages.unknown", "A message this version can't show yet.") };
+        }
+    }
+
     fb.accounts = {
-        formatBytes, quotaField, readQuota, approve, reject, block, unblock,
+        formatBytes, quotaField, readQuota, approve, reject, block, unblock, messageText,
         addLocalUser, resetPassword, setQuota, setAdmin, setDisabled, revealPassword, deleteUser,
     };
 })();

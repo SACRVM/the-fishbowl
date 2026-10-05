@@ -108,6 +108,13 @@
         dateTime: (d) => `${date(d)} ${time(d)}`,
         weekday:  (d) => toDate(d).toLocaleDateString(namesLocale(), { weekday: "short" }),
         monthYear: (d) => toDate(d).toLocaleDateString(namesLocale(), { month: "long", year: "numeric" }),
+        // "Monday, 5 October" · "Montag, 5. Oktober" — two parts joined by a
+        // comma, because en-GB's own long form lost it in newer ICU.
+        longDate: (d) => {
+            d = toDate(d);
+            const loc = namesLocale();
+            return `${d.toLocaleDateString(loc, { weekday: "long" })}, ${d.toLocaleDateString(loc, { day: "numeric", month: "long" })}`;
+        },
 
         /** An example of `formatName` for a settings list ("25.09.2026 20:00"). */
         example(formatName, d = new Date()) {

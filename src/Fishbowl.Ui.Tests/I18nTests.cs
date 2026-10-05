@@ -165,6 +165,7 @@ public class I18nKeyTableTests
         "js/lib/shell.js",
         "js/lib/desktop.js",
         "js/lib/desktop-apps.js",
+        "js/lib/desktop-live.js",
         "js/lib/accounts.js",
         "js/views/fb-hub-view.js",
         "js/views/fb-messages-view.js",
