@@ -30,7 +30,10 @@ public sealed class FileService : IFileService
     private static readonly ConcurrentDictionary<string, long> UsageCache = new(StringComparer.Ordinal);
     // Per data root (a process can host several — the test fixtures do).
     private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, (DateTime At, long Bytes)> InstanceUsageCache = new();
+    private static readonly object InstanceGate = new();
     private static readonly TimeSpan PartMaxAge = TimeSpan.FromHours(1);
+    // While an upload streams, the free-space floor is looked at again every so often.
+    private const long FreeCheckEveryBytes = 16L * 1024 * 1024;
 
     private readonly DatabaseFactory _dbFactory;
     private readonly ISystemRepository _system;
@@ -92,6 +95,12 @@ public sealed class FileService : IFileService
 
     private static string Hash(string rel)
         => Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(rel)))[..8];
+
+    private static string Nfc(string s)
+    {
+        try { return s.Normalize(NormalizationForm.FormC); }
+        catch (ArgumentException) { return s; }
+    }
 
     private static string Iso(DateTime? d) => d is { } v ? v.ToUniversalTime().ToString("o", CultureInfo.InvariantCulture) : "";
 
@@ -457,25 +466,84 @@ public sealed class FileService : IFileService
         return total;
     }
 
-    // `delta` = how much the context grows; `writeBytes` = what hits the disk.
-    private void CheckRoom(FilePathResolver r, FileSettings s, long delta, long writeBytes)
+    private static FileStoreException InstanceCapExceeded()
+        => FileStoreException.TooLarge("instance", "That would go over this server's storage limit.");
+
+    // The server's total moves with every write (the 60 s measurement alone
+    // would let parallel writes each pass against the same old total).
+    private void AdjustInstance(long delta)
+    {
+        lock (InstanceGate)
+            if (InstanceUsageCache.TryGetValue(_dbFactory.UsersRoot, out var v))
+                InstanceUsageCache[_dbFactory.UsersRoot] = (v.At, Math.Max(0, v.Bytes + delta));
+    }
+
+    // The instance cap for `delta` more. With `book`, checking and counting
+    // are one step under one gate, so two writes in different workspaces
+    // can't both take the last room.
+    private void CheckInstance(FileSettings s, long delta, bool book)
+    {
+        if (s.InstanceCapBytes <= 0)
+        {
+            if (book) AdjustInstance(delta);
+            return;
+        }
+        lock (InstanceGate)
+        {
+            var used = InstanceUsage();
+            if (delta > 0 && used + delta > s.InstanceCapBytes) throw InstanceCapExceeded();
+            if (book) InstanceUsageCache[_dbFactory.UsersRoot] = (InstanceUsageCache[_dbFactory.UsersRoot].At, Math.Max(0, used + delta));
+        }
+    }
+
+    private static void CheckQuota(FilePathResolver r, FileSettings s, long delta)
     {
         if (s.QuotaBytes > 0 && delta > 0 && Usage(r) + delta > s.QuotaBytes)
             throw FileStoreException.TooLarge("quota", "That would go over this workspace's storage quota.");
-        if (s.InstanceCapBytes > 0 && delta > 0 && InstanceUsage() + delta > s.InstanceCapBytes)
-            throw FileStoreException.TooLarge("instance", "That would go over this server's storage limit.");
-        if (s.MinFreeBytes > 0 || writeBytes > 0)
-        {
-            var root = Path.GetPathRoot(r.Root);
-            if (!string.IsNullOrEmpty(root))
-            {
-                long free;
-                try { free = new DriveInfo(root).AvailableFreeSpace; }
-                catch (Exception ex) when (ex is ArgumentException or IOException or UnauthorizedAccessException) { return; }
-                // (Subtracting, not adding: a huge configured floor must not overflow.)
-                if (free < s.MinFreeBytes || free - s.MinFreeBytes < writeBytes) throw FileStoreException.InsufficientStorage();
-            }
-        }
+    }
+
+    // The free-space floor on the volume of `path`, with `writeBytes` still to come.
+    private static void CheckFree(string path, FileSettings s, long writeBytes)
+    {
+        if (s.MinFreeBytes <= 0 && writeBytes <= 0) return;
+        var root = Path.GetPathRoot(path);
+        if (string.IsNullOrEmpty(root)) return;
+        long free;
+        try { free = new DriveInfo(root).AvailableFreeSpace; }
+        catch (Exception ex) when (ex is ArgumentException or IOException or UnauthorizedAccessException) { return; }
+        // (Subtracting, not adding: a huge configured floor must not overflow.)
+        if (free < s.MinFreeBytes || free - s.MinFreeBytes < writeBytes) throw FileStoreException.InsufficientStorage();
+    }
+
+    // `delta` = how much the context grows; `writeBytes` = what hits the disk.
+    // Checks only — the write books its growth once it knows it.
+    private void CheckRoom(FilePathResolver r, FileSettings s, long delta, long writeBytes)
+    {
+        CheckQuota(r, s, delta);
+        CheckInstance(s, delta, book: false);
+        CheckFree(r.Root, s, writeBytes);
+    }
+
+    public async Task CheckRoomAsync(ContextRef ctx, long bytes, CancellationToken ct = default)
+    {
+        var r = Open(ctx);
+        var s = await SettingsAsync(ct);
+        CheckRoom(r, s, bytes, bytes);
+        CheckOwnerRoom(await OwnerQuotaAsync(ctx, ct), bytes);
+    }
+
+    public async Task ReserveNewSpaceAsync(string ownerId, long filesBytes, long totalBytes, CancellationToken ct = default)
+    {
+        var s = await SettingsAsync(ct);
+        // The new space starts empty: its files alone must fit a workspace.
+        if (s.QuotaBytes > 0 && filesBytes > s.QuotaBytes)
+            throw FileStoreException.TooLarge("quota", "That would go over this workspace's storage quota.");
+        var owner = await OwnerQuotaAsync(ContextRef.User(ownerId), ct);
+        CheckOwnerRoom(owner, totalBytes);
+        CheckFree(_dbFactory.SpacesRoot, s, totalBytes);
+        CheckInstance(s, filesBytes, book: true);
+        if (owner is not null && OwnerUsageCache.TryGetValue(owner.OwnerId, out var v))
+            OwnerUsageCache[owner.OwnerId] = (v.At, v.Bytes + totalBytes);
     }
 
     // ───────────────────────────── reads ─────────────────────────────
@@ -656,6 +724,10 @@ public sealed class FileService : IFileService
         var roomLeft = s.QuotaBytes > 0 ? s.QuotaBytes - Usage(r) + (existing?.Size ?? 0) : long.MaxValue;
         var ownerRoom = OwnerRoom(owner);
         var ownerRoomLeft = ownerRoom == long.MaxValue ? long.MaxValue : ownerRoom + (existing?.Size ?? 0);
+        // The server's limits hold for what actually arrives, not only for a
+        // declared Content-Length (a chunked body declares none).
+        var instanceRoomLeft = s.InstanceCapBytes > 0 ? s.InstanceCapBytes - InstanceUsage() + (existing?.Size ?? 0) : long.MaxValue;
+        var nextFreeCheck = FreeCheckEveryBytes;
         try
         {
             string sha;
@@ -674,6 +746,12 @@ public sealed class FileService : IFileService
                         if (total > roomLeft)
                             throw FileStoreException.TooLarge("quota", "That would go over this workspace's storage quota.");
                         if (total > ownerRoomLeft) throw OwnerQuotaExceeded(owner!);
+                        if (total > instanceRoomLeft) throw InstanceCapExceeded();
+                        if (total >= nextFreeCheck)
+                        {
+                            CheckFree(r.Root, s, n);
+                            nextFreeCheck = total + FreeCheckEveryBytes;
+                        }
                         if (headLen < head.Length)
                         {
                             var take = Math.Min(n, head.Length - headLen);
@@ -697,8 +775,20 @@ public sealed class FileService : IFileService
                 if (s.QuotaBytes > 0 && Usage(r) - (now?.Size ?? 0) + total > s.QuotaBytes)
                     throw FileStoreException.TooLarge("quota", "That would go over this workspace's storage quota.");
                 if (OwnerRoom(owner) != long.MaxValue && OwnerRoom(owner) + (now?.Size ?? 0) < total) throw OwnerQuotaExceeded(owner!);
-                DiskFileStore.Unhide(temp);
-                DiskFileStore.Move(temp, target.Full, overwriteFile: true);
+                CheckFree(r.Root, s, 0);   // the bytes are on the disk already
+                // Last: the server's total, checked and booked in one step.
+                var growth = total - (now?.Size ?? 0);
+                CheckInstance(s, growth, book: true);
+                try
+                {
+                    DiskFileStore.Unhide(temp);
+                    DiskFileStore.Move(temp, target.Full, overwriteFile: true);
+                }
+                catch
+                {
+                    AdjustInstance(-growth);
+                    throw;
+                }
                 var item = DiskFileStore.Stat(r, target.Rel)!;
                 var mime = FileSniffer.Sniff(head.AsSpan(0, headLen), item.Name);
                 await _dbFactory.WithContextTransactionAsync(ctx, (db, tx, _) =>
@@ -708,8 +798,8 @@ public sealed class FileService : IFileService
                     Journal(db, tx, now is null ? "create" : "modify", FileKinds.File, item.Rel, null, item.Size, item.Mtime, sha, false, "api", actor);
                     return Task.CompletedTask;
                 }, ct);
-                AdjustUsage(r, total - (now?.Size ?? 0));
-                await OwnerGrewAsync(owner, total - (now?.Size ?? 0), ct);
+                AdjustUsage(r, growth);
+                await OwnerGrewAsync(owner, growth, ct);
                 _logger.LogInformation("Uploaded file {PathHash} ({Bytes} bytes, {Mime}) in {CtxType}:{CtxId}",
                     Hash(item.Rel), total, mime, ctx.Type, ctx.Id);
                 return new FileUploadResult(ToEntry(item, new IndexRow
@@ -780,10 +870,21 @@ public sealed class FileService : IFileService
             if (caseOnly)
             {
                 // Through a temp name, so a case-only rename works whatever
-                // File.Move does on this volume.
-                var tmp = Path.Combine(dstParent, DiskFileStore.TempName());
+                // File.Move does on this volume. Not an upload's `.part`
+                // name, which the maintenance sweep deletes: should the
+                // second step fail, the entry goes back where it was.
+                var tmp = Path.Combine(dstParent, DiskFileStore.RenameTempName());
                 DiskFileStore.Move(src.Full, tmp);
-                DiskFileStore.Move(tmp, dst.Full);
+                try { DiskFileStore.Move(tmp, dst.Full); }
+                catch
+                {
+                    try { DiskFileStore.Move(tmp, src.Full); }
+                    catch (Exception ex) when (ex is FileStoreException or IOException)
+                    {
+                        _logger.LogWarning("Case-only rename of {PathHash} left the entry under a temp name", Hash(src.Rel));
+                    }
+                    throw;
+                }
             }
             else DiskFileStore.Move(src.Full, dst.Full);
 
@@ -885,9 +986,11 @@ public sealed class FileService : IFileService
             if (!Directory.Exists(Path.GetDirectoryName(dst.Full))) throw new FileStoreException(404, "not_found", "The target folder doesn't exist.");
             var (bytes, nodes) = CountTree(r, item);
             CheckNodes(nodes);
-            CheckRoom(r, s, bytes, bytes);
+            CheckQuota(r, s, bytes);
+            CheckFree(r.Root, s, bytes);
             var owner = await OwnerQuotaAsync(ctx, ct);
             CheckOwnerRoom(owner, bytes);
+            CheckInstance(s, bytes, book: true);
 
             var created = await CopyTreeAsync(r, item, r, dst, ct);
             await _dbFactory.WithContextTransactionAsync(ctx, (db, tx, _) =>
@@ -967,6 +1070,7 @@ public sealed class FileService : IFileService
                 return Task.CompletedTask;
             }, ct);
             AdjustUsage(r, -size);
+            AdjustInstance(-size);
             _logger.LogInformation("Deleted {PathHash} permanently in {CtxType}:{CtxId}", Hash(item.Rel), ctx.Type, ctx.Id);
         }
     }
@@ -998,11 +1102,9 @@ public sealed class FileService : IFileService
         return list;
     }
 
-    private static bool IsTrashId(string id) => Ulid.TryParse(id, out _);
-
     public async Task<FileEntry> RestoreAsync(ContextRef ctx, string trashId, FileConflictMode mode, string actor, CancellationToken ct = default)
     {
-        if (!IsTrashId(trashId)) throw FileStoreException.NotFound();
+        trashId = FileTrashIds.Canonical(trashId) ?? throw FileStoreException.NotFound();
         var r = Open(ctx);
         using (await LockAsync(r, ct))
         {
@@ -1065,7 +1167,7 @@ public sealed class FileService : IFileService
 
     public async Task PurgeTrashAsync(ContextRef ctx, string trashId, CancellationToken ct = default)
     {
-        if (!IsTrashId(trashId)) throw FileStoreException.NotFound();
+        trashId = FileTrashIds.Canonical(trashId) ?? throw FileStoreException.NotFound();
         var r = Open(ctx);
         using (await LockAsync(r, ct))
         {
@@ -1082,24 +1184,51 @@ public sealed class FileService : IFileService
             var size = DiskFileStore.Measure(dir).Bytes;
             DiskFileStore.Delete(dir);
             AdjustUsage(r, -size);
+            AdjustInstance(-size);
         }
         using var db = _dbFactory.CreateContextConnection(ctx);
         var n = await db.ExecuteAsync(new CommandDefinition("DELETE FROM file_trash WHERE id = @trashId", new { trashId }, cancellationToken: ct));
         return found || n > 0;
     }
 
-    public async Task<int> EmptyTrashAsync(ContextRef ctx, CancellationToken ct = default)
+    public Task<int> EmptyTrashAsync(ContextRef ctx, CancellationToken ct = default)
+        => EmptyTrashAsync(ctx, keepAppCode: false, ct);
+
+    public async Task<int> EmptyTrashAsync(ContextRef ctx, bool keepAppCode, CancellationToken ct = default)
     {
         var r = Open(ctx);
         using (await LockAsync(r, ct))
         {
             var count = 0;
             var trashRoot = TrashRoot(r);
+            Dictionary<string, string> origins;
+            using (var db = _dbFactory.CreateContextConnection(ctx))
+                origins = (await db.QueryAsync<TrashRow>(new CommandDefinition("SELECT * FROM file_trash", cancellationToken: ct)))
+                    .ToDictionary(x => x.Id, x => x.OriginalPath, StringComparer.Ordinal);
+            var kept = new List<string>();
             if (Directory.Exists(trashRoot))
                 foreach (var dir in new DirectoryInfo(trashRoot).EnumerateDirectories("*", DiskFileStore.Shallow).ToList())
+                {
+                    if (keepAppCode)
+                    {
+                        // Where it came from: its row, else (no row) the root, as ListTrashAsync shows it.
+                        var id = FileTrashIds.Canonical(dir.Name) ?? dir.Name;
+                        var origin = origins.GetValueOrDefault(id)
+                                     ?? dir.EnumerateFileSystemInfos("*", DiskFileStore.Shallow).FirstOrDefault()?.Name;
+                        if (AppsFolder.Contains(origin))
+                        {
+                            kept.Add(id);
+                            continue;
+                        }
+                    }
                     if (await PurgeOneAsync(ctx, r, dir.Name, ct)) count++;
-            using var db = _dbFactory.CreateContextConnection(ctx);
-            await db.ExecuteAsync(new CommandDefinition("DELETE FROM file_trash", cancellationToken: ct));
+                }
+            // Rows without a folder go either way. (An array: a List<string>
+            // parameter would go through the tags' JSON type handler.)
+            using (var db = _dbFactory.CreateContextConnection(ctx))
+                await db.ExecuteAsync(kept.Count == 0
+                    ? new CommandDefinition("DELETE FROM file_trash", cancellationToken: ct)
+                    : new CommandDefinition("DELETE FROM file_trash WHERE id NOT IN @kept", new { kept = kept.ToArray() }, cancellationToken: ct));
             return count;
         }
     }
@@ -1193,11 +1322,19 @@ public sealed class FileService : IFileService
                     var dst = rt.Resolve(FilePathResolver.Join(targetFolder.Rel, item.Name), create: true, allowRoot: false);
                     if (sameContext && (string.Equals(dst.Rel, src.Rel, rs.Comparison) || dst.Rel.StartsWith(src.Rel + "/", rs.Comparison)))
                         throw new FileStoreException(400, "into_own_subtree", "A folder can't go into itself.");
+                    // Replacing a folder the item lies in would trash the item
+                    // with it. (dst is NFC like every new name; src as addressed.)
+                    if (sameContext && mode == FileConflictMode.Replace && Nfc(src.Rel).StartsWith(dst.Rel + "/", rs.Comparison)
+                        && DiskFileStore.Exists(dst.Full))
+                        throw new FileStoreException(409, "replaces_own_source", "That would replace the folder it comes from.");
                     // Checks first: a refused transfer must not have trashed what it would replace.
                     var (bytes, nodes) = CountTree(rs, item);
                     CheckNodes(nodes);
-                    CheckRoom(rt, s, sameContext && move ? 0 : bytes, sameContext && move ? 0 : bytes);
+                    CheckQuota(rt, s, sameContext && move ? 0 : bytes);
+                    CheckFree(rt.Root, s, sameContext && move ? 0 : bytes);
                     if (ownerGrows) CheckOwnerRoom(targetOwner, bytes);
+                    // A move keeps the server's total (another volume copies, then deletes).
+                    CheckInstance(s, move ? 0 : bytes, book: true);
 
                     if (DiskFileStore.Exists(dst.Full))
                     {

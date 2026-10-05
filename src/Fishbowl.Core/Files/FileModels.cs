@@ -47,6 +47,16 @@ public sealed record FileTrashEntry(
     DateTime DeletedAt,
     string? DeletedBy);
 
+// Trash ids are ULIDs in their canonical (upper-case) spelling. Every id that
+// comes in is canonicalised before it is used: a case-insensitive volume
+// opens `.trash/<lower-case id>` all the same, while the bookkeeping row and
+// every guard keyed on it know only the canonical spelling.
+public static class FileTrashIds
+{
+    /// <summary>The canonical spelling of a trash id, or null when it isn't one.</summary>
+    public static string? Canonical(string? id) => id is not null && Ulid.TryParse(id, out var u) ? u.ToString() : null;
+}
+
 public sealed record FileCapabilities(
     bool CaseSensitive,
     string NameRules,   // windows | posix | macos

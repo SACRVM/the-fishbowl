@@ -1,4 +1,5 @@
 using System.Security.Claims;
+using System.Text;
 using System.Text.Json;
 using Fishbowl.Core;
 using Fishbowl.Core.Files;
@@ -91,6 +92,26 @@ public static class FilesApi
             if (t.Personal) throw AppsFolder.SpaceOnly();
             if (!t.CanDesign) throw AppsFolder.DesignOnly();
         }
+    }
+
+    // A trash entry's original path decides whether it is app code. The id
+    // is canonicalised first (FileTrashIds): on a case-insensitive volume a
+    // lower-cased id opens the same `.trash/<id>`, and must find the same entry.
+    private static async Task<FileTrashEntry?> TrashEntryAsync(Target t, IFileService files, string id, CancellationToken ct)
+    {
+        var key = FileTrashIds.Canonical(id);
+        if (key is null) return null;
+        return (await files.ListTrashAsync(t.Ctx, ct)).FirstOrDefault(e => FileTrashIds.Canonical(e.Id) == key);
+    }
+
+    // The name an item arrives under elsewhere: its last segment, NFC like
+    // every name Fishbowl creates.
+    private static string ArrivingName(string? path)
+    {
+        var p = (path ?? "").TrimEnd('/');
+        var name = p[(p.LastIndexOf('/') + 1)..];
+        try { return name.Normalize(NormalizationForm.FormC); }
+        catch (ArgumentException) { return name; }   // not valid Unicode: the resolver refuses it
     }
 
     private static bool IsBearer(ClaimsPrincipal user) => user.Identity?.AuthenticationType == McpContextClaims.BearerScheme;
@@ -233,7 +254,7 @@ public static class FilesApi
         // a bound body parameter would make routing demand a JSON content type.
         g.MapPost("/trash/{id}/restore", (HttpContext http, string id) => Run(http, true, async (t, files, ct) =>
         {
-            var entry = (await files.ListTrashAsync(t.Ctx, ct)).FirstOrDefault(e => e.Id == id);
+            var entry = await TrashEntryAsync(t, files, id, ct);
             GuardApps(t, entry?.OriginalPath);
             RestoreRequest? body = null;
             if (http.Request.HasJsonContentType() && http.Request.ContentLength is not 0)
@@ -248,6 +269,10 @@ public static class FilesApi
             if (IsBearer(http.User)) return Task.FromResult(Results.Forbid());
             return Run(http, true, async (t, files, ct) =>
             {
+                // Trashed app code (a deploy's previous version among it)
+                // is the Designers' to throw away.
+                var entry = await TrashEntryAsync(t, files, id, ct);
+                if (!t.Personal && !t.CanDesign && AppsFolder.Contains(entry?.OriginalPath)) throw AppsFolder.DesignOnly();
                 await files.PurgeTrashAsync(t.Ctx, id, ct);
                 return Results.NoContent();
             });
@@ -257,8 +282,8 @@ public static class FilesApi
         {
             if (IsBearer(http.User)) return Task.FromResult(Results.Forbid());
             return Run(http, true, async (t, files, ct) =>
-                Results.Ok(new { purged = await files.EmptyTrashAsync(t.Ctx, ct) }));
-        })).WithName($"Empty{tag}Trash").WithSummary("Empties the trash. Cookie only.");
+                Results.Ok(new { purged = await files.EmptyTrashAsync(t.Ctx, keepAppCode: !t.Personal && !t.CanDesign, ct) }));
+        })).WithName($"Empty{tag}Trash").WithSummary("Empties the trash (below Designer, trashed app code stays). Cookie only.");
 
         g.MapGet("/usage", H(http => Run(http, false, async (t, files, ct) =>
             Results.Ok(await files.GetUsageAsync(t.Ctx, ct)))))
@@ -310,8 +335,11 @@ public static class FilesApi
         if (move is null || body.From?.Paths is not { Length: > 0 } || body.To is null)
             return Results.Json(new { error = "invalid_request", message = "Needs op (copy|move), from.paths and to." }, statusCode: 400);
 
+        var mode = Conflict(body.OnConflict, FileConflictMode.Fail);
         var spaces = http.RequestServices.GetRequiredService<ISpaceRepository>();
-        async Task<(ContextRef? Ctx, IResult? Error)> Workspace(string? ws, bool write, string?[] paths)
+        // `fixedRoot`: the paths must not touch .apps itself — a move would
+        // take it away, a replace would trash it.
+        async Task<(ContextRef? Ctx, IResult? Error)> Workspace(string? ws, bool write, string?[] paths, bool fixedRoot)
         {
             if (ws == "personal")
             {
@@ -324,22 +352,28 @@ public static class FilesApi
             if (resolved.Error is not null) return (null, resolved.Error);
             if (write && !resolved.Role!.Value.CanWrite()) return (null, Results.Forbid());
             // Into or out of .apps: Designer (transfer is cookie-only, so no key scope).
-            if (paths.Any(p => AppsFolder.IsRoot(p) && move.Value)) return (null, Fail(AppsFolder.Fixed()));
+            if (fixedRoot && paths.Any(AppsFolder.IsRoot)) return (null, Fail(AppsFolder.Fixed()));
             if (paths.Any(AppsFolder.Contains) && !resolved.Role!.Value.CanDesign()) return (null, Fail(AppsFolder.DesignOnly()));
             return (ContextRef.Space(resolved.Space!.Id), null);
         }
 
+        // What gets written is `<folder>/<name of each item>`, so that is what
+        // the target's guards look at — the folder alone would let `x/.apps`
+        // arrive as `.apps`.
+        var folder = (body.To.Folder ?? "").TrimEnd('/');
+        var arriving = body.From.Paths.Select(p => FilePathResolver.Join(folder, ArrivingName(p))).ToArray();
+
         // Moving takes from the source, so it needs write there too.
-        var (from, fromError) = await Workspace(body.From.Workspace, write: move.Value, body.From.Paths);
+        var (from, fromError) = await Workspace(body.From.Workspace, write: move.Value, body.From.Paths, fixedRoot: move.Value);
         if (fromError is not null) return fromError;
-        var (to, toError) = await Workspace(body.To.Workspace, write: true, new[] { body.To.Folder });
+        var (to, toError) = await Workspace(body.To.Workspace, write: true, arriving, fixedRoot: mode == FileConflictMode.Replace);
         if (toError is not null) return toError;
 
         try
         {
             var files = http.RequestServices.GetRequiredService<IFileService>();
             var results = await files.TransferAsync(from!.Value, body.From.Paths, to!.Value, body.To.Folder ?? "",
-                move.Value, Conflict(body.OnConflict, FileConflictMode.Fail), userId, ct);
+                move.Value, mode, userId, ct);
             return Results.Ok(new { results });
         }
         catch (FileStoreException ex) { return Fail(ex); }

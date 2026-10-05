@@ -52,9 +52,11 @@ public static class SpaceAppsApi
           .WithName("GetSpaceGuide").WithSummary("How to build this space's own apps, written from the live space (markdown).");
 
         // Deploy (space-apps spec phase 7, the deploy-to-fishbowl action): a
-        // ZIP of the app's files replaces .apps/<folder> — the old folder goes
-        // to the trash first (restorable), then every entry is written. A
-        // Designer; a key needs design:apps and write:files.
+        // ZIP of the app's files replaces .apps/<folder>. Every entry is
+        // written into a staging folder first; only when all of them are in
+        // does the old folder go to the trash (restorable) and the new one
+        // take its place — a refused deploy changes nothing. A Designer; a
+        // key needs design:apps and write:files.
         routes.MapPost("/api/v1/spaces/{slug}/apps/{folder}/deploy", DeployAsync)
             .RequireAuthorization()
             .WithName("DeploySpaceApp")
@@ -104,7 +106,19 @@ public static class SpaceAppsApi
     }
 
     public const long MaxDeployBytes = 50L * 1024 * 1024;
+    // What the files of one deploy may unpack to, counted as the bytes come
+    // out (a ZIP's declared sizes are only its word).
+    public const long MaxDeployUnpackedBytes = 100L * 1024 * 1024;
     public const int MaxDeployFiles = 500;
+
+    private static IResult DeployTooLarge() =>
+        ApiErrors.Json(413, "too_large", $"A deploy is at most {MaxDeployBytes / (1024 * 1024)} MB.");
+
+    private static FileStoreException UnpacksTooLarge() =>
+        FileStoreException.TooLarge("unpacked", $"A deploy unpacks to at most {MaxDeployUnpackedBytes / (1024 * 1024)} MB.");
+
+    private static IResult NotAZip(string path, string message) =>
+        ApiErrors.BadRequest("invalid_value", $"\"{path}\" {message}", new { field = "zip" });
 
     private static async Task<IResult> DeployAsync(string slug, string folder, HttpContext http,
         ISpaceRepository spaces, IFileService files, CancellationToken ct)
@@ -118,47 +132,154 @@ public static class SpaceAppsApi
         if (!resolved.Role!.Value.CanDesign()) return DesignOnly();
         if (!SpaceApps.IsFolder(folder))
             return ApiErrors.BadRequest("invalid_value", "The app folder is lower-case letters, digits and -.", new { field = "folder" });
-        if (http.Request.ContentLength is > MaxDeployBytes)
-            return ApiErrors.Json(413, "too_large", $"A deploy is at most {MaxDeployBytes / (1024 * 1024)} MB.");
+        if (http.Request.ContentLength is > MaxDeployBytes) return DeployTooLarge();
+        // Kestrel's 30 MB default would stop a deploy short of its own limit.
+        if (http.Features.Get<Microsoft.AspNetCore.Http.Features.IHttpMaxRequestBodySizeFeature>() is { IsReadOnly: false } bodyLimit)
+            bodyLimit.MaxRequestBodySize = MaxDeployBytes + 1;
 
-        // Read the whole ZIP first (bounded) so a broken one changes nothing.
+        // Read the whole ZIP first, never more than the limit (a chunked
+        // body declares no length).
         using var buffer = new MemoryStream();
-        await http.Request.Body.CopyToAsync(buffer, ct);
-        if (buffer.Length > MaxDeployBytes) return ApiErrors.Json(413, "too_large", $"A deploy is at most {MaxDeployBytes / (1024 * 1024)} MB.");
-        buffer.Position = 0;
-        List<(string Path, byte[] Bytes)> entries;
-        try
+        var chunk = new byte[81920];
+        int read;
+        while ((read = await http.Request.Body.ReadAsync(chunk, ct)) > 0)
         {
-            using var zip = new System.IO.Compression.ZipArchive(buffer, System.IO.Compression.ZipArchiveMode.Read, leaveOpen: true);
-            entries = new();
-            foreach (var e in zip.Entries.Where(e => !e.FullName.EndsWith('/')))
-            {
-                var path = e.FullName.Replace('\\', '/');
-                if (!SpaceApps.IsFile(path))
-                    return ApiErrors.BadRequest("invalid_value", $"\"{path}\" isn't a plain path inside the app folder.", new { field = "zip" });
-                if (entries.Count >= MaxDeployFiles)
-                    return ApiErrors.BadRequest("invalid_value", $"At most {MaxDeployFiles} files.", new { field = "zip" });
-                using var s = e.Open();
-                using var m = new MemoryStream();
-                await s.CopyToAsync(m, ct);
-                entries.Add((path, m.ToArray()));
-            }
+            if (buffer.Length + read > MaxDeployBytes) return DeployTooLarge();
+            buffer.Write(chunk, 0, read);
         }
-        catch (InvalidDataException) { return ApiErrors.BadRequest("invalid_value", "The body isn't a ZIP file.", new { field = "zip" }); }
-        if (!entries.Any(e => e.Path == SpaceApps.ManifestFile))
-            return ApiErrors.BadRequest("invalid_value", "The ZIP has no app.json at its top level.", new { field = "zip" });
+        buffer.Position = 0;
 
         var ctx = ContextRef.Space(resolved.Space!.Id);
         var actor = user.FindFirst(McpContextClaims.UserId)!.Value;
         var root = $"{AppsFolder.Name}/{folder}";
-        try { await files.StatAsync(ctx, root, ct); await files.TrashAsync(ctx, root, actor, ct); }
-        catch (FileStoreException ex) when (ex.Status == 404) { /* a first deploy */ }
-        foreach (var (path, bytes) in entries)
+        System.IO.Compression.ZipArchive zip;
+        try { zip = new System.IO.Compression.ZipArchive(buffer, System.IO.Compression.ZipArchiveMode.Read, leaveOpen: true); }
+        catch (InvalidDataException) { return ApiErrors.BadRequest("invalid_value", "The body isn't a ZIP file.", new { field = "zip" }); }
+        using (zip)
         {
-            using var body = new MemoryStream(bytes);
-            await files.UploadAsync(ctx, $"{root}/{path}", body, bytes.Length, ifMatch: null, ifNoneMatchStar: true, parents: true, actor, ct);
+            // Every entry is checked before anything is written: its shape,
+            // the host's name rules (what the upload would refuse — `con.js`
+            // on Windows), and that no two land on one name on this volume.
+            FileCapabilities caps;
+            try { caps = await files.GetCapabilitiesAsync(ctx, ct); }
+            catch (FileStoreException ex) { return FilesApi.Fail(ex); }
+            var names = caps.CaseSensitive ? StringComparer.Ordinal : StringComparer.OrdinalIgnoreCase;
+            var seen = new HashSet<string>(names);
+            var folders = new HashSet<string>(names);
+            var entries = new List<(string Path, System.IO.Compression.ZipArchiveEntry Entry)>();
+            long declared = 0;
+            foreach (var e in zip.Entries.Where(e => !e.FullName.EndsWith('/')))
+            {
+                var path = e.FullName.Replace('\\', '/');
+                if (!SpaceApps.IsFile(path)) return NotAZip(path, "isn't a plain path inside the app folder.");
+                if (entries.Count >= MaxDeployFiles)
+                    return ApiErrors.BadRequest("invalid_value", $"At most {MaxDeployFiles} files.", new { field = "zip" });
+                foreach (var segment in path.Split('/'))
+                    if (FileNameRules.Check(segment, FileNameRules.ForHost(), atRoot: false, caps.CaseSensitive) is { } v)
+                        return FilesApi.Fail(FileStoreException.InvalidName(v.Rule, segment, v.Message));
+                if (!seen.Add(path)) return NotAZip(path, "is in the ZIP twice (names here are compared as the server's disk does).");
+                for (var i = path.IndexOf('/'); i >= 0; i = path.IndexOf('/', i + 1)) folders.Add(path[..i]);
+                if (e.Length > MaxDeployUnpackedBytes) return FilesApi.Fail(UnpacksTooLarge());
+                declared += e.Length;
+                entries.Add((path, e));
+            }
+            if (seen.FirstOrDefault(folders.Contains) is { } both) return NotAZip(both, "is both a file and a folder in the ZIP.");
+            if (!entries.Any(e => e.Path == SpaceApps.ManifestFile))
+                return ApiErrors.BadRequest("invalid_value", "The ZIP has no app.json at its top level.", new { field = "zip" });
+            if (declared > MaxDeployUnpackedBytes) return FilesApi.Fail(UnpacksTooLarge());
+            try { await files.CheckRoomAsync(ctx, declared, ct); }
+            catch (FileStoreException ex) { return FilesApi.Fail(ex); }
+
+            // Staged under a dot name: no app (SpaceApps.IsFolder), so neither
+            // the desktop nor the triggers see it half-written.
+            var staging = $"{AppsFolder.Name}/.deploy-{Guid.NewGuid():N}";
+            var budget = new UnpackBudget(MaxDeployUnpackedBytes);
+            try
+            {
+                foreach (var (path, e) in entries)
+                {
+                    await using var s = new BudgetedStream(e.Open(), budget);
+                    await files.UploadAsync(ctx, $"{staging}/{path}", s, e.Length, ifMatch: null, ifNoneMatchStar: true, parents: true, actor, ct);
+                }
+            }
+            catch (FileStoreException ex)
+            {
+                await DiscardAsync(files, ctx, staging, actor);
+                return FilesApi.Fail(ex);
+            }
+            catch (InvalidDataException)
+            {
+                await DiscardAsync(files, ctx, staging, actor);
+                return ApiErrors.BadRequest("invalid_value", "A file in the ZIP is damaged.", new { field = "zip" });
+            }
+            catch
+            {
+                await DiscardAsync(files, ctx, staging, actor);
+                throw;
+            }
+
+            // The swap: the old version to the trash, the new one in its place.
+            FileTrashEntry? old = null;
+            try
+            {
+                try { old = await files.TrashAsync(ctx, root, actor, ct); }
+                catch (FileStoreException ex) when (ex.Status == 404) { /* a first deploy */ }
+                await files.MoveAsync(ctx, staging, root, actor, ct);
+            }
+            catch (FileStoreException ex)
+            {
+                if (old is not null)
+                    try { await files.RestoreAsync(ctx, old.Id, FileConflictMode.Fail, actor, CancellationToken.None); }
+                    catch (FileStoreException) { /* it stays in the trash, restorable */ }
+                await DiscardAsync(files, ctx, staging, actor);
+                return FilesApi.Fail(ex);
+            }
+            return Results.Ok(new { app = SpaceApps.IdOf(folder), files = entries.Count });
         }
-        return Results.Ok(new { app = SpaceApps.IdOf(folder), files = entries.Count });
+    }
+
+    // A failed deploy leaves no staging folder behind (best effort: a locked
+    // file keeps it, hidden under its dot name, until the next try).
+    private static async Task DiscardAsync(IFileService files, ContextRef ctx, string staging, string actor)
+    {
+        try { await files.DeletePermanentlyAsync(ctx, staging, actor, CancellationToken.None); }
+        catch (Exception ex) when (ex is FileStoreException or IOException or UnauthorizedAccessException) { }
+    }
+
+    private sealed class UnpackBudget(long bytes)
+    {
+        public long Left = bytes;
+    }
+
+    // An entry's bytes, counted against what the whole deploy may unpack to.
+    private sealed class BudgetedStream(Stream inner, UnpackBudget budget) : Stream
+    {
+        private int Take(int n)
+        {
+            budget.Left -= n;
+            if (budget.Left < 0) throw UnpacksTooLarge();
+            return n;
+        }
+
+        public override int Read(byte[] buffer, int offset, int count) => Take(inner.Read(buffer, offset, count));
+        public override int Read(Span<byte> buffer) => Take(inner.Read(buffer));
+        public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken ct = default) => Take(await inner.ReadAsync(buffer, ct));
+        public override async Task<int> ReadAsync(byte[] buffer, int offset, int count, CancellationToken ct) => Take(await inner.ReadAsync(buffer.AsMemory(offset, count), ct));
+        public override bool CanRead => true;
+        public override bool CanSeek => false;
+        public override bool CanWrite => false;
+        public override long Length => throw new NotSupportedException();
+        public override long Position { get => throw new NotSupportedException(); set => throw new NotSupportedException(); }
+        public override void Flush() { }
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+        public override void SetLength(long value) => throw new NotSupportedException();
+        public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing) inner.Dispose();
+            base.Dispose(disposing);
+        }
     }
 
     public sealed record ReportRequest(string? App, string? Kind, string? Message, string? Detail);

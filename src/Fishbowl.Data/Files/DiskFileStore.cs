@@ -97,6 +97,11 @@ public static class DiskFileStore
 
     public static string TempName() => $"{FileNameRules.TempPrefix}{Ulid.NewUlid()}.part";
 
+    // A rename's halfway name: reserved (hidden) like an upload's temp, but
+    // never a `.part` — the maintenance sweep deletes those, and this one
+    // holds a user's existing file or folder.
+    public static string RenameTempName() => $"{FileNameRules.TempPrefix}{Ulid.NewUlid()}.rename";
+
     public static void Hide(string full)
     {
         if (OperatingSystem.IsWindows())

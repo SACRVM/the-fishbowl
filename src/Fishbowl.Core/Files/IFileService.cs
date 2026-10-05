@@ -30,7 +30,22 @@ public interface IFileService
     Task PurgeTrashAsync(ContextRef ctx, string trashId, CancellationToken ct = default);
     Task<int> EmptyTrashAsync(ContextRef ctx, CancellationToken ct = default);
 
+    // keepAppCode: leave what came from a space's .apps (a member below
+    // Designer empties everything else).
+    Task<int> EmptyTrashAsync(ContextRef ctx, bool keepAppCode, CancellationToken ct = default);
+
     Task<FileUsage> GetUsageAsync(ContextRef ctx, CancellationToken ct = default);
+
+    // Would `bytes` more fit — the workspace's quota, its owner's quota, the
+    // server's cap and free-space floor? Throws the 413/507 a write would;
+    // books nothing (a check before a batch of writes, each checked again).
+    Task CheckRoomAsync(ContextRef ctx, long bytes, CancellationToken ct = default);
+
+    // A space that doesn't exist yet and `ownerId` will own (an archive
+    // restore): `totalBytes` on disk, `filesBytes` of them under files/.
+    // Checked like a write and booked against the owner's quota and the
+    // server's cap, so back-to-back restores can't each pass on one total.
+    Task ReserveNewSpaceAsync(string ownerId, long filesBytes, long totalBytes, CancellationToken ct = default);
     Task<FileChangesPage> GetChangesAsync(ContextRef ctx, string? cursor, int? limit, CancellationToken ct = default);
     Task<(string Cursor, IReadOnlyList<FileSnapshotEntry> Entries)> SnapshotAsync(ContextRef ctx, CancellationToken ct = default);
 

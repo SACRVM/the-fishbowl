@@ -30,12 +30,16 @@ public sealed class SpaceArchiver : ISpaceArchiveService
     private readonly DatabaseFactory _db;
     private readonly ISystemRepository _system;
     private readonly ILogger<SpaceArchiver> _logger;
+    private readonly IFileService _files;
 
-    public SpaceArchiver(DatabaseFactory db, ISystemRepository system, ILogger<SpaceArchiver>? logger = null)
+    public SpaceArchiver(DatabaseFactory db, ISystemRepository system, ILogger<SpaceArchiver>? logger = null,
+        IFileService? files = null)
     {
         _db = db;
         _system = system;
         _logger = logger ?? NullLogger<SpaceArchiver>.Instance;
+        // The quotas and the server's cap are the file store's (one rule set).
+        _files = files ?? new FileService(db, system);
     }
 
     private string ArchiveRoot => Path.Combine(Path.GetDirectoryName(_db.UsersRoot)!, "archive", "spaces");
@@ -248,6 +252,19 @@ public sealed class SpaceArchiver : ISpaceArchiveService
         if (found is null) return null;
         var m = found.Manifest;
         CheckFreeSpace(found.Size * 2);
+
+        // A restore writes a whole space, billed to the restoring owner: it
+        // must fit their quota, a workspace's quota and the server's cap like
+        // any write (and each restore of the same archive counts again).
+        long totalBytes = 0, filesBytes = 0;
+        using (var zip = ZipFile.OpenRead(found.Path))
+            foreach (var e in zip.Entries)
+            {
+                if (e.FullName == ManifestEntry) continue;
+                totalBytes += e.Length;
+                if (e.FullName.StartsWith("files/", StringComparison.Ordinal)) filesBytes += e.Length;
+            }
+        await _files.ReserveNewSpaceAsync(userId, filesBytes, totalBytes, ct);
 
         var newId = Ulid.NewUlid().ToString();
         var staging = System.IO.Path.Combine(_db.SpacesRoot, RestoringPrefix + newId);
