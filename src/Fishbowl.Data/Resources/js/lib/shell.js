@@ -38,14 +38,22 @@
     };
     fb.toolbar._nav.renderToolbar();
 
-    // --- Phone ribbon title ---------------------------------------------
-    // On compact the ribbon shows one name; give it the active view's label
-    // (the hub keeps the brand).
+    // --- Which app you are in ---------------------------------------------
+    // The ribbon names the active page after the brand (the kit's app-name,
+    // accent — like SACRVM Desktop's "SACRVM DESKTOP  COLOR BUCKET"); on
+    // compact it shows one name, the page's label. The hub keeps the brand.
     function syncTitle() {
         const current = sac.router.currentResource();
         const route = sac.router.routes().find((r) => r.hash === current);
-        if (route && current !== "#/") nav.setAttribute("compact-title", route.label);
-        else nav.removeAttribute("compact-title");
+        // app-name first: the kit observes only compact-title, whose change
+        // repaints the ribbon with both.
+        if (route && current !== "#/") {
+            nav.setAttribute("app-name", route.label.toUpperCase());
+            nav.setAttribute("compact-title", route.label);
+        } else {
+            nav.removeAttribute("app-name");
+            nav.removeAttribute("compact-title");
+        }
     }
     window.addEventListener("hashchange", syncTitle);
 

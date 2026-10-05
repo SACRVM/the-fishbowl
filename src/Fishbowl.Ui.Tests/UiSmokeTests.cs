@@ -39,6 +39,14 @@ public class UiSmokeTests
         await notesView.WaitForAsync(new LocatorWaitForOptions { Timeout = 3000 });
         Assert.True(await notesView.IsVisibleAsync());
 
+        // The ribbon says which app this is, after the brand; the hub doesn't.
+        var appName = page.Locator("#fb-nav .brand .app-name");
+        await appName.WaitForAsync(new LocatorWaitForOptions { Timeout = 3000 });
+        Assert.Equal("NOTES", (await appName.TextContentAsync())?.Trim());
+        await page.GotoAsync(_fixture.BaseUrl + "/#/");
+        await notesTile.WaitForAsync(new LocatorWaitForOptions { Timeout = 3000 });
+        Assert.Equal(0, await appName.CountAsync());
+
         await context.CloseAsync();
     }
 
