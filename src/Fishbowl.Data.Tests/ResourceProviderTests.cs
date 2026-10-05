@@ -188,6 +188,27 @@ public class ResourceProviderTests : IDisposable
         Assert.True(exists, "ExistsAsync must find embedded subfolder resources (backslash).");
     }
 
+    [Fact]
+    public async Task GetAsync_PathOutsideModsFolder_IsRefused_Test()
+    {
+        // The fallback route hands the request path in as it is: a rooted path
+        // or a "..\" (Kestrel decodes %5C) must never read a file beside or
+        // above the mods folder.
+        var outside = Path.Combine(Path.GetDirectoryName(_tempModsDir)!, "outside_" + Path.GetRandomFileName() + ".txt");
+        File.WriteAllText(outside, "not yours");
+        try
+        {
+            var provider = new ResourceProvider(_cache, _tempModsDir);
+            var name = Path.GetFileName(outside);
+            foreach (var path in new[] { "../" + name, @"..\" + name, outside, outside.Replace('\\', '/'), "js/../../" + name })
+            {
+                Assert.Null(await provider.GetAsync(path, TestContext.Current.CancellationToken));
+                Assert.False(await provider.ExistsAsync(path, TestContext.Current.CancellationToken), path);
+            }
+        }
+        finally { File.Delete(outside); }
+    }
+
     public void Dispose()
     {
         _cache.Dispose();

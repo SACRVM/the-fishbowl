@@ -32,8 +32,8 @@ public class ResourceProvider : IResourceProvider
 
         Resource? resource = null;
 
-        var diskPath = Path.Combine(_modsPath, path);
-        if (File.Exists(diskPath))
+        var diskPath = DiskPathFor(path);
+        if (diskPath is not null && File.Exists(diskPath))
         {
             var data = await File.ReadAllBytesAsync(diskPath, ct);
             resource = new Resource(data, path, ResourceSource.Disk);
@@ -68,12 +68,31 @@ public class ResourceProvider : IResourceProvider
         if (_cache.TryGetValue(path, out _))
             return Task.FromResult(true);
 
-        var diskPath = Path.Combine(_modsPath, path);
-        if (File.Exists(diskPath))
+        var diskPath = DiskPathFor(path);
+        if (diskPath is not null && File.Exists(diskPath))
             return Task.FromResult(true);
 
         using var stream = TryOpenEmbeddedStream(path);
         return Task.FromResult(stream != null);
+    }
+
+    // The path comes straight from the request URL (the UI fallback route), so
+    // it may only name something inside the mods folder. Path.Combine drops the
+    // root for a rooted second part ("C:/…", "\\server\…") and Kestrel decodes
+    // %5C to '\', which walks out with "..\" — so plain relative segments only,
+    // and the combined path is checked against the root once more.
+    private string? DiskPathFor(string path)
+    {
+        var rel = path.Replace('\\', '/');
+        if (rel.Length == 0 || rel.Contains(':') || rel.Contains('\0') || Path.IsPathRooted(rel))
+            return null;
+        foreach (var segment in rel.Split('/'))
+            if (segment is "" or "." or "..") return null;
+
+        var root = Path.TrimEndingDirectorySeparator(Path.GetFullPath(_modsPath)) + Path.DirectorySeparatorChar;
+        var full = Path.GetFullPath(Path.Combine(root, rel));
+        var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+        return full.StartsWith(root, comparison) ? full : null;
     }
 
     private Stream? TryOpenEmbeddedStream(string path)
