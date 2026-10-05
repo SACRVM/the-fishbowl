@@ -41,8 +41,13 @@ public class EventRepository : IEventRepository
     public async Task<IEnumerable<Event>> GetRangeAsync(
         ContextRef ctx, DateTime from, DateTime to, CancellationToken ct = default)
     {
-        if (to <= from)
-            throw new ArgumentException("`to` must be strictly after `from`", nameof(to));
+        // Callers (REST, MCP) check the window first and answer with the
+        // code; this is the backstop. Instants compare as UTC from here on —
+        // a Local `from` would print with an offset and compare wrongly.
+        from = TimeUtil.AsUtc(from);
+        to = TimeUtil.AsUtc(to);
+        if (EventLimits.CheckRange(from, to) is { } bad)
+            throw new ArgumentException(bad.Message);
 
         using var db = _dbFactory.CreateContextConnection(ctx);
 
@@ -102,8 +107,8 @@ public class EventRepository : IEventRepository
             if (!RRule.TryParse(ev.RRule, out var spec))
             {
                 // Out-of-subset rule — degrade to the master occurrence
-                // only, exactly what the pre-expansion read path returned.
-                if (ev.StartAt >= fromUtc && ev.StartAt < toUtc)
+                // only, matched like a single event.
+                if ((ev.StartAt >= fromUtc || ev.EndAt > fromUtc) && ev.StartAt < toUtc)
                     results.Add(ev);
                 continue;
             }
@@ -114,15 +119,23 @@ public class EventRepository : IEventRepository
                 // Whole days on the date anchors (UTC, so no DST), widened
                 // by the series' length so a multi-day occurrence that began
                 // before the window still shows.
-                var span = duration ?? TimeSpan.FromDays(1);
+                var span = Lead(duration ?? TimeSpan.FromDays(1));
                 foreach (var occ in RRule.Expand(ev.StartAt, spec,
-                    AllDayDates.Anchor(fromDay) - span, AllDayDates.Anchor(toDay)))
+                    Minus(AllDayDates.Anchor(fromDay), span), AllDayDates.Anchor(toDay)))
                     results.Add(CloneAt(ev, occ, duration));
                 continue;
             }
+            // Like a single event, an occurrence that began before the window
+            // and still runs into it (overnight, multi-day) belongs to it:
+            // expansion starts the series' length earlier, and an occurrence
+            // counts when it starts inside or ends after `from`.
+            var start = Minus(fromUtc, Lead(duration ?? TimeSpan.Zero));
             var zone = RRule.ResolveZone(ev.TimeZone);
-            foreach (var occ in RRule.Expand(ev.StartAt, spec, fromUtc, toUtc, zone))
-                results.Add(CloneAt(ev, occ, duration));
+            foreach (var occ in RRule.Expand(ev.StartAt, spec, start, toUtc, zone))
+            {
+                if (occ >= fromUtc || occ > start)
+                    results.Add(CloneAt(ev, occ, duration));
+            }
         }
 
         return results.OrderBy(e => e.StartAt).ToList();
@@ -144,7 +157,7 @@ public class EventRepository : IEventRepository
         Title = ev.Title,
         Description = ev.Description,
         StartAt = occStart,
-        EndAt = duration is TimeSpan d ? occStart + d : null,
+        EndAt = duration is TimeSpan d ? Plus(occStart, d) : null,
         AllDay = ev.AllDay,
         StartDate = ev.AllDay ? AllDayDates.ToText(AllDayDates.FromAnchor(occStart)) : null,
         EndDate = ev.AllDay
@@ -162,6 +175,23 @@ public class EventRepository : IEventRepository
         IsRecurringInstance = true,
     };
 
+    // How far before a window a series' occurrences are looked for: its
+    // length, capped so a pathological length can't turn every past
+    // occurrence into a clone.
+    private static TimeSpan Lead(TimeSpan duration)
+        => duration <= TimeSpan.Zero ? TimeSpan.Zero
+            : TimeSpan.FromTicks(Math.Min(duration.Ticks, TimeSpan.FromDays(EventLimits.MaxRangeDays).Ticks));
+
+    private static DateTime Minus(DateTime at, TimeSpan d)
+        => d.Ticks > at.Ticks ? DateTime.SpecifyKind(DateTime.MinValue, at.Kind) : at - d;
+
+    // occStart + d without overflowing on a series whose stored end is
+    // centuries out — it saturates at DateTime.MaxValue instead.
+    private static DateTime Plus(DateTime at, TimeSpan d)
+        => d.Ticks > DateTime.MaxValue.Ticks - at.Ticks
+            ? DateTime.SpecifyKind(DateTime.MaxValue, at.Kind)
+            : at + d;
+
     // Stored instants are UTC but the TEXT→DateTime parse can surface them
     // as Local/Unspecified kinds; expansion windows and the scheduler's
     // trigger latch compare instants in C#, so pin everything to UTC here.
@@ -174,14 +204,7 @@ public class EventRepository : IEventRepository
     public async Task<string> CreateAsync(
         ContextRef ctx, string actorUserId, Event evt, CancellationToken ct = default)
     {
-        if (string.IsNullOrWhiteSpace(evt.Title))
-            throw new ArgumentException("Event title is required", nameof(evt));
-        AllDayDates.Normalize(evt);
-        // `end == start` is a zero-duration point-in-time event; only
-        // strictly inverted windows are invalid.
-        if (evt.EndAt is not null && evt.EndAt < evt.StartAt)
-            throw new ArgumentException("Event end_at cannot be before start_at", nameof(evt));
-        EnforceLimits(evt);
+        PrepareForWrite(evt);
 
         if (string.IsNullOrEmpty(evt.Id))
             evt.Id = Ulid.NewUlid().ToString();
@@ -231,14 +254,7 @@ public class EventRepository : IEventRepository
 
     public async Task<bool> UpdateAsync(ContextRef ctx, Event evt, CancellationToken ct = default)
     {
-        if (string.IsNullOrWhiteSpace(evt.Title))
-            throw new ArgumentException("Event title is required", nameof(evt));
-        AllDayDates.Normalize(evt);
-        // `end == start` is a zero-duration point-in-time event; only
-        // strictly inverted windows are invalid.
-        if (evt.EndAt is not null && evt.EndAt < evt.StartAt)
-            throw new ArgumentException("Event end_at cannot be before start_at", nameof(evt));
-        EnforceLimits(evt);
+        PrepareForWrite(evt);
 
         evt.UpdatedAt = DateTime.UtcNow;
 
@@ -423,6 +439,30 @@ public class EventRepository : IEventRepository
                 "DELETE FROM events WHERE id = @id",
                 new { id }, transaction: tx, cancellationToken: token)) > 0;
         }, ct);
+    }
+
+    // Shared by create and update: required fields, the stored shape of
+    // dates and instants, then the limits.
+    private static void PrepareForWrite(Event evt)
+    {
+        if (string.IsNullOrWhiteSpace(evt.Title))
+            throw new ArgumentException("Event title is required", nameof(evt));
+        AllDayDates.Normalize(evt);
+        // Instants are stored as UTC ("Z"): range reads compare the ISO text
+        // lexically, so a body's "+02:00" (parsed as Local on a non-UTC host)
+        // would otherwise sort by the host's offset. All-day anchors are UTC
+        // already.
+        evt.StartAt = TimeUtil.AsUtc(evt.StartAt);
+        if (evt.EndAt is DateTime end) evt.EndAt = TimeUtil.AsUtc(end);
+        // A missing startAt binds as 0001-01-01: not a date anyone meant, and
+        // a series from there would be walked on every scheduler tick.
+        if (evt.StartAt == default)
+            throw new ArgumentException("Event startAt is required", nameof(evt));
+        // `end == start` is a zero-duration point-in-time event; only
+        // strictly inverted windows are invalid.
+        if (evt.EndAt is not null && evt.EndAt < evt.StartAt)
+            throw new ArgumentException("Event end_at cannot be before start_at", nameof(evt));
+        EnforceLimits(evt);
     }
 
     private static void EnforceLimits(Event evt)

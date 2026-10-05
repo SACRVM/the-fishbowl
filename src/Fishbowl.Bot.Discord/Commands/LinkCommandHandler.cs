@@ -1,4 +1,5 @@
 using global::Discord;
+using Fishbowl.Core.Auth;
 using Fishbowl.Core.Repositories;
 using Fishbowl.Core.Util;
 using Microsoft.Extensions.Logging;
@@ -72,13 +73,40 @@ public class LinkCommandHandler : ISlashCommandHandler
             return Replies.Say(null, "link.badCode");
         }
 
+        // A code whose account was disabled or blocked since it was minted
+        // links nothing: the bot only acts for active accounts.
+        var user = await _system.GetUserAsync(redemption.UserId, ct);
+        if (user is null || user.State != UserStates.Active)
+        {
+            _logger.LogInformation("Discord link refused for {UserId}: account not active", redemption.UserId);
+            return Replies.Say(user?.Language, "bot.inactive");
+        }
+
+        // Reminders go to the bot's own DM with this user. A command can also
+        // run inside a DM with a friend (PrivateChannel), where the bot can't
+        // post later — storing that channel would make every reminder fail.
+        var channelId = ctx.OpenBotDmAsync is null
+            ? ctx.DiscordChannelId
+            : await ctx.OpenBotDmAsync(ct);
+
+        // One Discord account per Fishbowl user: linking another replaces the
+        // old one. With two, the cold-DM fallback can't tell which account to
+        // reach and /unlink from one would drop the other's channel. The
+        // channel row is per user, so the upsert below replaces it too.
+        var previous = await _system.GetProviderIdForUserAsync(redemption.UserId, DiscordProvider.Name, ct);
+        if (!string.IsNullOrEmpty(previous) && previous != ctx.DiscordUserId)
+        {
+            await _system.DeleteUserMappingAsync(DiscordProvider.Name, previous, ct);
+            _logger.LogInformation("Replaced the previous Discord link of Fishbowl {UserId}", redemption.UserId);
+        }
+
         await _system.CreateUserMappingAsync(redemption.UserId, DiscordProvider.Name, ctx.DiscordUserId, ct);
-        await _channels.UpsertAsync(redemption.UserId, DiscordProvider.Name, ctx.DiscordChannelId, ct);
+        await _channels.UpsertAsync(redemption.UserId, DiscordProvider.Name, channelId, ct);
 
         _logger.LogInformation("Linked Discord {Discord} → Fishbowl {UserId}", ctx.DiscordUserId, redemption.UserId);
 
         // Linked: from here on the bot speaks the user's language.
-        return Replies.Say(await LanguageAsync(redemption.UserId, ct), "link.done");
+        return Replies.Say(user.Language, "link.done");
     }
 
     private async Task<string?> LanguageAsync(string userId, CancellationToken ct)

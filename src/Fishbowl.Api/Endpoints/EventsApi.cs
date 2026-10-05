@@ -9,9 +9,9 @@ using Fishbowl.Core.Util;
 namespace Fishbowl.Api.Endpoints;
 
 // CONCEPT.md § Calendar — "A calendar that belongs to you." Personal
-// CRUD over the events table (schema v1). No recurrence expansion on
-// read (callers get the master event; the future scheduler expands
-// RRULE when firing reminders). Space variant lives in SpacesApi.
+// CRUD over the events table (schema v1). A ?from=&to= range read expands
+// recurring series (at most EventLimits.MaxRangeDays); a plain list returns
+// masters only. Space variant lives in SpacesApi.
 public static class EventsApi
 {
     public static RouteGroupBuilder MapEventsApi(this IEndpointRouteBuilder routes)
@@ -31,7 +31,13 @@ public static class EventsApi
                 return ApiErrors.BadRequest("range_incomplete", "from and to must both be provided or both omitted");
 
             if (from is not null)
-                return Results.Ok(await repo.GetRangeAsync(userId, from.Value, to!.Value, ct));
+            {
+                // Inverted, unreal or open-ended windows are the caller's
+                // mistake, not a 500 (a range read expands every series).
+                if (EventLimits.CheckRange(from.Value, to!.Value) is { } bad)
+                    return ApiErrors.BadRequest(bad.Code, bad.Message, new { maxDays = EventLimits.MaxRangeDays });
+                return Results.Ok(await repo.GetRangeAsync(userId, from.Value, to.Value, ct));
+            }
             return Results.Ok(await repo.GetAllAsync(userId, ct));
         })
         .WithName("ListEvents")

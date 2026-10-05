@@ -1,4 +1,6 @@
+using System.Net;
 using global::Discord;
+using global::Discord.Net;
 using global::Discord.WebSocket;
 using Fishbowl.Core.Models;
 using Fishbowl.Core.Plugins;
@@ -59,10 +61,28 @@ public class DiscordBotClient : IBotClient
             throw new BotDeliveryException("No Discord channel is linked for this user.");
         }
 
-        IMessageChannel? dm = null;
+        var text = DiscordText.Fit(message);
+        ulong? refusedId = null;
         if (ulong.TryParse(channel.ChannelId, out var channelSnowflake))
         {
-            dm = await _socket.GetChannelAsync(channelSnowflake) as IMessageChannel;
+            // A stored channel the bot can't reach (403/404 — e.g. a DM with a
+            // friend that an older /link stored) isn't the end: the fallback
+            // below opens the bot's own DM and re-caches it.
+            try
+            {
+                if (await _socket.GetChannelAsync(channelSnowflake) is IMessageChannel stored)
+                {
+                    await stored.SendMessageAsync(text);
+                    return;
+                }
+            }
+            catch (HttpException ex) when (IsUnreachable(ex))
+            {
+                _logger.LogInformation(
+                    "Stored Discord channel for user {UserId} refused ({Status}) — reopening the DM",
+                    userId, ex.HttpCode);
+                refusedId = channelSnowflake;
+            }
         }
         else
         {
@@ -70,15 +90,19 @@ public class DiscordBotClient : IBotClient
                 "Discord channel id for user {UserId} is not a valid snowflake — will try DM re-open", userId);
         }
 
-        dm ??= await ResolveDmFallbackAsync(userId, channels, scope.ServiceProvider, ct);
-        if (dm is null)
+        var dm = await ResolveDmFallbackAsync(userId, channels, scope.ServiceProvider, ct);
+        if (dm is null || dm.Id == refusedId)
         {
+            // The bot's DM is the channel that just refused: trying again changes nothing.
             _logger.LogWarning("Could not resolve Discord DM channel for user {UserId}", userId);
             throw new BotDeliveryException("The Discord DM couldn't be opened.");
         }
 
-        await dm.SendMessageAsync(DiscordText.Fit(message));
+        await dm.SendMessageAsync(text);
     }
+
+    private static bool IsUnreachable(HttpException ex)
+        => ex.HttpCode is HttpStatusCode.Forbidden or HttpStatusCode.NotFound;
 
     // Discord evicts cold DM channels from the gateway cache surprisingly
     // often. Fallback path: take the user's mapped Discord user id from

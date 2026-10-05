@@ -5,6 +5,7 @@ using Fishbowl.Core.Mcp;
 using Fishbowl.Core.Models;
 using Fishbowl.Core.Repositories;
 using Fishbowl.Core.Util;
+using Fishbowl.Data.Repositories;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
@@ -18,7 +19,7 @@ namespace Fishbowl.Api.Endpoints;
 //   POST …/{id}/merge        { from } — the duplicate's data and links move here, it goes to the trash
 //   GET  …/duplicates        pairs that look like one contact (same email / same name)
 //   GET  …/export?format=vcf|csv
-//   POST …/import?format=vcf|csv   (the file as the body) → { created, organisations }
+//   POST …/import?format=vcf|csv   (the file as the body) → { created, organisations, skipped, failed }
 public static class ContactToolsApi
 {
     public sealed record MergeRequest(string? From);
@@ -119,36 +120,65 @@ public static class ContactToolsApi
             if (rows is null) return ApiErrors.BadRequest("invalid_value", "format is vcf or csv", new { field = "format" });
 
             // Organisations first (by name, found or made), then everyone else.
+            // A card that is already here — an organisation by name, a person
+            // by any email, else by name — is skipped, so importing a file
+            // twice (or the app's own export) adds nothing. Lookups are
+            // hashed: an import can hold tens of thousands of cards.
             var existing = (await repo.GetAllAsync(t!.Ctx, includeArchived: true, ct)).ToList();
             var orgs = existing.Where(c => c.Kind == ContactKinds.Organisation)
-                .GroupBy(c => c.Name.Trim().ToLowerInvariant()).ToDictionary(g => g.Key, g => g.First().Id);
-            int created = 0, madeOrgs = 0, failed = 0;
+                .GroupBy(c => NameKey(c.Name)).ToDictionary(g => g.Key, g => (string?)g.First().Id);
+            var emails = new HashSet<string>(existing.SelectMany(c => c.Emails).Select(e => EmailKey(e.Value)));
+            var people = new HashSet<string>(existing.Where(c => c.Kind != ContactKinds.Organisation).Select(c => NameKey(c.Name)));
+            int created = 0, madeOrgs = 0, skipped = 0, failed = 0;
             foreach (var (c, _) in rows.Where(r => r.Contact.Kind == ContactKinds.Organisation))
             {
-                var key = c.Name.Trim().ToLowerInvariant();
-                if (orgs.ContainsKey(key)) continue;
+                var key = NameKey(c.Name);
+                if (orgs.ContainsKey(key)) { skipped++; continue; }
                 try { orgs[key] = await repo.CreateAsync(t.Ctx, t.UserId, c, ct); created++; }
                 catch (Exception ex) when (ex is ResourceValidationException or InvalidOperationException or ArgumentException) { failed++; }
             }
             foreach (var (c, org) in rows.Where(r => r.Contact.Kind != ContactKinds.Organisation))
             {
+                ContactRepository.Normalize(c);   // the name a person gets from first + last
+                var mails = c.Emails.Select(e => EmailKey(e.Value)).ToList();
+                var name = NameKey(c.Name);
+                if (mails.Count > 0 ? mails.Any(emails.Contains) : name.Length > 0 && people.Contains(name))
+                {
+                    skipped++;
+                    continue;
+                }
                 if (!string.IsNullOrWhiteSpace(org))
                 {
-                    var key = org.Trim().ToLowerInvariant();
+                    var key = NameKey(org);
                     if (!orgs.TryGetValue(key, out var orgId))
                     {
-                        orgId = await repo.CreateAsync(t.Ctx, t.UserId, new Contact { Kind = ContactKinds.Organisation, Name = org.Trim() }, ct);
+                        // One that can't be made (a name over the limit) leaves
+                        // the person without it, counted once; tried once.
+                        try { orgId = await repo.CreateAsync(t.Ctx, t.UserId, new Contact { Kind = ContactKinds.Organisation, Name = org.Trim() }, ct); madeOrgs++; }
+                        catch (Exception ex) when (ex is ResourceValidationException or InvalidOperationException or ArgumentException) { orgId = null; failed++; }
                         orgs[key] = orgId;
-                        madeOrgs++;
                     }
                     c.OrganisationId = orgId;
                 }
-                try { await repo.CreateAsync(t.Ctx, t.UserId, c, ct); created++; }
+                try
+                {
+                    await repo.CreateAsync(t.Ctx, t.UserId, c, ct);
+                    created++;
+                    emails.UnionWith(mails);
+                    people.Add(name);
+                }
                 catch (Exception ex) when (ex is ResourceValidationException or InvalidOperationException or ArgumentException) { failed++; }
             }
-            return Results.Ok(new { created, organisations = madeOrgs, failed });
-        }).WithName($"Import{tag}Contacts").WithSummary("Imports a vCard (.vcf) or CSV file sent as the body; organisations are found by name or made.");
+            return Results.Ok(new { created, organisations = madeOrgs, skipped, failed });
+        }).WithName($"Import{tag}Contacts").WithSummary("Imports a vCard (.vcf) or CSV file sent as the body; organisations are found by name or made, contacts already here are skipped.");
     }
+
+    // How an import recognises a contact that is already here: an email by
+    // its lower-cased text, a name with case and spacing aside (as Duplicates).
+    private static string EmailKey(string email) => email.Trim().ToLowerInvariant();
+
+    private static string NameKey(string? name)
+        => string.Join(' ', (name ?? "").ToLowerInvariant().Split(' ', StringSplitOptions.RemoveEmptyEntries));
 
     public const int MaxImportBytes = 10 * 1024 * 1024;
 

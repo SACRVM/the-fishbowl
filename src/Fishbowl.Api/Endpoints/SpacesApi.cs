@@ -620,7 +620,11 @@ public static class SpacesApi
 
             var spaceCtx = ContextRef.Space(resolved.Space!.Id);
             if (from is not null)
-                return Results.Ok(await events.GetRangeAsync(spaceCtx, from.Value, to!.Value, ct));
+            {
+                if (EventLimits.CheckRange(from.Value, to!.Value) is { } bad)
+                    return ApiErrors.BadRequest(bad.Code, bad.Message, new { maxDays = EventLimits.MaxRangeDays });
+                return Results.Ok(await events.GetRangeAsync(spaceCtx, from.Value, to.Value, ct));
+            }
             return Results.Ok(await events.GetAllAsync(spaceCtx, ct));
         })
         .WithName("ListSpaceEvents")

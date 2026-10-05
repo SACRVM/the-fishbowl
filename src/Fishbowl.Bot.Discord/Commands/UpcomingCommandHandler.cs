@@ -52,10 +52,10 @@ public class UpcomingCommandHandler : ISlashCommandHandler
 
     public async Task<SlashCommandReply> HandleAsync(SlashCommandContext ctx, CancellationToken ct)
     {
-        var userId = await _resolver.ResolveAsync(ctx.DiscordUserId, ct);
-        if (string.IsNullOrEmpty(userId))
-            return Replies.NotLinked;
-        var lang = await _resolver.LanguageAsync(userId, ct);
+        var (user, refusal) = await _resolver.ResolveActiveAsync(ctx.DiscordUserId, ct);
+        if (user is null)
+            return refusal!;
+        var (userId, lang) = user;
 
         var days = DefaultDays;
         if (int.TryParse(ctx.Get("days"), out var parsed))

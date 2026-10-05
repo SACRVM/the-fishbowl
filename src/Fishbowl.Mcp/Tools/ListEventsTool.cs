@@ -3,6 +3,7 @@ using System.Text.Json;
 using Fishbowl.Core;
 using Fishbowl.Core.Mcp;
 using Fishbowl.Core.Repositories;
+using Fishbowl.Core.Util;
 
 namespace Fishbowl.Mcp.Tools;
 
@@ -60,10 +61,14 @@ public class ListEventsTool : IMcpTool
 
         DateTime? from = TryDate(arguments, "from");
         DateTime? to = TryDate(arguments, "to");
+        if ((from is null) != (to is null))
+            throw new ArgumentException("`from` and `to` go together: pass both or neither.");
 
         IEnumerable<Fishbowl.Core.Models.Event> found;
         if (from is not null && to is not null)
         {
+            if (EventLimits.CheckRange(from.Value, to.Value) is { } bad)
+                throw new ArgumentException(bad.Message);
             found = await _events.GetRangeAsync(ctx, from.Value, to.Value, ct);
         }
         else if (arguments.TryGetProperty("upcoming_days", out var dN) && dN.ValueKind == JsonValueKind.Number)
@@ -97,13 +102,18 @@ public class ListEventsTool : IMcpTool
         return new { events = rows, count = rows.Count };
     }
 
+    // An ISO-8601 string as a UTC instant; one without an offset counts as
+    // UTC. (RoundtripKind can't be combined with AssumeUniversal: TryParse
+    // throws for the style itself, whatever the input.)
     private static DateTime? TryDate(JsonElement args, string prop)
     {
-        if (!args.TryGetProperty(prop, out var v) || v.ValueKind != JsonValueKind.String)
+        if (!args.TryGetProperty(prop, out var v) || v.ValueKind == JsonValueKind.Null)
             return null;
-        return DateTime.TryParse(v.GetString(),
+        if (v.ValueKind == JsonValueKind.String && DateTime.TryParse(v.GetString(),
             System.Globalization.CultureInfo.InvariantCulture,
-            System.Globalization.DateTimeStyles.RoundtripKind | System.Globalization.DateTimeStyles.AssumeUniversal,
-            out var dt) ? dt : null;
+            System.Globalization.DateTimeStyles.AssumeUniversal | System.Globalization.DateTimeStyles.AdjustToUniversal,
+            out var dt))
+            return dt;
+        throw new ArgumentException($"`{prop}` must be an ISO-8601 date-time, e.g. 2026-10-04T00:00:00Z.");
     }
 }

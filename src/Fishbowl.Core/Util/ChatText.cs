@@ -31,6 +31,7 @@ public static class ChatText
 
         // Discord bot — shared.
         ["bot.notLinked"] = "I don't recognise this Discord account yet. Open your Fishbowl notification settings to generate a link code, then run `/link <code>` here.",
+        ["bot.inactive"] = "Your Fishbowl account isn't active right now, so I can't do anything for it.",
         ["bot.unknownCommand"] = "Unknown command `/{0}`. Try `/help`.",
         ["bot.error"] = "Something went wrong on my side. Try again, or check the Fishbowl host logs.",
 
@@ -121,6 +122,7 @@ public static class ChatText
         ["subject.other"] = "Fishbowl: du hast eine neue Nachricht.",
 
         ["bot.notLinked"] = "Dieses Discord-Konto kenne ich noch nicht. Erzeuge in deinen Fishbowl-Benachrichtigungseinstellungen einen Code und schick hier `/link <code>`.",
+        ["bot.inactive"] = "Dein Fishbowl-Konto ist gerade nicht aktiv, deshalb kann ich nichts dafür tun.",
         ["bot.unknownCommand"] = "Unbekannter Befehl `/{0}`. Versuch's mit `/help`.",
         ["bot.error"] = "Bei mir ist etwas schiefgegangen. Versuch es noch einmal oder schau in die Logs des Fishbowl-Hosts.",
 

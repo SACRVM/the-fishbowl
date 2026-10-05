@@ -170,10 +170,19 @@ public class TrashRepository : ITrashRepository
                 }
 
                 if (item.Kind == TrashKinds.Contact)
+                {
+                    // A person whose organisation went to the trash after them
+                    // comes back without it — a dangling organisation_id would
+                    // refuse every later save (organisation_invalid).
                     await db.ExecuteAsync(new CommandDefinition(@"
-                    INSERT INTO contacts_fts (rowid, name, email, phone, notes)
-                    SELECT rowid, name, email, phone, notes FROM contacts WHERE id = @id",
+                    UPDATE contacts SET organisation_id = NULL
+                    WHERE id = @id AND organisation_id IS NOT NULL
+                      AND organisation_id NOT IN (SELECT id FROM contacts WHERE kind = 'organisation')",
                         new { id = item.ItemId }, transaction: tx, cancellationToken: token));
+                    // The same search row every contact write builds (all the
+                    // emails and phones, the organisation's name, the rest).
+                    await ContactRepository.ReindexAsync(db, tx, item.ItemId, token);
+                }
 
                 await db.ExecuteAsync(new CommandDefinition(
                     "DELETE FROM trash WHERE id = @id", new { id }, transaction: tx, cancellationToken: token));

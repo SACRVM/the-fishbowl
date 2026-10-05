@@ -160,11 +160,16 @@ public class ContactRepository : IContactRepository
                 if (members > 0)
                     throw TableException.Conflict("contact_has_people", "People belong to this organisation — move them first.", new { count = members });
             }
+            var oldName = await db.ExecuteScalarAsync<string?>(new CommandDefinition(
+                "SELECT name FROM contacts WHERE id = @Id", new { contact.Id }, tx, cancellationToken: token));
             var affected = await db.ExecuteAsync(new CommandDefinition(
                 $"UPDATE contacts SET {Sets}, updated_at = @UpdatedAt WHERE id = @Id",
                 Params(contact), transaction: tx, cancellationToken: token));
             if (affected == 0) return false;
             await IndexAsync(db, tx, contact, insert: false, token);
+            // Its people are found by the organisation's name too.
+            if (contact.Kind == ContactKinds.Organisation && oldName != contact.Name)
+                await ReindexMembersAsync(db, tx, contact.Id, token);
             return true;
         }, ct);
     }
@@ -210,7 +215,12 @@ public class ContactRepository : IContactRepository
 
             Fill(keep, merge);
             Normalize(keep);
-            EnforceLimits(keep);
+            // Lists and notes add up: two valid contacts can make one that
+            // isn't. Refused before anything is written.
+            if (ContactLimits.Validate(keep) is { } tooMuch)
+                throw new TableException("merge_too_large",
+                    $"Together the two contacts are more than one contact holds ({tooMuch.Field}: {tooMuch.Reason}) — trim the duplicate first.",
+                    args: new { field = tooMuch.Field });
             keep.UpdatedAt = DateTime.UtcNow;
             await db.ExecuteAsync(new CommandDefinition($"UPDATE contacts SET {Sets}, updated_at = @UpdatedAt WHERE id = @Id",
                 Params(keep), transaction: tx, cancellationToken: token));
@@ -220,6 +230,8 @@ public class ContactRepository : IContactRepository
             await db.ExecuteAsync(new CommandDefinition(
                 "UPDATE contacts SET organisation_id = @keepId WHERE organisation_id = @mergeId",
                 new { keepId, mergeId }, tx, cancellationToken: token));
+            if (keep.Kind == ContactKinds.Organisation)
+                await ReindexMembersAsync(db, tx, keepId, token);
             var hasTables = await db.ExecuteScalarAsync<long>(new CommandDefinition(
                 "SELECT COUNT(*) FROM sqlite_master WHERE name = 'db_columns'", transaction: tx, cancellationToken: token)) > 0;
             if (hasTables)
@@ -395,6 +407,32 @@ public class ContactRepository : IContactRepository
             : @"UPDATE contacts_fts SET name = @Name, email = @Email, phone = @Phone, notes = @Notes
                 WHERE rowid = (SELECT rowid FROM contacts WHERE id = @Id)",
             p, transaction: tx, cancellationToken: ct));
+    }
+
+    // One stored contact's search row, rebuilt from the row itself with the
+    // routine every write uses — for trash restore and for an organisation's
+    // people when its name changes.
+    internal static async Task ReindexAsync(IDbConnection db, IDbTransaction tx, string id, CancellationToken ct)
+    {
+        var c = await db.QuerySingleOrDefaultAsync<Contact>(new CommandDefinition(
+            "SELECT * FROM contacts WHERE id = @id", new { id }, tx, cancellationToken: ct));
+        if (c is null) return;
+        c.Emails ??= new();
+        c.Phones ??= new();
+        c.Addresses ??= new();
+        c.Tags ??= new();
+        await db.ExecuteAsync(new CommandDefinition(
+            "DELETE FROM contacts_fts WHERE rowid = (SELECT rowid FROM contacts WHERE id = @id)",
+            new { id }, transaction: tx, cancellationToken: ct));
+        await IndexAsync(db, tx, c, insert: true, ct);
+    }
+
+    private static async Task ReindexMembersAsync(IDbConnection db, IDbTransaction tx, string organisationId, CancellationToken ct)
+    {
+        var people = await db.QueryAsync<string>(new CommandDefinition(
+            "SELECT id FROM contacts WHERE organisation_id = @organisationId", new { organisationId }, tx, cancellationToken: ct));
+        foreach (var id in people.ToList())
+            await ReindexAsync(db, tx, id, ct);
     }
 
     private static string Join(params string?[] parts) => string.Join(' ', parts.Where(v => !string.IsNullOrWhiteSpace(v)));

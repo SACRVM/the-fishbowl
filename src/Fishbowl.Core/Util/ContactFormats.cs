@@ -51,16 +51,29 @@ public static class ContactFormats
     private static string Typed(string name, string? label) =>
         string.IsNullOrWhiteSpace(label) ? name : $"{name};TYPE={new string(label.Where(ch => char.IsLetterOrDigit(ch) || ch == '-').ToArray())}";
 
-    // Lines over 75 octets fold (RFC 6350 § 3.2); we fold by characters, which
-    // every reader unfolds the same way.
+    // Lines over 75 octets fold (RFC 6350 § 3.2), counted in UTF-8 octets and
+    // never inside a character: a split surrogate pair (or UTF-8 sequence)
+    // reaches a reader that unfolds on bytes as two broken halves.
     private static void Line(StringBuilder sb, string name, string value)
     {
         var line = $"{name}:{value}";
-        for (var i = 0; i < line.Length; i += 74)
+        int start = 0, octets = 0, limit = 75;   // a continuation's leading space counts
+        for (var i = 0; i < line.Length;)
         {
-            if (i > 0) sb.Append(' ');
-            sb.Append(line, i, Math.Min(74, line.Length - i)).Append("\r\n");
+            var ch = line[i];
+            var pair = char.IsHighSurrogate(ch) && i + 1 < line.Length && char.IsLowSurrogate(line[i + 1]);
+            var size = pair ? 4 : ch < 0x80 ? 1 : ch < 0x800 ? 2 : 3;
+            if (octets + size > limit)
+            {
+                sb.Append(line, start, i - start).Append("\r\n ");
+                start = i;
+                octets = 0;
+                limit = 74;
+            }
+            octets += size;
+            i += pair ? 2 : 1;
         }
+        sb.Append(line, start, line.Length - start).Append("\r\n");
     }
 
     private static string Esc(string? s) => (s ?? "")
@@ -100,12 +113,7 @@ public static class ContactFormats
     public static List<(Contact Contact, string? Organisation)> ParseVCards(string text)
     {
         var result = new List<(Contact, string?)>();
-        var lines = new List<string>();
-        foreach (var raw in text.Replace("\r\n", "\n").Split('\n'))
-        {
-            if ((raw.StartsWith(' ') || raw.StartsWith('\t')) && lines.Count > 0) lines[^1] += raw[1..];
-            else if (raw.Length > 0) lines.Add(raw);
-        }
+        var lines = Unfold(text);
 
         Contact? c = null;
         string? org = null;
@@ -118,6 +126,15 @@ public static class ContactFormats
             var name = head[0].ToUpperInvariant();
             if (name.Contains('.')) name = name[(name.LastIndexOf('.') + 1)..];   // item1.EMAIL
             var value = line[(colon + 1)..];
+            // vCard 2.1 (Android's export): ENCODING=QUOTED-PRINTABLE (or the
+            // bare QUOTED-PRINTABLE) with the bytes' CHARSET.
+            if (head.Skip(1).Any(p => p.Equals("ENCODING=QUOTED-PRINTABLE", StringComparison.OrdinalIgnoreCase)
+                    || p.Equals("QUOTED-PRINTABLE", StringComparison.OrdinalIgnoreCase)))
+                value = QuotedPrintable(value, head.Skip(1)
+                    .Select(p => p.Split('=', 2))
+                    .Where(p => p.Length == 2 && p[0].Equals("CHARSET", StringComparison.OrdinalIgnoreCase))
+                    .Select(p => p[1].Trim('"'))
+                    .FirstOrDefault());
             var type = head.Skip(1)
                 .Select(p => p.Split('=', 2))
                 .Where(p => p.Length == 2 && p[0].Equals("TYPE", StringComparison.OrdinalIgnoreCase))
@@ -163,6 +180,71 @@ public static class ContactFormats
             }
         }
         return result;
+    }
+
+    // Logical lines: a line starting with a space or tab continues the one
+    // before (RFC 6350 § 3.2), and so does the line after a quoted-printable
+    // value ending in `=` (vCard 2.1's soft line break). Built up in a
+    // StringBuilder — appending to a string per continuation is quadratic,
+    // and an import may be 10 MB of them.
+    private static List<string> Unfold(string text)
+    {
+        var lines = new List<string>();
+        var current = new StringBuilder();
+        var quotedPrintable = false;
+        var softBreak = false;
+        foreach (var raw in text.Replace("\r\n", "\n").Split('\n'))
+        {
+            if (softBreak)
+            {
+                current.Length--;   // the `=`
+                current.Append(raw);
+            }
+            else if ((raw.StartsWith(' ') || raw.StartsWith('\t')) && current.Length > 0)
+            {
+                current.Append(raw, 1, raw.Length - 1);
+            }
+            else
+            {
+                if (current.Length > 0) lines.Add(current.ToString());
+                current.Clear().Append(raw);
+                var colon = raw.IndexOf(':');
+                quotedPrintable = colon > 0 && raw.AsSpan(0, colon).Contains("QUOTED-PRINTABLE", StringComparison.OrdinalIgnoreCase);
+            }
+            softBreak = quotedPrintable && current.Length > 0 && current[current.Length - 1] == '=';
+        }
+        if (current.Length > 0) lines.Add(current.ToString());
+        return lines;
+    }
+
+    // `=XX` octets to text in the given charset (UTF-8 when absent or unknown).
+    private static string QuotedPrintable(string s, string? charset)
+    {
+        var bytes = new List<byte>(s.Length);
+        for (var i = 0; i < s.Length; i++)
+        {
+            var ch = s[i];
+            if (ch == '=' && i + 2 < s.Length && Uri.IsHexDigit(s[i + 1]) && Uri.IsHexDigit(s[i + 2]))
+            {
+                bytes.Add(byte.Parse(s.AsSpan(i + 1, 2), NumberStyles.HexNumber, CultureInfo.InvariantCulture));
+                i += 2;
+            }
+            else if (ch < 0x80)
+            {
+                bytes.Add((byte)ch);
+            }
+            else
+            {
+                // Not valid QP, but don't lose it: the character as UTF-8.
+                var len = char.IsHighSurrogate(ch) && i + 1 < s.Length ? 2 : 1;
+                bytes.AddRange(Encoding.UTF8.GetBytes(s.Substring(i, len)));
+                i += len - 1;
+            }
+        }
+        Encoding encoding;
+        try { encoding = string.IsNullOrWhiteSpace(charset) ? Encoding.UTF8 : Encoding.GetEncoding(charset.Trim()); }
+        catch (Exception ex) when (ex is ArgumentException or NotSupportedException) { encoding = Encoding.UTF8; }
+        return encoding.GetString(bytes.ToArray());
     }
 
     private static string? Opt(List<string> parts, int i) => i < parts.Count && parts[i].Length > 0 ? Unesc(parts[i]) : null;

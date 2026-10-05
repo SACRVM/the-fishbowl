@@ -29,6 +29,32 @@ public static class EventLimits
     // IANA zone ids are short; the longest is around 32 characters.
     public const int MaxTimeZoneLength = 64;
 
+    // The longest window a range read covers. Every occurrence of a series
+    // inside it becomes its own clone, so an open-ended span is a cost the
+    // caller picks for the server; a year and a month is more than the
+    // calendar (six weeks), the digest (a day), /upcoming (60 days) and
+    // list_events' upcoming_days (365) ask for.
+    public const int MaxRangeDays = 400;
+
+    // Range reads pad their window by a few days (all-day slack); both ends
+    // stay that far inside DateTime's limits so the padding can't overflow.
+    private static readonly DateTime EarliestRangeEnd = DateTime.MinValue.AddDays(7);
+    private static readonly DateTime LatestRangeEnd = DateTime.MaxValue.AddDays(-7);
+
+    /// <summary>Null when [from, to) is a window a range read accepts, else
+    /// the refusal: <c>range_invalid</c> (inverted or not a real date) or
+    /// <c>range_too_long</c> (more than <see cref="MaxRangeDays"/>).</summary>
+    public static (string Code, string Message)? CheckRange(DateTime from, DateTime to)
+    {
+        from = TimeUtil.AsUtc(from);
+        to = TimeUtil.AsUtc(to);
+        if (from < EarliestRangeEnd || to > LatestRangeEnd || to <= from)
+            return ("range_invalid", "`to` must be after `from`, and both must be real dates.");
+        if (to - from > TimeSpan.FromDays(MaxRangeDays))
+            return ("range_too_long", $"A range may span at most {MaxRangeDays} days.");
+        return null;
+    }
+
     public static ResourceValidationError? Validate(Event evt)
     {
         if (evt.Title is { Length: > MaxTitleLength })

@@ -136,7 +136,28 @@ public class DiscordBotHostedService : IHostedService, IAsyncDisposable
         }
     }
 
-    private async Task OnSlashCommandAsync(SocketSlashCommand command)
+    // Discord.Net raises this on the gateway task: anything awaited here holds
+    // up every other interaction (and the heartbeat). A slow command — /search
+    // on a cold embedding model — would push the others past their 3-second
+    // deadline, so each command runs on its own task, deferred first.
+    private Task OnSlashCommandAsync(SocketSlashCommand command)
+    {
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await HandleSlashCommandAsync(command);
+            }
+            catch (Exception ex)
+            {
+                // Nothing awaits this task: an escaping exception would vanish.
+                _logger.LogError(ex, "Discord slash command {Name} failed outside its handler", command.Data.Name);
+            }
+        });
+        return Task.CompletedTask;
+    }
+
+    private async Task HandleSlashCommandAsync(SocketSlashCommand command)
     {
         // DM-only invariant. User-installable apps can be invoked in guilds
         // too; we hard-reject everything outside a DM/private channel
@@ -154,11 +175,18 @@ public class DiscordBotHostedService : IHostedService, IAsyncDisposable
                 o => o.Value?.ToString(),
                 StringComparer.OrdinalIgnoreCase);
 
+        // Outside the bot DM (a DM with a friend) the channel isn't the bot's:
+        // /link asks for the bot's own DM instead (CreateDMChannelAsync
+        // returns the existing one).
+        var user = command.User;
         var ctx = new SlashCommandContext(
-            DiscordUserId: command.User.Id.ToString(),
-            DiscordUsername: command.User.Username,
+            DiscordUserId: user.Id.ToString(),
+            DiscordUsername: user.Username,
             DiscordChannelId: command.Channel.Id.ToString(),
-            Options: options);
+            Options: options,
+            OpenBotDmAsync: command.ContextType is not InteractionContextType.BotDm
+                ? async _ => (await user.CreateDMChannelAsync()).Id.ToString()
+                : null);
 
         // Defer immediately so we don't trip the 3-second interaction
         // deadline on slow paths (search hits the embedding model).
