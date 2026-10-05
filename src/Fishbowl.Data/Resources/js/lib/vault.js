@@ -416,13 +416,20 @@
                 if (intro) body.querySelector(".fb-vault-intro").textContent = intro;
                 const [passField, wordsField] = body.querySelectorAll(".fb-vault-field");
                 const toggle = body.querySelector(".fb-vault-link");
-                let mode = "passphrase";   // | "recovery"
-                toggle.hidden = recSlots.length === 0;
-                toggle.addEventListener("click", () => {
-                    mode = mode === "recovery" ? "passphrase" : "recovery";
+                // Open on a way this vault has: without a passphrase slot
+                // (removed under Secrets) every passphrase would be "wrong".
+                let mode = passSlots.length === 0 && recSlots.length > 0 ? "recovery" : "passphrase";
+                const showMode = () => {
                     passField.hidden = mode === "recovery";
                     wordsField.hidden = mode !== "recovery";
                     toggle.textContent = mode === "recovery" ? fb.t("fb.vault.use-passphrase", "Use the passphrase instead") : fb.t("fb.vault.use-recovery", "Use the recovery key instead");
+                };
+                showMode();
+                // Switching only between two ways the vault has.
+                toggle.hidden = recSlots.length === 0 || passSlots.length === 0;
+                toggle.addEventListener("click", () => {
+                    mode = mode === "recovery" ? "passphrase" : "recovery";
+                    showMode();
                     (mode === "recovery" ? wordsField : passField).querySelector("input, textarea").focus();
                 });
                 // The passkey button runs the same primary action, flagged;
@@ -695,7 +702,9 @@
             document.body.appendChild(dlg);
             setTimeout(() => {
                 dlg.open();
-                requestAnimationFrame(() => body.querySelector("input:not([hidden]), textarea")?.focus());
+                // The first field that shows (a hidden label hides its input).
+                requestAnimationFrame(() => [...body.querySelectorAll("input, textarea")]
+                    .find(el => !el.closest("[hidden]"))?.focus());
             }, 0);
         });
     }

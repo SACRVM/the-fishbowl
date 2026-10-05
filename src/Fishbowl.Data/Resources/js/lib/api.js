@@ -89,14 +89,18 @@
 
     // ── Secret block transforms (vault v2) ─────────────────────────────────
     //
-    // Outbound: extract :::secret\n…\n:::end bodies from note.content, encrypt
-    //           each via fb.vault, write them to contentSecret as a JSON
-    //           envelope { v: 2, blocks: [...] }, and replace the inline body
-    //           with a :::secret#N:::end marker. The server never sees
-    //           plaintext secrets.
-    // Inbound:  inverse — decrypt each entry in contentSecret and splice the
-    //           body back between :::secret and :::end so the editor sees the
-    //           normal inline form.
+    // Outbound: take each :::secret … :::end block out of note.content — the
+    //           whole block as written, its label and any text after
+    //           `:::end` included — encrypt it via fb.vault, write the
+    //           ciphertexts to contentSecret as a JSON envelope
+    //           { v: 2, whole: true, blocks: [...] }, and put a
+    //           :::secret#N:::end marker line where the block was. The
+    //           server never sees plaintext secrets.
+    // Inbound:  inverse — decrypt each entry in contentSecret and put it back
+    //           in place of its marker, so the editor sees the block exactly
+    //           as it was written. Envelopes without `whole` (saved before)
+    //           hold only the lines between opener and closer; those come
+    //           back between a bare :::secret and :::end.
     //
     // Each block is encrypted with AAD "<note id>|<index>", so ciphertext
     // can't be moved to another note or reordered within one. A note gets
@@ -107,9 +111,10 @@
     // before any vault prompt (the server refuses it too).
     //
     // Delimiters read as `:{2,3}` and are always written as three. A failure
-    // to unlock (user cancels) leaves markers + ciphertext in place; a block
-    // that can't be decrypted shows a bracketed notice inside its :::secret
-    // block so the user sees something's there rather than losing it.
+    // to unlock (user cancels) leaves markers + ciphertext in place; so does
+    // a block that can't be decrypted — the whole note stays as stored
+    // (flagged `secretsUnreadable`), so it opens read-only and no save can
+    // put anything in place of that ciphertext.
 
     // One grammar with the editor (vendored sac-md-secret.js) and the server
     // (SecretStripper): a block OPENS on a line `:::secret` (or `::secret`,
@@ -117,22 +122,42 @@
     // followed by whitespace and text; without a closer it runs to the end
     // of the note. Opening is generous (any case, indented), closing strict
     // (never `::endpoint=`, never an indented `:::end`): everything the
-    // editor shows as secret gets encrypted, never less.
-    const SECRET_OPEN = /^[ \t]*:{2,3}secret(?:[ \t].*)?$/i;
-    const SECRET_CLOSE = /^:{2,3}end(?:\s.*)?$/;
+    // editor shows as secret gets encrypted, never less. Whitespace is JS's
+    // \s, as in the editor: a non-breaking space (Option+Space) after
+    // `:::secret` opens a block there, so it does here. Lines are split on
+    // "\n" only, like the editor's.
+    const SECRET_OPEN = /^\s*:{2,3}secret(?:\s|$)/i;
+    const SECRET_CLOSE = /^:{2,3}end(?:\s|$)/;
 
-    // Replaces each secret block (its lines) with fn(body); returns the new text.
-    function replaceSecretBlocks(content, fn) {
-        const lines = content.split("\n");
-        const out = [];
+    // The secret blocks of a text as line ranges { open, close } (close =
+    // the last line when the block isn't closed).
+    function secretRanges(content) {
+        const lines = String(content ?? "").split("\n");
+        const ranges = [];
         for (let i = 0; i < lines.length; i++) {
-            if (!SECRET_OPEN.test(lines[i].replace(/\r$/, ""))) { out.push(lines[i]); continue; }
+            if (!SECRET_OPEN.test(lines[i])) continue;
             let end = i + 1;
-            while (end < lines.length && !SECRET_CLOSE.test(lines[end].replace(/\r$/, ""))) end++;
-            const body = lines.slice(i + 1, Math.min(end, lines.length)).join("\n").replace(/\r$/, "");
-            out.push(fn(body));
+            while (end < lines.length && !SECRET_CLOSE.test(lines[end])) end++;
+            ranges.push({ open: i, close: Math.min(end, lines.length - 1), closed: end < lines.length });
             i = Math.min(end, lines.length - 1);
         }
+        return ranges;
+    }
+
+    // Replaces each secret block (its lines) with fn(body, block) — body =
+    // the lines between opener and closer, block = all of its lines as
+    // written; returns the new text.
+    function replaceSecretBlocks(content, fn) {
+        const lines = String(content ?? "").split("\n");
+        const out = [];
+        let at = 0;
+        for (const r of secretRanges(content)) {
+            for (; at < r.open; at++) out.push(lines[at]);
+            const body = lines.slice(r.open + 1, r.closed ? r.close : r.close + 1).join("\n").replace(/\r$/, "");
+            out.push(fn(body, lines.slice(r.open, r.close + 1).join("\n")));
+            at = r.close + 1;
+        }
+        for (; at < lines.length; at++) out.push(lines[at]);
         return out.join("\n");
     }
     const MARKER_SECRET_RE = /:{2,3}secret#(\d+):{2,3}end/g;
@@ -149,9 +174,11 @@
     async function transformNoteOutbound(note) {
         const content = note?.content || "";
         const bodies = [];
-        const rewritten = replaceSecretBlocks(content, (body) => {
+        // The whole block is encrypted, not only the lines inside: a label
+        // (`:::secret AWS root`) and text after `:::end` come back as written.
+        const rewritten = replaceSecretBlocks(content, (_body, block) => {
             const i = bodies.length;
-            bodies.push(body);
+            bodies.push(block);
             return `:::secret#${i}:::end`;
         });
         if (bodies.length === 0) {
@@ -174,7 +201,7 @@
         const ciphertexts = [];
         for (let i = 0; i < bodies.length; i++)
             ciphertexts.push(await fb.vault.encryptBlock(bodies[i], blockAad(note.id, i)));
-        const payload = JSON.stringify({ v: ENVELOPE_VERSION, blocks: ciphertexts });
+        const payload = JSON.stringify({ v: ENVELOPE_VERSION, whole: true, blocks: ciphertexts });
         // Base64 of UTF-8 JSON bytes — what the server deserialises into
         // the byte[] ContentSecret column.
         const bytes = new TextEncoder().encode(payload);
@@ -205,13 +232,17 @@
         }
         if (!Array.isArray(payload?.blocks)) return note;
 
+        // Each marker is replaced by text(idx): the whole block as written
+        // (`whole` envelopes), or the lines inside it with a bare opener and
+        // closer around them (envelopes saved before).
+        const wrap = (body) => `:::secret\n${body}\n:::end`;
         const restore = (text) => ({
             ...note,
-            content: content.replace(MARKER_SECRET_RE, (_m, idx) => `:::secret\n${text(idx)}\n:::end`),
+            content: content.replace(MARKER_SECRET_RE, (_m, idx) => text(idx)),
         });
 
         // v1 was encrypted with a per-browser key that no longer exists.
-        if (payload.v !== ENVELOPE_VERSION) return restore(() => "[unreadable secret from the old vault — type it again]");
+        if (payload.v !== ENVELOPE_VERSION) return restore(() => wrap("[unreadable secret from the old vault — type it again]"));
 
         if (!prompt && !window.fb?.vault?.isUnlocked()) return note;
         try { if (window.fb?.vault) await fb.vault.ensureUnlocked(); }
@@ -222,13 +253,22 @@
             if (decrypted[idx] !== undefined) continue;
             const n = Number(idx);
             if (n < 0 || n >= payload.blocks.length) {
-                decrypted[idx] = `[no ciphertext #${idx}]`;
+                // Nothing stored to lose: the notice may be edited away.
+                decrypted[idx] = wrap(`[no ciphertext #${idx}]`);
                 continue;
             }
-            try { decrypted[idx] = await fb.vault.decryptBlock(payload.blocks[n], blockAad(note.id, n)); }
-            catch (e) {
+            try {
+                const text = await fb.vault.decryptBlock(payload.blocks[n], blockAad(note.id, n));
+                decrypted[idx] = payload.whole === true ? text : wrap(text);
+            } catch (e) {
                 console.warn(`fb.api.notes: decryptBlock #${n} failed:`, e);
-                decrypted[idx] = "[decryption failed]";
+                // All or nothing: the note stays as stored — markers and
+                // ciphertext — so it opens read-only like a locked one. A
+                // notice spliced in as text would be encrypted over the
+                // ciphertext on the next save.
+                const kept = { ...note };
+                Object.defineProperty(kept, "secretsUnreadable", { value: true });
+                return kept;
             }
         }
         return restore((idx) => decrypted[idx]);
@@ -243,7 +283,8 @@
             if (!Array.isArray(arr)) return arr;
             return Promise.all(arr.map(n => transformNoteInbound(n, { prompt })));
         },
-        get:    async (id)       => transformNoteInbound(await rawNotes.get(id)),
+        // `prompt: false` — decrypt only if the vault is already unlocked.
+        get:    async (id, { prompt = true } = {}) => transformNoteInbound(await rawNotes.get(id), { prompt }),
         create: async (body)     => transformNoteInbound(await rawNotes.create(await transformNoteOutbound(body))),
         update: async (id, body) => rawNotes.update(id, await transformNoteOutbound(body)),
         delete: rawNotes.delete,
@@ -504,9 +545,12 @@
 
     // The block grammar, for tests: list of block bodies in a text.
     const secretBodies = (text) => { const b = []; replaceSecretBlocks(text || "", (x) => { b.push(x); return ""; }); return b; };
+    // The same grammar for views (the notes view's title, list preview and
+    // lock): one definition of what a secret block is, never a copy.
+    const secrets = { ranges: secretRanges, replace: replaceSecretBlocks, bodies: secretBodies };
 
     fb.api = {
-        secretBodies,
+        secretBodies, secrets,
         files,
         notes,
         todos,

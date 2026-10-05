@@ -20,10 +20,18 @@ public static class SecretStripper
     // what the editor treats as the end, never e.g. `::endpoint=` or an
     // indented `:::end`) — closing earlier than the editor would put the rest
     // of what it shows as secret in the clear.
+    //
+    // "Whitespace" is JavaScript's \s, because that is what the editor tests
+    // with (`^:{2,3}secret(\s|$)`): a non-breaking space typed with
+    // Option+Space after `:::secret` opens a block there. .NET's \s is not
+    // the same set (it has U+0085, lacks U+FEFF), so it is spelled out. The
+    // letters are ASCII-only like a JS /i match (.NET's IgnoreCase would also
+    // take U+017F for the s).
+    private const string Ws = @"\t\n\v\f\r \u00A0\u1680\u2000-\u200A\u2028\u2029\u202F\u205F\u3000\uFEFF";
     private static readonly Regex Open = new(
-        @"^[ \t]*:{2,3}secret(?:[ \t].*)?$", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+        $@"^[{Ws}]*:{{2,3}}[sS][eE][cC][rR][eE][tT](?:[{Ws}]|$)", RegexOptions.Compiled);
     private static readonly Regex Close = new(
-        @"^:{2,3}end(?:\s.*)?$", RegexOptions.Compiled);
+        $@"^:{{2,3}}end(?:[{Ws}]|$)", RegexOptions.Compiled);
 
     // The secret blocks of a text as line ranges [open, close] (close = the
     // last line when the block isn't closed).
@@ -32,9 +40,9 @@ public static class SecretStripper
         var blocks = new List<(int, int)>();
         for (var i = 0; i < lines.Length; i++)
         {
-            if (!Open.IsMatch(lines[i].TrimEnd('\r'))) continue;
+            if (!Open.IsMatch(lines[i])) continue;
             var end = i + 1;
-            while (end < lines.Length && !Close.IsMatch(lines[end].TrimEnd('\r'))) end++;
+            while (end < lines.Length && !Close.IsMatch(lines[end])) end++;
             if (end >= lines.Length) end = lines.Length - 1;
             blocks.Add((i, end));
             i = end;
@@ -43,7 +51,8 @@ public static class SecretStripper
     }
 
     // Post-encryption marker form (Phase 3): `:::secret#N:::end` on a single
-    // line, where N is the ciphertext index in content_secret. These markers
+    // line, where N is the ciphertext index in content_secret (the whole
+    // block, its label and closer line included, is inside). These markers
     // contain no secret data themselves, but leaking them reveals which
     // notes contain secrets and how many — strip anyway, same placeholder.
     private static readonly Regex Marker = new(

@@ -34,8 +34,9 @@ public static class NoteLimits
     public const int MaxTagCount = 64;
 
     // Per-tag length. Tag colour + system flags live elsewhere; the tag
-    // *name* itself wants to fit on one line of UI chrome.
-    public const int MaxTagLength = 128;
+    // *name* itself wants to fit on one line of UI chrome. TagName's rule —
+    // the one every tag is stored under — decides it.
+    public const int MaxTagLength = TagName.MaxLength;
 
     // Returns the first validation error, or null if everything fits.
     // Single-error return keeps the API response small and unambiguous —
@@ -56,10 +57,16 @@ public static class NoteLimits
 
         if (note.Tags is not null)
         {
+            // Every tag is stored under TagName's rule; one it can't take is
+            // the caller's mistake (400), not a crash in the tag repository.
+            // Blank entries are dropped on save.
             foreach (var tag in note.Tags)
             {
-                if (tag is { Length: > MaxTagLength })
-                    return new ResourceValidationError(Resource, "tags", $"a tag exceeds {MaxTagLength} characters");
+                if (string.IsNullOrWhiteSpace(tag)) continue;
+                if (!TagName.IsValid(tag))
+                    return new ResourceValidationError(Resource, "tags",
+                        $"a tag must be 1–{MaxTagLength} characters of a–z, 0–9, _, : and -",
+                        ResourceValidationKind.Invalid);
             }
         }
 

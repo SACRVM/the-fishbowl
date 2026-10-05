@@ -163,10 +163,15 @@ public class TrashRepository : ITrashRepository
                 {
                     var tags = snapshot["tags"] is JsonValue tv && tv.TryGetValue<string>(out var tj)
                         ? string.Join(' ', JsonSerializer.Deserialize<List<string>>(tj) ?? new()) : "";
+                    // Indexed secret-stripped, like every note write (NoteRepository.FtsContent).
+                    var content = await db.ExecuteScalarAsync<string?>(new CommandDefinition(
+                        "SELECT content FROM notes WHERE id = @id", new { id = item.ItemId },
+                        transaction: tx, cancellationToken: token));
                     await db.ExecuteAsync(new CommandDefinition(@"
                     INSERT INTO notes_fts (rowid, title, content, tags)
-                    SELECT rowid, title, content, @tags FROM notes WHERE id = @id",
-                        new { id = item.ItemId, tags }, transaction: tx, cancellationToken: token));
+                    SELECT rowid, title, @content, @tags FROM notes WHERE id = @id",
+                        new { id = item.ItemId, content = NoteRepository.FtsContent(content), tags },
+                        transaction: tx, cancellationToken: token));
                 }
 
                 if (item.Kind == TrashKinds.Contact)

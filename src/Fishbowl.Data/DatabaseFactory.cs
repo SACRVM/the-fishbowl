@@ -304,13 +304,23 @@ public class DatabaseFactory
         }.ToString();
 
         var connection = new SqliteConnection(connectionString);
-        connection.Open();
-
-        if (loadVec) SqliteVecLoader.LoadInto(connection);
-
-        lock (_initLocks.GetOrAdd(Path.GetFullPath(dbPath), _ => new object()))
+        try
         {
-            initializer(connection);
+            connection.Open();
+
+            if (loadVec) SqliteVecLoader.LoadInto(connection);
+
+            lock (_initLocks.GetOrAdd(Path.GetFullPath(dbPath), _ => new object()))
+            {
+                initializer(connection);
+            }
+        }
+        catch
+        {
+            // A migration that throws must not leave the file open (Windows
+            // then refuses to move or delete it until the process ends).
+            connection.Dispose();
+            throw;
         }
 
         return connection;
@@ -343,12 +353,13 @@ public class DatabaseFactory
             _logger.LogInformation("Applied user schema v3 to {DbPath}", ((SqliteConnection)connection).DataSource);
             version = 3;
         }
-        else
+        else if (version == 3)
         {
             // V3 was reshaped during pre-commit iteration (three-flag model,
-            // new seed set). If this DB was opened against an older v3 shape,
-            // reconcile without bumping user_version — v3 stays the current
-            // version until it ships. Harmless on a correct v3 DB.
+            // new seed set). A DB still at v3 may carry an older v3 shape:
+            // reconcile it once, on the way to v4. Every DB past v3 went
+            // through here already — running it on every open took a write
+            // lock per request ("database is locked" under load).
             ReconcileUserV3(connection);
         }
 
@@ -483,7 +494,39 @@ public class DatabaseFactory
                 connection.Execute("UPDATE desktop_apps SET mode = 'sandboxed', entry_integrity = NULL WHERE mode = 'trusted';");
             connection.Execute("PRAGMA user_version = 19");
             _logger.LogInformation("Applied user schema v19 to {DbPath}", ((SqliteConnection)connection).DataSource);
+            version = 19;
         }
+
+        if (version < 20)
+        {
+            ApplyUserV20(connection);
+            connection.Execute("PRAGMA user_version = 20");
+            _logger.LogInformation("Applied user schema v20 to {DbPath}", ((SqliteConnection)connection).DataSource);
+        }
+    }
+
+    // notes_fts holds no secret text (NoteRepository.FtsContent). Rows
+    // written before were indexed with the raw content, so a `:::secret`
+    // block stored in the clear made its note findable by the secret: those
+    // rows are indexed again, stripped. Idempotent — a stripped row has no
+    // block left to strip.
+    private static void ApplyUserV20(IDbConnection connection)
+    {
+        using var tx = connection.BeginTransaction();
+        var hasFts = connection.ExecuteScalar<long>(
+            "SELECT COUNT(*) FROM sqlite_master WHERE name IN ('notes', 'notes_fts')", transaction: tx) == 2;
+        if (hasFts)
+        {
+            var rows = connection.Query<(long RowId, string? Content)>(
+                "SELECT rowid, content FROM notes", transaction: tx).ToList();
+            foreach (var (rowId, content) in rows)
+            {
+                if (!SecretStripper.ContainsSecret(content)) continue;
+                connection.Execute("UPDATE notes_fts SET content = @content WHERE rowid = @rowId",
+                    new { rowId, content = SecretStripper.Strip(content) }, transaction: tx);
+            }
+        }
+        tx.Commit();
     }
 
     // Contacts become persons and organisations with one vCard-based field
@@ -1136,7 +1179,7 @@ public class DatabaseFactory
         }
     }
 
-    // Idempotent: runs on every open of an already-v3 DB. Safe because it
+    // Idempotent: runs once on a DB still at v3, before v4. Safe because it
     // only touches system-tagged rows and reconciles them against the current
     // SystemTags.Seeds. Drops the `is_system` flag from any stale reserved
     // names that were seeded by an earlier v3 iteration — they become regular
@@ -1161,7 +1204,7 @@ public class DatabaseFactory
     }
 
     private static void AddColumnIfMissing(
-        IDbConnection connection, IDbTransaction tx, string table, string column, string ddlType)
+        IDbConnection connection, IDbTransaction? tx, string table, string column, string ddlType)
     {
         var exists = connection.ExecuteScalar<long>(
             $"SELECT COUNT(*) FROM pragma_table_info('{table}') WHERE name = @col",
@@ -1529,12 +1572,15 @@ public class DatabaseFactory
     // NULL = ISO).
     private void ApplySystemV9(IDbConnection connection)
     {
+        // Column by column, only when missing: user_version is bumped after
+        // the commit, and a crash in between must not make every later open
+        // fail with "duplicate column".
         using var transaction = connection.BeginTransaction();
         try
         {
-            connection.Execute("ALTER TABLE spaces ADD COLUMN color TEXT;", transaction: transaction);
-            connection.Execute("ALTER TABLE users ADD COLUMN accent TEXT;", transaction: transaction);
-            connection.Execute("ALTER TABLE users ADD COLUMN date_format TEXT;", transaction: transaction);
+            AddColumnIfMissing(connection, transaction, "spaces", "color", "TEXT");
+            AddColumnIfMissing(connection, transaction, "users", "accent", "TEXT");
+            AddColumnIfMissing(connection, transaction, "users", "date_format", "TEXT");
             transaction.Commit();
         }
         catch
@@ -1558,6 +1604,13 @@ public class DatabaseFactory
                 "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'todos'",
                 transaction: transaction) > 0;
             if (!hasTodos) { transaction.Commit(); return; }
+            // Already there: this ran and committed, and only the version
+            // bump after it was lost (a crash in between) — the numbering
+            // below went with the column.
+            var hasPosition = connection.ExecuteScalar<long>(
+                "SELECT COUNT(*) FROM pragma_table_info('todos') WHERE name = 'position'",
+                transaction: transaction) > 0;
+            if (hasPosition) { transaction.Commit(); return; }
             connection.Execute("ALTER TABLE todos ADD COLUMN position REAL;", transaction: transaction);
             connection.Execute(@"
                 UPDATE todos SET position = (
@@ -1744,7 +1797,8 @@ public class DatabaseFactory
     // the accent: it follows the user to every device.
     private void ApplySystemV10(IDbConnection connection)
     {
-        connection.Execute("ALTER TABLE users ADD COLUMN vault_auto_lock_minutes INTEGER;");
+        // Only when missing — a crash before the version bump re-runs this.
+        AddColumnIfMissing(connection, null, "users", "vault_auto_lock_minutes", "INTEGER");
     }
 
     // V11: administration. Account state + approval + quota on users (every

@@ -55,8 +55,10 @@ public sealed class ModelDownloader
 
     // True once both files are on disk. A file only gets its final name after
     // it was downloaded completely and verified (written as .part, then
-    // renamed), so present means whole. EmbeddingService uses this to decide
-    // whether to initialise the pipeline or throw EmbeddingUnavailableException.
+    // renamed); one damaged since is found by EnsureModelAsync, which the
+    // EmbeddingInitializer runs on every start, and fetched again.
+    // EmbeddingService uses this to decide whether to initialise the
+    // pipeline or throw EmbeddingUnavailableException.
     public bool IsReady()
     {
         if (!Directory.Exists(_modelsDir)) return false;

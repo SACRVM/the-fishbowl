@@ -137,7 +137,7 @@ public class NoteRepository : INoteRepository
                 {
                     note.Id,
                     note.Title,
-                    note.Content,
+                    Content = FtsContent(note.Content),
                     TagsFlat = string.Join(' ', note.Tags)
                 }, transaction: tx, cancellationToken: token));
 
@@ -193,7 +193,7 @@ public class NoteRepository : INoteRepository
                     {
                         note.Id,
                         note.Title,
-                        note.Content,
+                        Content = FtsContent(note.Content),
                         TagsFlat = string.Join(' ', note.Tags)
                     }, transaction: tx, cancellationToken: token));
 
@@ -247,7 +247,7 @@ public class NoteRepository : INoteRepository
                 new { id }, transaction: tx, cancellationToken: token));
             await db.ExecuteAsync(new CommandDefinition(
                 "INSERT INTO notes_fts (rowid, title, content, tags) VALUES ((SELECT rowid FROM notes WHERE id = @Id), @Title, @Content, @TagsFlat)",
-                new { note.Id, note.Title, note.Content, TagsFlat = string.Join(' ', note.Tags) },
+                new { note.Id, note.Title, Content = FtsContent(note.Content), TagsFlat = string.Join(' ', note.Tags) },
                 transaction: tx, cancellationToken: token));
             await UpsertEmbeddingAsync(db, tx, note, token);
         }, ct);
@@ -255,10 +255,13 @@ public class NoteRepository : INoteRepository
 
     // ────────── Bulk re-embed ──────────
     //
-    // Runs each note's embedding sequentially in a single transaction. On
-    // SQLite this is fine at personal-memory scale; for very large vaults
-    // we'd want chunked commits to keep the WAL bounded. Keep an eye on
-    // durations in logs.
+    // The model runs with no transaction open — a write lock held across
+    // every note's embedding would leave every other request of the context
+    // with "database is locked". The vectors of each chunk then land in one
+    // short transaction; a note changed or deleted since it was read is
+    // skipped there (that write brought its own vector).
+    private const int ReEmbedChunkSize = 32;
+
     public async Task<ReEmbedResult> ReEmbedAllAsync(ContextRef ctx, CancellationToken ct = default)
     {
         if (_embeddings is null)
@@ -270,30 +273,26 @@ public class NoteRepository : INoteRepository
         var processed = 0;
         var failed = 0;
 
-        await _dbFactory.WithContextTransactionAsync(ctx, async (db, tx, token) =>
+        List<Note> rows;
+        using (var read = _dbFactory.CreateContextConnection(ctx))
         {
-            var rows = (await db.QueryAsync<Note>(new CommandDefinition(
-                "SELECT * FROM notes ORDER BY updated_at DESC",
-                transaction: tx, cancellationToken: token))).ToList();
+            rows = (await read.QueryAsync<Note>(new CommandDefinition(
+                "SELECT * FROM notes ORDER BY updated_at DESC", cancellationToken: ct))).ToList();
+        }
 
-            foreach (var note in rows)
+        foreach (var chunk in rows.Chunk(ReEmbedChunkSize))
+        {
+            var embedded = new List<(string Id, string Text, byte[] Blob)>(chunk.Length);
+            foreach (var note in chunk)
             {
-                token.ThrowIfCancellationRequested();
-                var before = processed + failed;
+                ct.ThrowIfCancellationRequested();
                 try
                 {
                     var text = BuildEmbeddingText(note);
-                    var vec = await _embeddings.EmbedAsync(text, token);
+                    var vec = await _embeddings.EmbedAsync(text, ct);
                     var blob = new byte[vec.Length * sizeof(float)];
                     Buffer.BlockCopy(vec, 0, blob, 0, blob.Length);
-
-                    await db.ExecuteAsync(new CommandDefinition(
-                        "DELETE FROM vec_notes WHERE id = @id",
-                        new { id = note.Id }, transaction: tx, cancellationToken: token));
-                    await db.ExecuteAsync(new CommandDefinition(
-                        "INSERT INTO vec_notes(id, embedding) VALUES (@id, @blob)",
-                        new { id = note.Id, blob }, transaction: tx, cancellationToken: token));
-                    processed++;
+                    embedded.Add((note.Id, text, blob));
                 }
                 catch (EmbeddingUnavailableException)
                 {
@@ -301,13 +300,33 @@ public class NoteRepository : INoteRepository
                     // place (or none) and move on; the user can retry.
                     _logger.LogDebug("Re-embed hit EmbeddingUnavailable on note {Id}; leaving existing row", note.Id);
                 }
-                catch (Exception ex)
+                catch (Exception ex) when (ex is not OperationCanceledException)
                 {
                     _logger.LogWarning(ex, "Re-embed failed for note {Id}", note.Id);
                     failed++;
                 }
             }
-        }, ct);
+            if (embedded.Count == 0) continue;
+
+            processed += await _dbFactory.WithContextTransactionAsync(ctx, async (db, tx, token) =>
+            {
+                var written = 0;
+                foreach (var (id, text, blob) in embedded)
+                {
+                    var current = await db.QuerySingleOrDefaultAsync<Note>(new CommandDefinition(
+                        "SELECT * FROM notes WHERE id = @id", new { id }, transaction: tx, cancellationToken: token));
+                    if (current is null || BuildEmbeddingText(current) != text) continue;
+                    await db.ExecuteAsync(new CommandDefinition(
+                        "DELETE FROM vec_notes WHERE id = @id",
+                        new { id }, transaction: tx, cancellationToken: token));
+                    await db.ExecuteAsync(new CommandDefinition(
+                        "INSERT INTO vec_notes(id, embedding) VALUES (@id, @blob)",
+                        new { id, blob }, transaction: tx, cancellationToken: token));
+                    written++;
+                }
+                return written;
+            }, ct);
+        }
 
         _logger.LogInformation("Re-embed finished in {CtxType}:{CtxId} — processed={Processed} failed={Failed}",
             ctx.Type, ctx.Id, processed, failed);
@@ -397,6 +416,14 @@ public class NoteRepository : INoteRepository
         return $"{note.Title} {stripped} {tags}".Trim();
     }
 
+    // What notes_fts indexes of a note's content: the same secret-stripped
+    // text the model gets. A secret block that reached the stored content in
+    // the clear (written by a key, before the vault, or behind a character
+    // the client didn't take for whitespace) must not make the note findable
+    // by its secret. TrashRepository's restore and the user v20 migration
+    // index the same way.
+    public static string? FtsContent(string? content) => SecretStripper.Strip(content);
+
     // ────────── Locked-tag preservation ──────────
     // Reads the existing notes.tags JSON for the row, then merges any tag
     // marked UserRemovable=false in SystemTags.Seeds into `note.Tags`.
@@ -471,7 +498,13 @@ public class NoteRepository : INoteRepository
     private static void ApplySourceTags(Note note, NoteSource source)
     {
         note.Tags ??= new List<string>();
-        var tags = new HashSet<string>(note.Tags, StringComparer.Ordinal);
+        // Compared as they will be stored: "Source:MCP" is source:mcp once
+        // EnsureExistsAsync normalises it, so it must not slip past the strip
+        // below. A name TagName can't take stays as sent — EnforceLimits
+        // refuses it.
+        var tags = new HashSet<string>(
+            note.Tags.Select(t => TagName.IsValid(t) ? TagName.Normalize(t) : t),
+            StringComparer.Ordinal);
 
         if (source == NoteSource.Mcp)
         {

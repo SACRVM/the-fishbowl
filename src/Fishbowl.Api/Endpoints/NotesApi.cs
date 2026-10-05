@@ -12,6 +12,24 @@ namespace Fishbowl.Api.Endpoints;
 
 public static class NotesApi
 {
+    // A key (an MCP client, an OAuth connector, a script) never sees a
+    // secret: what it reads goes through SecretStripper.StripNote, as on the
+    // MCP wire. The signed-in UI gets the note as stored — it needs the
+    // ciphertext envelope to decrypt. Shared with the space routes.
+    internal static bool IsKey(ClaimsPrincipal user)
+        => user.Identity?.AuthenticationType == McpContextClaims.BearerScheme;
+
+    internal static Note ForCaller(Note note, ClaimsPrincipal user)
+        => IsKey(user) ? SecretStripper.StripNote(note) : note;
+
+    // A key can't see secrets, so a PUT from one would overwrite them with
+    // "[secret content hidden]" and drop the ciphertext.
+    internal static bool HoldsSecret(Note note)
+        => SecretStripper.ContainsSecret(note.Content) || note.ContentSecret is { Length: > 0 };
+
+    internal static IResult SecretNoteRefused()
+        => ApiErrors.Conflict("secret_note", "This note holds secrets — agents can't change it; edit it in Fishbowl.");
+
     public static RouteGroupBuilder MapNotesApi(this IEndpointRouteBuilder routes)
     {
         var group = routes.MapGroup("/api/v1/notes");
@@ -49,8 +67,8 @@ public static class NotesApi
 
             var tags = tag is { Length: > 0 } ? tag : null;
             var matchMode = match == "all" ? "all" : "any";
-            return Results.Ok(await repo.GetAllAsync(
-                ctx.Value, tags, matchMode, limit, offset ?? 0, ct));
+            var notes = await repo.GetAllAsync(ctx.Value, tags, matchMode, limit, offset ?? 0, ct);
+            return Results.Ok(notes.Select(n => ForCaller(n, user)));
         })
         .WithName("ListNotes")
         .WithSummary("Lists notes for the resolved context. Optional ?tag=foo&tag=bar&match=any|all filter and ?limit=&offset= paging.")
@@ -64,7 +82,7 @@ public static class NotesApi
             if (ctx is null) return Results.Unauthorized();
 
             var note = await repo.GetByIdAsync(ctx.Value, id, ct);
-            return note is not null ? Results.Ok(note) : Results.NotFound();
+            return note is not null ? Results.Ok(ForCaller(note, user)) : Results.NotFound();
         })
         .WithName("GetNote")
         .WithSummary("Gets a single note by id.")
@@ -102,12 +120,8 @@ public static class NotesApi
             if (ctx is null) return Results.Unauthorized();
 
             note.Id = id;
-            // A key can't see secrets, so a PUT from one would overwrite them
-            // with "[secret content hidden]" and drop the ciphertext.
-            if (user.Identity?.AuthenticationType == McpContextClaims.BearerScheme
-                && await repo.GetByIdAsync(ctx.Value, id, ct) is { } current
-                && (SecretStripper.ContainsSecret(current.Content) || current.ContentSecret is { Length: > 0 }))
-                return ApiErrors.Conflict("secret_note", "This note holds secrets — agents can't change it; edit it in Fishbowl.");
+            if (IsKey(user) && await repo.GetByIdAsync(ctx.Value, id, ct) is { } current && HoldsSecret(current))
+                return SecretNoteRefused();
             try
             {
                 var updated = await repo.UpdateAsync(ctx.Value, note, SourceForPrincipal(user), ct);

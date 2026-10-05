@@ -69,6 +69,10 @@ public class TagRepository : ITagRepository
         var oldN = TagName.Normalize(oldName);
         var newN = TagName.Normalize(newName);
         if (oldN == newN) return false;
+        // Nor can a tag become one: renaming `foo` to `source:mcp` would put
+        // the provenance marker on every note that carried foo.
+        if (SystemTags.IsReserved(newN))
+            throw new ArgumentException($"'{newN}' is a system tag name; a tag can't be renamed to it.");
 
         return await _dbFactory.WithContextTransactionAsync(ctx, async (db, tx, token) =>
         {

@@ -198,8 +198,10 @@ public static class SpacesApi
 
             var tags = tag is { Length: > 0 } ? tag : null;
             var matchMode = match == "all" ? "all" : "any";
-            return Results.Ok(await notes.GetAllAsync(
-                ContextRef.Space(space.Id), tags, matchMode, limit, offset ?? 0, ct));
+            // A space holds no secrets since they were refused there, but a
+            // note from before may — a key reads it stripped (NotesApi.ForCaller).
+            var list = await notes.GetAllAsync(ContextRef.Space(space.Id), tags, matchMode, limit, offset ?? 0, ct);
+            return Results.Ok(list.Select(n => NotesApi.ForCaller(n, user)));
         })
         .WithName("ListSpaceNotes")
         .RequireScope("read:notes");
@@ -213,7 +215,7 @@ public static class SpacesApi
             var space = resolved.Space!;
 
             var note = await notes.GetByIdAsync(ContextRef.Space(space.Id), id, ct);
-            return note is not null ? Results.Ok(note) : Results.NotFound();
+            return note is not null ? Results.Ok(NotesApi.ForCaller(note, user)) : Results.NotFound();
         })
         .WithName("GetSpaceNote")
         .RequireScope("read:notes");
@@ -251,6 +253,10 @@ public static class SpacesApi
             if (!role.CanWrite()) return Results.Forbid();
 
             note.Id = id;
+            // Read stripped, written back it would lose what was stripped.
+            if (NotesApi.IsKey(user) && await notes.GetByIdAsync(ContextRef.Space(space.Id), id, ct) is { } current
+                && NotesApi.HoldsSecret(current))
+                return NotesApi.SecretNoteRefused();
             try
             {
                 var updated = await notes.UpdateAsync(ContextRef.Space(space.Id), note, NoteSources.Of(user), ct);

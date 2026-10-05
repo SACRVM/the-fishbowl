@@ -102,11 +102,11 @@ public sealed class EmbeddingInitializer : IHostedService
         {
             try
             {
-                if (_downloader.IsReady())
-                {
-                    _logger.LogInformation("MiniLM-L6-v2 already present, skipping download");
-                    return;
-                }
+                // Also when the files are there: EnsureModelAsync checks the
+                // pinned hash (once per start, ~90 MB read in the
+                // background) and fetches a truncated or damaged model again
+                // — present alone isn't whole (a full disk, a copy that
+                // stopped, a file from before downloads went through .part).
                 await _downloader.EnsureModelAsync(_cts.Token);
             }
             catch (OperationCanceledException) when (_cts.Token.IsCancellationRequested)

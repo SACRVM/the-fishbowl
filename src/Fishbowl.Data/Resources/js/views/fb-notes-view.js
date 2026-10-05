@@ -25,6 +25,10 @@ class FbNotesView extends HTMLElement {
         super();
         this.notes = [];
         this.selectedId = null;
+        // The note the editor shows — what saves write. Not looked up by
+        // selectedId: while another row loads (or asks for the key) the
+        // editor still holds this one. Set by _showInEditor only.
+        this._openNote = null;
         this.showArchived = false;
         // Search state. When searchActive, `this.notes` holds the ranked
         // server results (in score order). An empty input flips back to
@@ -186,7 +190,12 @@ class FbNotesView extends HTMLElement {
             const kept = this._applyRelevanceCutoff(all);
             this.searchActive = true;
             this.searchDegraded = !!res.degraded;
-            this.notes = kept;
+            // A hit is not the note: its secrets are a placeholder and it
+            // has no ciphertext, so writing it back would replace them for
+            // good. Marked `_hit`, it is loaded before it is opened or
+            // changed (select, _noteFor); the open note stays the editor's.
+            const open = this._openNote;
+            this.notes = kept.map(h => open && !open._hit && h.id === open.id ? open : Object.assign(h, { _hit: true }));
             this._updateDegradedHint();
             this.renderList();
             // Narrow the chip strip to tags that actually appear on the
@@ -739,9 +748,7 @@ class FbNotesView extends HTMLElement {
             // current input value against the stored note to decide whether
             // the PUT is needed. Pre-mutating would always produce "no
             // change" and silently drop every tag edit.
-            if (this.notes.some(n => n.id === this.selectedId)) {
-                this.scheduleAutoSave();
-            }
+            if (this._openNote) this.scheduleAutoSave();
         });
         // A tag created in the input (name + colour from its picker) is
         // persisted right away, so the colour sticks before the note saves.
@@ -859,12 +866,14 @@ class FbNotesView extends HTMLElement {
                 // chips on the active note) so stale chips don't linger.
                 await this.loadNotes();
                 this._renderTagFilter();
-                if (this.selectedId) {
-                    const refreshed = await fb.api.notes.get(this.selectedId).catch(() => null);
-                    if (refreshed) {
-                        const idx = this.notes.findIndex(n => n.id === this.selectedId);
-                        if (idx >= 0) this.notes[idx] = refreshed;
-                        this.querySelector("#tag-input").value = refreshed.tags || [];
+                // The open note's tags may have been renamed: only those
+                // change — its text stays the editor's.
+                const open = this._openNote;
+                if (open) {
+                    const refreshed = await fb.api.notes.get(open.id, { prompt: false }).catch(() => null);
+                    if (refreshed && this._openNote === open) {
+                        open.tags = refreshed.tags || [];
+                        this.querySelector("#tag-input").value = open.tags;
                     }
                 }
             },
@@ -999,96 +1008,149 @@ class FbNotesView extends HTMLElement {
         this.selectedId = id;
         let note = this.notes.find(n => n.id === id);
         if (!note) return;
+        // A search hit (or a copy masked by a lock) isn't the note: load it.
         // Opening a note whose secrets are still markers (the vault was
         // locked when the list loaded) is the moment to ask for the key.
-        if (hasLockedSecrets(note)) note = await this._decryptInCache(note);
+        if (note._hit || hasLockedSecrets(note)) note = await this._decryptInCache(note);
+        // Another row was opened while this one loaded or asked for the
+        // key: that one wins — this note must not land in its editor.
+        if (this.selectedId !== id) return;
+        if (!note) {
+            this.selectedId = this._openNote?.id ?? null;
+            window.sac?.toast?.(fb.t("fb.notes.open-failed", "Couldn't open the note."), { kind: "error" });
+            this.renderList();
+            return;
+        }
         this.querySelector("#editor-empty").hidden  = true;
         this.querySelector("#editor").hidden        = false;
         this.querySelector("#tagbar").hidden        = false;
         this.querySelector("#editor-footer").hidden = false;
-        this._loadedText = editorTextFor(note);
-        this.querySelector("#content").value = this._loadedText;
+        this._showInEditor(note);
         this.querySelector("#tag-input").value = note.tags || [];
         this.querySelector("#timestamp").textContent = this.formatFullTimestamp(note.updatedAt);
-        this._applyReadOnly(note);
         this.updateToolbar(note);
         // sac-md-editor autosizes itself on value-set (deferred to next
         // frame internally), so no explicit autosize hook needed here.
         this.renderList();
     }
 
-    /** Re-fetch one note through the decrypting path (asks to unlock) and
-     *  swap it into the cache. Cancelled → the note stays as it was. */
-    async _decryptInCache(note) {
-        try {
-            const fresh = await fb.api.notes.get(note.id);
-            const i = this.notes.findIndex(n => n.id === note.id);
-            if (i >= 0) this.notes[i] = fresh;
-            return fresh;
-        } catch (err) {
-            console.warn("[fb-notes-view] decrypt on open failed:", err);
-            return note;
-        }
-    }
-
-    /** After a lock: reload the list without asking for the key, so every
-     *  decrypted secret on the page turns back into a marker, and repaint
-     *  the open note from that. The split keeps showing what it showed. */
-    async _repaintLocked() {
-        const split = this.querySelector("#split");
-        const shown = split?.show;
-        const id = this.selectedId;
-        await this.loadNotes({ prompt: false });
-        if (!id) return;
-        const note = this.notes.find(n => n.id === id);
-        if (!note) { this.clearSelection(); return; }
+    /** Puts a note in the editor; from here on it is the one saves write. */
+    _showInEditor(note) {
+        this._openNote = note;
         this._loadedText = editorTextFor(note);
         this.querySelector("#content").value = this._loadedText;
         this._applyReadOnly(note);
+    }
+
+    /** Re-fetch one note through the decrypting path (asks to unlock) and
+     *  swap it into the cache. Cancelled → the note stays as it was; a
+     *  search hit or a masked copy that can't be loaded gives null — it is
+     *  never opened or written as it is. */
+    async _decryptInCache(note) {
+        try {
+            return this._swapIn(await fb.api.notes.get(note.id));
+        } catch (err) {
+            console.warn("[fb-notes-view] loading the note failed:", err);
+            return note._hit ? null : note;
+        }
+    }
+
+    /** Replace the cached copy of a note with this one. */
+    _swapIn(note) {
+        const i = this.notes.findIndex(n => n.id === note.id);
+        if (i >= 0) this.notes[i] = note;
+        return note;
+    }
+
+    /** The note to write back for a row. Never a search hit or a masked copy
+     *  (`_hit`): those hold their secrets as a placeholder and no ciphertext,
+     *  so a PUT of one would replace the secrets for good. The open note is
+     *  the editor's own; anything else in that state is loaded first —
+     *  without asking for the key: a locked note's markers and ciphertext go
+     *  back as they are. */
+    async _noteFor(id) {
+        const open = this._openNote;
+        if (open?.id === id && !open._hit) return this._swapIn(open);
+        const cached = this.notes.find(n => n.id === id);
+        if (cached && !cached._hit) return cached;
+        try {
+            return this._swapIn(await fb.api.notes.get(id, { prompt: false }));
+        } catch (err) {
+            console.error("[fb-notes-view] loading the note failed:", err);
+            window.sac?.toast?.(fb.errors.text(err, fb.t("fb.notes.save-failed", "Couldn't save that change.")), { kind: "error" });
+            return null;
+        }
+    }
+
+    /** After a lock: every cached copy holding decrypted secrets is masked
+     *  in place (`lockedCopy`, loaded again before it is opened or written)
+     *  — no list reload, so nothing else in the cache is touched. The editor
+     *  is repainted only when it shows decrypted secrets: a note without
+     *  any keeps what is being typed. The split keeps showing what it
+     *  showed. */
+    async _repaintLocked() {
+        const showsSecrets = (text) => fb.api.secrets.ranges(text || "").length > 0;
+        this.notes = this.notes.map(n => !n._hit && !hasLockedSecrets(n) && showsSecrets(n.content) ? lockedCopy(n) : n);
+        this.renderList();
+        const open = this._openNote;
+        const content = this.querySelector("#content");
+        if (!open || open._hit || hasLockedSecrets(open) || !showsSecrets(content.value)) return;
+        const split = this.querySelector("#split");
+        const shown = split?.show;
+        const fresh = await fb.api.notes.get(open.id, { prompt: false }).catch(() => null);
+        if (this._openNote !== open) return;   // another note was opened meanwhile
+        // Offline: the masked text, read-only until the pill unlocks it.
+        this._showInEditor(fresh ? this._swapIn(fresh) : lockedCopy({ ...open, content: content.value }));
         this.renderList();
         if (split && shown) split.show = shown;
     }
 
     /** After an unlock (the account menu, or writing a secret): decrypt
-     *  just the cached notes still holding markers. Everything else in the
-     *  cache stays as it is — a save may be in flight on one of them, and a
-     *  whole-list reload could put an older server copy over it. The open
-     *  note is repainted only if it was showing placeholders. */
+     *  just the cached notes still holding markers (or masked by a lock).
+     *  Everything else in the cache stays as it is — a save may be in flight
+     *  on one of them, and a whole-list reload could put an older server
+     *  copy over it. The open note is repainted only if it was showing
+     *  placeholders, and only if it is still the open one. */
     async _repaintUnlocked() {
-        const locked = this.notes.filter(hasLockedSecrets);
-        if (locked.length === 0) return;
-        const openWasLocked = locked.some(n => n.id === this.selectedId);
+        const isLocked = (n) => hasLockedSecrets(n) || !!n._locked;
+        const open = this._openNote;
+        const openWasLocked = !!open && isLocked(open);
+        const locked = this.notes.filter(isLocked);
+        if (locked.length === 0 && !openWasLocked) return;
         await Promise.all(locked.map(n => this._decryptInCache(n)));
-        if (openWasLocked) {
-            const note = this.notes.find(n => n.id === this.selectedId);
-            if (note && !hasLockedSecrets(note)) {
-                this._loadedText = editorTextFor(note);
-                this.querySelector("#content").value = this._loadedText;
-                this._applyReadOnly(note);
-            }
+        if (openWasLocked && this._openNote === open) {
+            let note = this.notes.find(n => n.id === open.id);
+            if (!note || note._hit) note = await this._decryptInCache(open);
+            if (note && this._openNote === open && !isLocked(note) && !note._hit) this._showInEditor(note);
         }
         this.renderList();
     }
 
     /** "Secrets locked" pill → unlock, then show the note decrypted. */
     async _unlockOpenNote() {
-        const note = this.notes.find(n => n.id === this.selectedId);
-        if (!note) return;
-        const fresh = await this._decryptInCache(note);
-        if (hasLockedSecrets(fresh)) return; // cancelled
-        this._loadedText = editorTextFor(fresh);
-        this.querySelector("#content").value = this._loadedText;
-        this._applyReadOnly(fresh);
+        const open = this._openNote;
+        if (!open) return;
+        const fresh = await this._decryptInCache(open);
+        // Failed, or another note was opened while the dialog was up.
+        if (!fresh || this._openNote !== open) return;
+        if (fresh.secretsUnreadable) {
+            window.sac?.toast?.(fb.t("fb.notes.secrets-unreadable",
+                "This note's secrets can't be decrypted. It stays read-only so they aren't overwritten."), { kind: "error" });
+        }
+        if (hasLockedSecrets(fresh)) return; // cancelled, or unreadable
+        this._showInEditor(fresh);
         this.renderList();
     }
 
-    /** Read-only while archived, and while the note's secrets are locked —
-     *  editing around `:::secret#N:::end` markers is too easy to get wrong. */
+    /** Read-only while archived, while the note's secrets are locked —
+     *  editing around `:::secret#N:::end` markers is too easy to get wrong —
+     *  and while the editor holds a masked copy (`_hit`) instead of the
+     *  note. */
     _applyReadOnly(note) {
-        const locked = hasLockedSecrets(note);
+        const locked = hasLockedSecrets(note) || !!note._hit;
         this.querySelector("#locked-pill").hidden = !locked;
         const ro = !!note.archived || locked || this.writable === false;
-        this.querySelector("#tag-input")?.toggleAttribute("disabled", this.writable === false);
+        this.querySelector("#tag-input")?.toggleAttribute("disabled", this.writable === false || !!note._hit);
         const editor = this.querySelector("#editor");
         editor.classList.toggle("readonly", ro);
         this.querySelector("#content").toggleAttribute("readonly", ro);
@@ -1097,6 +1159,7 @@ class FbNotesView extends HTMLElement {
 
     clearSelection() {
         this.selectedId = null;
+        this._openNote = null;
         // Collapsed, an editor with nothing in it is a dead end.
         this.querySelector("#split").show = "start";
         this.querySelector("#editor-empty").hidden  = false;
@@ -1110,12 +1173,13 @@ class FbNotesView extends HTMLElement {
     }
 
     async saveSelected() {
-        if (!this.selectedId) return;
         // Any debounced save firing is equivalent to an explicit flush.
         clearTimeout(this._saveDebounce);
         this._saveDebounce = null;
-        const note = this.notes.find(n => n.id === this.selectedId);
-        if (!note) return;
+        // The note in the editor — see _openNote. A masked copy (`_hit`,
+        // after a lock without the server) isn't the note: never written.
+        const note = this._openNote;
+        if (!note || note._hit) return;
         const newTags  = this.querySelector("#tag-input").value;
         const tagsChanged = !this._sameTags(note.tags || [], newTags);
         // A note with locked secrets shows placeholders in the editor. Its
@@ -1138,7 +1202,7 @@ class FbNotesView extends HTMLElement {
         try {
             await fb.api.notes.update(note.id, note);
             note.updatedAt = new Date().toISOString();
-            this.querySelector("#timestamp").textContent = this.formatFullTimestamp(note.updatedAt);
+            if (this._openNote === note) this.querySelector("#timestamp").textContent = this.formatFullTimestamp(note.updatedAt);
             if (tagsChanged) {
                 // A new tag may have been auto-registered server-side via
                 // EnsureExistsAsync; refresh the registry + filter strip so
@@ -1150,12 +1214,14 @@ class FbNotesView extends HTMLElement {
             // wipe the list DOM mid-click and cause the user's click on
             // another row to be dropped (mousedown/mouseup land on different
             // elements so the browser doesn't fire the click). Re-sort on
-            // next explicit render (select, delete, archive, pin).
+            // next explicit render (select, delete, archive, pin). The list's
+            // copy (a search hit, an older load) becomes the saved note.
+            this._swapIn(note);
             this._updateRowInPlace(note);
             this._lastSaveError = null;
         } catch (err) {
             // Not saved: the next edit or flush must try again.
-            if (this._loadedText === text) this._loadedText = previousText;
+            if (this._openNote === note && this._loadedText === text) this._loadedText = previousText;
             console.error("[fb-notes-view] update failed:", err);
             this._reportSaveError(err);
         }
@@ -1224,13 +1290,13 @@ class FbNotesView extends HTMLElement {
     async togglePinnedById(id) {
         // If the target is the active editor, flush text edits first so they
         // ride in the same PUT as the pinned flip (one round-trip, no clobber).
-        if (id === this.selectedId) await this.flushSave();
-        const note = this.notes.find(n => n.id === id);
+        if (id === this._openNote?.id) await this.flushSave();
+        const note = await this._noteFor(id);
         if (!note) return;
         note.pinned = !note.pinned;
         try {
             await fb.api.notes.update(note.id, note);
-            if (id === this.selectedId) this.updateToolbar(note);
+            if (id === this._openNote?.id) this.updateToolbar(note);
             this.renderList();
         } catch (err) {
             console.error("[fb-notes-view] pin toggle failed:", err);
@@ -1240,17 +1306,17 @@ class FbNotesView extends HTMLElement {
     }
 
     async toggleArchivedById(id) {
-        if (id === this.selectedId) await this.flushSave();
-        const note = this.notes.find(n => n.id === id);
+        if (id === this._openNote?.id) await this.flushSave();
+        const note = await this._noteFor(id);
         if (!note) return;
         note.archived = !note.archived;
         try {
             await fb.api.notes.update(note.id, note);
             // If we archived the currently-open note and archive view is off,
             // it just disappeared from the list — clear the editor too.
-            if (id === this.selectedId && note.archived && !this.showArchived) {
+            if (note === this._openNote && note.archived && !this.showArchived) {
                 this.clearSelection();
-            } else if (id === this.selectedId) {
+            } else if (note === this._openNote) {
                 // Still visible (either unarchived, or archived with
                 // showArchived on) — refresh the editor's read-only state.
                 this._applyReadOnly(note);
@@ -1267,9 +1333,9 @@ class FbNotesView extends HTMLElement {
         // Editing is implicit approval; this button is just an explicit UX
         // handle for users filtering on `review:pending`. Flush any pending
         // autosave first so our tag change rides in the same PUT.
-        if (id === this.selectedId) await this.flushSave();
+        if (id === this._openNote?.id) await this.flushSave();
 
-        const note = this.notes.find(n => n.id === id);
+        const note = await this._noteFor(id);
         if (!note || !(note.tags || []).includes("review:pending")) return;
 
         const previousTags = [...note.tags];
@@ -1280,7 +1346,7 @@ class FbNotesView extends HTMLElement {
             // filter selects that tag, it'll vanish from the list on the
             // next render — renderList handles that. For the editor's
             // tag-input we just re-apply the new list.
-            if (id === this.selectedId) {
+            if (note === this._openNote) {
                 this.querySelector("#tag-input").value = note.tags;
             }
             this.renderList();
@@ -1316,14 +1382,18 @@ class FbNotesView extends HTMLElement {
 
         // Cancel any pending autosave for this note so it doesn't re-create it
         // after the DELETE round-trip.
-        if (id === this.selectedId) {
+        if (id === this._openNote?.id) {
             clearTimeout(this._saveDebounce);
             this._saveDebounce = null;
         }
         try {
             await fb.api.notes.delete(id);
             this.notes = this.notes.filter(n => n.id !== id);
-            if (id === this.selectedId) this.clearSelection();
+            if (id === this._openNote?.id || id === this.selectedId) {
+                // Still loading when deleted: the editor holds another note.
+                if (this._openNote && this._openNote.id !== id) await this.flushSave();
+                this.clearSelection();
+            }
             this.renderList();
         } catch (err) {
             console.error("[fb-notes-view] delete failed:", err);
@@ -1374,23 +1444,25 @@ function escapeHtml(s) {
 }
 
 const TITLE_MAX = 200;
-const SECRET_OPEN  = /^\s*:{2,3}secret(\s|$)/i;
-const SECRET_CLOSE = /^\s*:{2,3}end\s*$/i;
 const FENCE        = /^\s*(```|~~~)/;
 const SECRET_MARKER = /^\s*:{2,3}secret#\d+:{2,3}end\s*$/i;
 
 /** The note's title is its first line of text, stripped of markdown line
  *  markers (heading, quote, list, task). Secret blocks are skipped whole —
  *  the title is stored in plain text and travels into FTS, embeddings and
- *  MCP responses, so a secret must never become one. Fence markers are
+ *  MCP responses, so a secret must never become one. Which lines are secret
+ *  is the one grammar's call (fb.api.secrets — what the editor masks and
+ *  the client encrypts), never a looser copy of it. Fence markers are
  *  skipped too; the code inside them can still title a note. */
 function splitTitle(text) {
-    const lines = String(text || "").split(/\r?\n/);
-    let inSecret = false;
+    const lines = String(text || "").split("\n");
+    const secret = new Set();
+    for (const { open, close } of fb.api.secrets.ranges(text)) {
+        for (let k = open; k <= close; k++) secret.add(k);
+    }
     for (let i = 0; i < lines.length; i++) {
         const raw = lines[i];
-        if (inSecret) { if (SECRET_CLOSE.test(raw)) inSecret = false; continue; }
-        if (SECRET_OPEN.test(raw)) { inSecret = true; continue; }
+        if (secret.has(i)) continue;
         if (FENCE.test(raw) || SECRET_MARKER.test(raw)) continue;
         const line = raw
             .replace(/^\s*#{1,6}\s+/, "")
@@ -1440,17 +1512,34 @@ function plainText(md) {
         .replace(/&nbsp;/g, " ").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&");
 }
 
-const SECRET_BLOCK_RE  = /^[ \t]*:{2,3}secret(?:[ \t][^\n]*)?\n[\s\S]*?\n[ \t]*:{2,3}end[^\n]*$/gim;
 const SECRET_MARKER_RE = /:{2,3}secret#\d+:{2,3}end/gi;
 // Display only: the editor shows it for a locked secret; never saved.
 const lockedPlaceholder = () => fb.t("fb.notes.locked-placeholder", "locked — unlock to show");
+// …and for a secret whose ciphertext doesn't decrypt (the note stays read-only).
+const unreadablePlaceholder = () => fb.t("fb.notes.unreadable-placeholder", "can't be decrypted — left as it is");
 
+/** Every secret block (the one grammar, fb.api.secrets — an unclosed block
+ *  runs to the end) and every stored marker as a lock. */
 function maskSecrets(text) {
-    return String(text || "").replace(SECRET_BLOCK_RE, "🔒").replace(SECRET_MARKER_RE, "🔒");
+    return fb.api.secrets.replace(String(text || ""), () => "🔒").replace(SECRET_MARKER_RE, "🔒");
+}
+
+/** A cached note with its decrypted secrets masked, for after a lock: what
+ *  the list shows until the note is loaded again (opening it asks for the
+ *  key). Marked `_hit` like a search hit — never written back as it is. */
+function lockedCopy(note) {
+    return {
+        ...note,
+        content: fb.api.secrets.replace(note.content || "", () => `:::secret\n${lockedPlaceholder()}\n:::end`),
+        contentSecret: null,
+        _hit: true,
+        _locked: true,
+    };
 }
 
 /** The note came back with `:::secret#N:::end` markers still in place —
- *  its ciphertext wasn't decrypted because the vault is locked. */
+ *  its ciphertext wasn't decrypted because the vault is locked (or because
+ *  a block doesn't decrypt: `secretsUnreadable`). */
 function hasLockedSecrets(note) {
     return !!note?.contentSecret && /:{2,3}secret#\d+:{2,3}end/.test(note.content || "");
 }
@@ -1464,8 +1553,9 @@ function editorTextFor(note) {
     // Locked secrets show as ordinary (blurred) secret blocks with a
     // placeholder body, not as the raw `:::secret#N:::end` storage marker.
     // Display only: saveSelected never writes a locked note's text back.
+    const placeholder = note.secretsUnreadable ? unreadablePlaceholder() : lockedPlaceholder();
     const content = hasLockedSecrets(note)
-        ? (note.content || "").replace(SECRET_MARKER_RE, `:::secret\n${lockedPlaceholder()}\n:::end`)
+        ? (note.content || "").replace(SECRET_MARKER_RE, `:::secret\n${placeholder}\n:::end`)
         : note.content || "";
     if (!title || titleFromText(content) === title) return content;
     return content ? `# ${title}\n\n${content}` : `# ${title}\n`;

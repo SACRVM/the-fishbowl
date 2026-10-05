@@ -17,6 +17,8 @@ public class VaultTests
 {
     private const string Passphrase = "correct-horse-battery-staple-test";
     private const string Secret = "hunter2-vault-smoke";
+    private const string Label = "aws-root-label";
+    private const string Trailer = "rotate-yearly-trailer";
 
     private readonly PlaywrightFixture _fixture;
 
@@ -50,8 +52,10 @@ public class VaultTests
 
             // ── Setup: writing the first secret opens the setup dialog. ──
             await OpenNoteAsync(page, baseUrl, "Vault smoke");
+            // A label on the opener and text after the closer are part of
+            // the block: encrypted with it, and back exactly as written.
             await page.Locator("fb-notes-view #content").EvaluateAsync(
-                $"e => {{ e.value = '# Vault smoke\\n\\n:::secret\\n{Secret}\\n:::end\\n'; e.dispatchEvent(new Event('change')); }}");
+                $"e => {{ e.value = '# Vault smoke\\n\\n:::secret {Label}\\n{Secret}\\n:::end {Trailer}\\n'; e.dispatchEvent(new Event('change')); }}");
 
             var setup = page.Locator("sac-dialog[title='Set up secrets']");
             await setup.WaitForAsync(new LocatorWaitForOptions { Timeout = 5000 });
@@ -89,9 +93,32 @@ public class VaultTests
             });
             var raw = stored.GetRawText();
             Assert.DoesNotContain(Secret, raw);
+            Assert.DoesNotContain(Label, raw);
+            Assert.DoesNotContain(Trailer, raw);
             var contentSecret = stored.GetProperty("contentSecret").GetString()!;
             var envelope = JsonDocument.Parse(Convert.FromBase64String(contentSecret)).RootElement;
             Assert.Equal(2, envelope.GetProperty("v").GetInt32());
+
+            // ── A search hit is never written back as it is (its secret is a
+            //    placeholder, it has no ciphertext): pinning one from the
+            //    results loads the note first. ──
+            await OpenNoteAsync(page, baseUrl, "Vault victim", navigate: false);
+            await page.Locator("fb-notes-view #search-input").FillAsync("Vault smoke");
+            await page.WaitForFunctionAsync(
+                "() => { const v = document.querySelector('fb-notes-view'); return v.searchActive && v.notes.some(n => n._hit); }");
+            var hit = page.Locator(".nv-item", new PageLocatorOptions { HasText = "Vault smoke" }).First;
+            await hit.HoverAsync();
+            await hit.Locator("button[data-action='pin']").ClickAsync();
+            var pinned = await WaitForAsync(async () =>
+            {
+                var n = await GetNoteAsync(api, baseUrl, noteId);
+                return n.GetProperty("pinned").GetBoolean() ? n : (JsonElement?)null;
+            });
+            Assert.Contains(":::secret#0:::end", pinned.GetProperty("content").GetString());
+            Assert.DoesNotContain("secret content hidden", pinned.GetProperty("content").GetString());
+            contentSecret = pinned.GetProperty("contentSecret").GetString()!;
+            await page.Locator("fb-notes-view #search-input").FillAsync("");
+            await page.WaitForFunctionAsync("() => !document.querySelector('fb-notes-view').searchActive");
 
             // Move the ciphertext into another note — AAD must make it useless there.
             var put = await api.PutAsync($"{baseUrl}/api/v1/notes/{otherId}", new APIRequestContextOptions
@@ -112,12 +139,15 @@ public class VaultTests
             await unlock.WaitForAsync(new LocatorWaitForOptions { State = WaitForSelectorState.Detached, Timeout = 10000 });
 
             await OpenNoteAsync(page, baseUrl, "Vault smoke", navigate: false);
-            Assert.Contains(Secret, await EditorValueAsync(page));
+            Assert.Contains($":::secret {Label}\n{Secret}\n:::end {Trailer}", await EditorValueAsync(page));
 
+            // Ciphertext that doesn't decrypt leaves the note as stored and
+            // read-only: no save may put a notice in place of it.
             await OpenNoteAsync(page, baseUrl, "Vault victim", navigate: false);
             var victim = await EditorValueAsync(page);
             Assert.DoesNotContain(Secret, victim);
-            Assert.Contains("[decryption failed]", victim);
+            Assert.Contains(":::secret\ncan't be decrypted — left as it is\n:::end", victim);
+            Assert.Equal("", await page.Locator("fb-notes-view #content").GetAttributeAsync("readonly"));
 
             // The list preview never shows a decrypted secret.
             var row = page.Locator(".nv-item", new PageLocatorOptions { HasText = "Vault smoke" }).First;
@@ -227,6 +257,19 @@ public class VaultTests
             Assert.Equal(new[] { "" }, await Bodies(":::secret\n:::end"));
             Assert.Equal(new[] { "x", "y" }, await Bodies("a\n::secret\nx\n::end note\nb\n:::SECRET\ny\n:::end"));
             Assert.Empty(await Bodies(":::secretive plan"));
+            // Whitespace is JS's \s, as in the editor: a no-break space
+            // (Option+Space) after the opener or the closer counts.
+            Assert.Equal(new[] { "pw=hunter2" }, await Bodies(":::secret\u00A0AWS root\npw=hunter2\n:::end\u00A0rotate\nafter"));
+            Assert.Equal(new[] { "x" }, await Bodies(":::secret\u3000\nx"));
+            // The notes view titles and previews by the same grammar: an
+            // indented ":::end" doesn't close (its title isn't the secret),
+            // and an unclosed block or one holding "::endpoint=" stays out of
+            // the list preview.
+            Assert.Equal("", await page.EvaluateAsync<string>("t => titleFromText(t)", ":::secret\nhunter2\n  :::end\nstill secret"));
+            Assert.Equal("Intro", await page.EvaluateAsync<string>("t => titleFromText(t)", ":::Secret\npw\n:::end\nIntro"));
+            foreach (var text in new[] { "Note\n:::secret\nuser\n::endpoint=x\npw=hunter2\n:::end", "Note\n:::secret\npw=hunter2" })
+                Assert.DoesNotContain("hunter2", await page.EvaluateAsync<string>(
+                    "t => snippetFor({ title: 'Note', content: t })", text));
         }
         finally { await context.CloseAsync(); }
     }
