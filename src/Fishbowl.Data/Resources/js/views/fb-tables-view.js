@@ -15,6 +15,10 @@ class FbTablesView extends HTMLElement {
         super();
         this.tables = [];
         this.current = null;
+        this.slug = undefined;   // the space the list and the role are for
+        this._routeSeq = 0;
+        this._openSeq = 0;
+        this._listSeq = 0;
     }
 
     async connectedCallback() {
@@ -22,13 +26,33 @@ class FbTablesView extends HTMLElement {
         this.querySelector("#split").addEventListener("sac:resize", (e) => {
             try { localStorage.setItem("fb.tables.split", e.detail.position); } catch { /* storage off */ }
         });
-        this.writable = await fb.access.canWrite();
+        // Prefix route: the table in the URL. A switch to another space keeps
+        // this view mounted too — it arrives as a route change.
+        this.addEventListener("sac:route", () => this.routed());
+        await this.routed();
+    }
+
+    /** The URL changed: another table, or another space with its own role and tables. */
+    async routed() {
+        const seq = ++this._routeSeq;
+        const slug = sac.scope.get().slug;
+        if (slug !== this.slug) {
+            // Never the last space's columns or write mode on this one's table.
+            this.slug = slug;
+            this.open("");
+            this._spaceLoaded = this._loadSpace(slug);
+        }
+        await this._spaceLoaded;   // a route change meanwhile in the same space waits for it too
+        if (seq !== this._routeSeq || !this.isConnected) return;
+        this.open((sac.router.subpath() || "").split("?")[0]);
+    }
+
+    /** A space's role and tables — dropped when another space came first. */
+    async _loadSpace(slug) {
+        const writable = await fb.access.canWrite();
+        if (slug !== this.slug) return;
+        this.writable = writable;
         await this.loadTables();
-        if (!this.isConnected) return;
-        // Prefix route: the table in the URL.
-        this.addEventListener("sac:route", (e) => this.open(decodeURIComponent(e.detail.subpath || "")));
-        const sub = (location.hash.split("/tables/")[1] || "").split("?")[0];
-        if (sub) this.open(decodeURIComponent(sub));
     }
 
     render() {
@@ -104,8 +128,13 @@ class FbTablesView extends HTMLElement {
     }
 
     async loadTables() {
-        try { this.tables = await fb.api.tables.list(); }
-        catch (err) { console.warn("[fb-tables-view] list failed:", err); this.tables = []; }
+        // The newest list wins (a count refresh may still be under way for the last space).
+        const seq = ++this._listSeq;
+        let tables;
+        try { tables = await fb.api.tables.list(); }
+        catch (err) { console.warn("[fb-tables-view] list failed:", err); tables = []; }
+        if (seq !== this._listSeq) return;
+        this.tables = tables;
         const items = this.querySelector("#tb-items");
         items.replaceChildren(...this.tables.map((t) => {
             const a = document.createElement("a");
@@ -130,6 +159,7 @@ class FbTablesView extends HTMLElement {
     }
 
     async open(name) {
+        const seq = ++this._openSeq;
         const def = this.tables.find((t) => t.name === name);
         this.querySelectorAll(".tb-item").forEach((a) => a.classList.toggle("selected", a.dataset.table === name));
         const slot = this.querySelector("#tb-grid-slot");
@@ -152,7 +182,7 @@ class FbTablesView extends HTMLElement {
         this.querySelector("#split").show = "end";
 
         const { columns, source } = await fb.tableGrid.build(def);
-        if (this.current !== name || !this.isConnected) return;   // another table was picked meanwhile
+        if (seq !== this._openSeq || !this.isConnected) return;   // another table (or space) was picked meanwhile
         const grid = document.createElement("sac-data-grid");
         grid.setAttribute("label", def.name);
         grid.setAttribute("mode", this.writable ? "sheet" : "read");

@@ -32,6 +32,7 @@ class FbCalendarView extends HTMLElement {
         this.selectedDay = FbCalendarView.dayKey(now);
         this.editing = null;       // event open in the editor (draft when id === null)
         this._saveDebounce = null;
+        this._loadSeq = 0;         // the newest month load — an older one landing late is dropped
     }
 
     static dayKey(d) {
@@ -54,6 +55,9 @@ class FbCalendarView extends HTMLElement {
     }
 
     async connectedCallback() {
+        // The workspace this view shows, pinned: a save flushed on leaving
+        // still goes there, not to the workspace the hash moved on to.
+        this.api = fb.api.events.in(fb.api.workspace());
         // A format change remounts the view, so this follows the setting.
         const longTime = fb.format.time(new Date(2000, 0, 1, 22, 0)).length > 5
             || fb.t("fb.calendar.all-day-short", "all day").length > 7;   // "ganztägig"
@@ -88,14 +92,18 @@ class FbCalendarView extends HTMLElement {
     async loadEvents() {
         const from = this._gridStart();
         const to = new Date(from.getFullYear(), from.getMonth(), from.getDate() + 42);
+        const seq = ++this._loadSeq;
+        let events;
         try {
-            const list = await fb.api.events.list({ from, to });
-            this.events = (Array.isArray(list) ? list : [])
+            const list = await this.api.list({ from, to });
+            events = (Array.isArray(list) ? list : [])
                 .sort((a, b) => new Date(a.startAt) - new Date(b.startAt));
         } catch (err) {
             console.error("[fb-calendar-view] list failed:", err);
-            this.events = [];
+            events = [];
         }
+        if (seq !== this._loadSeq) return;   // another month was asked for meanwhile
+        this.events = events;
         this.renderMonth();
     }
 
@@ -818,7 +826,7 @@ class FbCalendarView extends HTMLElement {
             // editing must happen on the master or a blur would silently
             // move the whole series' start to this occurrence.
             try {
-                const master = await fb.api.events.get(id);
+                const master = await this.api.get(id);
                 if (master) { this._openEditor(master); return; }
             } catch (err) {
                 console.error("[fb-calendar-view] master fetch failed:", err);
@@ -1068,10 +1076,10 @@ class FbCalendarView extends HTMLElement {
         Object.assign(e, form);
         try {
             if (!e.id) {
-                const created = await fb.api.events.create(e);
+                const created = await this.api.create(e);
                 if (created && created.id) e.id = created.id;
             } else {
-                await fb.api.events.update(e.id, e);
+                await this.api.update(e.id, e);
             }
             e.updatedAt = new Date().toISOString();
             this._refreshFooter();
@@ -1102,6 +1110,11 @@ class FbCalendarView extends HTMLElement {
     async deleteEditing() {
         const e = this.editing;
         if (!e) return;
+        // Clicking Trash blurs the title, and the blur saves: a new event's
+        // first POST may be under way. Its outcome decides — dropping the
+        // draft now would let the event land after and come back.
+        await this._saving;
+        if (this.editing !== e) return;
         if (!e.id) { this._discardEditor(); return; } // unsaved draft — just drop it
 
         const result = await sac.dialog.confirm({
@@ -1118,8 +1131,9 @@ class FbCalendarView extends HTMLElement {
 
         clearTimeout(this._saveDebounce);
         this._saveDebounce = null;
+        await this._saving;   // nothing of it may land after the delete
         try {
-            await fb.api.events.delete(e.id);
+            await this.api.delete(e.id);
             this.events = this.events.filter(x => x.id !== e.id);
             this._discardEditor();
         } catch (err) {

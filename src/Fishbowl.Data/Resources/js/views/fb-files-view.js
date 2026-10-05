@@ -435,7 +435,7 @@
 
             // Extra hotkeys the bar doesn't carry: workspace menus, clipboard.
             const reg = (combo, fn, description, opts = {}) =>
-                this._offs.push(sac.hotkeys.register(combo, fn, { description, group: group(), ...opts }));
+                this._offs.push(sac.hotkeys.register(combo, this._ownKey(fn), { description, group: group(), ...opts }));
             reg("alt+1", () => this._panes.left.menu.open(), t("fb.files.key-ws-left", "Workspace of the left pane"));
             reg("alt+2", () => { if (!this._phone.matches) this._panes.right.menu.open(); }, t("fb.files.key-ws-right", "Workspace of the right pane"));
             reg("mod+c", () => this._clip("copy"), t("fb.files.copy", "Copy"), { skipInInput: true });
@@ -677,6 +677,24 @@
             this._paintToolbar();
         }
 
+        /** The keys are page-wide (sac.hotkeys): one pressed in a window or a
+         *  dialog over the view — the Files trash, a clash question, Messages,
+         *  the palette — is not for the panes. Clicks and the view's own quick
+         *  look pass. */
+        _ownKey(fn) {
+            if (typeof fn !== "function") return fn;
+            return (e) => {
+                if (e instanceof KeyboardEvent && this._keyElsewhere(e)) return;
+                return fn(e);
+            };
+        }
+
+        _keyElsewhere(e) {
+            if (document.querySelector("sac-dialog[open]")) return true;   // a question is up
+            return e.composedPath().some((n) => n instanceof Element && n !== this._quickLookWin
+                && (["sac-window", "sac-dialog", "dialog"].includes(n.localName) || n.getAttribute("role") === "dialog"));
+        }
+
         _paintBar() {
             if (!this._panes?.left?.store) return;
             const pane = this._activePane;
@@ -712,7 +730,7 @@
             if (canWrite) items.push({ id: "upload", label: t("fb.files.upload", "Upload"), combo: "alt+u", icon: "upload", action: () => this._browse() });
             items.push({ id: "download", label: t("fb.files.download", "Download"), combo: "alt+s", icon: "download", action: () => this._download(pane) });
             items.push({ id: "filter", label: t("fb.files.filter", "Filter"), combo: "mod+f", icon: "search", action: () => this._openFilter(pane) });
-            this._bar.items = items;
+            this._bar.items = items.map((it) => ({ ...it, action: this._ownKey(it.action), shiftAction: this._ownKey(it.shiftAction) }));
             this._paintToolbar();
         }
 
@@ -966,10 +984,11 @@
             }
             let done = 0;
             const trashed = [];   // trash entry ids, for Undo
+            const api = pane.store.api;   // the workspace they are in — Undo restores there, wherever the pane is by then
             for (const p of paths) {
                 try {
-                    if (permanent) await pane.store.api.destroy(p);
-                    else trashed.push((await pane.store.api.trash(p))?.id);
+                    if (permanent) await api.destroy(p);
+                    else trashed.push((await api.trash(p))?.id);
                     done++;
                 } catch (err) {
                     sac.toast(explain(err, t("fb.files.err-delete-name", "Couldn't delete “{name}”.", { name: baseName(p) })), { kind: "error" });
@@ -988,7 +1007,7 @@
                     kind: "success",
                     action: ids.length ? {
                         label: "Undo", labelKey: "fb.files.undo",
-                        onClick: () => { this._undoTrash(pane, ids); },
+                        onClick: () => { this._undoTrash(api, ids); },
                     } : undefined,
                 });
             }
@@ -997,9 +1016,9 @@
 
         /** Undo a Delete: restore those trash entries to where they were. A
          *  name that is taken again comes back as a copy ("name (2).ext"),
-         *  the trash window's "Restore as a copy". */
-        async _undoTrash(pane, ids) {
-            const api = pane.store.api;
+         *  the trash window's "Restore as a copy". `api` is the workspace
+         *  they were deleted in. */
+        async _undoTrash(api, ids) {
             let back = 0;
             for (const id of ids) {
                 try { await api.restore(id); back++; }
@@ -1009,9 +1028,11 @@
                     catch (err2) { sac.toast(explain(err2, t("fb.files.err-restore", "Couldn't restore that.")), { kind: "error" }); }
                 }
             }
-            await pane.browser.refresh();
-            this._loadUsage(pane);
-            this._refreshTwin(pane);
+            for (const p of Object.values(this._panes)) {
+                if (p.workspace !== api.workspace) continue;
+                await p.browser.refresh();
+                this._loadUsage(p);
+            }
             if (back) sac.toast(count(back, "Restored 1 item.", "Restored {n} items.", "fb.files.restored"), { kind: "success" });
         }
 

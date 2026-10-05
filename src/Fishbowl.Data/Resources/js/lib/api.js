@@ -66,12 +66,14 @@
         return result;
     }
 
-    const crud = (resource) => ({
-        list:   ()        => request(ctx(`/${resource}`)),
-        get:    (id)      => request(ctx(`/${resource}/${encodeURIComponent(id)}`)),
-        create: (body)    => request(ctx(`/${resource}`),                      { method: "POST",   body: JSON.stringify(body) }),
-        update: (id, body) => request(ctx(`/${resource}/${encodeURIComponent(id)}`), { method: "PUT",    body: JSON.stringify(body) }),
-        delete: (id)      => request(ctx(`/${resource}/${encodeURIComponent(id)}`), { method: "DELETE" })
+    // `ws` pins a workspace ("personal" | "space:<slug>"); without it the
+    // active one at request time.
+    const crud = (resource, ws) => ({
+        list:   ()        => request(wsPath(ws, `/${resource}`)),
+        get:    (id)      => request(wsPath(ws, `/${resource}/${encodeURIComponent(id)}`)),
+        create: (body)    => request(wsPath(ws, `/${resource}`),                      { method: "POST",   body: JSON.stringify(body) }),
+        update: (id, body) => request(wsPath(ws, `/${resource}/${encodeURIComponent(id)}`), { method: "PUT",    body: JSON.stringify(body) }),
+        delete: (id)      => request(wsPath(ws, `/${resource}/${encodeURIComponent(id)}`), { method: "DELETE" })
     });
 
     // Notes list accepts an optional filter: { tags?: string[], match?: 'any'|'all' }.
@@ -247,53 +249,64 @@
         delete: rawNotes.delete,
     };
 
+    // Contacts, events, todos and the record trash also come pinned to a
+    // workspace — `fb.api.contacts.in("personal" | "space:<slug>")`, like
+    // files.in(): a view writes where it loaded, even when the hash has
+    // already moved on (a save flushed on leaving).
+
     // Contacts list accepts an optional filter: { includeArchived?: boolean }.
-    function listContacts(opts) {
-        if (!opts || !opts.includeArchived) return request(ctx("/contacts"));
-        return request(`${ctx("/contacts")}?includeArchived=true`);
+    function contactsIn(ws) {
+        const p = (path) => wsPath(ws, path);
+        const c = crud("contacts", ws);
+        c.list = (opts) => request(opts?.includeArchived ? `${p("/contacts")}?includeArchived=true` : p("/contacts"));
+        // Resource-scoped search — contacts_fts backed, different ranker from
+        // the hybrid notes search so it stays on its own path.
+        c.search = (query, { limit = 50 } = {}) => {
+            const qs = new URLSearchParams({ q: query, limit: String(limit) });
+            return request(`${p("/contacts/search")}?${qs.toString()}`);
+        };
+        // The Contacts app's tools (ContactToolsApi): what links here, merging a
+        // duplicate in, finding duplicates, vCard / CSV out and in.
+        c.links      = (id)          => request(p(`/contacts/${encodeURIComponent(id)}/links`));
+        c.merge      = (id, from)    => request(p(`/contacts/${encodeURIComponent(id)}/merge`), { method: "POST", body: JSON.stringify({ from }) });
+        c.duplicates = ()            => request(p("/contacts/duplicates"));
+        c.exportUrl  = (format)      => `${base}${p("/contacts/export")}?format=${encodeURIComponent(format)}`;
+        c.import     = (text, format) => request(`${p("/contacts/import")}?format=${encodeURIComponent(format)}`,
+            { method: "POST", body: text, headers: { "Content-Type": "text/plain; charset=utf-8" } });
+        return c;
     }
-    const contacts = crud("contacts");
-    contacts.list   = listContacts;
-    // Resource-scoped search — contacts_fts backed, different ranker from
-    // the hybrid notes search so it stays on its own path.
-    contacts.search = (query, { limit = 50 } = {}) => {
-        const qs = new URLSearchParams({ q: query, limit: String(limit) });
-        return request(`${ctx("/contacts/search")}?${qs.toString()}`);
-    };
-    // The Contacts app's tools (ContactToolsApi): what links here, merging a
-    // duplicate in, finding duplicates, vCard / CSV out and in.
-    contacts.links      = (id)          => request(ctx(`/contacts/${encodeURIComponent(id)}/links`));
-    contacts.merge      = (id, from)    => request(ctx(`/contacts/${encodeURIComponent(id)}/merge`), { method: "POST", body: JSON.stringify({ from }) });
-    contacts.duplicates = ()            => request(ctx("/contacts/duplicates"));
-    contacts.exportUrl  = (format)      => `${base}${ctx("/contacts/export")}?format=${encodeURIComponent(format)}`;
-    contacts.import     = (text, format) => request(`${ctx("/contacts/import")}?format=${encodeURIComponent(format)}`,
-        { method: "POST", body: text, headers: { "Content-Type": "text/plain; charset=utf-8" } });
+    const contacts = contactsIn(null);
+    contacts.in = contactsIn;
 
     // Events list accepts { from, to } as a chronological range — maps to
     // the server's half-open [from, to) query. Both must be Date-ish
     // (Date or ISO-8601 string).
-    function listEvents(opts) {
-        if (!opts || !opts.from || !opts.to) return request(ctx("/events"));
-        const from = opts.from instanceof Date ? opts.from.toISOString() : opts.from;
-        const to   = opts.to   instanceof Date ? opts.to.toISOString()   : opts.to;
-        const qs = new URLSearchParams({ from, to });
-        return request(`${ctx("/events")}?${qs.toString()}`);
+    function eventsIn(ws) {
+        const e = crud("events", ws);
+        const list = (opts) => {
+            if (!opts || !opts.from || !opts.to) return request(wsPath(ws, "/events"));
+            const from = opts.from instanceof Date ? opts.from.toISOString() : opts.from;
+            const to   = opts.to   instanceof Date ? opts.to.toISOString()   : opts.to;
+            const qs = new URLSearchParams({ from, to });
+            return request(`${wsPath(ws, "/events")}?${qs.toString()}`);
+        };
+        e.list = list;
+        // Common shortcuts for the calendar view. All resolve to the same
+        // /events?from=&to= range query server-side.
+        e.upcoming = (days = 7) => {
+            const from = new Date();
+            const to   = new Date(from.getTime() + days * 86400_000);
+            return list({ from, to });
+        };
+        e.today = () => {
+            const from = new Date(); from.setHours(0, 0, 0, 0);
+            const to   = new Date(from.getTime() + 86400_000);
+            return list({ from, to });
+        };
+        return e;
     }
-    const events = crud("events");
-    events.list = listEvents;
-
-    // Common shortcuts for the calendar view. All resolve to the same
-    // /events?from=&to= range query server-side.
-    events.upcoming = (days = 7) => {
-        const from = new Date();
-        const to   = new Date(from.getTime() + days * 86400_000);
-        return listEvents({ from, to });
-    };
-    events.today = () => {
-        const from = new Date(); from.setHours(0, 0, 0, 0);
-        const to   = new Date(from.getTime() + 86400_000);
-        return listEvents({ from, to });
-    };
+    const events = eventsIn(null);
+    events.in = eventsIn;
 
     // ── Files ──────────────────────────────────────────────────────────────
     //
@@ -391,12 +404,14 @@
     // server's default leaves completed todos out.
     // The workspace's record trash (deleted notes, todos, events, contacts);
     // files keep theirs under fb.api.files (trashList/restore/purge).
-    const trash = {
-        list:    ()   => request(ctx("/trash")),
-        restore: (id) => request(ctx(`/trash/${encodeURIComponent(id)}/restore`), { method: "POST" }),
-        remove:  (id) => request(ctx(`/trash/${encodeURIComponent(id)}`), { method: "DELETE" }),
-        empty:   ()   => request(ctx("/trash"), { method: "DELETE" }),
-    };
+    const trashIn = (ws) => ({
+        list:    ()   => request(wsPath(ws, "/trash")),
+        restore: (id) => request(wsPath(ws, `/trash/${encodeURIComponent(id)}/restore`), { method: "POST" }),
+        remove:  (id) => request(wsPath(ws, `/trash/${encodeURIComponent(id)}`), { method: "DELETE" }),
+        empty:   ()   => request(wsPath(ws, "/trash"), { method: "DELETE" }),
+    });
+    const trash = trashIn(null);
+    trash.in = trashIn;
 
     // A space's own tables (spaces only: the routes live under /spaces/<slug>/).
     const t = (name) => ctx(`/tables/${encodeURIComponent(name)}`);
@@ -464,10 +479,15 @@
         };
     }
 
-    const todos = crud("todos");
-    todos.list = (opts) => request(opts?.includeCompleted
-        ? `${ctx("/todos")}?includeCompleted=true`
-        : ctx("/todos"));
+    function todosIn(ws) {
+        const td = crud("todos", ws);
+        td.list = (opts) => request(opts?.includeCompleted
+            ? `${wsPath(ws, "/todos")}?includeCompleted=true`
+            : wsPath(ws, "/todos"));
+        return td;
+    }
+    const todos = todosIn(null);
+    todos.in = todosIn;
 
     // The block grammar, for tests: list of block bodies in a text.
     const secretBodies = (text) => { const b = []; replaceSecretBlocks(text || "", (x) => { b.push(x); return ""; }); return b; };
@@ -484,6 +504,8 @@
         appMessage,
         contacts,
         events,
+        // The active workspace as the .in() calls name it: "personal" | "space:<slug>".
+        workspace: currentWorkspace,
         tags: {
             list:        ()                  => request(ctx("/tags")),
             upsertColor: (name, color)       => request(ctx(`/tags/${encodeURIComponent(name)}`),

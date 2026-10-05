@@ -23,6 +23,9 @@ class FbContactsView extends HTMLElement {
     }
 
     async connectedCallback() {
+        // The workspace this view shows, pinned: an edit flushed on leaving
+        // still goes there, not to the workspace the hash moved on to.
+        this.api = fb.api.contacts.in(fb.api.workspace());
         this.render();
         this.writable = await fb.access.canWrite();
         this.toggleAttribute("readonly", !this.writable);
@@ -45,10 +48,17 @@ class FbContactsView extends HTMLElement {
     }
 
     async load() {
-        try { this.contacts = await fb.api.contacts.list(); }
+        // A pending edit goes out first, so the list below has it.
+        await this.flush();
+        try { this.contacts = await this.api.list(); }
         catch (err) { console.error("[fb-contacts-view] list failed:", err); this.contacts = []; }
         this.renderList();
-        if (this.selectedId && !this.byId(this.selectedId)) this.open(null);
+        if (!this.selectedId) return;
+        if (!this.byId(this.selectedId)) this.open(null);
+        // The open contact again from what the server has now (a merge moved
+        // data into it): saves send the whole contact, so the editor must
+        // never hold an older copy.
+        else if (!this._saveTimer) this.open(this.selectedId);
     }
 
     byId(id) { return this.contacts.find((c) => c.id === id) || null; }
@@ -212,7 +222,7 @@ class FbContactsView extends HTMLElement {
             const body = kind === "organisation"
                 ? { kind, name: this.t("new-organisation-name", "New organisation") }
                 : { kind: "person", firstName: this.t("new-person-first", "New"), lastName: this.t("new-person-last", "person") };
-            const made = await fb.api.contacts.create(body);
+            const made = await this.api.create(body);
             await this.load();
             this.open(made.id);
         } catch (err) {
@@ -364,7 +374,7 @@ class FbContactsView extends HTMLElement {
     async renderLinks() {
         const id = this.selectedId;
         let data;
-        try { data = await fb.api.contacts.links(id); } catch { return; }
+        try { data = await this.api.links(id); } catch { return; }
         if (id !== this.selectedId) return;
         const box = this.querySelector("#cv-links");
         if (!box || (!data.people?.length && !data.links?.length)) { if (box) box.replaceChildren(); return; }
@@ -400,19 +410,29 @@ class FbContactsView extends HTMLElement {
         this._saveTimer = setTimeout(() => this.save(), 600);
     }
 
+    /** Saves a pending edit now; resolves once every save is on the server. */
     flush() {
-        if (this._saveTimer) { clearTimeout(this._saveTimer); this._saveTimer = null; this.save(); }
+        if (this._saveTimer) { clearTimeout(this._saveTimer); this._saveTimer = null; return this.save(); }
+        return this._saving || Promise.resolve();
     }
 
-    async save() {
+    /** The contact as it is now, after the saves ahead of it — one at a time, in order. */
+    save() {
         this._saveTimer = null;
         const c = this.editing;
-        if (!c || !this.writable) return;
+        if (!c || !this.writable) return Promise.resolve();
         // The lists are the truth; `email`/`phone` are derived on the server.
         const body = { ...c, email: null, phone: null };
+        const p = (this._saving || Promise.resolve()).then(() => this._put(c, body));
+        this._saving = p;
+        p.then(() => { if (this._saving === p) this._saving = null; });
+        return p;
+    }
+
+    async _put(c, body) {
         try {
-            await fb.api.contacts.update(c.id, body);
-            const fresh = await fb.api.contacts.get(c.id);
+            await this.api.update(c.id, body);
+            const fresh = await this.api.get(c.id);
             const i = this.contacts.findIndex((x) => x.id === c.id);
             if (i >= 0) this.contacts[i] = fresh;
             if (this.selectedId === c.id) {
@@ -428,8 +448,11 @@ class FbContactsView extends HTMLElement {
     async remove() {
         const c = this.byId(this.selectedId);
         if (!c) return;
+        // A pending edit would PUT the contact after it is gone.
+        clearTimeout(this._saveTimer);
+        this._saveTimer = null;
         try {
-            await fb.api.contacts.delete(c.id);
+            await this.api.delete(c.id);
             this.selectedId = null;
             this.editing = null;
             await this.load();
@@ -459,7 +482,7 @@ class FbContactsView extends HTMLElement {
 
     export(format) {
         const a = document.createElement("a");
-        a.href = fb.api.contacts.exportUrl(format);
+        a.href = this.api.exportUrl(format);
         a.download = `contacts.${format}`;
         document.body.appendChild(a);
         a.click();
@@ -476,7 +499,7 @@ class FbContactsView extends HTMLElement {
             try {
                 const text = await file.text();
                 const format = /\.csv$/i.test(file.name) ? "csv" : "vcf";
-                const r = await fb.api.contacts.import(text, format);
+                const r = await this.api.import(text, format);
                 sac.toast?.(this.t("imported", "Imported {n} contacts.", { n: r.created }));
                 await this.load();
             } catch (err) {
@@ -488,7 +511,7 @@ class FbContactsView extends HTMLElement {
 
     async duplicates() {
         let pairs = [];
-        try { pairs = (await fb.api.contacts.duplicates()).pairs || []; }
+        try { pairs = (await this.api.duplicates()).pairs || []; }
         catch (err) { sac.toast?.(fb.errors.text(err, this.t("duplicates-failed", "Couldn't look for duplicates.")), { kind: "error" }); return; }
         const dlg = document.createElement("sac-dialog");
         dlg.id = "cv-duplicates-dialog";
@@ -509,10 +532,14 @@ class FbContactsView extends HTMLElement {
             merge.title = this.t("merge-hint", "Keep {a}, move {b}'s data and links into it", { a: p.a.name, b: p.b.name });
             merge.addEventListener("click", async () => {
                 try {
-                    await fb.api.contacts.merge(p.a.id, p.b.id);
+                    // What was just typed goes in before the merge — a save
+                    // after it would put the pre-merge fields back.
+                    await this.flush();
+                    await this.api.merge(p.a.id, p.b.id);
                     row.remove();
-                    await this.load();
-                    if (this.selectedId === p.b.id) this.open(p.a.id);
+                    const wasB = this.selectedId === p.b.id;
+                    await this.load();   // reopens the kept one fresh when it is open
+                    if (wasB) this.open(p.a.id);
                 } catch (err) {
                     sac.toast?.(fb.errors.text(err, this.t("merge-failed", "Couldn't merge them.")), { kind: "error" });
                 }
@@ -521,14 +548,10 @@ class FbContactsView extends HTMLElement {
             list.appendChild(row);
         }
         dlg.appendChild(list);
-        const close = document.createElement("button");
-        close.type = "button";
-        close.slot = "footer";
-        close.className = "btn";
-        close.textContent = fb.t("fb.common.close", "Close");
-        close.addEventListener("click", () => dlg.close?.());
-        dlg.appendChild(close);
-        dlg.addEventListener("sac:close", () => dlg.remove());
+        // The dialog's own button row (sac-dialog has no footer slot); any
+        // way out — the button, Escape, the backdrop — ends in sac:action.
+        dlg.buttons = [{ action: "close", label: fb.t("fb.common.close", "Close"), kind: "default" }];
+        dlg.addEventListener("sac:action", () => setTimeout(() => dlg.remove(), 120));
         document.body.appendChild(dlg);
         setTimeout(() => dlg.open?.(), 0);
     }

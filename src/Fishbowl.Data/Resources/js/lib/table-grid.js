@@ -86,12 +86,19 @@
                 case "link": {
                     const opts = await linkOptions(c.link);
                     if (c.multiple) {
-                        // Ids lower-cased are tag-safe; the map turns them back.
+                        // Ids lower-cased are tag-safe; the map turns them back —
+                        // also for a target beyond the loaded options, whose id
+                        // the map learns as the row comes in (the server's ids
+                        // are case-sensitive).
                         const byTag = new Map(opts.map((o) => [o.value.toLowerCase(), o.value]));
                         map.push({
                             col: { ...base, type: "tags", options: opts.map((o) => ({ value: o.value.toLowerCase(), label: o.label })),
                                    allowCreate: false, sortable: false, filterable: false },
-                            in: (v) => (v || []).map((id) => id.toLowerCase()),
+                            in: (v) => (v || []).map((id) => {
+                                const tag = id.toLowerCase();
+                                if (!byTag.has(tag)) byTag.set(tag, id);
+                                return tag;
+                            }),
                             out: (v) => (v || []).map((x) => byTag.get(x) || x),
                         });
                     } else {
@@ -145,7 +152,8 @@
                     if (d.max != null && d.max !== "") cond.$lte = conv(d.max, true);
                     if (Object.keys(cond).length) all.push({ [field]: cond });
                 } else if (d.op === "any" && d.values?.length) all.push({ [field]: { $in: d.values } });
-                else if (d.op === "is") all.push({ [field]: d.value ? 1 : 0 });
+                // An empty yes/no shows unchecked, so "No" takes it too.
+                else if (d.op === "is") all.push(d.value ? { [field]: 1 } : { $or: [{ [field]: 0 }, { [field]: { $isNull: true } }] });
             }
             return all.length === 0 ? undefined : all.length === 1 ? all[0] : { $and: all };
         }
@@ -158,20 +166,30 @@
                      message: fb.errors.text(err, fb.t("fb.tables.save-failed", "Couldn't save the row.")) };
         };
 
-        let lastWhere = null;
-        let total = null;
+        // The row count for one filter: each load counts for its own filter,
+        // and only the newest filter's count is kept (a failed count is
+        // simply asked again by the next load).
+        let latest = null;    // the newest load's filter key
+        let counted = null;   // { key, total }
         const source = {
             key: "id",
             pageSize: 100,
             async load({ offset, limit, sort, filter }) {
                 const w = where(filter);
                 const key = JSON.stringify(w || null);
-                if (key !== lastWhere) { lastWhere = key; total = await fb.api.tables.count(def.name, w).then((r) => r.count); }
-                const rows = await fb.api.tables.query(def.name, {
-                    where: w,
-                    orderBy: (sort || []).map((s) => ({ field: s.field, direction: s.dir })),
-                    limit, offset,
-                });
+                latest = key;
+                const count = counted?.key === key
+                    ? Promise.resolve(counted.total)
+                    : fb.api.tables.count(def.name, w).then((r) => r.count);
+                const [rows, total] = await Promise.all([
+                    fb.api.tables.query(def.name, {
+                        where: w,
+                        orderBy: (sort || []).map((s) => ({ field: s.field, direction: s.dir })),
+                        limit, offset,
+                    }),
+                    count,
+                ]);
+                if (key === latest && counted?.key !== key) counted = { key, total };
                 return { rows: rows.map(fromServer), total };
             },
             async save(changes) {
@@ -183,7 +201,7 @@
                             // A new row's typed values are in c.fields; c.row is the blank it started from.
                             const created = await fb.api.tables.insert(def.name, toServer({ ...c.row, ...c.fields }));
                             Object.assign(c.row, fromServer(created));
-                            total = total == null ? null : total + 1;
+                            if (counted) counted.total += 1;
                         } else if (c.op === "update") {
                             const updated = await fb.api.tables.update(def.name, c.id, toServer(c.fields));
                             Object.assign(c.row, fromServer(updated));
@@ -201,7 +219,7 @@
                 const removed = [];
                 const errors = [];
                 for (const id of ids) {
-                    try { await fb.api.tables.remove(def.name, id); removed.push(id); total = total == null ? null : total - 1; }
+                    try { await fb.api.tables.remove(def.name, id); removed.push(id); if (counted) counted.total -= 1; }
                     catch (err) { errors.push(refusal(id, err)); }
                 }
                 return { removed, errors };

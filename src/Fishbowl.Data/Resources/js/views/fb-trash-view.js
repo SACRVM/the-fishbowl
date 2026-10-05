@@ -35,13 +35,23 @@ class FbTrashView extends HTMLElement {
     }
 
     async refresh() {
+        // The list and its buttons belong to one workspace: the one it was
+        // read from, whatever is active when a button is pressed. The newest
+        // read wins (a scope switch while one is under way).
+        const seq = this._seq = (this._seq || 0) + 1;
         const scope = sac.scope.get();
-        const [records, files, spaces] = await Promise.all([
-            fb.api.trash.list().catch(() => []),
-            fb.api.files.trashList().catch(() => []),
+        const ws = fb.api.workspace();
+        const records = fb.api.trash.in(ws);
+        const files = fb.api.files.in(ws);
+        const [recordList, fileList, spaces] = await Promise.all([
+            records.list().catch(() => []),
+            files.trashList().catch(() => []),
             scope.type === "scoped" ? fb.api.spaces.list().catch(() => []) : Promise.resolve([]),
         ]);
         if (!this.isConnected) return;   // left meanwhile: the toolbar belongs to another view now
+        if (seq !== this._seq) return;
+        this.recordsApi = records;
+        this.filesApi = files;
         if (scope.type === "scoped") {
             const role = spaces.find((s) => s.slug === scope.slug)?.role;
             this.writable = role !== "reader";
@@ -49,8 +59,8 @@ class FbTrashView extends HTMLElement {
             this.writable = true;
         }
         this.items = [
-            ...(records || []).map((r) => ({ ...r, source: "record" })),
-            ...(files || []).map((f) => ({
+            ...(recordList || []).map((r) => ({ ...r, source: "record" })),
+            ...(fileList || []).map((f) => ({
                 id: f.id, source: "file", kind: f.kind === "folder" ? "folder" : "file",
                 title: f.originalPath, deletedAt: f.deletedAt, deletedBy: null,
             })),
@@ -119,10 +129,10 @@ class FbTrashView extends HTMLElement {
     async restore(item) {
         try {
             if (item.source === "record") {
-                await fb.api.trash.restore(item.id);
+                await this.recordsApi.restore(item.id);
             } else {
                 try {
-                    await fb.api.files.restore(item.id);
+                    await this.filesApi.restore(item.id);
                 } catch (err) {
                     if (err?.status !== 409) throw err;
                     const answer = await sac.dialog.confirm({
@@ -134,7 +144,7 @@ class FbTrashView extends HTMLElement {
                         ],
                     });
                     if (answer !== "rename") return;
-                    await fb.api.files.restore(item.id, "rename");
+                    await this.filesApi.restore(item.id, "rename");
                 }
             }
             sac.toast(fb.t("fb.trash.restored", "“{name}” is back.", { name: item.title || "" }), { kind: "success" });
@@ -155,8 +165,8 @@ class FbTrashView extends HTMLElement {
         });
         if (answer !== "delete") return;
         try {
-            if (item.source === "record") await fb.api.trash.remove(item.id);
-            else await fb.api.files.purge(item.id);
+            if (item.source === "record") await this.recordsApi.remove(item.id);
+            else await this.filesApi.purge(item.id);
         } catch (err) {
             sac.toast(fb.errors.text(err, fb.t("fb.trash.delete-failed", "Couldn't delete that.")), { kind: "error" });
         }
@@ -174,7 +184,7 @@ class FbTrashView extends HTMLElement {
         });
         if (answer !== "empty") return;
         try {
-            await Promise.all([fb.api.trash.empty(), fb.api.files.emptyTrash()]);
+            await Promise.all([this.recordsApi.empty(), this.filesApi.emptyTrash()]);
         } catch (err) {
             sac.toast(fb.errors.text(err, fb.t("fb.trash.delete-failed", "Couldn't delete that.")), { kind: "error" });
         }

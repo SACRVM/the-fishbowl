@@ -26,6 +26,9 @@ class FbTodosView extends HTMLElement {
     }
 
     async connectedCallback() {
+        // The workspace this view shows, pinned: a save flushed on leaving
+        // still goes there, not to the workspace the hash moved on to.
+        this.api = fb.api.todos.in(fb.api.workspace());
         this.render();
         // A space Reader gets no write actions (the server would refuse them).
         this.writable = await fb.access.canWrite();
@@ -61,7 +64,7 @@ class FbTodosView extends HTMLElement {
     async loadTodos() {
         try {
             // Completed ones too: the list filters them itself ("Show completed").
-            this.todos = await fb.api.todos.list({ includeCompleted: true });
+            this.todos = await this.api.list({ includeCompleted: true });
             this.renderList();
         } catch (err) {
             console.error("[fb-todos-view] list failed:", err);
@@ -584,7 +587,7 @@ class FbTodosView extends HTMLElement {
             : todo.position;
         this.renderList();
         try {
-            await fb.api.todos.update(todo.id, todo);
+            await this.api.update(todo.id, todo);
         } catch (err) {
             console.error("[fb-todos-view] reorder failed:", err);
             todo.position = before;
@@ -756,7 +759,7 @@ class FbTodosView extends HTMLElement {
     }
 
     async saveSelected() {
-        if (!this.selectedId) return;
+        if (!this.selectedId || this.writable === false) return;
         clearTimeout(this._saveDebounce);
         this._saveDebounce = null;
         const todo = this.todos.find(t => t.id === this.selectedId);
@@ -776,7 +779,7 @@ class FbTodosView extends HTMLElement {
         todo.dueAt       = newDue;
 
         try {
-            await fb.api.todos.update(todo.id, todo);
+            await this.api.update(todo.id, todo);
             todo.updatedAt = new Date().toISOString();
             this.querySelector("#timestamp").textContent = this.formatFullTimestamp(todo.updatedAt);
             this.querySelector("#due-clear").hidden = !todo.dueAt;
@@ -829,7 +832,7 @@ class FbTodosView extends HTMLElement {
         // first, then let it go (_leave).
         if (todo.completedAt && this.hideCompleted) this._leave(id);
         try {
-            await fb.api.todos.update(todo.id, todo);
+            await this.api.update(todo.id, todo);
             if (id === this.selectedId) {
                 this.querySelector("#completed-pill").hidden = !todo.completedAt;
                 this.updateToolbar(todo);
@@ -888,7 +891,7 @@ class FbTodosView extends HTMLElement {
             this._saveDebounce = null;
         }
         try {
-            await fb.api.todos.delete(id);
+            await this.api.delete(id);
             this.todos = this.todos.filter(t => t.id !== id);
             if (id === this.selectedId) this.clearSelection();
             this.renderList();
@@ -900,7 +903,7 @@ class FbTodosView extends HTMLElement {
 
     async createTodo() {
         try {
-            const created = await fb.api.todos.create({ title: "" });
+            const created = await this.api.create({ title: "" });
             this.todos.push(created);
             await this.select(created.id);
             this.querySelector("#title").focus();

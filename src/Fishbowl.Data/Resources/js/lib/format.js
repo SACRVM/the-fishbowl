@@ -153,6 +153,10 @@
         const changed = () => dateEl.dispatchEvent(new Event("change", { bubbles: true }));
         dateEl.addEventListener("sac:change", changed);
         timeEl.addEventListener("sac:change", changed);
+        // One field to the views: disabling the date field disables its time too.
+        const follow = () => timeEl.toggleAttribute("disabled", dateEl.hasAttribute("disabled"));
+        new MutationObserver(follow).observe(dateEl, { attributes: true, attributeFilter: ["disabled"] });
+        follow();
         return dateEl;
     }
 
