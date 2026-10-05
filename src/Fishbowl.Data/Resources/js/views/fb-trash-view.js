@@ -85,10 +85,11 @@ class FbTrashView extends HTMLElement {
     }
 
     row(item) {
-        const icons = { note: "note", todo: "check", event: "calendar", contact: "user", file: "document", folder: "folder" };
+        const icons = { note: "note", todo: "check", event: "calendar", contact: "user", row: "grid", table: "grid", file: "document", folder: "folder" };
         const kinds = {
             note: fb.t("fb.trash.kind-note", "Note"), todo: fb.t("fb.trash.kind-todo", "Todo"),
             event: fb.t("fb.trash.kind-event", "Event"), contact: fb.t("fb.trash.kind-contact", "Contact"),
+            row: fb.t("fb.trash.kind-row", "Row"), table: fb.t("fb.trash.kind-table", "Table"),
             file: fb.t("fb.trash.kind-file", "File"), folder: fb.t("fb.trash.kind-folder", "Folder"),
         };
         const row = document.createElement("div");
@@ -107,7 +108,9 @@ class FbTrashView extends HTMLElement {
         row.querySelector(".when").textContent = item.deletedBy
             ? fb.t("fb.trash.deleted-by", "deleted {when} by {who}", { when, who: item.deletedBy })
             : fb.t("fb.trash.deleted", "deleted {when}", { when });
-        if (this.writable) {
+        // canChange: the server says this caller may restore / delete it
+        // (a dropped table needs a Designer, another's own-rows row too).
+        if (this.writable && item.canChange !== false) {
             row.append(
                 this.button("undo", fb.t("fb.trash.restore", "Restore"), "restore-btn", () => this.restore(item)),
                 this.button("trash", fb.t("fb.trash.delete-forever", "Delete for good"), "delete-btn danger", () => this.remove(item)));

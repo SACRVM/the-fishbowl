@@ -14,7 +14,17 @@ public interface IUserAdminRepository
     // Active admins only — the ones who can act.
     Task<int> CountActiveAdminsAsync(CancellationToken ct = default);
 
+    // False when nothing changed — also when it would leave no active admin
+    // (the count is part of the write). Leaving active deletes the account's
+    // open OAuth codes.
     Task<bool> SetStateAsync(string userId, string state, CancellationToken ct = default);
+
+    // An approved, active local-password account in one transaction (users
+    // row + local mapping, password to be changed at the first sign-in).
+    // False — and nothing written — when the id or the username is taken.
+    Task<bool> CreateLocalAccountAsync(
+        string userId, string? name, string username, string passwordHash, string passwordSalt,
+        string approverId, long? quotaBytes, CancellationToken ct = default);
 
     // pending → active, recording who approved and the quota (null = default).
     Task<bool> ApproveAsync(string userId, string approverId, long? quotaBytes, CancellationToken ct = default);
@@ -38,9 +48,11 @@ public interface IUserAdminRepository
     // Discord link codes, space memberships, messages addressed to it, its
     // per-user config latches, and the users row — and leaves a tombstone in
     // deleted_users. The folder is the caller's (archive, then delete).
+    // Refuses (false) the last active admin or a sole owner of a space —
+    // checked inside the transaction.
     Task<bool> DeleteUserAsync(string userId, CancellationToken ct = default);
 
-    // True for an id whose account was deleted.
+    // True for an id whose account was deleted, in any spelling.
     Task<bool> IsDeletedAsync(string userId, CancellationToken ct = default);
 
     Task RecordAdminActionAsync(string actorId, string action, string? targetType, string? targetId, CancellationToken ct = default);

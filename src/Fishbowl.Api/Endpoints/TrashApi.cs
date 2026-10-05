@@ -34,10 +34,15 @@ public static class TrashApi
     private static void Map(RouteGroupBuilder group, bool space)
     {
         group.MapGet("/", async (HttpContext http, ClaimsPrincipal user, ISpaceRepository spaces, ITrashRepository trash,
-            ISystemRepository system, CancellationToken ct) =>
+            ISystemRepository system, TableRepository tables, CancellationToken ct) =>
         {
-            var (ctx, _, error) = await ResolveAsync(http, user, spaces, space, write: false, ct);
+            var (ctx, actor, error) = await ResolveAsync(http, user, spaces, space, write: false, ct);
             if (error is not null) return error;
+            // canChange: false on a table item the caller's role can't restore
+            // or delete, so the Trash app offers no button that would fail.
+            var refused = actor is null
+                ? new Dictionary<string, TableException>()
+                : await tables.TrashRefusalsAsync(ctx!.Value, actor, null, ct);
             var names = new Dictionary<string, string?>();
             var items = new List<object>();
             foreach (var t in await trash.ListAsync(ctx!.Value, ct))
@@ -47,7 +52,7 @@ public static class TrashApi
                 {
                     if (!names.TryGetValue(id, out by)) names[id] = by = (await system.GetUserAsync(id, ct))?.Name;
                 }
-                items.Add(new { id = t.Id, kind = t.Kind, itemId = t.ItemId, title = t.Title, deletedAt = t.DeletedAt, deletedBy = by });
+                items.Add(new { id = t.Id, kind = t.Kind, itemId = t.ItemId, title = t.Title, deletedAt = t.DeletedAt, deletedBy = by, canChange = !refused.ContainsKey(t.Id) });
             }
             return Results.Ok(items);
         })

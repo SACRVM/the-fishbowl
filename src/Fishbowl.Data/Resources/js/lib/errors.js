@@ -60,6 +60,11 @@
         "rate_limited": "Too many messages from this app — try again later.",
         "invalid_mute": "That can't be muted.",
         "invalid_app_error": "An app error needs app (the folder), kind (load, runtime, call, reported) and message.",
+        "app_folder_taken": "Another app on this desktop keeps its data in {folder}.",
+        // Calendar and contacts
+        "range_invalid": "`to` must be after `from`, and both must be real dates.",
+        "range_too_long": "A range may span at most {maxDays} days.",
+        "merge_too_large": "Together the two contacts are more than one contact holds ({field}) — trim the duplicate first.",
         // System settings and setup
         "unknown_config_key": "That setting doesn't exist.",
         "value_required": "Enter a value — or remove the setting to use the default.",
@@ -78,6 +83,7 @@
         "discord_token_dots": "A Discord bot token contains two '.' separators.",
         "tos_required": "You have to accept the Let's Encrypt subscriber agreement.",
         "setup_no_sign_in": "Pick at least one sign-in method: Google or a local admin account.",
+        "acme_urls_set": "This Fishbowl listens where its urls setting says (host.config.json) — HTTPS is the reverse proxy's job there, so Let's Encrypt settings would be ignored. Remove urls first to use them.",
         // API keys and spaces
         "scopes_required": "Pick at least one permission.",
         "unknown_scopes": "Unknown permission requested.",
@@ -129,6 +135,7 @@
         "is_folder": "That's a folder.",
         "not_a_folder": "That isn't a folder.",
         "into_own_subtree": "A folder can't go into itself.",
+        "replaces_own_source": "That would replace the folder it comes from.",
         "link_not_followed": "Links aren't followed.",
         "too_large": "That's too large.",
         "too_many_items": "Too many items at once.",

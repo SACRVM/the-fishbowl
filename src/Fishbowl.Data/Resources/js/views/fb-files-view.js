@@ -1070,7 +1070,7 @@
                     for (const r of res.results || []) {
                         if (!r.error) { moved++; continue; }
                         if (r.error === "name_exists") clashes.push(r.from);
-                        else sac.toast(r.message || (op === "move"
+                        else sac.toast(explain({ body: r }, op === "move"
                             ? t("fb.files.err-move", "Couldn't move “{name}”.", { name: baseName(r.from) })
                             : t("fb.files.err-copy", "Couldn't copy “{name}”.", { name: baseName(r.from) })), { kind: "error" });
                     }

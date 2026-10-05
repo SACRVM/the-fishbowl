@@ -47,9 +47,11 @@ public class SystemRepository : ISystemRepository
     public async Task<string?> GetProviderIdForUserAsync(string userId, string provider, CancellationToken ct = default)
     {
         using var db = _dbFactory.CreateSystemConnection();
-        return await db.QuerySingleOrDefaultAsync<string>(
+        // Newest first: /link now replaces an earlier mapping, but accounts
+        // linked twice before that must not make this throw.
+        return await db.QueryFirstOrDefaultAsync<string>(
             new CommandDefinition(
-                "SELECT provider_id FROM user_mappings WHERE user_id = @userId AND provider = @provider",
+                "SELECT provider_id FROM user_mappings WHERE user_id = @userId AND provider = @provider ORDER BY rowid DESC",
                 new { userId, provider }, cancellationToken: ct));
     }
 

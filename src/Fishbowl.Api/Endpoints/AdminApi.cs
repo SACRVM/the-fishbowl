@@ -11,7 +11,6 @@ using Fishbowl.Core.Repositories;
 using Fishbowl.Core.Util;
 using Fishbowl.Data;
 using Fishbowl.Data.Files;
-using Fishbowl.Data.Repositories;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
@@ -84,7 +83,6 @@ public static class AdminApi
             DatabaseFactory dbFactory,
             IPasswordHasher hasher,
             IUserAdminRepository admin,
-            UserAdminRepository accounts,
             IMessageRepository messages,
             CancellationToken ct) =>
         {
@@ -164,7 +162,7 @@ public static class AdminApi
             // restores it to active), and the password the admin typed is
             // only a way in: it must be changed at the first sign-in.
             var hash = hasher.Hash(request.Password);
-            if (!await accounts.CreateLocalAccountAsync(folder, request.DisplayName ?? username, username,
+            if (!await admin.CreateLocalAccountAsync(folder, request.DisplayName ?? username, username,
                     hash.Hash, hash.Salt, ActorId(user), quotaBytes: null, ct))
             {
                 return await system.GetUserByLocalUsernameAsync(username, ct) is not null
@@ -450,7 +448,6 @@ public static class AdminApi
             ClaimsPrincipal caller,
             ISystemRepository system,
             IUserAdminRepository admin,
-            UserAdminRepository accounts,
             IPasswordHasher hasher,
             CancellationToken ct) =>
         {
@@ -478,7 +475,7 @@ public static class AdminApi
             var userId = Guid.NewGuid().ToString();
             var tempPassword = GenerateTempPassword();
             var hash = hasher.Hash(tempPassword);
-            if (!await accounts.CreateLocalAccountAsync(userId, displayName, username, hash.Hash, hash.Salt,
+            if (!await admin.CreateLocalAccountAsync(userId, displayName, username, hash.Hash, hash.Salt,
                     ActorId(caller), body.QuotaBytes, ct))
                 return ApiErrors.Conflict("username_taken", "Username is already taken.");
             await admin.RecordAdminActionAsync(ActorId(caller), AdminActions.CreateLocal, "user", userId, ct);

@@ -79,12 +79,12 @@
     // Notes list accepts an optional filter: { tags?: string[], match?: 'any'|'all' }.
     // Repeated `tag` query params follow the server's IReadOnlyCollection<string>
     // binding; absent params leave the server defaults (no filter, match=any).
-    function listNotes(opts) {
-        if (!opts || !opts.tags || opts.tags.length === 0) return request(ctx("/notes"));
+    function listNotes(opts, ws) {
+        if (!opts || !opts.tags || opts.tags.length === 0) return request(wsPath(ws, "/notes"));
         const qs = new URLSearchParams();
         for (const t of opts.tags) qs.append("tag", t);
         if (opts.match === "all") qs.set("match", "all");
-        return request(`${ctx("/notes")}?${qs.toString()}`);
+        return request(`${wsPath(ws, "/notes")}?${qs.toString()}`);
     }
 
     // ── Secret block transforms (vault v2) ─────────────────────────────────
@@ -171,7 +171,9 @@
 
     const blockAad = (noteId, index) => `${noteId}|${index}`;
 
-    async function transformNoteOutbound(note) {
+    // `ws` is the workspace the note is saved to (else the active one): a
+    // space holds no secrets.
+    async function transformNoteOutbound(note, ws) {
         const content = note?.content || "";
         const bodies = [];
         // The whole block is encrypted, not only the lines inside: a label
@@ -192,7 +194,7 @@
             }
             return note;
         }
-        if (window.sac?.scope?.get?.().type === "scoped")
+        if (ws ? ws.startsWith("space:") : window.sac?.scope?.get?.().type === "scoped")
             throw new SecretSaveError("Secrets are personal for now — remove the secret block to save this note in a space.");
         if (!note?.id) throw new SecretSaveError("Save the note once before adding a secret to it.");
         if (!window.fb?.vault) throw new SecretSaveError("Secrets are unavailable in this browser.");
@@ -274,21 +276,24 @@
         return restore((idx) => decrypted[idx]);
     }
 
-    const rawNotes = crud("notes");
-    rawNotes.list = listNotes;
-
-    const notes = {
-        list:   async (opts, { prompt = true } = {}) => {
-            const arr = await rawNotes.list(opts);
-            if (!Array.isArray(arr)) return arr;
-            return Promise.all(arr.map(n => transformNoteInbound(n, { prompt })));
-        },
-        // `prompt: false` — decrypt only if the vault is already unlocked.
-        get:    async (id, { prompt = true } = {}) => transformNoteInbound(await rawNotes.get(id), { prompt }),
-        create: async (body)     => transformNoteInbound(await rawNotes.create(await transformNoteOutbound(body))),
-        update: async (id, body) => rawNotes.update(id, await transformNoteOutbound(body)),
-        delete: rawNotes.delete,
-    };
+    // Notes come pinned to a workspace too (`fb.api.notes.in(ws)`, like the
+    // records below): the notes view writes where it loaded.
+    function notesIn(ws) {
+        const raw = crud("notes", ws);
+        return {
+            list:   async (opts, { prompt = true } = {}) => {
+                const arr = await listNotes(opts, ws);
+                if (!Array.isArray(arr)) return arr;
+                return Promise.all(arr.map(n => transformNoteInbound(n, { prompt })));
+            },
+            // `prompt: false` — decrypt only if the vault is already unlocked.
+            get:    async (id, { prompt = true } = {}) => transformNoteInbound(await raw.get(id), { prompt }),
+            create: async (body)     => transformNoteInbound(await raw.create(await transformNoteOutbound(body, ws))),
+            update: async (id, body) => raw.update(id, await transformNoteOutbound(body, ws)),
+            delete: raw.delete,
+        };
+    }
+    const notes = { ...notesIn(), in: (ws) => notesIn(ws) };
 
     // Contacts, events, todos and the record trash also come pinned to a
     // workspace — `fb.api.contacts.in("personal" | "space:<slug>")`, like
@@ -428,6 +433,15 @@
             purge:   (id) => request(`${b()}/trash/${encodeURIComponent(id)}`, { method: "DELETE" }),
             emptyTrash: () => request(`${b()}/trash`, { method: "DELETE" }),
             usage:   () => request(`${b()}/usage`),
+            // The change feed (the journal): no cursor → { changes: [], cursor: "<epoch>:<head>" }; a
+            // cursor → what happened after it, oldest first; 410 cursor_expired when it can't be served.
+            changes: (cursor, limit) => {
+                const qs = new URLSearchParams();
+                if (cursor) qs.set("cursor", cursor);
+                if (limit) qs.set("limit", String(limit));
+                const s = qs.toString();
+                return request(`${b()}/changes${s ? `?${s}` : ""}`);
+            },
         };
     }
 

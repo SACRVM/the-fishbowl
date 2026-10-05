@@ -190,10 +190,7 @@ builder.Services.AddScoped<MessageRepository>();
 builder.Services.AddSingleton<Fishbowl.Api.Accounts.SystemMessageNotifier>();
 builder.Services.AddScoped<IMessageRepository>(sp => new Fishbowl.Api.Accounts.NotifyingMessageRepository(
     sp.GetRequiredService<MessageRepository>(), sp.GetRequiredService<Fishbowl.Api.Accounts.SystemMessageNotifier>()));
-// The concrete type too: creating a local account (admin "Add local user",
-// cold import) is one transaction that only UserAdminRepository offers.
-builder.Services.AddScoped<UserAdminRepository>();
-builder.Services.AddScoped<IUserAdminRepository>(sp => sp.GetRequiredService<UserAdminRepository>());
+builder.Services.AddScoped<IUserAdminRepository, UserAdminRepository>();
 builder.Services.AddScoped<IDesktopRepository, DesktopRepository>();
 builder.Services.AddScoped<IAppErrorRepository, AppErrorRepository>();
 builder.Services.AddScoped<IOAuthRepository, OAuthRepository>();

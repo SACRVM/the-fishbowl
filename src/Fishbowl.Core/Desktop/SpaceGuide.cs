@@ -114,7 +114,7 @@ public static partial class SpaceGuide
             - A `throw new Error('…')` in a before-function refuses the write; the writer sees your message.
             - After-functions run once the write is saved; their errors go to the error store (kind `trigger`), the write stands.
             - `ctx`: `get(table, id)`, `query(table, { where, orderBy, limit })`, `count(table, where?)`, `insert(table, values)`, `update(table, id, values)`, `remove(table, id)` — with the writer's role, and through triggers again (at most 3 deep); `ctx.user` `{ id, canWrite, canDesign }`, `ctx.table`, `ctx.log(message)` into the error store.
-            - Synchronous, plain JavaScript: no `fetch`, no files, no modules. Each run gets about 1 s, 50 000 statements and 32 MB.
+            - Synchronous, plain JavaScript: no `fetch`, no files, no modules, no `eval`/`Function()`, no typed arrays. Each run gets about 1 s, 50 000 statements and 32 MB; an array holds at most 100 000 items, one string built in one call at most 8 million characters, and a value handed back at most 64 levels deep.
 
             """);
 

@@ -125,7 +125,7 @@ public class DatabaseFactory
         var state = system.ExecuteScalar<string?>(
             "SELECT state FROM users WHERE id = @userId", new { userId });
         if (state is null && system.ExecuteScalar<long>(
-                "SELECT COUNT(*) FROM deleted_users WHERE id = @userId", new { userId }) > 0)
+                "SELECT COUNT(*) FROM deleted_users WHERE id = @userId COLLATE NOCASE", new { userId }) > 0)
             state = "deleted";
         if (state is not null && state != Fishbowl.Core.Auth.UserStates.Active)
             throw new Fishbowl.Core.Auth.InactiveAccountException(userId, state);

@@ -57,6 +57,9 @@ class FbNotesView extends HTMLElement {
     }
 
     async connectedCallback() {
+        // The workspace this view loaded: a save flushed on leaving still
+        // goes there, even when the hash has already moved on.
+        this.api = fb.api.notes.in(fb.api.workspace());
         this.render();
         window.addEventListener("fb-tags-invalidated", this._onTagsInvalidated);
         window.addEventListener("fb:vault-changed", this._onVaultChanged);
@@ -158,7 +161,7 @@ class FbNotesView extends HTMLElement {
             const opts = this.tagFilter.tags.length > 0
                 ? { tags: this.tagFilter.tags, match: "all" }
                 : undefined;
-            this.notes = await fb.api.notes.list(opts, { prompt });
+            this.notes = await this.api.list(opts, { prompt });
             this.renderList();
         } catch (err) {
             console.error("[fb-notes-view] list failed:", err);
@@ -870,7 +873,7 @@ class FbNotesView extends HTMLElement {
                 // change — its text stays the editor's.
                 const open = this._openNote;
                 if (open) {
-                    const refreshed = await fb.api.notes.get(open.id, { prompt: false }).catch(() => null);
+                    const refreshed = await this.api.get(open.id, { prompt: false }).catch(() => null);
                     if (refreshed && this._openNote === open) {
                         open.tags = refreshed.tags || [];
                         this.querySelector("#tag-input").value = open.tags;
@@ -1048,7 +1051,7 @@ class FbNotesView extends HTMLElement {
      *  never opened or written as it is. */
     async _decryptInCache(note) {
         try {
-            return this._swapIn(await fb.api.notes.get(note.id));
+            return this._swapIn(await this.api.get(note.id));
         } catch (err) {
             console.warn("[fb-notes-view] loading the note failed:", err);
             return note._hit ? null : note;
@@ -1074,7 +1077,7 @@ class FbNotesView extends HTMLElement {
         const cached = this.notes.find(n => n.id === id);
         if (cached && !cached._hit) return cached;
         try {
-            return this._swapIn(await fb.api.notes.get(id, { prompt: false }));
+            return this._swapIn(await this.api.get(id, { prompt: false }));
         } catch (err) {
             console.error("[fb-notes-view] loading the note failed:", err);
             window.sac?.toast?.(fb.errors.text(err, fb.t("fb.notes.save-failed", "Couldn't save that change.")), { kind: "error" });
@@ -1097,7 +1100,7 @@ class FbNotesView extends HTMLElement {
         if (!open || open._hit || hasLockedSecrets(open) || !showsSecrets(content.value)) return;
         const split = this.querySelector("#split");
         const shown = split?.show;
-        const fresh = await fb.api.notes.get(open.id, { prompt: false }).catch(() => null);
+        const fresh = await this.api.get(open.id, { prompt: false }).catch(() => null);
         if (this._openNote !== open) return;   // another note was opened meanwhile
         // Offline: the masked text, read-only until the pill unlocks it.
         this._showInEditor(fresh ? this._swapIn(fresh) : lockedCopy({ ...open, content: content.value }));
@@ -1200,7 +1203,7 @@ class FbNotesView extends HTMLElement {
         }
         note.tags    = newTags;
         try {
-            await fb.api.notes.update(note.id, note);
+            await this.api.update(note.id, note);
             note.updatedAt = new Date().toISOString();
             if (this._openNote === note) this.querySelector("#timestamp").textContent = this.formatFullTimestamp(note.updatedAt);
             if (tagsChanged) {
@@ -1295,7 +1298,7 @@ class FbNotesView extends HTMLElement {
         if (!note) return;
         note.pinned = !note.pinned;
         try {
-            await fb.api.notes.update(note.id, note);
+            await this.api.update(note.id, note);
             if (id === this._openNote?.id) this.updateToolbar(note);
             this.renderList();
         } catch (err) {
@@ -1311,7 +1314,7 @@ class FbNotesView extends HTMLElement {
         if (!note) return;
         note.archived = !note.archived;
         try {
-            await fb.api.notes.update(note.id, note);
+            await this.api.update(note.id, note);
             // If we archived the currently-open note and archive view is off,
             // it just disappeared from the list — clear the editor too.
             if (note === this._openNote && note.archived && !this.showArchived) {
@@ -1341,7 +1344,7 @@ class FbNotesView extends HTMLElement {
         const previousTags = [...note.tags];
         note.tags = note.tags.filter(t => t !== "review:pending");
         try {
-            await fb.api.notes.update(note.id, note);
+            await this.api.update(note.id, note);
             // If the selected note just lost review:pending and the current
             // filter selects that tag, it'll vanish from the list on the
             // next render — renderList handles that. For the editor's
@@ -1387,7 +1390,7 @@ class FbNotesView extends HTMLElement {
             this._saveDebounce = null;
         }
         try {
-            await fb.api.notes.delete(id);
+            await this.api.delete(id);
             this.notes = this.notes.filter(n => n.id !== id);
             if (id === this._openNote?.id || id === this.selectedId) {
                 // Still loading when deleted: the editor holds another note.
@@ -1403,7 +1406,7 @@ class FbNotesView extends HTMLElement {
 
     async createNote() {
         try {
-            const created = await fb.api.notes.create({ title: "", content: "" });
+            const created = await this.api.create({ title: "", content: "" });
             this.notes.unshift(created);
             // Let select() set selectedId so its dedupe guard doesn't short-circuit.
             await this.select(created.id);

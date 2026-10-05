@@ -500,7 +500,9 @@ class FbContactsView extends HTMLElement {
                 const text = await file.text();
                 const format = /\.csv$/i.test(file.name) ? "csv" : "vcf";
                 const r = await this.api.import(text, format);
-                sac.toast?.(this.t("imported", "Imported {n} contacts.", { n: r.created }));
+                sac.toast?.(r.skipped
+                    ? this.t("imported-skipped", "Imported {n} contacts; {skipped} were already here.", { n: r.created, skipped: r.skipped })
+                    : this.t("imported", "Imported {n} contacts.", { n: r.created }));
                 await this.load();
             } catch (err) {
                 sac.toast?.(fb.errors.text(err, this.t("import-failed", "Couldn't import the file.")), { kind: "error" });
