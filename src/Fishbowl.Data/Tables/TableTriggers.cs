@@ -7,7 +7,6 @@ using Fishbowl.Core.Repositories;
 using Fishbowl.Core.Tables;
 using Jint;
 using Jint.Native;
-using Jint.Native.Json;
 using Jint.Runtime;
 using Jint.Runtime.Interop;
 using Microsoft.Extensions.Logging;
@@ -34,15 +33,14 @@ namespace Fishbowl.Data.Tables;
 // update, remove — through this decorator, so triggers chain, at most
 // MaxDepth deep), plus ctx.user { id, canWrite, canDesign }, ctx.table and
 // ctx.log(message) (into the error store). Every script run is bounded:
-// time, statements, memory, recursion; Jint gets no .NET, no files, no
-// network. Several apps may each have a trigger for a table: they run in
-// folder order, each seeing what the one before left.
+// time, statements, memory, recursion, the stack and what single built-ins
+// build (TriggerSandbox); Jint gets no .NET, no files, no network. Scripts
+// run only for a write that passes the role, table, row and own-row checks.
+// Several apps may each have a trigger for a table: they run in folder
+// order, each seeing what the one before left.
 public sealed class TriggeringTableRepository : ITableRepository
 {
     public const int MaxDepth = 3;
-    public static readonly TimeSpan TimeLimit = TimeSpan.FromSeconds(1);
-    public const int StatementLimit = 50_000;
-    public const long MemoryLimit = 32L * 1024 * 1024;
     public const int MaxScriptBytes = 256 * 1024;
 
     private static readonly AsyncLocal<int> Depth = new();
@@ -67,6 +65,7 @@ public sealed class TriggeringTableRepository : ITableRepository
     {
         var scripts = await ScriptsAsync(ctx, table, ct);
         if (scripts.Count == 0) return await _inner.InsertAsync(ctx, actor, table, values, ct);
+        await _inner.CheckWriteAsync(ctx, actor, table, null, null, ct);
         using var _ = Enter();
         foreach (var s in scripts) values = Before(s, "beforeInsert", ctx, actor, table, values, null) ?? values;
         var row = await _inner.InsertAsync(ctx, actor, table, values, ct);
@@ -78,8 +77,8 @@ public sealed class TriggeringTableRepository : ITableRepository
     {
         var scripts = await ScriptsAsync(ctx, table, ct);
         if (scripts.Count == 0) return await _inner.UpdateAsync(ctx, actor, table, id, values, rowVersion, ct);
+        var old = (await _inner.CheckWriteAsync(ctx, actor, table, id, rowVersion, ct))!.Value;
         using var _ = Enter();
-        var old = await _inner.GetAsync(ctx, table, id, ct);
         foreach (var s in scripts) values = Before(s, "beforeUpdate", ctx, actor, table, values, old) ?? values;
         var row = await _inner.UpdateAsync(ctx, actor, table, id, values, rowVersion, ct);
         foreach (var s in scripts) await AfterAsync(s, "afterUpdate", ctx, actor, table, row, old, ct);
@@ -90,16 +89,12 @@ public sealed class TriggeringTableRepository : ITableRepository
     {
         var scripts = await ScriptsAsync(ctx, table, ct);
         if (scripts.Count == 0) { await _inner.DeleteAsync(ctx, actor, table, id, ct); return; }
+        var old = (await _inner.CheckWriteAsync(ctx, actor, table, id, null, ct))!.Value;
         using var _ = Enter();
-        var old = await _inner.GetAsync(ctx, table, id, ct);
-        if (old is { } o)
-        {
-            foreach (var s in scripts)
-                if (BeforeDelete(s, ctx, actor, table, o)) return;      // a trigger kept the row
-        }
+        foreach (var s in scripts)
+            if (BeforeDelete(s, ctx, actor, table, old)) return;      // a trigger kept the row
         await _inner.DeleteAsync(ctx, actor, table, id, ct);
-        if (old is { } gone)
-            foreach (var s in scripts) await AfterAsync(s, "afterDelete", ctx, actor, table, null, gone, ct);
+        foreach (var s in scripts) await AfterAsync(s, "afterDelete", ctx, actor, table, null, old, ct);
     }
 
     private static IDisposable Enter()
@@ -123,7 +118,9 @@ public sealed class TriggeringTableRepository : ITableRepository
     // .apps; a missing folder or file just means no trigger.
     private async Task<IReadOnlyList<Script>> ScriptsAsync(ContextRef ctx, string table, CancellationToken ct)
     {
-        if (ctx.Type != ContextType.Space || !SqliteIdentifiers.IsValid(table)) return Array.Empty<Script>();
+        // The table-name rule, not the SQL identifier one: a table may be
+        // called "order" or "group" (its rows live in t_<name>).
+        if (ctx.Type != ContextType.Space || !TableNames.IsValid(table)) return Array.Empty<Script>();
         FileListPage apps;
         try { apps = await _files.ListAsync(ctx, AppsFolder.Name, null, 500, ct); }
         catch (FileStoreException) { return Array.Empty<Script>(); }
@@ -151,12 +148,7 @@ public sealed class TriggeringTableRepository : ITableRepository
 
     private Engine NewEngine(Script s, ContextRef ctx, TableActor actor, string table)
     {
-        var engine = new Engine(o => o
-            .Strict()
-            .TimeoutInterval(TimeLimit)
-            .MaxStatements(StatementLimit)
-            .LimitMemory(MemoryLimit)
-            .LimitRecursion(64));
+        var engine = TriggerSandbox.NewEngine();
         engine.SetValue("ctx", Ctx(engine, s, ctx, actor, table));
         engine.Execute(s.Code, s.Path);
         return engine;
@@ -168,19 +160,24 @@ public sealed class TriggeringTableRepository : ITableRepository
         return f.IsUndefined() || f is not Jint.Native.Function.Function ? null : f;
     }
 
-    // before*: the row as the script left it, or null when it has no such function.
+    // before*: the row as the script left it, or null when it has no such
+    // function. beforeUpdate gets the row as it is (`old`), beforeInsert not.
+    // Numbers the script didn't change keep their exact text.
     private JsonElement? Before(Script s, string fn, ContextRef ctx, TableActor actor, string table, JsonElement values, JsonElement? old)
     {
         try
         {
-            var engine = NewEngine(s, ctx, actor, table);
-            if (Function(engine, fn) is not { } f) return null;
-            var row = ToJs(engine, values);
-            var result = old is null
-                ? engine.Invoke(f, row, engine.GetValue("ctx"))
-                : engine.Invoke(f, row, ToJs(engine, old.Value), engine.GetValue("ctx"));
-            var back = result.IsObject() ? result : row;
-            return ToJson(engine, back);
+            return TriggerSandbox.OnOwnStack(() =>
+            {
+                var engine = NewEngine(s, ctx, actor, table);
+                if (Function(engine, fn) is not { } f) return (JsonElement?)null;
+                var row = ToJs(engine, values);
+                var result = fn == "beforeUpdate"
+                    ? engine.Invoke(f, row, old is { } o ? ToJs(engine, o) : JsValue.Null, engine.GetValue("ctx"))
+                    : engine.Invoke(f, row, engine.GetValue("ctx"));
+                var back = result.IsObject() ? result : row;
+                return TriggerSandbox.KeepNumbers(values, ToJson(back));
+            });
         }
         catch (TableException) { throw; }
         catch (JavaScriptException ex)
@@ -198,10 +195,13 @@ public sealed class TriggeringTableRepository : ITableRepository
     {
         try
         {
-            var engine = NewEngine(s, ctx, actor, table);
-            if (Function(engine, "beforeDelete") is not { } f) return false;
-            var result = engine.Invoke(f, ToJs(engine, old), engine.GetValue("ctx"));
-            return result.IsBoolean() && !result.AsBoolean();
+            return TriggerSandbox.OnOwnStack(() =>
+            {
+                var engine = NewEngine(s, ctx, actor, table);
+                if (Function(engine, "beforeDelete") is not { } f) return false;
+                var result = engine.Invoke(f, ToJs(engine, old), engine.GetValue("ctx"));
+                return result.IsBoolean() && !result.AsBoolean();
+            });
         }
         catch (TableException) { throw; }
         catch (JavaScriptException ex)
@@ -218,9 +218,12 @@ public sealed class TriggeringTableRepository : ITableRepository
     {
         try
         {
-            var engine = NewEngine(s, ctx, actor, table);
-            if (Function(engine, fn) is not { } f) return;
-            engine.Invoke(f, row is null ? JsValue.Null : ToJs(engine, row.Value), old is null ? JsValue.Null : ToJs(engine, old.Value), engine.GetValue("ctx"));
+            TriggerSandbox.OnOwnStack(() =>
+            {
+                var engine = NewEngine(s, ctx, actor, table);
+                if (Function(engine, fn) is not { } f) return;
+                engine.Invoke(f, row is null ? JsValue.Null : ToJs(engine, row.Value), old is null ? JsValue.Null : ToJs(engine, old.Value), engine.GetValue("ctx"));
+            });
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -241,21 +244,18 @@ public sealed class TriggeringTableRepository : ITableRepository
 
     private static string? Limit(Exception ex) => ex switch
     {
-        TimeoutException => $"it ran longer than {TimeLimit.TotalSeconds:0.#} s",
-        StatementsCountOverflowException => $"it ran more than {StatementLimit} statements",
+        System.Text.RegularExpressions.RegexMatchTimeoutException => $"a regular expression ran longer than {TriggerSandbox.TimeLimit.TotalSeconds:0.#} s",
+        TimeoutException => $"it ran longer than {TriggerSandbox.TimeLimit.TotalSeconds:0.#} s",
+        StatementsCountOverflowException => $"it ran more than {TriggerSandbox.StatementLimit} statements",
         MemoryLimitExceededException => "it used too much memory",
-        RecursionDepthOverflowException => "it recursed too deep",
+        RecursionDepthOverflowException or InsufficientExecutionStackException => "it recursed too deep",
+        TriggerValueException => ex.Message,
         _ => null,
     };
 
-    private static JsValue ToJs(Engine engine, JsonElement value) => new JsonParser(engine).Parse(value.GetRawText());
+    private static JsValue ToJs(Engine engine, JsonElement value) => TriggerSandbox.ToJs(engine, value);
 
-    private static JsonElement ToJson(Engine engine, JsValue value)
-    {
-        var text = new Jint.Native.Json.JsonSerializer(engine).Serialize(value).AsString();
-        using var doc = JsonDocument.Parse(text);
-        return doc.RootElement.Clone();
-    }
+    private static JsonElement ToJson(JsValue value) => TriggerSandbox.ToJson(value);
 
     // ---------------------------------------------------------------- ctx --
 
@@ -263,12 +263,13 @@ public sealed class TriggeringTableRepository : ITableRepository
     {
         var o = new JsObject(engine);
         JsValue Json(object? v) => v is null ? JsValue.Null : ToJs(engine, System.Text.Json.JsonSerializer.SerializeToElement(v));
-        JsonElement Arg(JsValue v) => v.IsUndefined() || v.IsNull() ? JsonDocument.Parse("{}").RootElement.Clone() : ToJson(engine, v);
+        JsonElement Arg(JsValue v) => v.IsUndefined() || v.IsNull() ? JsonDocument.Parse("{}").RootElement.Clone() : ToJson(v);
         string Str(JsValue v, string what) => v.IsString() ? v.AsString() : throw new JavaScriptException($"{what} must be a string");
         void Fn(string name, Func<JsValue[], JsValue> body) =>
             o.Set(name, new ClrFunction(engine, name, (_, args) => body(args)));
         JsValue At(JsValue[] a, int i) => i < a.Length ? a[i] : JsValue.Undefined;
         T Run<T>(Task<T> t) => t.GetAwaiter().GetResult();
+        void Wait(Task t) => t.GetAwaiter().GetResult();
 
         var user = new JsObject(engine);
         user.Set("id", actor.UserId);
@@ -282,13 +283,15 @@ public sealed class TriggeringTableRepository : ITableRepository
         Fn("count", a =>
         {
             var where = At(a, 1);
-            var spec = where.IsUndefined() || where.IsNull() ? "{}" : $"{{\"where\":{ToJson(engine, where).GetRawText()}}}";
+            var spec = where.IsUndefined() || where.IsNull() ? "{}" : $"{{\"where\":{ToJson(where).GetRawText()}}}";
             using var doc = JsonDocument.Parse(spec);
             return Run(CountAsync(ctx, Str(At(a, 0), "table"), AppJsonParsers.ParseQuerySpec(doc.RootElement)));
         });
         Fn("insert", a => ToJs(engine, Run(InsertAsync(ctx, actor, Str(At(a, 0), "table"), Arg(At(a, 1))))));
         Fn("update", a => ToJs(engine, Run(UpdateAsync(ctx, actor, Str(At(a, 0), "table"), Str(At(a, 1), "id"), Arg(At(a, 2)), null))));
-        Fn("remove", a => { Run(DeleteAsync(ctx, actor, Str(At(a, 0), "table"), Str(At(a, 1), "id")).ContinueWith(_ => true)); return JsValue.Undefined; });
+        // A refusal (not_your_row, still_linked, a nested trigger's…) reaches
+        // the script's caller like every other ctx call's.
+        Fn("remove", a => { Wait(DeleteAsync(ctx, actor, Str(At(a, 0), "table"), Str(At(a, 1), "id"))); return JsValue.Undefined; });
         Fn("log", a =>
         {
             Run(_errors.AddAsync(ctx, s.App, AppErrors.Trigger, At(a, 0).ToString(), null, actor.UserId).ContinueWith(_ => true));

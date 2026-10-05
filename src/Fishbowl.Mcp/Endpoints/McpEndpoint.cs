@@ -3,6 +3,7 @@ using System.Text.Json;
 using Fishbowl.Core;
 using Fishbowl.Core.Apps;
 using Fishbowl.Core.Mcp;
+using Fishbowl.Core.Tables;
 using Fishbowl.Core.Util;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
@@ -82,16 +83,21 @@ public static class McpEndpoint
                 request.Method, ex.Code, ex.Field ?? "(none)");
             error = new McpError(McpErrorCodes.InvalidParams, ex.Message);
         }
-        catch (InvalidOperationException ex)
+        catch (TableException ex)
         {
-            // Caller-fixable errors raised by repository pre-flight checks
-            // (forbidden base column write, unknown column on insert, schema
-            // not yet created, etc). InvalidParams keeps the agent in fix-and-
-            // retry mode; anything we genuinely don't expect still falls
-            // through to the InternalError branch below.
-            logger.LogDebug("MCP {Method} rejected on repository pre-flight: {Message}",
-                request.Method, ex.Message);
+            // The table layer's refusals (unknown column, a link that points
+            // nowhere, a role, a trigger's message…) are written for the
+            // caller. Any other InvalidOperationException is a fault: it
+            // falls through to InternalError, its wording stays in the log.
+            logger.LogDebug("MCP {Method} refused by the table layer: {Code}", request.Method, ex.Code);
             error = new McpError(McpErrorCodes.InvalidParams, ex.Message);
+        }
+        catch (InvalidOperationException ex) when (ex.TargetSite?.DeclaringType?.Assembly == typeof(JsonElement).Assembly)
+        {
+            // A tool read an argument as the wrong JSON type (a number where
+            // text belongs…): the caller's to fix, not the server's.
+            logger.LogDebug(ex, "MCP {Method} got an argument of the wrong JSON type", request.Method);
+            error = new McpError(McpErrorCodes.InvalidParams, "An argument has the wrong type — see the tool's inputSchema.");
         }
         catch (Exception ex)
         {
@@ -181,8 +187,12 @@ public static class McpEndpoint
         }
 
         var actor = user.FindFirst(McpContextClaims.UserId)?.Value ?? "";
-        var arguments = p.TryGetProperty("arguments", out var argsEl)
-            ? argsEl : default;
+        // No arguments = none given: an empty object, so each tool's own
+        // "`x` is required" answers rather than a JSON type error.
+        var arguments = p.TryGetProperty("arguments", out var argsEl) && argsEl.ValueKind is not (JsonValueKind.Null or JsonValueKind.Undefined)
+            ? argsEl : EmptyArguments;
+        if (arguments.ValueKind != JsonValueKind.Object)
+            return (null, new McpError(McpErrorCodes.InvalidParams, "`arguments` must be an object."));
 
         var toolResult = await tool.InvokeAsync(ctxRef, actor, arguments, user, ctx.RequestAborted);
 
@@ -196,6 +206,8 @@ public static class McpEndpoint
             isError = false,
         }, null);
     }
+
+    private static readonly JsonElement EmptyArguments = JsonDocument.Parse("{}").RootElement.Clone();
 
     private static IResult ErrorResponse(JsonElement? id, int code, string message)
     {

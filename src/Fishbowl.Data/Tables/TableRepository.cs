@@ -492,9 +492,7 @@ public class TableRepository : ITableRepository
             var def = await RequireAsync(db, tx, table, token);
             var current = await RequireRowAsync(db, tx, def, id, token);
             CheckOwnRow(def, actor, current);
-            if (rowVersion is { } v && Convert.ToInt64(current["row_version"]) != v)
-                throw TableException.Conflict("version_conflict", "Someone changed this row in the meantime — read it again.",
-                    new { table, id, rowVersion = current["row_version"] });
+            CheckVersion(def, current, rowVersion);
             var parsed = await ParseValuesAsync(ctx, db, tx, def, values, insert: false, id, token);
             var sets = new List<string> { "last_modified = @now", "row_version = row_version + 1" };
             var p = new DynamicParameters();
@@ -533,13 +531,37 @@ public class TableRepository : ITableRepository
         }, ct);
     }
 
+    // What a write checks before it reads any value — the workspace, the
+    // role, the table and, for a change, the row: there, its author (own
+    // rows) and its version. The trigger layer asks first, so no script runs
+    // for a write that is refused anyway. The row as it is (null: an insert).
+    public async Task<JsonElement?> CheckWriteAsync(ContextRef ctx, TableActor actor, string table, string? id, long? rowVersion, CancellationToken ct = default)
+    {
+        RequireSpace(ctx);
+        RequireWrite(actor);
+        using var db = _db.CreateContextConnection(ctx);
+        var def = await RequireAsync(db, null, table, ct);
+        if (id is null) return null;
+        var row = await RequireRowAsync(db, null, def, id, ct);
+        CheckOwnRow(def, actor, row);
+        CheckVersion(def, row, rowVersion);
+        return (await ToJsonAsync(db, null, def, new List<Dictionary<string, object?>> { row }, ct))[0];
+    }
+
     private static void CheckOwnRow(TableDef def, TableActor actor, Dictionary<string, object?> row)
     {
         if (def.OwnRows && !actor.EditsAllRows && !Equals(row["author"], actor.UserId))
             throw TableException.Forbidden("not_your_row", $"In '{def.Name}' members change only their own rows.", new { table = def.Name });
     }
 
-    private static async Task<Dictionary<string, object?>> RequireRowAsync(IDbConnection db, IDbTransaction tx, TableDef def, string id, CancellationToken ct)
+    private static void CheckVersion(TableDef def, Dictionary<string, object?> row, long? rowVersion)
+    {
+        if (rowVersion is { } v && Convert.ToInt64(row["row_version"]) != v)
+            throw TableException.Conflict("version_conflict", "Someone changed this row in the meantime — read it again.",
+                new { table = def.Name, id = row["id"], rowVersion = row["row_version"] });
+    }
+
+    private static async Task<Dictionary<string, object?>> RequireRowAsync(IDbConnection db, IDbTransaction? tx, TableDef def, string id, CancellationToken ct)
     {
         var rows = await ReadRowsAsync(db, tx, $"SELECT * FROM \"{TableNames.Physical(def.Name)}\" WHERE id = @id", new { id }, ct);
         return rows.Count > 0 ? rows[0]
@@ -672,12 +694,17 @@ public class TableRepository : ITableRepository
         using var db = _db.CreateContextConnection(ctx);
         if (table is not null) await RequireAsync(db, null, table, ct);
         const int pool = 50;
+        // One table: both candidate pools come from its rows only — filtering
+        // the space-wide pools afterwards would leave few hits, or none.
+        var prefix = table is null ? null : RowKey(table, "");
 
         var fts = new List<(string Id, double Bm25)>();
         if (HybridSearchService.FtsQuery(query) is { } match)
             fts = (await db.QueryAsync<(string Id, double Bm25)>(new CommandDefinition(
-                "SELECT row_key AS Id, bm25(rows_fts) AS Bm25 FROM rows_fts WHERE rows_fts MATCH @match ORDER BY bm25(rows_fts) LIMIT @pool",
-                new { match, pool }, cancellationToken: ct))).ToList();
+                "SELECT row_key AS Id, bm25(rows_fts) AS Bm25 FROM rows_fts WHERE rows_fts MATCH @match" +
+                (prefix is null ? "" : " AND substr(row_key, 1, length(@prefix)) = @prefix") +
+                " ORDER BY bm25(rows_fts) LIMIT @pool",
+                new { match, prefix, pool }, cancellationToken: ct))).ToList();
         var vec = new List<(string Id, double Distance)>();
         var degraded = _embeddings is null;
         if (_embeddings is not null)
@@ -687,9 +714,13 @@ public class TableRepository : ITableRepository
                 var q = await _embeddings.EmbedAsync(query, ct);
                 var blob = new byte[q.Length * sizeof(float)];
                 Buffer.BlockCopy(q, 0, blob, 0, blob.Length);
-                vec = (await db.QueryAsync<(string Id, double Distance)>(new CommandDefinition(
-                    "SELECT id AS Id, distance AS Distance FROM vec_rows WHERE embedding MATCH @blob AND k = @pool ORDER BY distance",
-                    new { blob, pool }, cancellationToken: ct))).ToList();
+                // vec0's k-nearest search can't be narrowed to a key prefix;
+                // one table's rows are few enough to measure each (same L2
+                // distance as the k-nearest search).
+                vec = (await db.QueryAsync<(string Id, double Distance)>(new CommandDefinition(prefix is null
+                        ? "SELECT id AS Id, distance AS Distance FROM vec_rows WHERE embedding MATCH @blob AND k = @pool ORDER BY distance"
+                        : "SELECT id AS Id, vec_distance_l2(embedding, @blob) AS Distance FROM vec_rows WHERE substr(id, 1, length(@prefix)) = @prefix ORDER BY Distance LIMIT @pool",
+                    new { blob, prefix, pool }, cancellationToken: ct))).ToList();
             }
             catch (EmbeddingUnavailableException) { degraded = true; }
         }
@@ -1017,17 +1048,24 @@ public class TableRepository : ITableRepository
                 return false;
         var p = new DynamicParameters();
         var names = new List<string>();
+        var defined = def.Columns.ToDictionary(c => c.Name, StringComparer.Ordinal);
         foreach (var (k, v) in row)
         {
             if (!columns.Contains(k)) continue;
-            names.Add(k);
-            p.Add("p" + names.Count, v switch
+            object? value;
+            if (defined.TryGetValue(k, out var col))
+            {
+                if (!TryRestoreValue(table, col, v, out value)) return false;
+            }
+            else value = v switch
             {
                 null => null,
                 JsonValue jv when jv.TryGetValue<long>(out var l) => l,
                 JsonValue jv when jv.TryGetValue<double>(out var d) => d,
                 _ => v.GetValue<string>(),
-            });
+            };
+            names.Add(k);
+            p.Add("p" + names.Count, value);
         }
         try
         {
@@ -1046,6 +1084,78 @@ public class TableRepository : ITableRepository
             await WriteLinksAsync(db, tx, table, id, new List<(string, List<string>)> { (c.Name, ids) }, ct);
         }
         return true;
+    }
+
+    // A snapshot's value made fit for its column as the column is now — it
+    // may have been dropped and added again with another type since. False:
+    // it doesn't fit, and the restore is refused (works or doesn't).
+    private static bool TryRestoreValue(string table, ColumnDef col, JsonNode? v, out object? stored)
+    {
+        stored = null;
+        if (v is null) return true;
+        if (v is not JsonValue jv) return false;
+        try
+        {
+            switch (col.Kind)
+            {
+                case ColumnKind.Link:   // its target was checked above
+                case ColumnKind.Member:
+                case ColumnKind.File:
+                    if (!jv.TryGetValue<string>(out var text)) return false;
+                    stored = text;
+                    return true;
+                case ColumnKind.YesNo:
+                    if (!jv.TryGetValue<long>(out var flag) || flag is not (0 or 1)) return false;
+                    stored = flag;
+                    return true;
+                case ColumnKind.Choice when col.Multiple:
+                    if (!jv.TryGetValue<string>(out var list)
+                        || JsonSerializer.Deserialize<List<string>>(list) is not { } items
+                        || items.Any(i => !col.Options!.Contains(i)))
+                        return false;
+                    stored = list;
+                    return true;
+                default:
+                    // As a write would take it: a whole number, text within
+                    // the column's length, a date, one of the options…
+                    stored = CoerceScalar(table, col, TableJson.ToElement(jv));
+                    return true;
+            }
+        }
+        catch (Exception ex) when (ex is TableException or JsonException or FormatException or InvalidOperationException)
+        {
+            return false;
+        }
+    }
+
+    // Who may restore a table item from the trash or delete it for good —
+    // as for deleting it: a dropped table needs the Designer role, a row of
+    // an own-rows table (or of a table that is gone) its author unless
+    // Designer+. The refusals among the trash's table items (or `trashId`).
+    public async Task<IReadOnlyDictionary<string, TableException>> TrashRefusalsAsync(
+        ContextRef ctx, TableActor actor, string? trashId = null, CancellationToken ct = default)
+    {
+        var refusals = new Dictionary<string, TableException>(StringComparer.Ordinal);
+        if (ctx.Type != ContextType.Space || actor.CanDesign) return refusals;
+        using var db = _db.CreateContextConnection(ctx);
+        var items = await db.QueryAsync<(string Id, string Kind, string Data)>(new CommandDefinition(
+            "SELECT id, kind, data FROM trash WHERE kind IN ('row', 'table')" + (trashId is null ? "" : " AND id = @trashId"),
+            new { trashId }, cancellationToken: ct));
+        var defs = new Dictionary<string, TableDef?>(StringComparer.Ordinal);
+        foreach (var (id, kind, data) in items)
+        {
+            if (kind == "table")
+            {
+                refusals[id] = TableException.Forbidden("role_design", "Changing tables needs the Designer role or above.");
+                continue;
+            }
+            var node = JsonNode.Parse(data);
+            var table = node?["$table"]?.GetValue<string>() ?? "";
+            if (!defs.TryGetValue(table, out var def)) defs[table] = def = await LoadAsync(db, null, table, ct);
+            if ((def is null || def.OwnRows) && node?["row"]?["author"]?.GetValue<string>() != actor.UserId)
+                refusals[id] = TableException.Forbidden("not_your_row", $"In '{table}' members change only their own rows.", new { table });
+        }
+        return refusals;
     }
 
     // The trash puts a dropped table back with its rows.
