@@ -10,9 +10,9 @@
  * The arrangement (size, colour, order, hidden) is per workspace and lives
  * on the server (fb.api.desktop), so it follows the user across devices.
  * Tiles keep their stored position (the desktop has no reordering UI);
- * a tile never arranged sorts by its registry index. Only Notes, Todos and
- * Calendar start medium; every other tile — built-in or installed, in any
- * workspace — starts small, and they come after those three, so they share
+ * a tile never arranged sorts by its registry index. Only Notes, Todos,
+ * Calendar and Contacts start medium; every other tile — built-in or installed,
+ * in any workspace — starts small, and they come after those four, so they share
  * medium cells four at a time (the kit's .tile-pack).
  *
  * Two kinds of app: pages (Notes, Todos, Calendar, Files, Tables — a route,
@@ -25,7 +25,8 @@
  * workspace's rules: hidden tiles, admin apps only in the personal
  * workspace, Secrets never in a space.
  *   Apps      every visible tile, in desktop order (a window app opens)
- *   Create    new note / todo / event — fb.desktop.go() into the view
+ *   Create    new note / todo / event / contact — fb.desktop.go() into the
+ *             view (the live tiles' "+" does the same)
  *   Go        the desktop, and the Your data window
  *   Workspace Personal and every space
  *   Notes     full-text search in the active workspace's notes (a
@@ -37,7 +38,7 @@
         { key: "builtin:notes",    hash: "#/notes",       name: "Notes",    icon: "note",     desc: "Write freely. Find anything.", size: "medium" },
         { key: "builtin:todos",    hash: "#/todos",       name: "Todos",    icon: "check",    desc: "Fast to-dos, always at hand.", size: "medium" },
         { key: "builtin:calendar", hash: "#/calendar",    name: "Calendar", icon: "calendar", desc: "Events and reminders, yours.", size: "medium" },
-        { key: "builtin:contacts", hash: "#/contacts",    name: "Contacts", icon: "contact",  desc: "People and organisations." },
+        { key: "builtin:contacts", hash: "#/contacts",    name: "Contacts", icon: "contacts", desc: "People and organisations.", size: "medium" },
         { key: "builtin:files",    hash: "#/files",       name: "Files",    icon: "folder",   desc: "Real files, two panes, any workspace." },
         { key: "builtin:tables",   hash: "#/tables",      name: "Tables",   icon: "grid",     desc: "This space's own tables, like a spreadsheet.", space: true },
         // Window apps (fb.windowApps): `open`, no address.
@@ -195,6 +196,9 @@
         }
         if (writable && entries.some((e) => e.key === "builtin:calendar")) {
             register("create:event", { label: fb.t("fb.palette.new-event", "New event"), icon: "plus", group: fb.t("fb.palette.create", "Create"), run: () => go("calendar", "create") });
+        }
+        if (writable && entries.some((e) => e.key === "builtin:contacts")) {
+            register("create:contact", { label: fb.t("fb.palette.new-contact", "New contact"), icon: "plus", group: fb.t("fb.palette.create", "Create"), run: () => go("contacts", "create") });
         }
         for (const s of SETTINGS.filter((x) => !x.personal || !space)) {
             register(`go:${s.hash}`, {

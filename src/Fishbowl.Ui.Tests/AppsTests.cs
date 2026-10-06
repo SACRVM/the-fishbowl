@@ -311,6 +311,7 @@ public class AppsTests : IAsyncLifetime
                     const members = await context.space.members();
                     await context.space.notify([members.items.find((m) => m.you).userId], 'hello members');
                     this.querySelector('#data').textContent = `${rows.length} ${rows[0]?.title} ${refused}`;
+                    setTimeout(() => { throw new Error('uncaught in the frame'); });
                   }
                 });
                 """);
@@ -335,10 +336,12 @@ public class AppsTests : IAsyncLifetime
             var row = page.Locator("fb-apps-settings-view .fb-row[data-app='space.hello']");
             await Assertions.Expect(row).ToContainTextAsync(".apps/hello · v0.1.0");
             await Assertions.Expect(row.Locator("button[data-action]")).ToHaveCountAsync(0);
-            // Its Designer sees what broke: the refused call and its own report.
+            // Its Designer sees what broke: the refused call, its own report and
+            // the uncaught error the kit forwards from the frame (sac:app-error).
             var errorsCard = page.Locator("#fb-apps-errors-card");
             await Assertions.Expect(errorsCard).ToContainTextAsync("boom from the app");
             await Assertions.Expect(errorsCard).ToContainTextAsync("describe:");
+            await Assertions.Expect(errorsCard).ToContainTextAsync("uncaught in the frame");
             await errorsCard.Locator("button[data-action='clear-errors']").ClickAsync();
             await Assertions.Expect(errorsCard).ToContainTextAsync("No errors.");
 
@@ -356,7 +359,8 @@ public class AppsTests : IAsyncLifetime
             await Assertions.Expect(dialog).ToContainTextAsync("hello");
             await dialog.Locator("button[data-action='unmute']").ClickAsync();
             await Assertions.Expect(mutedBtn).ToHaveCountAsync(0);
-            Assert.Empty(errors);
+            // The one page error is the app's own, thrown on purpose above.
+            Assert.DoesNotContain(errors, (e) => !e.Contains("uncaught in the frame"));
         }
         finally
         {

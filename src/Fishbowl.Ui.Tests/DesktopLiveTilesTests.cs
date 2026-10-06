@@ -172,25 +172,48 @@ public class DesktopLiveTilesTests
         return seed;
     }
 
-    /// <summary>The status text sits on the icon's centre line (a phone widget's header).</summary>
-    private static async Task AssertStatusOnIconCentreAsync(ILocator tile)
+    /// <summary>The header: a darker band across the top of the tile (its ::before, the kit's
+    /// --field wash) holding the icon, the app's name as the heading beside it (the kit's
+    /// type, not a label) and the status under the name — the text block centred on the
+    /// icon, with one status line or two; what follows starts under the band.</summary>
+    private static async Task AssertHeaderAsync(ILocator tile, string name)
     {
-        var off = await tile.EvaluateAsync<double>(@"el => {
-            const s = el.querySelector('.tl-status').getBoundingClientRect();
+        var r = await tile.EvaluateAsync<JsonElement>(@"el => {
             const i = el.querySelector(':scope > sac-icon').getBoundingClientRect();
-            return (s.top + s.height / 2) - (i.top + i.height / 2);
+            const h2 = el.querySelector('.tl-status > h2'), hb = h2.getBoundingClientRect(), hcs = getComputedStyle(h2);
+            const main = el.querySelector('.tl-main').getBoundingClientRect();
+            const last = (el.querySelector('.tl-sub') || el.querySelector('.tl-main')).getBoundingClientRect();
+            const band = getComputedStyle(el, '::before');
+            const next = el.querySelector('.tl-items, .tl-empty');
+            return {
+                name: h2.textContent, position: hcs.position, transform: hcs.textTransform, weight: parseInt(hcs.fontWeight, 10),
+                beside: hb.left >= i.right,
+                centre: (hb.top + last.bottom) / 2 - (i.top + i.bottom) / 2,
+                under: main.top >= hb.bottom - 1 && Math.abs(main.left - hb.left) < 1,
+                band: band.content !== 'none' && band.backgroundColor !== 'rgba(0, 0, 0, 0)',
+                below: next ? next.getBoundingClientRect().top - Math.max(i.bottom, main.bottom) : 99,
+            };
         }");
-        Assert.True(Math.Abs(off) < 2, $"{await tile.GetAttributeAsync("data-key")}: the status is {off}px off the icon's centre line");
+        var key = await tile.GetAttributeAsync("data-key");
+        Assert.Equal(name, r.GetProperty("name").GetString());
+        Assert.NotEqual("absolute", r.GetProperty("position").GetString());
+        Assert.Equal("none", r.GetProperty("transform").GetString());
+        Assert.True(r.GetProperty("weight").GetInt32() >= 600, $"{key}: the name is not a heading");
+        Assert.True(r.GetProperty("beside").GetBoolean(), $"{key}: the name is not beside the icon");
+        Assert.True(Math.Abs(r.GetProperty("centre").GetDouble()) < 3, $"{key}: the header text is {r.GetProperty("centre").GetDouble()}px off the icon's centre line");
+        Assert.True(r.GetProperty("under").GetBoolean(), $"{key}: the status is not under the name");
+        Assert.True(r.GetProperty("band").GetBoolean(), $"{key}: no header band");
+        Assert.True(r.GetProperty("below").GetDouble() > 12, $"{key}: the content starts {r.GetProperty("below").GetDouble()}px under the header");
     }
 
-    /// <summary>Everything the tile paints — status, bar, list, the name label — lies
-    /// inside it, and the icon is still on top.</summary>
+    /// <summary>Everything the tile paints — header, list — lies inside it, and the
+    /// icon is still on top.</summary>
     private static async Task AssertFitsAsync(ILocator tile)
     {
         var r = await tile.EvaluateAsync<JsonElement>(@"el => {
             const t = el.getBoundingClientRect();
             const inside = (n) => { const b = n.getBoundingClientRect(); return b.top >= t.top - 1 && b.bottom <= t.bottom + 1 && b.left >= t.left - 1 && b.right <= t.right + 1; };
-            const parts = [...el.querySelectorAll('.tl-status, .tl-bar, .tl-items, .tl-empty, h2')];
+            const parts = [...el.querySelectorAll('.tl-status > *, .tl-items, .tl-empty, h2, :scope > .tl-new')].filter((n) => n.getClientRects().length);
             const icon = el.querySelector(':scope > sac-icon').getBoundingClientRect();
             return { inside: parts.every(inside), iconTop: icon.top - t.top };
         }");
@@ -199,30 +222,20 @@ public class DesktopLiveTilesTests
         Assert.True(r.GetProperty("iconTop").GetDouble() >= 0, $"{key}: the icon is pushed out of the tile");
     }
 
-    /// <summary>A square tile's list runs down to the tile's bottom edge, more rows than room
-    /// continue under a fade (a mask on the list, the first row well clear of it, clear again
-    /// above the label), and the name is a small uppercase label drawn over the list's end — no row of its own,
-    /// its right edge on the tails', set in as far from the bottom as from the right.</summary>
-    private static async Task AssertFadeAndLabelAsync(ILocator tile, bool moreThanRoom = true)
+    /// <summary>A square tile's list runs down to the tile's bottom edge, and more rows than
+    /// room continue under a fade (a mask on the list, the first row well clear of it).</summary>
+    private static async Task AssertFadeAsync(ILocator tile, bool moreThanRoom = true)
     {
         var r = await tile.EvaluateAsync<JsonElement>(@"el => {
             const t = el.getBoundingClientRect();
             const list = el.querySelector('.tl-items'), lb = list.getBoundingClientRect(), lcs = getComputedStyle(list);
-            const h2 = el.querySelector('h2'), hb = h2.getBoundingClientRect(), cs = getComputedStyle(h2);
-            const tail = [...list.querySelectorAll('.tl-tail')].find(x => x.textContent.trim() && x.getBoundingClientRect().height > 0);
             const rows = [...list.children];
             return {
                 fill: el.hasAttribute('data-fill'),
                 mask: (lcs.maskImage && lcs.maskImage !== 'none' ? lcs.maskImage : lcs.webkitMaskImage) || '',
                 toBottom: t.bottom - lb.bottom,
                 over: list.scrollHeight - list.clientHeight,
-                rows: rows.length,
-                firstRowClear: rows[0].getBoundingClientRect().bottom <= lb.top + lb.height - Math.min(parseFloat(getComputedStyle(el).getPropertyValue('--tl-pad')) * 14 + 77, 0.6 * lb.height) + 1,
-                position: cs.position, transform: cs.textTransform, size: parseFloat(cs.fontSize), spacing: parseFloat(cs.letterSpacing) || 0,
-                labelOverList: hb.top >= lb.top && hb.bottom <= lb.bottom + 1,
-                labelRight: tail ? hb.right - tail.getBoundingClientRect().right : 999,
-                labelBottom: t.bottom - hb.bottom,
-                labelInsetRight: t.right - hb.right,
+                firstRowClear: rows[0].getBoundingClientRect().bottom <= lb.top + lb.height - Math.min(parseFloat(getComputedStyle(el).getPropertyValue('--tl-pad')) * 14 + 56, 0.6 * lb.height) + 1,
             };
         }");
         var key = await tile.GetAttributeAsync("data-key");
@@ -232,15 +245,6 @@ public class DesktopLiveTilesTests
         Assert.True(r.GetProperty("toBottom").GetDouble() <= 3, $"{key}: the list stops {r.GetProperty("toBottom").GetDouble()}px above the tile's bottom edge");
         if (moreThanRoom) Assert.True(r.GetProperty("over").GetDouble() > 0, $"{key}: nothing continues under the fade");
         Assert.True(r.GetProperty("firstRowClear").GetBoolean(), $"{key}: the fade reaches the first row");
-        Assert.Equal("absolute", r.GetProperty("position").GetString());
-        Assert.Equal("uppercase", r.GetProperty("transform").GetString());
-        Assert.InRange(r.GetProperty("size").GetDouble(), 9, 11);
-        Assert.True(r.GetProperty("spacing").GetDouble() > 0.5, $"{key}: the label has no letter-spacing");
-        Assert.True(r.GetProperty("labelOverList").GetBoolean(), $"{key}: the label is not drawn over the list's faded end");
-        Assert.True(Math.Abs(r.GetProperty("labelRight").GetDouble()) <= 2, $"{key}: the label is {r.GetProperty("labelRight").GetDouble()}px off the tails' right edge");
-        var bottom = r.GetProperty("labelBottom").GetDouble();
-        var right = r.GetProperty("labelInsetRight").GetDouble();
-        Assert.True(Math.Abs(bottom - right) <= 2, $"{key}: the label sits {bottom}px from the bottom but {right}px from the right");
     }
 
     [Fact]
@@ -267,10 +271,11 @@ public class DesktopLiveTilesTests
             await Assertions.Expect(standup.Locator(".tl-lead")).ToHaveTextAsync(new Regex(@"^\d{1,2}:\d{2}( [AP]M)?$"));
             await Assertions.Expect(standup.Locator(".tl-tail")).ToHaveTextAsync("today");
             await Assertions.Expect(calendar.Locator("li", new() { HasText = seed.Tomorrow }).Locator(".tl-tail")).ToHaveTextAsync("tomorrow");
-            // Two columns: the status left of the list.
-            var head = (await calendar.Locator(".tl-status").BoundingBoxAsync())!;
+            // Wide: the header across the top, the list under it at the full width.
+            var calIcon = (await Tile(page, "builtin:calendar").Locator(":scope > sac-icon").BoundingBoxAsync())!;
             var list = (await calendar.Locator(".tl-items").BoundingBoxAsync())!;
-            Assert.True(list.X >= head.X + head.Width - 1, $"head {head.X}+{head.Width}, list at {list.X}");
+            Assert.True(list.Y > calIcon.Y + calIcon.Height, $"icon ends at {calIcon.Y + calIcon.Height}, list at {list.Y}");
+            Assert.True(Math.Abs(list.X - calIcon.X) < 2, $"icon at {calIcon.X}, list at {list.X}");
 
             // Todos (large): the open count, overdue first, the overdue one marked.
             var todos = Live(page, "builtin:todos");
@@ -302,25 +307,41 @@ public class DesktopLiveTilesTests
             // Contacts (medium): the count and the birthday coming up.
             var contacts = Live(page, "builtin:contacts");
             await Assertions.Expect(contacts.Locator(".tl-main")).ToHaveTextAsync("1 contact");
-            await Assertions.Expect(contacts.Locator(".tl-sub")).ToHaveCountAsync(0);
+            await Assertions.Expect(contacts.Locator(".tl-sub")).ToHaveTextAsync("1 birthday in 30 days");
+            // It fits a medium tile, the German one with a two-digit count too.
+            var cut = await contacts.Locator(".tl-sub").EvaluateAsync<string>(@"el => {
+                const fits = () => el.scrollWidth <= el.clientWidth, en = el.textContent;
+                const out = [fits() ? '' : en];
+                el.textContent = '12 Geburtstage in 30 Tagen'; if (!fits()) out.push(el.textContent);
+                el.textContent = en; return out.join(' ').trim(); }");
+            Assert.True(cut == "", $"the birthday line is cut off on a medium tile: {cut}");
             await Assertions.Expect(contacts.Locator(".tl-items li")).ToHaveCountAsync(1);
             await Assertions.Expect(contacts.Locator(".tl-text")).ToHaveTextAsync("Live Birthday" + seed.Tag);
             await Assertions.Expect(contacts.Locator(".tl-tail")).ToHaveTextAsync("in 3 days");
 
-            // Files (medium): the size, of the quota, with the kit's bar. Messages: the unread count.
+            // Files (medium): the size, of the quota — in words only, no storage bar. Messages: the unread count.
             var files = Live(page, "builtin:files");
             await Assertions.Expect(files.Locator(".tl-main")).ToHaveTextAsync(new Regex(@"^[\d.,]+ (B|KB|MB|GB) of [\d.,]+ (GB|TB)$"));
-            await Assertions.Expect(files.Locator("sac-progress")).ToHaveCountAsync(1);
-            // The bar runs under the icon row at the tile's full content width.
-            var bar = (await files.Locator("sac-progress").BoundingBoxAsync())!;
-            var filesTile = (await Tile(page, "builtin:files").BoundingBoxAsync())!;
-            Assert.True(bar.Width > filesTile.Width - 90, $"bar {bar.Width}px in a {filesTile.Width}px tile");
+            await Assertions.Expect(Tile(page, "builtin:files").Locator("sac-progress")).ToHaveCountAsync(0);
             var messages = Live(page, "builtin:messages");
             await Assertions.Expect(messages.Locator(".tl-main")).ToHaveTextAsync(new Regex(@"^(\d+ unread|No new messages)$"));
 
-            // No big numbers; every status sits on its icon's centre line.
-            await Assertions.Expect(page.Locator("fb-hub-view .tl-big, fb-hub-view .tl-head")).ToHaveCountAsync(0);
-            foreach (var key in Keys) await AssertStatusOnIconCentreAsync(Tile(page, key));
+            // No big numbers; every tile has the header — the name beside the icon, the status under it.
+            await Assertions.Expect(page.Locator("fb-hub-view .tl-big")).ToHaveCountAsync(0);
+            foreach (var (key, name) in new[] { ("builtin:notes", "Notes"), ("builtin:todos", "Todos"), ("builtin:calendar", "Calendar"),
+                ("builtin:contacts", "Contacts"), ("builtin:files", "Files"), ("builtin:messages", "Messages") })
+                await AssertHeaderAsync(Tile(page, key), name);
+            // Every band is as tall, with one status line or two: the lists start at one height.
+            var starts = new List<double>();
+            foreach (var key in new[] { "builtin:notes", "builtin:todos", "builtin:calendar", "builtin:contacts" })
+                starts.Add(await Tile(page, key).EvaluateAsync<double>(
+                    "el => el.querySelector('.tl-items, .tl-empty').getBoundingClientRect().top - el.getBoundingClientRect().top"));
+            Assert.True(starts.Max() - starts.Min() < 1.5, $"lists start at {string.Join(", ", starts)}");
+            // "+" (a new item) in the header of Notes, Todos, Calendar and Contacts — not Files or Messages.
+            foreach (var key in new[] { "builtin:notes", "builtin:todos", "builtin:calendar", "builtin:contacts" })
+                await Assertions.Expect(Tile(page, key).Locator(":scope > .tl-new")).ToBeVisibleAsync();
+            foreach (var key in new[] { "builtin:files", "builtin:messages" })
+                await Assertions.Expect(Tile(page, key).Locator(".tl-new")).ToHaveCountAsync(0);
 
             // A live tile has no description, but keeps its name.
             await Assertions.Expect(Tile(page, "builtin:todos").Locator("p")).ToHaveCountAsync(0);
@@ -335,6 +356,36 @@ public class DesktopLiveTilesTests
                 var overflow = await page.EvaluateAsync<int>("() => document.documentElement.scrollWidth - document.documentElement.clientWidth");
                 Assert.Equal(0, overflow);
             }
+            Assert.Empty(errors);
+        }
+        finally
+        {
+            await context.CloseAsync();
+        }
+    }
+
+    [Fact]
+    public async Task LiveTiles_NewButton_OpensTheAppOnANewItem_Test()
+    {
+        var (context, page, errors) = await OpenAsync();
+        try
+        {
+            var slug = await CreateSpaceAsync(page, Guid.NewGuid().ToString("N")[..6]);
+            await page.GotoAsync($"{_fixture.BaseUrl}/#/space/{slug}/");
+            var add = Tile(page, "builtin:contacts").Locator(":scope > .tl-new");
+            await Assertions.Expect(add).ToBeVisibleAsync(new() { Timeout = 10000 });
+            await Assertions.Expect(add).ToHaveAttributeAsync("title", "New contact");
+            await add.ClickAsync();
+            await page.WaitForURLAsync(new Regex($"#/space/{slug}/contacts$"));
+            // The Contacts app made a person — in the workspace of the desktop.
+            var made = 0;
+            for (var i = 0; i < 50 && made == 0; i++)
+            {
+                if (i > 0) await page.WaitForTimeoutAsync(100);
+                var list = await (await page.APIRequest.GetAsync($"{_fixture.BaseUrl}/api/v1/spaces/{slug}/contacts")).JsonAsync();
+                made = list!.Value.GetArrayLength();
+            }
+            Assert.Equal(1, made);
             Assert.Empty(errors);
         }
         finally
@@ -450,7 +501,7 @@ public class DesktopLiveTilesTests
     }
 
     [Fact]
-    public async Task LiveTiles_ListRunsToTheBottomAndFades_NameIsALabel_Test()
+    public async Task LiveTiles_ListRunsToTheBottomAndFades_Test()
     {
         var (context, page, errors) = await OpenAsync();
         try
@@ -474,39 +525,26 @@ public class DesktopLiveTilesTests
             await Assertions.Expect(Live(page, "builtin:todos").Locator(".tl-items li").First).ToBeVisibleAsync();
             await Assertions.Expect(Live(page, "builtin:calendar").Locator(".tl-items li").First).ToBeVisibleAsync();
 
-            // Medium, large, wide: the list runs down to the bottom edge and fades, the
-            // name is the label; enough rows are there for a large tile to be full.
+            // Medium, large, wide: the list runs down to the bottom edge and fades;
+            // enough rows are there for a large tile to be full.
             foreach (var key in new[] { "builtin:notes", "builtin:todos", "builtin:calendar" })
             {
                 await AssertFitsAsync(Tile(page, key));
-                await AssertFadeAndLabelAsync(Tile(page, key));
+                await AssertFadeAsync(Tile(page, key));
             }
             Assert.True(await Live(page, "builtin:todos").Locator(".tl-items li").CountAsync() >= 20, "a large tile has rows enough to be full");
 
-            // The name is still the link's name, and a label like that is for live tiles only.
+            // The name is still the link's name.
             await Assertions.Expect(Tile(page, "builtin:todos").Locator("h2")).ToHaveTextAsync("Todos");
             await Assertions.Expect(Tile(page, "builtin:todos")).ToHaveAttributeAsync("href", new Regex("#/space/.*/todos"));
 
-            // Wide: the list starts at the top of the content, beside the icon and its
-            // status; the name label is bottom RIGHT, under the list's end.
-            var calendarTile = Tile(page, "builtin:calendar");
-            var head = (await calendarTile.Locator(".tl-status").BoundingBoxAsync())!;
-            var icon = (await calendarTile.Locator(":scope > sac-icon").BoundingBoxAsync())!;
-            var list = (await calendarTile.Locator(".tl-items").BoundingBoxAsync())!;
-            var name = (await calendarTile.Locator("h2").BoundingBoxAsync())!;
-            Assert.True(Math.Abs(list.Y - icon.Y) < 6, $"icon at {icon.Y}, list at {list.Y}");
-            Assert.True(list.X >= head.X + head.Width, "the list is right of the status");
-            Assert.True(name.X > list.X, "the name is in the right column");
-
-            // The status sits beside the icon on its centre line; the list starts a
-            // little under the icon row (medium and large).
-            foreach (var key in new[] { "builtin:notes", "builtin:todos", "builtin:calendar" })
-                await AssertStatusOnIconCentreAsync(Tile(page, key));
-            foreach (var key in new[] { "builtin:notes", "builtin:todos" })
+            // Every footprint has the header band on top and the list under it (wide too).
+            foreach (var (key, name) in new[] { ("builtin:notes", "Notes"), ("builtin:todos", "Todos"), ("builtin:calendar", "Calendar") })
             {
+                await AssertHeaderAsync(Tile(page, key), name);
                 var gap = await Tile(page, key).EvaluateAsync<double>(
                     "el => el.querySelector('.tl-items').getBoundingClientRect().top - el.querySelector(':scope > sac-icon').getBoundingClientRect().bottom");
-                Assert.InRange(gap, 8, 32);
+                Assert.InRange(gap, 16, 48);
             }
 
             // The window changes: still filled and faded at every width...
@@ -515,10 +553,10 @@ public class DesktopLiveTilesTests
                 await page.SetViewportSizeAsync(width, 900);
                 await page.WaitForTimeoutAsync(400);
                 foreach (var key in Keys) await AssertFitsAsync(Tile(page, key));
-                await AssertFadeAndLabelAsync(Tile(page, "builtin:notes"));
+                await AssertFadeAsync(Tile(page, "builtin:notes"));
             }
             // ...and a one-column card (as tall as its content: no fill, no fade) shows
-            // one row, its label in the padding; back at full width it fills again.
+            // one row; back at full width it fills again.
             await page.SetViewportSizeAsync(520, 900);
             await page.WaitForTimeoutAsync(400);
             var card = Tile(page, "builtin:notes");
@@ -693,10 +731,14 @@ public class DesktopLiveTilesTests
             await Assertions.Expect(notes.Locator(".tl-sub")).ToHaveCountAsync(0);
             await Assertions.Expect(notes.Locator(".tl-empty")).ToHaveCountAsync(0);
             await Assertions.Expect(notes.Locator(".tl-items")).ToHaveCountAsync(0);
+            // Contacts too: "0 contacts", no birthday line under it.
+            var contacts = Live(page, "builtin:contacts");
+            await Assertions.Expect(contacts.Locator(".tl-main")).ToHaveTextAsync("0 contacts");
+            await Assertions.Expect(contacts.Locator(".tl-sub")).ToHaveCountAsync(0);
+            await Assertions.Expect(contacts.Locator(".tl-empty")).ToHaveCountAsync(0);
             // The others keep their line.
             await Assertions.Expect(Live(page, "builtin:todos").Locator(".tl-empty")).ToHaveTextAsync("All done");
             await Assertions.Expect(Live(page, "builtin:calendar").Locator(".tl-empty")).ToHaveTextAsync("Nothing planned");
-            await Assertions.Expect(Live(page, "builtin:contacts").Locator(".tl-empty")).ToHaveTextAsync("No birthdays in the next 30 days");
             foreach (var key in new[] { "builtin:notes", "builtin:todos", "builtin:calendar", "builtin:contacts" })
                 await AssertFitsAsync(Tile(page, key));
             Assert.Empty(errors);

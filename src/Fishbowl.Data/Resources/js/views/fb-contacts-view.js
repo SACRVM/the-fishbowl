@@ -33,9 +33,14 @@ class FbContactsView extends HTMLElement {
         await this.load();
         if (!this.isConnected) return;
         this.paintToolbar();
+        // "New contact" from the palette or the desktop tile (fb.desktop.go).
+        this._onIntent = () => { if (fb.desktop?.takeIntent("contacts")?.action === "create" && this.writable) this.create("person"); };
+        window.addEventListener("fb:intent", this._onIntent);
+        this._onIntent();
     }
 
     disconnectedCallback() {
+        if (this._onIntent) window.removeEventListener("fb:intent", this._onIntent);
         this.flush();
         if (window.fb?.toolbar) fb.toolbar.clear();
     }
@@ -147,7 +152,7 @@ class FbContactsView extends HTMLElement {
                 </aside>
                 <main class="cv-editor-pane" slot="end">
                     <div class="empty-state cv-empty" id="cv-empty">
-                        <sac-icon name="contact"></sac-icon>
+                        <sac-icon name="contacts"></sac-icon>
                         <h3>${t("none-open", "No contact open")}</h3>
                     </div>
                     <div class="cv-editor" id="cv-editor" hidden></div>
@@ -560,4 +565,4 @@ class FbContactsView extends HTMLElement {
 }
 
 customElements.define("fb-contacts-view", FbContactsView);
-sac.router.register("#/contacts", "fb-contacts-view", { label: "Contacts", icon: "contact", palette: false });
+sac.router.register("#/contacts", "fb-contacts-view", { label: "Contacts", icon: "contacts", palette: false });

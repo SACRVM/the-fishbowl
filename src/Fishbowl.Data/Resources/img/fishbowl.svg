@@ -1,0 +1,46 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" width="120" height="120">
+  <title>The Fishbowl</title>
+  <defs>
+    <radialGradient id="fbw-water" cx="45%" cy="30%" r="80%">
+      <stop offset="0%" stop-color="#7dd3fc" stop-opacity="0.75"/>
+      <stop offset="60%" stop-color="#2563eb" stop-opacity="0.85"/>
+      <stop offset="100%" stop-color="#1e3a8a" stop-opacity="0.95"/>
+    </radialGradient>
+    <radialGradient id="fbw-glass" cx="32%" cy="30%" r="85%">
+      <stop offset="0%" stop-color="#fff" stop-opacity="0.30"/>
+      <stop offset="50%" stop-color="#fff" stop-opacity="0.04"/>
+      <stop offset="100%" stop-color="#fff" stop-opacity="0.14"/>
+    </radialGradient>
+    <linearGradient id="fbw-fish" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#fb923c"/>
+      <stop offset="100%" stop-color="#ea580c"/>
+    </linearGradient>
+    <clipPath id="fbw-body"><path d="M29 26 A48 48 0 0 0 36 106 L84 106 A48 48 0 0 0 91 26 Z"/></clipPath>
+  </defs>
+  <ellipse cx="60" cy="110" rx="29" ry="3.2" fill="#000" opacity="0.35"/>
+  <g clip-path="url(#fbw-body)">
+    <rect x="0" y="42" width="120" height="74" fill="url(#fbw-water)"/>
+    <ellipse cx="60" cy="42" rx="45" ry="4.2" fill="#bae6fd" opacity="0.45"/>
+    <ellipse cx="45" cy="104" rx="6" ry="3.5" fill="#94a3b8"/>
+    <ellipse cx="56" cy="106" rx="5" ry="3" fill="#cbd5e1"/>
+    <ellipse cx="69" cy="104.5" rx="6.5" ry="3.5" fill="#64748b"/>
+    <ellipse cx="80" cy="106" rx="4.5" ry="2.8" fill="#a8b5c7"/>
+    <g transform="translate(56 70) scale(1.08)">
+      <path d="M13 0 C21 -12 32 -11 30 -4 C29 -1 26 0 30 3 C33 10 21 13 13 0 Z" fill="#fdba74" opacity="0.95"/>
+      <path d="M-6 -9 Q1 -18 8 -9 Z" fill="#fdba74"/>
+      <ellipse cx="0" cy="0" rx="15" ry="10" fill="url(#fbw-fish)"/>
+      <path d="M-1 5 Q3 13 9 7 Z" fill="#fdba74"/>
+      <circle cx="-8" cy="-2" r="1.9" fill="#0b0f1a"/>
+      <circle cx="-8.6" cy="-2.6" r="0.6" fill="#fff"/>
+      <ellipse cx="-3" cy="-5" rx="6" ry="1.6" fill="#fff" opacity="0.45"/>
+    </g>
+    <circle cx="35" cy="60" r="2.4" fill="#fff" opacity="0.55"/>
+    <circle cx="31" cy="52" r="1.6" fill="#fff" opacity="0.5"/>
+  </g>
+  <path d="M29 26 A48 48 0 0 0 36 106 L84 106 A48 48 0 0 0 91 26" fill="none" stroke="#0f172a" stroke-opacity="0.45" stroke-width="3.4" stroke-linejoin="round"/>
+  <path d="M29 26 A48 48 0 0 0 36 106 L84 106 A48 48 0 0 0 91 26" fill="url(#fbw-glass)" stroke="#fff" stroke-opacity="0.6" stroke-width="1.8" stroke-linejoin="round"/>
+  <path d="M20 62 Q20 40 36 31" fill="none" stroke="#fff" stroke-opacity="0.55" stroke-width="3" stroke-linecap="round"/>
+  <ellipse cx="60" cy="25" rx="36" ry="6" fill="none" stroke="#0f172a" stroke-opacity="0.45" stroke-width="4.2"/>
+  <ellipse cx="60" cy="25" rx="36" ry="6" fill="#0b1324" fill-opacity="0.45" stroke="#fff" stroke-opacity="0.75" stroke-width="2.4"/>
+  <path d="M27 27.5 Q60 36 93 27.5" fill="none" stroke="#fff" stroke-opacity="0.35" stroke-width="1.2"/>
+</svg>

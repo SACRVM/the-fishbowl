@@ -5,13 +5,17 @@
     <!-- viewport-fit=cover: the kit pads the nav and scroll regions by the
          safe-area insets, so nothing ends up behind a notch or home bar. -->
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-    <meta name="theme-color" content="#0b0f1a">
+    <meta name="theme-color" content="#0b0f1a" media="(prefers-color-scheme: dark)">
+    <meta name="theme-color" content="#eef2f7" media="(prefers-color-scheme: light)">
     <title>The Fishbowl</title>
+    <link rel="icon" type="image/svg+xml" href="/img/fishbowl.svg">
     <!-- app.css first: Fishbowl's own tokens (tag palette, vault) and the
          legacy view styles. The vendored kit's ui.css loads after it and wins
          wherever both define the same rule. -->
     <link rel="stylesheet" href="/css/app.css">
     <link rel="stylesheet" href="/kit/css/ui.css">
+    <!-- Not deferred: the stored light/auto theme before the first paint. -->
+    <script src="/js/lib/theme.js"></script>
 </head>
 <body>
     <!-- lib (load order matters: fb globals → kit lib → fb lib, then
@@ -30,6 +34,7 @@
     <script defer src="/kit/js/lib/router.js"></script>
     <script defer src="/kit/js/lib/scope.js"></script>
     <script defer src="/kit/js/lib/dialog.js"></script>
+    <script defer src="/kit/js/lib/about.js"></script>
     <script defer src="/kit/js/lib/sortable.js"></script>
     <script defer src="/kit/js/lib/hotkeys.js"></script>
     <script defer src="/kit/js/lib/pan-zoom.js"></script>
@@ -51,6 +56,7 @@
     <script defer src="/js/lib/tag-manager.js"></script>
     <script defer src="/js/lib/space-members.js"></script>
     <script defer src="/js/lib/your-data.js"></script>
+    <script defer src="/js/lib/about.js"></script>
     <script defer src="/js/lib/window-apps.js"></script>
     <script defer src="/js/lib/access.js"></script>
     <script defer src="/js/lib/table-grid.js"></script>

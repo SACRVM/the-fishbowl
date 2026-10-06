@@ -183,6 +183,47 @@ public class FilesTests
     }
 
     [Fact]
+    public async Task Files_ParentRow_CursorAndEnterGoUp_Test()
+    {
+        var (context, page, errors) = await OpenAsync();
+        try
+        {
+            var folder = Unique("up-");
+            await PutAsync(page, $"{folder}/inner/a.txt", "a");
+            await page.GotoAsync($"{_fixture.BaseUrl}/#/files/{folder}/inner");
+            await Assertions.Expect(Row(page, "left", "a.txt")).ToHaveCountAsync(1, new() { Timeout = 10000 });
+
+            // The ribbon names the app below its prefix route too.
+            await Assertions.Expect(page.Locator("#fb-nav .brand .app-name")).ToHaveTextAsync("FILES");
+
+            // Below the root, the first row is "..".
+            var parent = Pane(page, "left").Locator("sac-file-browser").Locator(".canvas > .row[part~='parent']");
+            await Assertions.Expect(parent).ToHaveCountAsync(1);
+            await Assertions.Expect(parent).ToContainTextAsync("..");
+            Assert.Equal("parent", (await Rows(page, "left").First.GetAttributeAsync("part"))!.Split(' ')[1]);
+
+            // Cursor onto it, Enter: one folder up, the cursor on the folder just left.
+            await FocusRowAsync(page, "left", "a.txt");
+            await page.Keyboard.PressAsync("Home");
+            await page.Keyboard.PressAsync("Enter");
+            await Assertions.Expect(page).ToHaveURLAsync(new System.Text.RegularExpressions.Regex($"#/files/{folder}$"), new() { Timeout = 10000 });
+            await Assertions.Expect(Row(page, "left", "inner")).ToHaveAttributeAsync("part", new System.Text.RegularExpressions.Regex(@"\bcursor\b"));
+
+            // Once more to the root, which has no "..".
+            await page.Keyboard.PressAsync("Home");
+            await page.Keyboard.PressAsync("Enter");
+            await Assertions.Expect(page).ToHaveURLAsync(new System.Text.RegularExpressions.Regex(@"#/files/?$"), new() { Timeout = 10000 });
+            await Assertions.Expect(Row(page, "left", folder)).ToHaveCountAsync(1, new() { Timeout = 10000 });
+            await Assertions.Expect(parent).ToHaveCountAsync(0);
+            Assert.Empty(errors);
+        }
+        finally
+        {
+            await context.CloseAsync();
+        }
+    }
+
+    [Fact]
     public async Task Files_CopyAndMoveToOtherPane_AcrossWorkspaces_WithClash_Test()
     {
         var (context, page, errors) = await OpenAsync();
@@ -354,9 +395,11 @@ public class FilesTests
             await Assertions.Expect(Status(page, "right")).ToContainTextAsync("notes.txt");
             await page.ScreenshotAsync(new PageScreenshotOptions { Path = Path.Combine(Path.GetTempPath(), "fishbowl_ui_files_properties.png") });
 
-            // A folder (a click would open it — walk there with the keys):
-            // its item count comes from one listing.
+            // A folder (a click would open it — walk there with the keys; Home is
+            // the ".." row, nothing to describe): its item count comes from one listing.
             await page.Keyboard.PressAsync("Home");
+            await Assertions.Expect(Status(page, "right")).ToContainTextAsync("Nothing selected");
+            await page.Keyboard.PressAsync("ArrowDown");
             await Assertions.Expect(props.Locator("h3")).ToHaveTextAsync("sub", new() { Timeout = 10000 });
             await Assertions.Expect(props).ToContainTextAsync("0 folders, 1 file", new() { Timeout = 10000 });
 

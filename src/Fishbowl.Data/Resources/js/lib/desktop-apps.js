@@ -179,6 +179,20 @@
             .catch(() => { /* the store is best effort */ });
     }
 
+    // What goes wrong inside a running app's frame (kit ≥ 2.26, sac:app-error
+    // on document): a mount that throws didn't start ("load"); an uncaught
+    // error, a rejection or a failing unmount is "runtime". Only a space app's
+    // reach the store (report() checks) — an installed app isn't the space's code.
+    document.addEventListener("sac:app-error", (e) => {
+        const d = e.detail || {};
+        const app = byId(d.appId);
+        if (!app) return;
+        const at = d.source ? ` (${d.source}${d.line ? `:${d.line}${d.column ? `:${d.column}` : ""}` : ""})` : "";
+        const what = d.kind === "rejection" ? "Unhandled rejection: " : d.kind === "unmount" ? "unmount: " : "";
+        report(app, d.kind === "mount" ? "load" : "runtime", `${what}${d.message || "Script error."}${at}`,
+            typeof d.stack === "string" ? d.stack : null);
+    });
+
     function spaceError(err) {
         let body = null;
         try { body = typeof err?.body === "string" ? JSON.parse(err.body) : err?.body; } catch { /* plain text */ }

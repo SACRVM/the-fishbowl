@@ -39,20 +39,21 @@
     fb.toolbar._nav.renderToolbar();
 
     // --- Which app you are in ---------------------------------------------
-    // The ribbon names the active page after the brand (the kit's app-name,
-    // accent — like SACRVM Desktop's "SACRVM DESKTOP  COLOR BUCKET"); on
-    // compact it shows one name, the page's label. The hub keeps the brand.
+    // The ribbon names the active page after the brand — the kit's app-icon
+    // and app-name, in accent, like SACRVM Desktop's "SACRVM DESKTOP  COLOR
+    // BUCKET"; a phone's ribbon shows that icon and name. The hub keeps the
+    // brand.
     function syncTitle() {
         const current = sac.router.currentResource();
-        const route = sac.router.routes().find((r) => r.hash === current);
-        // app-name first: the kit observes only compact-title, whose change
-        // repaints the ribbon with both.
+        // A prefix route (Files, Tables) names every address below it too.
+        const route = sac.router.routes().find((r) => r.hash === current || (r.prefix && current.startsWith(r.hash + "/")));
         if (route && current !== "#/") {
             nav.setAttribute("app-name", route.label.toUpperCase());
-            nav.setAttribute("compact-title", route.label);
+            if (route.icon) nav.setAttribute("app-icon", route.icon);
+            else nav.removeAttribute("app-icon");
         } else {
             nav.removeAttribute("app-name");
-            nav.removeAttribute("compact-title");
+            nav.removeAttribute("app-icon");
         }
     }
     window.addEventListener("hashchange", syncTitle);
@@ -307,7 +308,39 @@
             // Cancelling the dialog is a normal answer, not an error.
             fb.vault?.ensureUnlocked().catch(() => {});
         }
+        if (e.detail.action?.startsWith("theme:")) setTheme(e.detail.action.slice(6));
     });
+
+    // Light / dark: the kit's flag (sac.apps.theme — <html data-theme> plus
+    // localStorage "sac-theme", per browser; theme.js applies it before the
+    // first paint). Three items in their own group above "Log out"; kit menus
+    // force item colours, so the current one wears a check instead of its icon.
+    const THEMES = [
+        ["dark", "fb-theme-dark", "fb.shell.theme-dark", "Dark"],
+        ["light", "fb-theme-light", "fb.shell.theme-light", "Light"],
+        ["auto", "fb-theme-auto", "fb.shell.theme-auto", "Like the system"],
+    ];
+    const themeItems = THEMES.map(([mode, icon, key, label]) => {
+        const b = document.createElement("button");
+        b.dataset.action = "theme:" + mode;
+        b.dataset.icon = icon;
+        b.innerHTML = `<sac-icon name="${icon}"></sac-icon> <span data-t="${key}">${label}</span>`;
+        fb.i18n.apply(b);
+        return b;
+    });
+    account.querySelector("hr")?.before(document.createElement("hr"), ...themeItems);
+    function syncThemeItems() {
+        const current = sac.apps?.theme?.get() ?? "dark";
+        for (const b of themeItems) {
+            const on = b.dataset.action === "theme:" + current;
+            b.querySelector("sac-icon").setAttribute("name", on ? "check" : b.dataset.icon);
+        }
+    }
+    function setTheme(mode) {
+        try { sac.apps?.theme?.set(mode); } catch (err) { /* storage refused: applies to this page only */ }
+        syncThemeItems();
+    }
+    syncThemeItems();
 
     // The vault pair: "Lock secrets" while unlocked, "Unlock secrets" while
     // locked, neither while there is no vault yet (nothing to unlock) or in a

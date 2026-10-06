@@ -48,9 +48,10 @@ public class I18nTests
             await Assertions.Expect(language).ToHaveValueAsync("auto");
             await language.SelectOptionAsync("de");
 
-            // The desktop remounts in German: tiles, the tagline.
+            // The desktop remounts in German: tiles, the cover's workspace name and label.
             await Assertions.Expect(page.Locator("fb-hub-view a.tile[data-key='builtin:notes'] h2")).ToHaveTextAsync("Notizen", new() { Timeout = 5000 });
-            await Assertions.Expect(page.Locator("fb-hub-view .intro-text")).ToHaveTextAsync("Dein Gedächtnis lebt hier. Du nicht.");
+            await Assertions.Expect(page.Locator("fb-hub-view .fb-cover .fc-name")).ToHaveTextAsync("Persönlich");
+            await Assertions.Expect(page.Locator("fb-hub-view .fb-cover")).ToHaveAttributeAsync("aria-label", "Über The Fishbowl");
             // The profile window re-rendered in German, the date format untouched.
             await Assertions.Expect(page.Locator("label[for='fb-language']")).ToHaveTextAsync("Sprache");
             await Assertions.Expect(page.Locator("#fb-date-format")).ToHaveValueAsync("iso");
@@ -166,6 +167,7 @@ public class I18nKeyTableTests
         "js/lib/desktop.js",
         "js/lib/desktop-apps.js",
         "js/lib/desktop-live.js",
+        "js/lib/about.js",
         "js/lib/accounts.js",
         "js/views/fb-hub-view.js",
         "js/views/fb-messages-view.js",

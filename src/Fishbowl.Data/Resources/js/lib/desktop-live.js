@@ -5,22 +5,23 @@
  * Secrets, Users, System, installed apps) stays a plain tile.
  *
  * One model for every provider, one renderer for all of them, so the live
- * tiles look alike — no big numbers; the status sits beside the tile's icon,
- * like a phone widget's header:
+ * tiles look alike — no big numbers. The tile's header (a darker band, drawn
+ * by fb-hub-view) holds the icon, the app's name as the heading and the
+ * status under it; the list follows on the tile's lighter ground:
  *
- *   { icon, main, sub, large, items: [{ lead, text, tail }], empty, bar }
+ *   { icon, main, sub, large, items: [{ lead, text, tail }], empty }
  *
  *   icon    a different icon name for the tile (Calendar: today's day number)
- *   main    status line 1 (--text, 1rem, 600) — "12 open", "3 notes"
+ *   main    status line 1, muted — "12 open", "3 notes"
  *   sub     status line 2, muted: a string, or a list of strings joined by
- *           " · ". Optional. (No colour appears on one tile only: every
- *           status and tail is muted, the leads are the accent.)
- *   large   line 1 as the clock (Calendar): 1.6rem, 700, tabular numbers
+ *           " · ". Optional — and what tells the list apart when line 1
+ *           doesn't ("1 birthday in 30 days"). (No colour appears on one
+ *           tile only: every status and tail is muted, the leads are the accent.)
+ *   large   line 1 is the clock (Calendar): tabular numbers
  *   items   rows (up to 30) — lead (accent, aligned), text (one line,
  *           ellipsised), tail (muted). Absent = the app has no list. The
  *           list runs to the tile's bottom edge and fades out there.
  *   empty   the line shown when `items` is an empty list
- *   bar     0…1, a thin <sac-progress> under the icon row, full width (Files)
  *
  * A provider is { load(ws) → data, present(data, now) → model, clock? }.
  * `load` is the only part that talks to the server (always the workspace the
@@ -290,12 +291,16 @@
                 next.sort((a, b) => a.diff - b.diff || a.name.localeCompare(b.name));
                 return {
                     main: count(contacts.length, "1 contact", "{n} contacts", "fb.desk.live.n-contacts"),
+                    // Line 2 says what the list is; no contacts, no line (and
+                    // no empty line: "0 contacts" says it).
+                    sub: !contacts.length ? ""
+                        : next.length ? count(next.length, "1 birthday in 30 days", "{n} birthdays in 30 days", "fb.desk.live.n-birthdays")
+                        : t("fb.desk.live.no-birthdays", "No birthdays in 30 days"),
                     items: next.slice(0, MAX_ITEMS).map((b) => ({
                         lead: fb.format.dayMonth(localDate(b.key)),
                         text: b.name,
                         tail: b.diff === 0 ? t("fb.desk.live.today", "today") : count(b.diff, "in 1 day", "in {n} days", "fb.desk.live.in-days"),
                     })),
-                    empty: t("fb.desk.live.no-birthdays", "No birthdays in the next 30 days"),
                 };
             },
         },
@@ -310,13 +315,11 @@
                 const used = Number(usage?.bytes) || 0;
                 const quota = Number(usage?.quotaBytes) || 0;
                 const size = fb.format.bytes(used);
-                const model = {
+                return {
                     main: quota > 0 ? `${size} ${t("fb.desk.live.of-quota", "of {quota}", { quota: fb.format.bytes(quota) })}` : size,
                     // The lead stays empty: the name and when, nothing else.
                     items: recent.slice(0, MAX_ITEMS).map((f) => ({ text: f.name, tail: dayAgo(f.at, now) })),
                 };
-                if (quota > 0) model.bar = Math.min(1, used / quota);
-                return model;
             },
         },
 
@@ -348,24 +351,16 @@
     };
 
     /** The `.tile-live` block for a model at a size ("medium" | "wide" | "large"):
-     *  the status (beside the tile's icon), the bar, the list. */
-    function render(model, size) {
+     *  the header beside the tile's icon (the app's name as the heading, the
+     *  status under it), then the list. */
+    function render(model, size, name) {
         const root = el("div", `tile-live live-${size}`);
 
         const status = el("div", "tl-status");
-        status.append(el("div", model.large ? "tl-main clock" : "tl-main", model.main));
+        status.append(el("h2", "", name), el("div", model.large ? "tl-main clock" : "tl-main", model.main));
         const sub = (Array.isArray(model.sub) ? model.sub : [model.sub]).filter(Boolean);
         if (sub.length) status.append(el("div", "tl-sub", sub.join(" · ")));
         root.append(status);
-
-        if (typeof model.bar === "number") {
-            const bar = document.createElement("sac-progress");
-            bar.className = "tl-bar";
-            bar.setAttribute("max", "1000");
-            bar.setAttribute("value", String(Math.round(model.bar * 1000)));
-            bar.setAttribute("aria-label", t("fb.data.storage-used", "Storage used"));
-            root.append(bar);
-        }
 
         if (Array.isArray(model.items)) {
             if (model.items.length) {

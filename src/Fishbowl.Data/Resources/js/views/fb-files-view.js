@@ -348,7 +348,7 @@
                 <div class="fv-filter" hidden>
                     <input type="search" placeholder="${t("fb.files.filter-placeholder", "Filter this folder")}" aria-label="${t("fb.files.filter-placeholder", "Filter this folder")}">
                 </div>
-                <sac-file-browser multiple no-thumbnails delete-button="hover" columns="size date" cursor-style="quiet" flush active="false">
+                <sac-file-browser multiple no-thumbnails parent-row delete-button="hover" columns="size date" cursor-style="quiet" flush active="false">
                     <sac-menu slot="title" class="fv-ws">
                         <button slot="trigger" class="fv-ws-btn" type="button" aria-label="${t("fb.files.workspace", "Workspace")}">
                             <sac-icon name="user"></sac-icon><span>${t("fb.files.personal", "Personal")}</span>
@@ -1148,6 +1148,7 @@
                 const picker = document.createElement("sac-file-browser");
                 picker.setAttribute("readonly", "");
                 picker.setAttribute("no-thumbnails", "");
+                picker.setAttribute("parent-row", "");
                 picker.setAttribute("columns", "");
                 const bindPicker = () => {
                     picker.setAttribute("root-label", this._label(select.value));

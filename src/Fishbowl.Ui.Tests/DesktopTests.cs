@@ -161,6 +161,20 @@ public class DesktopTests
             var small = (await Cell(page, "builtin:messages").BoundingBoxAsync())!;
             Assert.True(small.Width < medium.Width / 2 && small.Width > medium.Width / 3, $"small {small.Width} vs medium {medium.Width}");
             await Assertions.Expect(Cell(page, "builtin:messages").Locator("p").First).ToBeHiddenAsync();
+            // Its name under the icon (the kit's small tile hides it).
+            var label = Cell(page, "builtin:messages").Locator("h2");
+            await Assertions.Expect(label).ToHaveTextAsync("Messages");
+            await Assertions.Expect(label).ToBeVisibleAsync();
+            var labelBox = (await label.BoundingBoxAsync())!;
+            var iconBox = (await Cell(page, "builtin:messages").Locator(":scope > sac-icon").BoundingBoxAsync())!;
+            Assert.True(labelBox.Y >= iconBox.Y + iconBox.Height - 1, $"label at {labelBox.Y}, icon ends at {iconBox.Y + iconBox.Height}");
+            // Hover: the icon grows, it doesn't turn.
+            await Cell(page, "builtin:messages").HoverAsync();
+            await page.WaitForTimeoutAsync(600);
+            var matrix = await Cell(page, "builtin:messages").Locator(":scope > sac-icon").EvaluateAsync<string>("i => getComputedStyle(i).transform");
+            Assert.StartsWith("matrix(", matrix);
+            var m = matrix[7..^1].Split(',').Select(x => double.Parse(x.Trim(), System.Globalization.CultureInfo.InvariantCulture)).ToArray();
+            Assert.True(m[0] > 1.05 && Math.Abs(m[1]) < 0.001 && Math.Abs(m[2]) < 0.001, $"icon transform {matrix}");
 
             // Colour, from the menu's colour row.
             await OpenMenuAsync(page, "builtin:calendar");
