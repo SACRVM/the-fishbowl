@@ -52,7 +52,7 @@
  *       // lists them; what is actually handed over is the host's grant):
  *       permissions: { files: true, identity: true }, // beyond the always-on fs
  *       connect:     ["https://api.example.com"],     // https origins it talks to
- *       opens:       ["image/png", ".png"],           // "Open with…" metadata
+ *       opens:       ["image/png", "image/*", ".png"], // what it can open — see opening()
  *       isolated:    true,                    // optional — the app asks to be
  *                                             // sandboxed; can only RAISE isolation
  *   });
@@ -108,6 +108,12 @@
  *                        opts { route, accent }: what a launcher tile carries —
  *                        route opens a view at "#/<id>/<route>", accent seeds
  *                        the app's --accent (tile color = app highlight).
+ *                        opts.files: [FileRef] — "Open with": the app starts
+ *                        with these files (context.launch.files), or, already
+ *                        mounted, hears them via context.onLaunch. FileRefs of
+ *                        the host's files provider; only with a files grant
+ *                        (else the app gets none). An isolated app gets them
+ *                        like picked files: opaque handle ids.
  *                        kind:"page" navigates
  *                        (params appended) and the promise never resolves.
  *                        kind:"window" injects src once (keyed by src), awaits
@@ -148,6 +154,10 @@
  *                        the install record and hand it back on the next boot.
  *   policy(id)           → { isolated, granted } — what the host decided, or null
  *   frameOf(id)          → the <iframe> of an isolated app once created, or null
+ *   opening(file)        → manifest copies whose `opens` matches a file — a
+ *                        FileRef, a File, or { name, type }. An entry matches
+ *                        by exact MIME, "type/*", or ".ext" (case-insensitive)
+ *                        — so every host lists the same "Open with" choices.
  *
  * Isolation and grants (the host's decision — a manifest cannot make itself
  * trusted; its own `isolated: true` can only raise isolation):
@@ -303,6 +313,12 @@
  *                                  // in the DOM) and so never asks.
  *       close(),                   // sac.apps.close(<own id>) — a window closes,
  *                                  // a view goes home
+ *       launch: { files },         // "Open with": the FileRefs it was opened
+ *                                  // with (open(id, params, { files })) — read
+ *                                  // f.file, save back with files.save(blob,
+ *                                  // { handle: f.handle }). [] without a grant
+ *       onLaunch(cb),              // cb({ files }) when opened again with files
+ *                                  // while mounted. Returns an unsubscribe
  *       <name>: { <method>(…) },   // a host capability (grant.api) — async
  *       granted: {                 // what the host actually handed over —
  *           fs, files, identity,   // booleans (identity may also be
@@ -320,6 +336,14 @@
  *   <sac-launcher> refreshes on). The stage also emits "view" (id = the app now
  *   on stage) and "home" (id = null, back at "#/"), so a host can track which
  *   view is showing.
+ *   sac:app-error (on document, bubbles) — an app broke after it loaded.
+ *   detail { appId, kind, message, source?, line?, column?, stack? }; kind is
+ *   "mount" / "unmount" (the call threw — any app), or "error" / "rejection"
+ *   (an uncaught exception / unhandled rejection inside an isolated frame;
+ *   in-realm those are the page's own). Strings are capped (message 1000,
+ *   stack 4000) and each app may report 10 a second (burst 10) — a looping
+ *   error cannot flood the host. `source` is set only when it lies in the
+ *   app's own entry folder. Load failures still reject sac.apps.open().
  */
 (function () {
     if (!window.sac) { console.warn("[sac.apps] globals.js must load first — app runtime unavailable."); return; }
@@ -794,7 +818,50 @@
 
     /* ---------------------------------------------------------- context -- */
 
-    function makeContext(manifest, params) {
+    /* ---------------------------------------------------- open with --- */
+
+    const launchCbs = new Map();   // id → Set of onLaunch callbacks
+
+    /** The FileRefs an app may get: only with a files grant, only refs. */
+    function launchFiles(manifest, files) {
+        if (!Array.isArray(files) || !files.length) return [];
+        if (!grantedFor(manifest, policyOf(manifest.id)).files) return [];
+        return files.filter((f) => f && typeof f === "object" && f.file instanceof Blob)
+            .map((f) => ({ name: typeof f.name === "string" ? f.name : f.file.name || "", file: f.file, handle: f.handle == null ? null : f.handle }));
+    }
+
+    /** Files for an app that is already mounted: over the bridge, or to its
+     *  onLaunch callbacks. */
+    function deliverLaunch(id, rec, files) {
+        const manifest = registry.get(id);
+        const list = manifest ? launchFiles(manifest, files) : [];
+        if (!list.length) return;
+        if (rec && rec.bridge) { rec.bridge.launch(list); return; }
+        (launchCbs.get(id) || []).forEach((cb) => {
+            try { cb({ files: list.slice() }); }
+            catch (err) { console.error(`[sac.apps] ${id} onLaunch handler threw:`, err); }
+        });
+    }
+
+    /** "Open with": the registered apps whose `opens` matches a file. */
+    function openersOf(file) {
+        const f = file && typeof file === "object" ? file : {};
+        const blob = f.file instanceof Blob ? f.file : (f instanceof Blob ? f : null);
+        const name = String(f.name || (blob && blob.name) || "");
+        const type = String(f.type || (blob && blob.type) || "").toLowerCase();
+        const dot = name.lastIndexOf(".");
+        const ext = dot > 0 ? name.slice(dot).toLowerCase() : "";
+        const matches = (pat) => {
+            const p = pat.toLowerCase();
+            if (p.startsWith(".")) return !!ext && p === ext;
+            if (!type) return false;
+            if (p.endsWith("/*")) return type.startsWith(p.slice(0, -1));
+            return p === type;
+        };
+        return list().filter((m) => Array.isArray(m.opens) && m.opens.some(matches));
+    }
+
+    function makeContext(manifest, params, files) {
         const id = manifest.id;
         const pol = policyOf(id);
         const granted = grantedFor(manifest, pol);
@@ -831,6 +898,14 @@
             setDirty(flag) { setDirty(id, flag); },
             // Leave: a window closes, a view goes home.
             close() { close(id); },
+            // "Open with": the files it was opened with, and later ones.
+            launch: { files: launchFiles(manifest, files) },
+            onLaunch(cb) {
+                if (typeof cb !== "function") return () => {};
+                if (!launchCbs.has(id)) launchCbs.set(id, new Set());
+                launchCbs.get(id).add(cb);
+                return () => { const set = launchCbs.get(id); if (set) set.delete(cb); };
+            },
             // What the host actually handed over (vs. what the manifest asked).
             granted: Object.assign({}, granted, { connect: granted.connect.slice(), api: granted.api.slice() }),
             isolated: pol.isolated,
@@ -906,6 +981,30 @@
     }
 
     /* --------------------------------------------------------- registry -- */
+
+    /* An app's own failures after it loaded → sac:app-error. One bucket per
+       app (10/s), shared by in-realm catches and the isolated bridge. */
+    const errorBuckets = new Map();   // id → { tokens, at }
+    const cap = (v, n) => (typeof v === "string" ? v.slice(0, n) : undefined);
+
+    function reportError(id, kind, info) {
+        const now = performance.now();
+        const b = errorBuckets.get(id) || { tokens: 10, at: now };
+        b.tokens = Math.min(10, b.tokens + ((now - b.at) / 1000) * 10);
+        b.at = now;
+        errorBuckets.set(id, b);
+        if (b.tokens < 1) return;
+        b.tokens -= 1;
+        const i = info instanceof Error ? { message: info.message, stack: info.stack } : (info || {});
+        const detail = { appId: id, kind, message: cap(String(i.message || ""), 1000) };
+        const src = cap(i.source, 2000);
+        if (src) detail.source = src;
+        if (Number.isFinite(i.line)) detail.line = i.line;
+        if (Number.isFinite(i.column)) detail.column = i.column;
+        const stack = cap(i.stack, 4000);
+        if (stack) detail.stack = stack;
+        document.dispatchEvent(new CustomEvent("sac:app-error", { detail, bubbles: true }));
+    }
 
     function emitChanged(id, type) {
         document.dispatchEvent(new CustomEvent("sac:apps-changed", {
@@ -1078,19 +1177,23 @@
             if (manifest && rec.bridge) {
                 // Isolated: the host keeps this context and answers the
                 // frame's calls with it; the guest builds the same shape.
-                const ctx = makeContext(manifest, rec.params);
+                const ctx = makeContext(manifest, rec.params, rec.files);
                 rec.host = ctx.host;
                 rec.bridge.mount(ctx);
             } else if (manifest && typeof rec.el.mount === "function") {
-                const ctx = makeContext(manifest, rec.params);
+                const ctx = makeContext(manifest, rec.params, rec.files);
                 // Retain the injected host object so a later host re-declaration
                 // can mutate it in place — the app's nav holds it by reference
                 // (nav.host = context.host). Null when the host injected none.
                 rec.host = ctx.host;
                 try { rec.el.mount(ctx); }
-                catch (err) { console.error(`[sac.apps] ${id}.mount() threw:`, err); }
+                catch (err) {
+                    console.error(`[sac.apps] ${id}.mount() threw:`, err);
+                    reportError(id, "mount", err);
+                }
             }
             rec.params = null;
+            rec.files = null;
         }
 
         deliverRoute(id, route);
@@ -1108,7 +1211,7 @@
     }
 
     /** @returns Promise<HTMLElement> — the created element, on stage. */
-    function openView(manifest, route, params, accent) {
+    function openView(manifest, route, params, accent, files) {
         const id = manifest.id;
         if (views.has(id)) {
             // Re-seed on every reopen, not only when a tile passed one — else
@@ -1117,23 +1220,35 @@
             const seed = accent || manifest.accent;
             if (seed) views.get(id).el.style.setProperty("--accent", seed);
             else      views.get(id).el.style.removeProperty("--accent");
+            const rec = views.get(id);
+            // Not mounted yet: the files go into its first context.
+            const atMount = !!files && !rec.mounted;
+            if (atMount) rec.files = files;
             showView(id, route);
-            return Promise.resolve(views.get(id).el);
+            if (files && !atMount) deliverLaunch(id, rec, files);
+            return Promise.resolve(rec.el);
         }
         // Creation is async (the script has to arrive), and the trigger can
         // fire twice for one navigation — a hash-only history move fires
         // hashchange AND popstate. Without this the second call sails past
         // the views.has() check and builds a second, orphaned element.
         if (!viewOpening.has(id)) {
-            viewOpening.set(id, createView(manifest, route, params, accent)
+            viewOpening.set(id, createView(manifest, route, params, accent, files)
                 .finally(() => viewOpening.delete(id)));
+        } else if (files) {
+            // A second open while it loads: its files arrive after mount.
+            return viewOpening.get(id).then((el) => {
+                showView(id, route);
+                deliverLaunch(id, views.get(id), files);
+                return el;
+            });
         }
         return viewOpening.get(id).then((el) => { showView(id, route); return el; });
     }
 
-    async function createView(manifest, route, params, accent) {
+    async function createView(manifest, route, params, accent, files) {
         const id = manifest.id;
-        if (policyOf(id).isolated) return createFrameView(manifest, route, params, accent);
+        if (policyOf(id).isolated) return createFrameView(manifest, route, params, accent, files);
         try {
             await ensureDefined(manifest);
         } catch (err) {
@@ -1161,7 +1276,7 @@
         // showView() does the mounting, once it is visible.
         views.set(id, {
             el, route: route || "", routeCbs: new Set(),
-            mounted: false, params,
+            mounted: false, params, files,
         });
         host.appendChild(el);
         return el;
@@ -1170,7 +1285,7 @@
     /** An isolated view: a wrapper on the stage holding the app's frame. The
      *  wrapper plays the element's part (hidden / --accent / .sac-app-view);
      *  the frame must be in the document to load, so it goes in first. */
-    async function createFrameView(manifest, route, params, accent) {
+    async function createFrameView(manifest, route, params, accent, files) {
         const id = manifest.id;
         const host = viewHost || document.getElementById("app-root");
         if (!host) {
@@ -1200,7 +1315,7 @@
         }
         views.set(id, {
             el: wrap, route: route || "", routeCbs: new Set(),
-            mounted: false, params, bridge,
+            mounted: false, params, files, bridge,
         });
         return wrap;
     }
@@ -1247,6 +1362,7 @@
             frameUrl: sac.apps.frameUrl,
             limits:   sac.apps.limits,
             classify: classifyLoadFailure,
+            onError:  (kind, info) => reportError(manifest.id, kind, info),
             appError,
         });
         try {
@@ -1306,7 +1422,7 @@
                 window.history.pushState({}, document.title,
                     window.location.pathname + window.location.search + target);
             }
-            return openView(manifest, route, params, o.accent);
+            return openView(manifest, route, params, o.accent, o.files);
         }
 
         // kind:"window" (the default — legacy specs carry no kind field).
@@ -1321,10 +1437,11 @@
             else      existing.win.style.removeProperty("--accent");
             if (existing.win.hasAttribute("minimized")) existing.win.restore?.();
             existing.win.open();
+            if (o.files) deliverLaunch(id, existing, o.files);
             return existing.el;
         }
 
-        if (policyOf(id).isolated) return openFrameWindow(manifest, params, o.accent);
+        if (policyOf(id).isolated) return openFrameWindow(manifest, params, o.accent, o.files);
 
         try {
             await ensureDefined(manifest);
@@ -1344,8 +1461,11 @@
         // mount(context): exactly once per element lifetime, right after the
         // element lands in the document. Opt-in — apps without mount() work.
         if (typeof el.mount === "function") {
-            try { el.mount(makeContext(manifest, params)); }
-            catch (err) { console.error(`[sac.apps] ${id}.mount() threw:`, err); }
+            try { el.mount(makeContext(manifest, params, o.files)); }
+            catch (err) {
+                console.error(`[sac.apps] ${id}.mount() threw:`, err);
+                reportError(id, "mount", err);
+            }
         }
 
         // Defer open() so the CSS transition starts from the closed state.
@@ -1358,7 +1478,7 @@
     /** An isolated window: the frame goes into the (still closed) window
      *  first — it must be in the document to load — and the window opens
      *  once the app is defined inside it. Resolves to the <iframe>. */
-    async function openFrameWindow(manifest, params, accent) {
+    async function openFrameWindow(manifest, params, accent, files) {
         const id = manifest.id;
         const win = buildWindow(manifest, accent);
         document.body.appendChild(win);
@@ -1376,7 +1496,7 @@
             throw new Error(`[sac.apps] app removed while loading: ${id}`);
         }
         windows.set(id, { win, el: bridge.frame, bridge });
-        bridge.mount(makeContext(manifest, params));
+        bridge.mount(makeContext(manifest, params, files));
         setTimeout(() => win.open(), 0);
         return bridge.frame;
     }
@@ -1410,7 +1530,15 @@
 
     function open(id, params, opts) {
         // Collapse rapid double-opens into one window creation.
-        if (opening.has(id)) return opening.get(id);
+        if (opening.has(id)) {
+            const files = opts && opts.files;
+            // Collapsed into the open in flight — its files still arrive.
+            if (!files) return opening.get(id);
+            return opening.get(id).then((el) => {
+                deliverLaunch(id, windows.get(id) || views.get(id), files);
+                return el;
+            });
+        }
         const p = doOpen(id, params, opts);
         opening.set(id, p);
         p.finally(() => opening.delete(id)).catch(() => {});
@@ -1432,12 +1560,16 @@
     function unmountEl(id, el) {
         if (typeof el.unmount !== "function") return;
         try { el.unmount(); }
-        catch (err) { console.error(`[sac.apps] ${id}.unmount() threw:`, err); }
+        catch (err) {
+            console.error(`[sac.apps] ${id}.unmount() threw:`, err);
+            reportError(id, "unmount", err);
+        }
     }
 
     function remove(id) {
         registry.delete(id);
         policies.delete(id);
+        launchCbs.delete(id);
         setDirty(id, false);
         const rec = windows.get(id);
         if (rec) {
@@ -1685,6 +1817,7 @@
             return { isolated: pol.isolated, granted: grantedFor(m, pol) };
         },
         frameOf,
+        opening: openersOf,
         // Isolation settings (see the header): the harness a host serves
         // itself, the kit the frame loads, the bridge's limits.
         frameUrl: null,

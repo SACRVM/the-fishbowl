@@ -8,6 +8,11 @@
 (function () {
     if (!window.sac || !sac.i18n || typeof sac.i18n.add !== "function") return;
     sac.i18n.add("de", {
+        "about.copyright": "Copyright",
+        "about.license": "Lizenz",
+        "about.source": "Quellcode",
+        "about.tab-info": "Info",
+        "about.tab-oss": "Open Source",
         "about.this-app": "Diese App",
         "about.title": "Über {name}",
 
@@ -97,6 +102,7 @@
         "files.new-folder-name": "Ordnername",
         "files.open": "Öffnen",
         "files.open-title": "Öffnen",
+        "files.parent": "Übergeordneter Ordner",
         "files.rename-dot": "Ein Name darf nicht mit einem Punkt beginnen.",
         "files.rename-label": "Neuer Name",
         "files.rename-taken": "Dieser Name ist hier schon vergeben.",
@@ -250,6 +256,7 @@
         "select.placeholder": "Auswählen …",
 
         "shortcutbar.label": "Tastenkürzel",
+        "shortcutbar.more": "Mehr",
 
         "shortcuts.close": "Schließen",
         "shortcuts.empty": "Keine Tastenkürzel registriert.",
