@@ -164,8 +164,9 @@ public static class DesktopApi
             {
                 var files = http.RequestServices.GetRequiredService<IFileService>();
                 var appErrors = http.RequestServices.GetRequiredService<IAppErrorRepository>();
+                var appTiles = http.RequestServices.GetRequiredService<ISpaceAppTiles>();
                 foreach (var (m, changed) in await SpaceAppCatalog.ListAsync(files, t.Ctx, ct, appErrors))
-                    apps.Add(SpaceAppsApi.Dto(http, key, t.Ctx.Id, m, changed));
+                    apps.Add(SpaceAppsApi.Dto(http, key, t.Ctx.Id, m, changed, await appTiles.HasTileAsync(t.Ctx, m.Folder, ct)));
             }
             return Results.Ok(new
             {

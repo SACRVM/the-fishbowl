@@ -31,6 +31,13 @@
  * Dates are compared as date strings (YYYY-MM-DD) — a birthday or an all-day
  * event is the same day in every zone, never shifted through UTC.
  *
+ * Custom apps (key "app:<id>") use the same model: a space's own app shows
+ * what its .apps/<folder>/tile.js returned on the server (run as the viewer,
+ * read-only — `entry.app.tile` says it has one; fb.api.appTiles), else what
+ * the app last handed over while it ran (context.tile.set, fb.desktopApps —
+ * kept per browser and workspace in localStorage `fb.desk.app-tiles`). What
+ * an app hands over is cleaned here (text only, at most 30 rows).
+ *
  * Per-browser privacy switch: a tile's "Show content" (its "⋯" menu) is a list
  * of "<workspace>|<tile key>" in localStorage `fb.desk.quiet`. Switched off,
  * the tile is the plain tile and its provider isn't even asked.
@@ -403,6 +410,86 @@
         } catch { memoryQuiet = list; }
     }
 
+    // ------------------------------------------------------- custom apps
+
+    const APP_TILES_KEY = "fb.desk.app-tiles";
+    const MAX_APP_TILES = 100;
+    const TEXT = 200;
+
+    const textOf = (v) => {
+        if (typeof v === "number" || typeof v === "boolean") v = String(v);
+        if (typeof v !== "string") return null;
+        v = v.trim();
+        return v ? v.slice(0, TEXT) : null;
+    };
+
+    /** An app's tile model, as the built-ins' — anything else dropped. */
+    function cleanModel(m) {
+        if (!m || typeof m !== "object") return null;
+        const main = textOf(m.main);
+        const sub = Array.isArray(m.sub) ? m.sub.map(textOf).filter(Boolean).slice(0, 3) : textOf(m.sub);
+        const items = Array.isArray(m.items)
+            ? m.items.filter((i) => i && typeof i === "object")
+                .map((i) => ({ lead: textOf(i.lead) || "", text: textOf(i.text) || "", tail: textOf(i.tail) || "" }))
+                .filter((i) => i.text || i.lead)
+                .slice(0, MAX_ITEMS)
+            : undefined;
+        if (!main && !(Array.isArray(sub) ? sub.length : sub) && !items) return null;
+        return { main: main || "", sub: sub || "", items, empty: textOf(m.empty) || undefined };
+    }
+
+    let memoryAppTiles = null;   // when localStorage is blocked, this session only
+    function appTileStore() {
+        if (memoryAppTiles) return memoryAppTiles;
+        try {
+            const v = JSON.parse(localStorage.getItem(APP_TILES_KEY) || "{}");
+            return v && typeof v === "object" && !Array.isArray(v) ? v : {};
+        } catch { return {}; }
+    }
+    /** What an app handed over (context.tile.set) for workspace `ws`, or null. */
+    const pushedTile = (ws, key) => cleanModel(appTileStore()[quietId(ws, key)]?.model);
+    /** Keep (or, with null, forget) what an app handed over. */
+    function setPushedTile(ws, key, model) {
+        const all = appTileStore();
+        const id = quietId(ws, key);
+        const clean = model == null ? null : cleanModel(model);
+        if (clean) all[id] = { model: clean, at: Date.now() };
+        else delete all[id];
+        // The newest MAX_APP_TILES only.
+        const ids = Object.keys(all).sort((a, b) => (all[b].at || 0) - (all[a].at || 0));
+        for (const old of ids.slice(MAX_APP_TILES)) delete all[old];
+        try {
+            if (Object.keys(all).length) localStorage.setItem(APP_TILES_KEY, JSON.stringify(all));
+            else localStorage.removeItem(APP_TILES_KEY);
+            memoryAppTiles = null;
+        } catch { memoryAppTiles = all; }
+        return !!clean;
+    }
+
+    /** Can this tile show content? A built-in with a provider, or an app with
+     *  a tile.js or something it handed over in this workspace. */
+    function has(key, entry = null) {
+        if (providers[key]) return true;
+        if (!key.startsWith("app:")) return false;
+        return !!entry?.app?.tile || !!pushedTile(fb.api.workspace(), key);
+    }
+
+    /** The app tiles of `keys` for `ws`: the space's tile.js answers (one
+     *  request for all of them), else what each app handed over. */
+    async function loadApps(ws, keys, out) {
+        if (!keys.length) return;
+        let server = {};
+        if (ws.startsWith("space:") && keys.some((k) => k.startsWith("app:space."))) {
+            try { server = (await fb.api.appTiles(ws.slice("space:".length)))?.tiles || {}; }
+            catch (err) { console.warn("[fb.desktopLive] app tiles failed:", err?.status || err?.message || err); }
+        }
+        for (const k of keys) {
+            const folder = k.startsWith("app:space.") ? k.slice("app:space.".length) : null;
+            const model = (folder && cleanModel(server[folder])) || pushedTile(ws, k);
+            if (model) out.set(k, model);
+        }
+    }
+
     // ---------------------------------------------------------------- load
 
     // What the last desktop of each workspace loaded, so coming back to the
@@ -414,10 +501,13 @@
      *  Map of the ones that answered — a provider that fails is simply absent. */
     async function load(ws, keys) {
         const out = new Map();
-        await Promise.all(keys.filter((k) => providers[k]).map(async (k) => {
-            try { out.set(k, await providers[k].load(ws)); }
-            catch (err) { console.warn(`[fb.desktopLive] ${k} failed:`, err?.status || err?.message || err); }
-        }));
+        await Promise.all([
+            ...keys.filter((k) => providers[k]).map(async (k) => {
+                try { out.set(k, await providers[k].load(ws)); }
+                catch (err) { console.warn(`[fb.desktopLive] ${k} failed:`, err?.status || err?.message || err); }
+            }),
+            loadApps(ws, keys.filter((k) => !providers[k] && k.startsWith("app:")), out),
+        ]);
         const kept = cache.get(ws) || new Map();
         for (const k of keys) { if (out.has(k)) kept.set(k, out.get(k)); else kept.delete(k); }
         cache.set(ws, kept);
@@ -425,12 +515,14 @@
     }
 
     fb.desktopLive = {
-        has: (key) => !!providers[key],
+        has,
         /** Does this tile repaint every minute without a request? */
         clock: (key) => !!providers[key]?.clock,
         load,
         cached: (ws) => new Map(cache.get(ws) || []),
-        present: (key, data, now = new Date()) => providers[key].present(data, now),
+        // An app's data is its model already.
+        present: (key, data, now = new Date()) => providers[key] ? providers[key].present(data, now) : cleanModel(data),
+        setAppTile: setPushedTile,
         render,
         isQuiet,
         setQuiet,

@@ -126,7 +126,10 @@ class FbHubView extends HTMLElement {
         this._onUpdates = () => this._renderTiles();
         this._onVisible = () => { if (document.visibilityState === "visible") this._loadLive(); };
         this._onMessages = () => this._loadLive(["builtin:messages"]);
+        // An app handed over its tile (context.tile.set) for this workspace.
+        this._onAppTile = (e) => { if (e.detail?.ws === fb.api.workspace()) this._loadLive([e.detail.key]); };
         window.addEventListener("sac:scope-changed", this._onContext);
+        window.addEventListener("fb:app-tile", this._onAppTile);
         window.addEventListener("fb:apps-changed", this._onApps);
         window.addEventListener("fb:app-updates", this._onUpdates);
         window.addEventListener("fb:messages-changed", this._onMessages);
@@ -146,6 +149,7 @@ class FbHubView extends HTMLElement {
 
     disconnectedCallback() {
         window.removeEventListener("sac:scope-changed", this._onContext);
+        window.removeEventListener("fb:app-tile", this._onAppTile);
         window.removeEventListener("fb:apps-changed", this._onApps);
         window.removeEventListener("fb:app-updates", this._onUpdates);
         window.removeEventListener("fb:messages-changed", this._onMessages);
@@ -627,7 +631,7 @@ class FbHubView extends HTMLElement {
     /** Does this tile show its content? Medium and up, an app with a
      *  provider, not hidden, and not switched off in this browser. */
     _wantsLive(e) {
-        return !e.hidden && e.size !== "small" && fb.desktopLive.has(e.key)
+        return !e.hidden && e.size !== "small" && fb.desktopLive.has(e.key, e)
             && !fb.desktopLive.isQuiet(fb.api.workspace(), e.key);
     }
 
@@ -904,7 +908,7 @@ class FbHubView extends HTMLElement {
         // The per-browser privacy switch of a tile that can show content
         // (medium and up): ✓ while it does.
         const content = [];
-        if (e.size !== "small" && fb.desktopLive.has(e.key)) {
+        if (e.size !== "small" && fb.desktopLive.has(e.key, e)) {
             const b = document.createElement("button");
             b.dataset.action = "live:toggle";
             const on = !fb.desktopLive.isQuiet(fb.api.workspace(), e.key);

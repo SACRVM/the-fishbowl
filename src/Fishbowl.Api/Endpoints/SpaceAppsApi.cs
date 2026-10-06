@@ -62,6 +62,21 @@ public static class SpaceAppsApi
             .WithName("DeploySpaceApp")
             .WithSummary("Replaces .apps/<folder> with the files of a ZIP (the body). Designer; a key needs design:apps and write:files.");
 
+        // What the space's own apps show on their desktop tiles: each
+        // .apps/<folder>/tile.js, run as the caller and read-only (AppTiles,
+        // ISpaceAppTiles). The desktop's — cookie only, any member.
+        routes.MapGet("/api/v1/spaces/{slug}/apps/tiles", async (string slug, HttpContext http, ISpaceRepository spaces,
+            ISpaceAppTiles tiles, CancellationToken ct) =>
+        {
+            if (http.User.Identity?.AuthenticationType == McpContextClaims.BearerScheme) return Results.Forbid();
+            var resolved = await SpacesApi.ResolveSpaceAsync(slug, http.User, spaces, ct);
+            if (resolved.Error is not null) return resolved.Error;
+            var userId = http.User.FindFirst(McpContextClaims.UserId)!.Value;
+            var map = await tiles.RenderAsync(ContextRef.Space(resolved.Space!.Id), TablesApi.ActorFor(userId, resolved.Role!.Value), ct);
+            return Results.Ok(new { tiles = map });
+        }).RequireAuthorization()
+          .WithName("GetSpaceAppTiles").WithSummary("What each of the space's own apps shows on its desktop tile (its tile.js, run as the caller). Cookie only.");
+
         var g = routes.MapGroup("/api/v1/spaces/{slug}/apps/errors").RequireAuthorization();
         g.MapGet("/", async (string slug, string? app, int? limit, HttpContext http, ISpaceRepository spaces, IAppErrorRepository errors, CancellationToken ct) =>
         {
@@ -310,7 +325,7 @@ public static class SpaceAppsApi
 
     // The desktop's record of a space app — the install record's shape, so
     // tiles, the burger, the palette and the Apps window take it as is.
-    internal static object Dto(HttpContext http, byte[] key, string spaceId, SpaceAppManifest m, DateTime? changed) => new
+    internal static object Dto(HttpContext http, byte[] key, string spaceId, SpaceAppManifest m, DateTime? changed, bool tile = false) => new
     {
         id = SpaceApps.IdOf(m.Folder),
         manifest = new
@@ -330,6 +345,8 @@ public static class SpaceAppsApi
         folder = $"{AppsFolder.Name}/{m.Folder}",
         granted = Array.Empty<string>(),
         updatedAt = changed,
+        // A tile.js: the desktop asks /apps/tiles for what its tile shows.
+        tile,
     };
 
     private static async Task<IResult> CodeAsync(string spaceId, string folder, string sig, string? file,

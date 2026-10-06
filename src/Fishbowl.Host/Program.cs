@@ -179,6 +179,8 @@ builder.Services.AddScoped<ITrashRepository, TrashRepository>();
 builder.Services.AddScoped<Fishbowl.Data.Tables.TableRepository>();
 // Triggers (.apps/<app>/triggers/<table>.js) wrap every row write.
 builder.Services.AddScoped<ITableRepository, Fishbowl.Data.Tables.TriggeringTableRepository>();
+// A space app's tile.js (what its desktop tile shows), read-only.
+builder.Services.AddScoped<Fishbowl.Core.Desktop.ISpaceAppTiles, Fishbowl.Data.Tables.SpaceAppTiles>();
 builder.Services.AddScoped<IApiKeyRepository, ApiKeyRepository>();
 builder.Services.AddScoped<INotificationChannelRepository, NotificationChannelRepository>();
 builder.Services.AddScoped<IDiscordLinkRepository, DiscordLinkRepository>();

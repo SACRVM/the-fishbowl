@@ -242,7 +242,8 @@ public sealed class TriggeringTableRepository : ITableRepository
         return new TableException("trigger_failed", $"The trigger {s.Path} ({fn}) couldn't run: {why}", 400, new { app = s.App, trigger = fn });
     }
 
-    private static string? Limit(Exception ex) => ex switch
+    // Why a script stopped, when a sandbox limit stopped it (shared with tile.js).
+    internal static string? Limit(Exception ex) => ex switch
     {
         System.Text.RegularExpressions.RegexMatchTimeoutException => $"a regular expression ran longer than {TriggerSandbox.TimeLimit.TotalSeconds:0.#} s",
         TimeoutException => $"it ran longer than {TriggerSandbox.TimeLimit.TotalSeconds:0.#} s",
@@ -259,46 +260,11 @@ public sealed class TriggeringTableRepository : ITableRepository
 
     // ---------------------------------------------------------------- ctx --
 
-    private JsValue Ctx(Engine engine, Script s, ContextRef ctx, TableActor actor, string table)
-    {
-        var o = new JsObject(engine);
-        JsValue Json(object? v) => v is null ? JsValue.Null : ToJs(engine, System.Text.Json.JsonSerializer.SerializeToElement(v));
-        JsonElement Arg(JsValue v) => v.IsUndefined() || v.IsNull() ? JsonDocument.Parse("{}").RootElement.Clone() : ToJson(v);
-        string Str(JsValue v, string what) => v.IsString() ? v.AsString() : throw new JavaScriptException($"{what} must be a string");
-        void Fn(string name, Func<JsValue[], JsValue> body) =>
-            o.Set(name, new ClrFunction(engine, name, (_, args) => body(args)));
-        JsValue At(JsValue[] a, int i) => i < a.Length ? a[i] : JsValue.Undefined;
-        T Run<T>(Task<T> t) => t.GetAwaiter().GetResult();
-        void Wait(Task t) => t.GetAwaiter().GetResult();
-
-        var user = new JsObject(engine);
-        user.Set("id", actor.UserId);
-        user.Set("canWrite", actor.CanWrite);
-        user.Set("canDesign", actor.CanDesign);
-        o.Set("user", user);
-        o.Set("table", table);
-
-        Fn("get", a => Run(GetAsync(ctx, Str(At(a, 0), "table"), Str(At(a, 1), "id"))) is { } row ? ToJs(engine, row) : JsValue.Null);
-        Fn("query", a => Json(Run(QueryAsync(ctx, Str(At(a, 0), "table"), AppJsonParsers.ParseQuerySpec(Arg(At(a, 1)))))));
-        Fn("count", a =>
-        {
-            var where = At(a, 1);
-            var spec = where.IsUndefined() || where.IsNull() ? "{}" : $"{{\"where\":{ToJson(where).GetRawText()}}}";
-            using var doc = JsonDocument.Parse(spec);
-            return Run(CountAsync(ctx, Str(At(a, 0), "table"), AppJsonParsers.ParseQuerySpec(doc.RootElement)));
-        });
-        Fn("insert", a => ToJs(engine, Run(InsertAsync(ctx, actor, Str(At(a, 0), "table"), Arg(At(a, 1))))));
-        Fn("update", a => ToJs(engine, Run(UpdateAsync(ctx, actor, Str(At(a, 0), "table"), Str(At(a, 1), "id"), Arg(At(a, 2)), null))));
-        // A refusal (not_your_row, still_linked, a nested trigger's…) reaches
-        // the script's caller like every other ctx call's.
-        Fn("remove", a => { Wait(DeleteAsync(ctx, actor, Str(At(a, 0), "table"), Str(At(a, 1), "id"))); return JsValue.Undefined; });
-        Fn("log", a =>
-        {
-            Run(_errors.AddAsync(ctx, s.App, AppErrors.Trigger, At(a, 0).ToString(), null, actor.UserId).ContinueWith(_ => true));
-            return JsValue.Undefined;
-        });
-        return o;
-    }
+    private JsValue Ctx(Engine engine, Script s, ContextRef ctx, TableActor actor, string table) =>
+        ScriptCtx.Build(engine, this, ctx, actor,
+            // A log line that can't be stored never breaks the script.
+            message => _errors.AddAsync(ctx, s.App, AppErrors.Trigger, message, null, actor.UserId).ContinueWith(_ => true).GetAwaiter().GetResult(),
+            table, writes: true);
 
     // ------------------------------------------------------- pass-through --
 

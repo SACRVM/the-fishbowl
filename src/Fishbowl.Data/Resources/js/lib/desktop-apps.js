@@ -136,9 +136,32 @@
             ? { provider: () => sac.files.virtual({ store: fb.filesStore({ workspace: ws }), label: fb.t("fb.apps.picker-label", "Files") }) }
             : false;
         if (app.mode === "space") {
-            return { isolated: true, integrity: false, grant: { files: false, identity: false, connect: [], api: { space: spaceApi(ws, app) } } };
+            return { isolated: true, integrity: false, grant: { files: false, identity: false, connect: [], api: { space: spaceApi(ws, app), tile: tileApi(ws, app) } } };
         }
-        return { isolated: true, integrity: app.entryIntegrity, grant: { files, identity, connect } };
+        return { isolated: true, integrity: app.entryIntegrity, grant: { files, identity, connect, api: { tile: tileApi(ws, app) } } };
+    }
+
+    /**
+     * context.tile for every app: what its desktop tile shows — the built-in
+     * live tiles' model, { main, sub, items: [{ lead, text, tail }], empty }.
+     * Kept per browser for the workspace the app runs in (fb.desktopLive
+     * cleans it: text only, 30 rows); a space app's tile.js, when it has one,
+     * wins over it. clear() takes the tile back to plain.
+     */
+    function tileApi(ws, app) {
+        const key = `app:${app.id}`;
+        const changed = () => window.dispatchEvent(new CustomEvent("fb:app-tile", { detail: { ws, key } }));
+        return {
+            set: async (model) => {
+                if (!fb.desktopLive?.setAppTile(ws, key, model)) {
+                    const e = new Error("A tile needs main, sub or items (text).");
+                    e.code = "invalid-tile";
+                    throw e;
+                }
+                changed();
+            },
+            clear: async () => { fb.desktopLive?.setAppTile(ws, key, null); changed(); },
+        };
     }
 
     /** context.space for a space app: the space's data, refusals as { code, message }. */

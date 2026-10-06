@@ -275,6 +275,77 @@ public class AppsTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Apps_SpaceAppTiles_TileJsAndContextTileSet_Test()
+    {
+        var (context, page, errors) = await OpenAsync();
+        try
+        {
+            var res = await page.APIRequest.PostAsync($"{_fixture.BaseUrl}/api/v1/spaces", new() { DataObject = new { name = "Tiles " + Guid.NewGuid().ToString("N")[..6] } });
+            var slug = (await res.JsonAsync())!.Value.GetProperty("slug").GetString();
+            async Task Put(string path, string content)
+            {
+                var put = await page.APIRequest.PutAsync($"{_fixture.BaseUrl}/api/v1/spaces/{slug}/files/content?path={Uri.EscapeDataString(path)}&parents=1",
+                    new APIRequestContextOptions
+                    {
+                        Headers = new Dictionary<string, string> { ["X-Fishbowl-Upload"] = "1", ["If-None-Match"] = "*" },
+                        DataByte = System.Text.Encoding.UTF8.GetBytes(content),
+                    });
+                Assert.True(put.Ok, $"PUT {path}: {put.Status} {await put.TextAsync()}");
+            }
+            await page.APIRequest.PostAsync($"{_fixture.BaseUrl}/api/v1/spaces/{slug}/tables", new() { DataObject = new { name = "cards", columns = Array.Empty<object>() } });
+            foreach (var title in new[] { "Plan", "Ship" })
+                await page.APIRequest.PostAsync($"{_fixture.BaseUrl}/api/v1/spaces/{slug}/tables/cards/rows", new() { DataObject = new { title } });
+
+            // A tile.js: the server runs it, the tile starts medium and shows it.
+            await Put(".apps/kanban/app.json", "{\"name\":\"Kanban\",\"tag\":\"kanban-tile-app\",\"icon\":\"grid\"}");
+            await Put(".apps/kanban/app.js", "customElements.define('kanban-tile-app', class extends HTMLElement { mount() { this.textContent = 'kanban'; } });");
+            await Put(".apps/kanban/tile.js", """
+                function tile(ctx) {
+                  return { main: ctx.count('cards') + ' cards', items: ctx.query('cards', {}).map(c => ({ text: c.title })) };
+                }
+                """);
+            // No tile.js: the app hands its tile over while it runs.
+            await Put(".apps/pusher/app.json", "{\"name\":\"Pusher\",\"tag\":\"pusher-tile-app\"}");
+            await Put(".apps/pusher/app.js", """
+                customElements.define('pusher-tile-app', class extends HTMLElement {
+                  async mount(context) {
+                    await context.tile.set({ main: 'pushed main', items: [{ text: 'pushed row', tail: 'now' }] });
+                    this.innerHTML = '<p id=done>set</p>';
+                  }
+                });
+                """);
+            await page.APIRequest.PutAsync($"{_fixture.BaseUrl}/api/v1/spaces/{slug}/desktop/tiles/app:space.pusher",
+                new() { DataObject = new { position = (double?)null, size = "medium", color = (string?)null, hidden = false } });
+
+            await page.GotoAsync($"{_fixture.BaseUrl}/#/space/{slug}/");
+            var kanban = page.Locator("fb-hub-view a.tile[data-key='app:space.kanban']");
+            await Assertions.Expect(kanban.Locator(".tl-main")).ToHaveTextAsync("2 cards", new() { Timeout = 15000 });
+            await Assertions.Expect(kanban.Locator(".tl-status > h2")).ToHaveTextAsync("Kanban");
+            await Assertions.Expect(kanban.Locator(".tl-items li")).ToHaveCountAsync(2);
+            // Until arranged, the space's apps come right after the full-screen apps.
+            var order = await page.Locator("fb-hub-view a.tile[data-key]").EvaluateAllAsync<string[]>("els => els.map(e => e.dataset.key)");
+            Assert.True(Array.IndexOf(order, "app:space.kanban") < Array.IndexOf(order, "builtin:messages"), string.Join(", ", order));
+            Assert.True(Array.IndexOf(order, "app:space.kanban") > Array.IndexOf(order, "builtin:tables"), string.Join(", ", order));
+
+            // Plain until the app ran; then what it set, also after a reload.
+            var pusher = page.Locator("fb-hub-view a.tile[data-key='app:space.pusher']");
+            await Assertions.Expect(pusher.Locator(".tl-main")).ToHaveCountAsync(0);
+            await pusher.ClickAsync();
+            await Assertions.Expect(page.FrameLocator("sac-window iframe").Locator("#done")).ToHaveTextAsync("set", new() { Timeout = 15000 });
+            await WindowApp.CloseAllAsync(page);
+            await Assertions.Expect(pusher.Locator(".tl-main")).ToHaveTextAsync("pushed main", new() { Timeout = 10000 });
+            await Assertions.Expect(pusher.Locator(".tl-text")).ToHaveTextAsync("pushed row");
+            await page.ReloadAsync();
+            await Assertions.Expect(pusher.Locator(".tl-main")).ToHaveTextAsync("pushed main", new() { Timeout = 15000 });
+            Assert.Empty(errors);
+        }
+        finally
+        {
+            await context.CloseAsync();
+        }
+    }
+
+    [Fact]
     public async Task Apps_SpaceApp_FromDotApps_OpensSandboxed_Test()
     {
         var (context, page, errors) = await OpenAsync();

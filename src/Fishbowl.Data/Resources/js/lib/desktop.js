@@ -9,8 +9,9 @@
  *
  * The arrangement (size, colour, order, hidden) is per workspace and lives
  * on the server (fb.api.desktop), so it follows the user across devices.
- * Tiles keep their stored position (the desktop has no reordering UI);
- * a tile never arranged sorts by its registry index. Only Notes, Todos,
+ * Tiles keep their stored position; a tile never arranged sorts by its
+ * registry index, a workspace's own and installed apps right after the
+ * full-screen apps. Only Notes, Todos,
  * Calendar and Contacts start medium; every other tile — built-in or installed,
  * in any workspace — starts small, and they come after those four, so they share
  * medium cells four at a time (the kit's .tile-pack).
@@ -108,9 +109,13 @@
             };
         };
         const entries = apps.map((app, i) => arranged({ ...app, href: hrefOf(app) }, i));
-        // Installed apps follow the built-ins until arranged.
+        // Until arranged, a workspace's own and installed apps come right
+        // after the full-screen apps (Notes … Files, Tables) and before the
+        // window apps (Messages, Trash, Apps, …): positions between the two.
         fb.desktopApps?.sync(stored);
-        (stored.apps || []).forEach((a, j) => entries.push(arranged({
+        const extra = stored.apps || [];
+        const lastPage = apps.reduce((last, a, i) => (a.hash ? i + 1 : last), 0);
+        extra.forEach((a, j) => entries.push(arranged({
             key: `app:${a.id}`,
             app: a,
             name: a.manifest?.name || a.id,
@@ -118,7 +123,9 @@
             icon: /^[a-z0-9-]{1,40}$/.test(a.manifest?.icon || "") ? a.manifest.icon : "cube",
             desc: a.manifest?.description || "",
             href: null,
-        }, apps.length + j)));
+            // A space app with a tile.js has something to show: medium.
+            size: a.tile ? "medium" : undefined,
+        }, lastPage - 1 + (j + 1) / (extra.length + 1))));
         entries.sort((a, b) => a.position - b.position);
         return {
             entries,

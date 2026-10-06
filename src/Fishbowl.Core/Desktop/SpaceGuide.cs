@@ -118,6 +118,30 @@ public static partial class SpaceGuide
 
             """);
 
+        sb.AppendLine("## The app's tile");
+        sb.AppendLine("""
+            What your app's desktop tile shows besides its icon and name — the same as Notes or Todos show: two status lines and a short list. Two ways, both optional:
+
+            - **`.apps/<folder>/tile.js`** — runs on the server every time someone's desktop loads, as that person, **read-only**, in the triggers' sandbox (same limits). The tile is fresh even when nobody opened the app. A tile.js makes the tile start medium.
+              ```js
+              function tile(ctx) {
+                const open = ctx.count('cards', { done: false });
+                return {
+                  main: open + ' open',
+                  sub: ctx.count('cards', { done: false, column: 'Doing' }) + ' in progress',
+                  items: ctx.query('cards', { where: { done: false }, orderBy: [{ field: 'last_modified', dir: 'desc' }], limit: 30 })
+                    .map(c => ({ lead: c.column, text: c.title, tail: c.due })),
+                  empty: 'Nothing open',
+                };
+              }
+              ```
+              `ctx`: `get`, `query`, `count`, `ctx.user`, `ctx.log(message)` — no writes. A tile.js that fails leaves the tile plain; why goes to the error store (kind `tile`).
+            - **`context.tile.set({ main, sub, items, empty })`** while the app runs — the tile keeps what you set (per browser) until the next `set` or `context.tile.clear()`. A tile.js wins over it.
+
+            The model: `main` and `sub` are text (`sub` may be a list of up to 3), `items` up to 30 rows of `{ lead, text, tail }` (leave `items` out for no list; `[]` shows `empty`). Text only — up to 200 characters each, no markup. Keep content people wouldn't want on a shared screen out of it.
+
+            """);
+
         sb.AppendLine("## This space's tables");
         var defs = await tables.ListAsync(ctx, ct);
         if (defs.Count == 0)

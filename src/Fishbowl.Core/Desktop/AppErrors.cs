@@ -16,6 +16,8 @@ public static class AppErrors
     // A table trigger (.apps/<app>/triggers/<table>.js) that failed after a
     // write, was too large, or what it logged itself (ctx.log).
     public const string Trigger = "trigger";
+    // An app's tile.js (AppTiles) that failed, or what it logged (ctx.log).
+    public const string Tile = "tile";
     // The browser's.
     public const string Load = "load";          // the entry didn't load or define its element
     public const string Runtime = "runtime";    // an uncaught error in the frame (kit issue #39)

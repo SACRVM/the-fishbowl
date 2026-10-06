@@ -547,6 +547,12 @@
         };
     }
 
+    // What a space's own apps show on their desktop tiles — each app's
+    // tile.js, run on the server as the caller: { tiles: { <folder>: model } }.
+    function appTiles(slug) {
+        return request(`/spaces/${encodeURIComponent(slug)}/apps/tiles`);
+    }
+
     function todosIn(ws) {
         const td = crud("todos", ws);
         td.list = (opts) => request(opts?.includeCompleted
@@ -572,6 +578,7 @@
         tables,
         spaceData,
         appErrors,
+        appTiles,
         appMessage,
         contacts,
         events,
