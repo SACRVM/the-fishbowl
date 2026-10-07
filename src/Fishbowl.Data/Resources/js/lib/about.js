@@ -35,6 +35,8 @@
     const SERVER = [
         ["Jint",                "BSD-2-Clause", "Sebastien Ros"],
         ["Dapper",              "Apache-2.0", "Stack Exchange, Inc."],
+        ["Ical.Net",            "MIT", "ical-org"],
+        ["Noda Time",           "Apache-2.0", "Jon Skeet"],
         ["Microsoft.Data.Sqlite", "MIT", "Microsoft"],
         ["sqlite-vec",          "MIT", "Alex Garcia"],
         ["ONNX Runtime",        "MIT", "Microsoft"],

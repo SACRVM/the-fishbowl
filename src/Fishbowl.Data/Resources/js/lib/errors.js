@@ -64,6 +64,8 @@
         // Calendar and contacts
         "range_invalid": "`to` must be after `from`, and both must be real dates.",
         "range_too_long": "A range may span at most {maxDays} days.",
+        "invalid_file": "The file isn't iCalendar (.ics).",
+        "feed_missing": "There is no such link.",
         "merge_too_large": "Together the two contacts are more than one contact holds ({field}) — trim the duplicate first.",
         // System settings and setup
         "unknown_config_key": "That setting doesn't exist.",

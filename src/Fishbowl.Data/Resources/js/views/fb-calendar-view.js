@@ -54,6 +54,27 @@ class FbCalendarView extends HTMLElement {
         return new Date(y, m - 1, d);
     }
 
+    /** A contact's birthday as a calendar entry: all day, read-only, its id
+     *  "bday:<contact>:<date>"; opening it opens the contact. */
+    static birthdayEntry(b) {
+        return {
+            id: `bday:${b.contactId}:${b.date}`,
+            _birthday: b,
+            title: b.age != null ? fb.t("fb.calendar.birthday-age", "{name} ({age})", { name: b.name, age: b.age }) : b.name,
+            allDay: true,
+            startDate: b.date,
+            endDate: FbCalendarView.addDays(b.date, 1),
+            startAt: `${b.date}T00:00:00`,
+        };
+    }
+
+    /** The mark before an entry's title: the gift for a birthday, the
+     *  repeat arrow for a series. */
+    static mark(e) {
+        if (e._birthday) return `<sac-icon class="cv-bday-mark" name="fb-gift" title="${fb.t("fb.calendar.birthday", "Birthday")}"></sac-icon>`;
+        return e.rRule ? `<span class="cv-repeat-mark" title="${fb.t("fb.calendar.repeats", "Repeats")}">&#8635;</span>` : "";
+    }
+
     async connectedCallback() {
         // The workspace this view shows, pinned: a save flushed on leaving
         // still goes there, not to the workspace the hash moved on to.
@@ -70,6 +91,7 @@ class FbCalendarView extends HTMLElement {
         this.querySelector("#cv-editor-wrap").toggleAttribute("inert", !this.writable);
         await this.loadEvents();
         if (!this.isConnected) return;   // left during the load — don't hook a dead view
+        if (!this.editing) this.paintToolbar();
         // "New event" from the Ctrl-K palette (fb.desktop.go).
         this._onIntent = () => { if (fb.desktop?.takeIntent("calendar")?.action === "create" && this.writable) this.createEvent(); };
         window.addEventListener("fb:intent", this._onIntent);
@@ -95,8 +117,14 @@ class FbCalendarView extends HTMLElement {
         const seq = ++this._loadSeq;
         let events;
         try {
-            const list = await this.api.list({ from, to });
+            // The contacts' birthdays come along as read-only all-day entries
+            // (never stored events); a failure there leaves the events.
+            const [list, bdays] = await Promise.all([
+                this.api.list({ from, to }),
+                this.api.birthdays(FbCalendarView.dayKey(from), FbCalendarView.dayKey(to)).catch(() => null),
+            ]);
             events = (Array.isArray(list) ? list : [])
+                .concat((bdays?.birthdays || []).map(FbCalendarView.birthdayEntry))
                 .sort((a, b) => new Date(a.startAt) - new Date(b.startAt));
         } catch (err) {
             console.error("[fb-calendar-view] list failed:", err);
@@ -334,6 +362,15 @@ class FbCalendarView extends HTMLElement {
                     border-left-color: var(--accent-warm);
                 }
                 fb-calendar-view .cv-chip.all-day:hover { background: color-mix(in srgb, var(--accent-warm) 26%, transparent); }
+                fb-calendar-view .cv-bday-mark { --icon-size: 12px; vertical-align: -1px; margin-right: 3px; color: var(--accent); }
+                #cv-feeds-dialog .cv-feeds { display: flex; flex-direction: column; gap: 12px; }
+                #cv-feeds-dialog .cv-feeds:empty { display: none; }
+                #cv-feeds-dialog .cv-feed-row { display: flex; align-items: center; gap: 8px; }
+                #cv-feeds-dialog .cv-feed-row > span { flex: 1; min-width: 0; }
+                #cv-feeds-dialog .btn { width: auto; flex: none; }
+                #cv-feeds-dialog #cv-feed-new { align-self: flex-start; }
+                #cv-feeds-dialog .cv-feed-url { flex: 1; min-width: 0; width: auto; }
+                #cv-feeds-dialog p { margin: 0; }
                 fb-calendar-view .cv-chip-time {
                     color: var(--text-muted);
                     margin-right: 4px;
@@ -701,8 +738,8 @@ class FbCalendarView extends HTMLElement {
 
             const chips = dayEvents.slice(0, MAX_CHIPS).map(e => {
                 const time = e.allDay || e._cont ? "" : fb.format.time(e.startAt);
-                const repeat = e.rRule ? `<span class="cv-repeat-mark" title="${fb.t("fb.calendar.repeats", "Repeats")}">&#8635;</span>` : "";
-                return `<div class="cv-chip ${e.allDay ? "all-day" : ""} ${e._cont ? "cont" : ""}" data-id="${e.id}" title="${escapeHtml(e.title || fb.t("fb.calendar.untitled", "Untitled"))}">
+                const repeat = FbCalendarView.mark(e);
+                return `<div class="cv-chip ${e.allDay ? "all-day" : ""} ${e._cont ? "cont" : ""} ${e._birthday ? "birthday" : ""}" data-id="${e.id}" title="${escapeHtml(e.title || fb.t("fb.calendar.untitled", "Untitled"))}">
                             ${time ? `<span class="cv-chip-time">${time}</span>` : ""}${repeat}${escapeHtml(e.title || fb.t("fb.calendar.untitled", "Untitled"))}
                         </div>`;
             }).join("");
@@ -756,7 +793,7 @@ class FbCalendarView extends HTMLElement {
             b.type = "button";
             b.dataset.action = ev.id;
             const t = ev.allDay || ev._cont ? fb.t("fb.calendar.all-day-short", "all day") : fb.format.time(ev.startAt);
-            const repeat = ev.rRule ? ` <span class="cv-repeat-mark" title="${fb.t("fb.calendar.repeats", "Repeats")}">&#8635;</span>` : "";
+            const repeat = " " + FbCalendarView.mark(ev);
             b.innerHTML = `<span class="cv-chip-time">${t}</span> ${escapeHtml(ev.title || fb.t("fb.calendar.untitled", "Untitled"))}${repeat}`;
             menu.appendChild(b);
         }
@@ -795,9 +832,9 @@ class FbCalendarView extends HTMLElement {
                 // A multi-day event's following days: no start time again,
                 // dimmed like its grid chip.
                 const time = e.allDay || e._cont ? fb.t("fb.calendar.all-day-short", "all day") : fb.format.time(e.startAt);
-                const repeat = e.rRule ? ` <span class="cv-repeat-mark" title="${fb.t("fb.calendar.repeats", "Repeats")}">&#8635;</span>` : "";
+                const repeat = " " + FbCalendarView.mark(e);
                 return `
-                    <div class="cv-agenda-item ${e.id === this.editing?.id ? "selected" : ""} ${e._cont ? "cont" : ""}" data-id="${e.id}">
+                    <div class="cv-agenda-item ${e.id === this.editing?.id ? "selected" : ""} ${e._cont ? "cont" : ""} ${e._birthday ? "birthday" : ""}" data-id="${e.id}">
                         <span class="cv-agenda-time">${time}</span>
                         <span class="cv-agenda-title">${escapeHtml(e.title || fb.t("fb.calendar.untitled", "Untitled"))}${repeat}</span>
                         ${e.location ? `<span class="cv-agenda-loc">${escapeHtml(e.location)}</span>` : ""}
@@ -821,6 +858,8 @@ class FbCalendarView extends HTMLElement {
         await this.flushSave();
         const evt = this.events.find(e => e.id === id);
         if (!evt) return;
+        // A birthday is the contact's: it opens there.
+        if (evt._birthday) { fb.desktop.go("contacts", "open", evt._birthday.contactId); return; }
         if (evt.isRecurringInstance) {
             // Instances share the master's id and carry a shifted startAt —
             // editing must happen on the master or a blur would silently
@@ -972,8 +1011,126 @@ class FbCalendarView extends HTMLElement {
         this.querySelector("#cv-grid-wrap").hidden = false;
         // Collapsed (phone): the agenda is the calendar — back to it.
         this.querySelector("#split").show = "start";
-        fb.toolbar.clear();
+        this.paintToolbar();
         this.renderMonth();
+    }
+
+    /** The calendar's own actions while no event is open: .ics in (writers)
+     *  and out, and the subscription links. */
+    paintToolbar() {
+        const items = [];
+        if (this.writable) items.push({ id: "cv-import", icon: "upload", title: fb.t("fb.calendar.import", "Import an .ics file"), onClick: () => this.importIcs() });
+        items.push({ id: "cv-export", icon: "download", title: fb.t("fb.calendar.export", "Export as an .ics file"), onClick: () => this.exportIcs() });
+        items.push({ id: "cv-feeds", icon: "link", title: fb.t("fb.calendar.feeds", "Subscription links"), onClick: () => this.feedsDialog() });
+        fb.toolbar.set(items);
+    }
+
+    exportIcs() {
+        const a = document.createElement("a");
+        a.href = this.api.exportUrl();
+        a.download = "calendar.ics";
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+    }
+
+    importIcs() {
+        const input = document.createElement("input");
+        input.type = "file";
+        input.accept = ".ics,.ical,.ifb,text/calendar";
+        input.addEventListener("change", async () => {
+            const file = input.files?.[0];
+            if (!file) return;
+            try {
+                // Floating times (no zone in the file) are this browser's.
+                const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+                const r = await this.api.import(await file.text(), tz);
+                sac.toast?.(r.skipped
+                    ? fb.t("fb.calendar.imported-skipped", "Imported {n} events; {skipped} were already here or are changed single occurrences.", { n: r.created, skipped: r.skipped })
+                    : fb.t("fb.calendar.imported", "Imported {n} events.", { n: r.created }));
+                await this.loadEvents();
+            } catch (err) {
+                sac.toast?.(fb.errors.text(err, fb.t("fb.calendar.import-failed", "Couldn't import the file.")), { kind: "error" });
+            }
+        });
+        input.click();
+    }
+
+    /** The caller's subscription links of this workspace: each with when it
+     *  was made and Revoke; "New link" shows the URL once. */
+    async feedsDialog() {
+        const dlg = document.createElement("sac-dialog");
+        dlg.id = "cv-feeds-dialog";
+        dlg.setAttribute("title", fb.t("fb.calendar.feeds", "Subscription links"));
+        const body = document.createElement("div");
+        body.className = "cv-feeds";
+        const fresh = document.createElement("div");
+        fresh.className = "cv-feeds";
+        const list = document.createElement("div");
+        list.className = "cv-feeds";
+        let freshId = null;   // the link whose URL is on show — revoking it takes the URL away
+        const fill = async () => {
+            let feeds = [];
+            try { feeds = (await this.api.feeds.list()).feeds || []; }
+            catch (err) { sac.toast?.(fb.errors.text(err, fb.t("fb.calendar.feeds-failed", "Couldn't load the links.")), { kind: "error" }); }
+            list.replaceChildren(...feeds.map((f) => {
+                const row = document.createElement("div");
+                row.className = "cv-feed-row";
+                const when = document.createElement("span");
+                when.textContent = fb.t("fb.calendar.feed-made", "Link made {date}", { date: fb.format.date(new Date(f.createdAt)) });
+                const revoke = document.createElement("button");
+                revoke.type = "button";
+                revoke.className = "btn";
+                revoke.dataset.id = f.id;
+                revoke.textContent = fb.t("fb.calendar.feed-revoke", "Revoke");
+                revoke.addEventListener("click", async () => {
+                    try {
+                        await this.api.feeds.remove(f.id);
+                        if (f.id === freshId) { freshId = null; fresh.replaceChildren(); }
+                        await fill();
+                    }
+                    catch (err) { sac.toast?.(fb.errors.text(err, fb.t("fb.calendar.feeds-failed", "Couldn't load the links.")), { kind: "error" }); }
+                });
+                row.append(when, revoke);
+                return row;
+            }));
+        };
+        const make = document.createElement("button");
+        make.type = "button";
+        make.className = "btn";
+        make.id = "cv-feed-new";
+        make.textContent = fb.t("fb.calendar.feed-new", "New link");
+        make.addEventListener("click", async () => {
+            try {
+                const r = await this.api.feeds.create();
+                const url = document.createElement("input");
+                url.readOnly = true;
+                url.value = r.url;
+                url.className = "cv-feed-url";
+                url.addEventListener("focus", () => url.select());
+                const copy = document.createElement("sac-copy-button");
+                copy.setAttribute("value", r.url);
+                const row = document.createElement("div");
+                row.className = "cv-feed-row";
+                row.append(url, copy);
+                const note = document.createElement("p");
+                note.className = "muted";
+                note.textContent = fb.t("fb.calendar.feed-once",
+                    "Shown once. Add it in your calendar app as a subscription (by URL). Anyone with the link can read this calendar until you revoke it.");
+                fresh.replaceChildren(row, note);
+                freshId = r.id;
+                await fill();
+            } catch (err) {
+                sac.toast?.(fb.errors.text(err, fb.t("fb.calendar.feed-failed", "Couldn't make a link.")), { kind: "error" });
+            }
+        });
+        body.append(make, fresh, list);
+        dlg.appendChild(body);
+        dlg.buttons = [{ action: "close", label: fb.t("fb.common.close", "Close"), kind: "default" }];
+        dlg.addEventListener("sac:action", () => setTimeout(() => dlg.remove(), 120));
+        document.body.appendChild(dlg);
+        await fill();
+        setTimeout(() => dlg.open?.(), 0);
     }
 
     scheduleAutoSave() {

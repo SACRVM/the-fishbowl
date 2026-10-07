@@ -183,8 +183,14 @@
                 const n = new Date();
                 const from = new Date(n.getFullYear(), n.getMonth(), n.getDate());
                 const to = new Date(n.getFullYear(), n.getMonth(), n.getDate() + 8);
-                const list = await fb.api.events.in(ws).list({ from, to });
-                return Array.isArray(list) ? list : [];
+                const api = fb.api.events.in(ws);
+                // The contacts' birthdays come along as all-day rows; a failure
+                // there leaves the events.
+                const [list, bdays] = await Promise.all([api.list({ from, to }), api.birthdays(dayKey(from), dayKey(to)).catch(() => null)]);
+                return (Array.isArray(list) ? list : []).concat((bdays?.birthdays || []).map((b) => ({
+                    id: `bday:${b.contactId}:${b.date}`, birthday: true, allDay: true, startDate: b.date, endDate: addDays(b.date, 1),
+                    title: b.age != null ? t("fb.calendar.birthday-age", "{name} ({age})", { name: b.name, age: b.age }) : b.name,
+                })));
             },
             present(events, now) {
                 const today = dayKey(now);
@@ -197,7 +203,7 @@
                         const end = e.endDate || addDays(e.startDate, 1);
                         if (end <= today || e.startDate >= end7) continue;
                         day = e.startDate > today ? e.startDate : today;
-                        lead = t("fb.desk.live.all-day", "All day");
+                        lead = e.birthday ? t("fb.desk.live.birthday", "Birthday") : t("fb.desk.live.all-day", "All day");
                         order = [0, 0];
                     } else {
                         const s = new Date(e.startAt);

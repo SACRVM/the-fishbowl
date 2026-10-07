@@ -99,7 +99,7 @@ public class NoteFtsSecretStripTests : IDisposable
         SqliteConnection.ClearAllPools();
 
         using (var db = new DatabaseFactory(_dataDir).CreateContextConnection(_ctx))
-            Assert.Equal(20, db.ExecuteScalar<long>("PRAGMA user_version"));
+            Assert.Equal(21, db.ExecuteScalar<long>("PRAGMA user_version"));
         Assert.Equal(0, Matches(Secret));
         Assert.Equal("nothing hidden", IndexedContent(plain));
     }

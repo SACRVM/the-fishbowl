@@ -112,6 +112,7 @@ window.sac?.i18n?.add?.("de", {
     "fb.desk.save-failed": "Der Desktop konnte nicht gespeichert werden.",
     "fb.desk.live.show-content": "Inhalt anzeigen",
     "fb.desk.live.all-day": "Ganztägig",
+    "fb.desk.live.birthday": "Geburtstag",
     "fb.desk.live.today": "heute",
     "fb.desk.live.tomorrow": "morgen",
     "fb.desk.live.yesterday": "gestern",

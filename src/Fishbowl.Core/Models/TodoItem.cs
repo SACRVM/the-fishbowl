@@ -5,6 +5,10 @@ namespace Fishbowl.Core.Models;
 public class TodoItem
 {
     public string Id { get; set; } = string.Empty; // ULID
+    // The iCalendar / vCard UID (user/space schema v21): "<id>@fishbowl" for
+    // what Fishbowl makes, the source's own for what an import or a synced
+    // device brings. Set once, never changed by an update.
+    public string? Uid { get; set; }
     public string Title { get; set; } = string.Empty;
     public string? Description { get; set; }
     public DateTime? DueAt { get; set; }

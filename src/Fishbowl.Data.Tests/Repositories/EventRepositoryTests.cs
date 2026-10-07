@@ -287,15 +287,35 @@ public class EventRepositoryTests : IDisposable
     }
 
     [Fact]
-    public async Task GetRange_UnsupportedRule_DegradesToMasterOnly()
+    public async Task GetRange_ExpandsRulesBeyondTheOldSubset()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var start = new DateTime(2026, 7, 5, 9, 0, 0, DateTimeKind.Utc);   // a Sunday
+        await _repo.CreateAsync(TestUserId, new Event
+        {
+            Title = "last friday",
+            StartAt = start,
+            RRule = "FREQ=MONTHLY;BYSETPOS=-1;BYDAY=FR",
+        }, ct);
+
+        var july = (await _repo.GetRangeAsync(TestUserId,
+            new DateTime(2026, 7, 10, 0, 0, 0, DateTimeKind.Utc), new DateTime(2026, 8, 10, 0, 0, 0, DateTimeKind.Utc), ct)).ToList();
+
+        var occ = Assert.Single(july);
+        Assert.True(occ.IsRecurringInstance);
+        Assert.Equal(new DateTime(2026, 7, 31, 9, 0, 0, DateTimeKind.Utc), occ.StartAt);
+    }
+
+    [Fact]
+    public async Task GetRange_TextThatIsNoRule_DegradesToMasterOnly()
     {
         var ct = TestContext.Current.CancellationToken;
         var start = new DateTime(2026, 7, 5, 9, 0, 0, DateTimeKind.Utc);
         await _repo.CreateAsync(TestUserId, new Event
         {
-            Title = "exotic import",
+            Title = "broken import",
             StartAt = start,
-            RRule = "FREQ=MONTHLY;BYSETPOS=-1;BYDAY=FR", // out of subset
+            RRule = "FREQ=FORTNIGHTLY",
         }, ct);
 
         var inWindow = (await _repo.GetRangeAsync(TestUserId,
@@ -303,8 +323,8 @@ public class EventRepositoryTests : IDisposable
         var laterWindow = (await _repo.GetRangeAsync(TestUserId,
             start.AddDays(10), start.AddDays(40), ct)).ToList();
 
-        // Master shows once at DTSTART (pre-expansion behavior), and no
-        // phantom occurrences are invented for a rule we can't walk.
+        // Master shows once at DTSTART, and no phantom occurrences are
+        // invented for a rule that can't be read.
         Assert.Single(inWindow);
         Assert.False(inWindow[0].IsRecurringInstance);
         Assert.Empty(laterWindow);

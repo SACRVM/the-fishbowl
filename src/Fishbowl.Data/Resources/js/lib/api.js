@@ -349,6 +349,18 @@
             const to   = new Date(from.getTime() + 86400_000);
             return list({ from, to });
         };
+        // The calendar's tools (EventToolsApi): .ics out and in (tz = the zone
+        // for floating times), the contacts' birthdays between two date keys
+        // (to exclusive), and the caller's subscription links.
+        e.exportUrl = () => `${base}${wsPath(ws, "/events/export")}`;
+        e.import = (text, tz) => request(`${wsPath(ws, "/events/import")}?tz=${encodeURIComponent(tz || "")}`,
+            { method: "POST", body: text, headers: { "Content-Type": "text/calendar; charset=utf-8" } });
+        e.birthdays = (from, to) => request(`${wsPath(ws, "/events/birthdays")}?${new URLSearchParams({ from, to })}`);
+        e.feeds = {
+            list:   ()   => request(wsPath(ws, "/events/feeds")),
+            create: ()   => request(wsPath(ws, "/events/feeds"), { method: "POST" }),
+            remove: (id) => request(wsPath(ws, `/events/feeds/${encodeURIComponent(id)}`), { method: "DELETE" }),
+        };
         return e;
     }
     const events = eventsIn(null);

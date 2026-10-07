@@ -94,7 +94,7 @@ public class DatabaseFactoryTests : IDisposable
         Assert.Contains("language", userColumns);
 
         var version = connection.ExecuteScalar<long>("PRAGMA user_version");
-        Assert.Equal(17, version);
+        Assert.Equal(18, version);
     }
 
     [Fact]
@@ -129,7 +129,7 @@ public class DatabaseFactoryTests : IDisposable
 
         // Assert
         var version = connection.ExecuteScalar<int>("PRAGMA user_version");
-        Assert.Equal(20, version);
+        Assert.Equal(21, version);
     }
 
     [Fact]

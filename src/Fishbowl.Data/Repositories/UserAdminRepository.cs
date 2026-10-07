@@ -221,6 +221,7 @@ public class UserAdminRepository : IUserAdminRepository
         {
             "DELETE FROM api_keys WHERE user_id = @userId OR (owner_type = 'user' AND owner_id = @userId) OR (context_type = 'user' AND context_id = @userId)",
             "DELETE FROM oauth_codes WHERE user_id = @userId",
+            "DELETE FROM calendar_feeds WHERE created_by = @userId",
             "DELETE FROM notification_channels WHERE user_id = @userId",
             "DELETE FROM discord_link_codes WHERE user_id = @userId",
             "DELETE FROM space_members WHERE user_id = @userId",

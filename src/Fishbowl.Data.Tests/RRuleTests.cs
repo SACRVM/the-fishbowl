@@ -40,20 +40,68 @@ public class RRuleTests
     [Theory]
     [InlineData(null)]
     [InlineData("")]
-    [InlineData("FREQ=HOURLY")]              // sub-daily out of subset
-    [InlineData("FREQ=SECONDLY")]
     [InlineData("INTERVAL=2")]               // FREQ is mandatory
+    [InlineData("FREQ=FORTNIGHTLY")]
     [InlineData("FREQ=DAILY;INTERVAL=0")]
-    [InlineData("FREQ=WEEKLY;BYDAY=2MO")]    // ordinal BYDAY out of subset
-    [InlineData("FREQ=MONTHLY;BYDAY=MO")]    // BYDAY only supported on WEEKLY
-    [InlineData("FREQ=MONTHLY;BYMONTHDAY=15")]
-    [InlineData("FREQ=DAILY;BYSETPOS=1")]
     [InlineData("FREQ=DAILY;COUNT=0")]
     [InlineData("FREQ=DAILY;UNTIL=notadate")]
     [InlineData("garbage")]
-    public void TryParse_RejectsOutOfSubset(string? text)
+    public void TryParse_RejectsWhatIsNoRule(string? text)
     {
         Assert.False(RRule.TryParse(text, out _));
+    }
+
+    // Every rule a calendar app can send (Ical.Net): what the old subset
+    // turned away now parses.
+    [Theory]
+    [InlineData("FREQ=HOURLY", RRuleFreq.Hourly)]
+    [InlineData("FREQ=SECONDLY", RRuleFreq.Secondly)]
+    [InlineData("FREQ=WEEKLY;BYDAY=2MO", RRuleFreq.Weekly)]
+    [InlineData("FREQ=MONTHLY;BYDAY=MO", RRuleFreq.Monthly)]
+    [InlineData("FREQ=MONTHLY;BYMONTHDAY=15", RRuleFreq.Monthly)]
+    [InlineData("FREQ=MONTHLY;BYSETPOS=-1;BYDAY=FR", RRuleFreq.Monthly)]
+    public void TryParse_AcceptsTheWholeRfc(string text, RRuleFreq freq)
+    {
+        Assert.True(RRule.TryParse(text, out var spec));
+        Assert.Equal(freq, spec.Freq);
+        Assert.Equal(text, spec.Text);
+    }
+
+    [Fact]
+    public void Expand_LastDayOfTheMonth()
+    {
+        Assert.True(RRule.TryParse("FREQ=MONTHLY;BYMONTHDAY=-1;COUNT=4", out var spec));
+        var occs = RRule.Expand(Utc(2026, 1, 31, 10), spec, Utc(2026, 1, 1), Utc(2027, 1, 1)).ToList();
+
+        Assert.Equal(new[] { Utc(2026, 1, 31, 10), Utc(2026, 2, 28, 10), Utc(2026, 3, 31, 10), Utc(2026, 4, 30, 10) }, occs);
+    }
+
+    [Fact]
+    public void Expand_SecondMondayOfTheMonth_InItsZone()
+    {
+        // 18:00 in Berlin on the second Monday: 17:00Z in winter, 16:00Z in summer.
+        Assert.True(RRule.TryParse("FREQ=MONTHLY;BYDAY=2MO;COUNT=4", out var spec));
+        var zone = RRule.ResolveZone("Europe/Berlin");
+        var occs = RRule.Expand(Utc(2026, 1, 12, 17), spec, Utc(2026, 1, 1), Utc(2027, 1, 1), zone).ToList();
+
+        Assert.Equal(new[] { Utc(2026, 1, 12, 17), Utc(2026, 2, 9, 17), Utc(2026, 3, 9, 17), Utc(2026, 4, 13, 16) }, occs);
+    }
+
+    [Fact]
+    public void Expand_ARuleThatNeverMatches_EndsInsteadOfSpinning()
+    {
+        Assert.True(RRule.TryParse("FREQ=YEARLY;BYMONTH=2;BYMONTHDAY=30", out var spec));
+        Assert.Empty(RRule.Expand(Utc(2026, 1, 1, 9), spec, Utc(2026, 1, 1), Utc(2030, 1, 1)));
+    }
+
+    [Fact]
+    public void Expand_SubDaily_IsCapped()
+    {
+        Assert.True(RRule.TryParse("FREQ=MINUTELY", out var spec));
+        var occs = RRule.Expand(Utc(2026, 1, 1), spec, Utc(2026, 1, 1), Utc(2027, 1, 1)).ToList();
+
+        Assert.Equal(10_000, occs.Count);
+        Assert.Equal(Utc(2026, 1, 1), occs[0]);
     }
 
     // ── Expansion ───────────────────────────────────────────────────────

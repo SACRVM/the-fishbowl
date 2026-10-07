@@ -182,6 +182,7 @@ builder.Services.AddScoped<ITableRepository, Fishbowl.Data.Tables.TriggeringTabl
 // A space app's tile.js (what its desktop tile shows), read-only.
 builder.Services.AddScoped<Fishbowl.Core.Desktop.ISpaceAppTiles, Fishbowl.Data.Tables.SpaceAppTiles>();
 builder.Services.AddScoped<IApiKeyRepository, ApiKeyRepository>();
+builder.Services.AddScoped<ICalendarFeedRepository, CalendarFeedRepository>();
 builder.Services.AddScoped<INotificationChannelRepository, NotificationChannelRepository>();
 builder.Services.AddScoped<IDiscordLinkRepository, DiscordLinkRepository>();
 builder.Services.AddScoped<IReminderRepository, ReminderRepository>();
@@ -913,6 +914,7 @@ app.MapTagsApi();
 app.MapTodoApi();
 app.MapContactsApi();
 app.MapContactToolsApi();
+app.MapEventToolsApi();
 app.MapEventsApi();
 app.MapSpacesApi();
 app.MapSpaceMembersApi();

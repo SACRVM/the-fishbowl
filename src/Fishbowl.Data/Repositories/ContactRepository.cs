@@ -127,6 +127,7 @@ public class ContactRepository : IContactRepository
         Normalize(contact);
         EnforceLimits(contact);
         if (string.IsNullOrEmpty(contact.Id)) contact.Id = Ulid.NewUlid().ToString();
+        if (string.IsNullOrWhiteSpace(contact.Uid)) contact.Uid = contact.Id + "@fishbowl";
         contact.CreatedAt = DateTime.UtcNow;
         contact.UpdatedAt = contact.CreatedAt;
         contact.CreatedBy = actorUserId;
@@ -136,7 +137,7 @@ public class ContactRepository : IContactRepository
         {
             await CheckOrganisationAsync(db, tx, contact, token);
             await db.ExecuteAsync(new CommandDefinition(
-                $"INSERT INTO contacts (id, {Columns}, created_by, created_at, updated_at) VALUES (@Id, {Values}, @CreatedBy, @CreatedAt, @UpdatedAt)",
+                $"INSERT INTO contacts (id, uid, {Columns}, created_by, created_at, updated_at) VALUES (@Id, @Uid, {Values}, @CreatedBy, @CreatedAt, @UpdatedAt)",
                 Params(contact), transaction: tx, cancellationToken: token));
             await IndexAsync(db, tx, contact, insert: true, token);
         }, ct);
@@ -346,6 +347,7 @@ public class ContactRepository : IContactRepository
     private static object Params(Contact c) => new
     {
         c.Id,
+        c.Uid,
         c.Kind,
         c.Name,
         c.Salutation,

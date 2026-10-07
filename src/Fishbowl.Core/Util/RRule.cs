@@ -1,39 +1,47 @@
 using System.Globalization;
+using Ical.Net;
+using Ical.Net.CalendarComponents;
+using Ical.Net.DataTypes;
+using Ical.Net.Evaluation;
 
 namespace Fishbowl.Core.Util;
 
-// Minimal iCal RRULE (RFC 5545) subset shared by reminder expansion and
-// calendar-range reads: FREQ=DAILY|WEEKLY|MONTHLY|YEARLY, INTERVAL,
-// BYDAY (weekly only, no ordinal prefixes), COUNT, UNTIL. Anything outside
-// the subset fails TryParse and callers degrade to treating the event as
-// non-recurring (single occurrence at DTSTART) — the pre-expansion
-// behavior, so an exotic imported rule never silences reminders entirely.
+// iCal RRULE (RFC 5545) for reminder expansion and calendar-range reads,
+// evaluated by Ical.Net — every rule a calendar app can send (ordinal and
+// monthly BYDAY, BYMONTHDAY, BYSETPOS, sub-daily frequencies, …), so the
+// server and a synced phone agree on when something happens (sync spec,
+// 2026-10-06). A text that isn't a rule fails TryParse and callers degrade to
+// treating the event as non-recurring (a single occurrence at DTSTART).
 //
 // Expansion runs in the event's own time zone when it has one (events carry
 // the IANA zone they were written in, user schema v11): occurrences keep
 // DTSTART's wall-clock time there, so a "09:00" weekly event stays 09:00
 // across DST, and each occurrence converts back to a UTC instant. Without a
 // zone (older rows, clients that send none) the math runs on UTC instants,
-// so occurrences carry DTSTART's UTC time-of-day.
+// so occurrences carry DTSTART's UTC time-of-day. A wall-clock time that
+// doesn't exist (the spring-forward gap) moves forward by the gap; an
+// ambiguous one (the fall-back hour) takes its first occurrence.
 
-public enum RRuleFreq { Daily, Weekly, Monthly, Yearly }
+public enum RRuleFreq { Secondly, Minutely, Hourly, Daily, Weekly, Monthly, Yearly }
 
 public sealed class RRuleSpec
 {
     public RRuleFreq Freq { get; init; }
     public int Interval { get; init; } = 1;
-    public IReadOnlyList<DayOfWeek>? ByDay { get; init; } // weekly only
+    public IReadOnlyList<DayOfWeek>? ByDay { get; init; } // the weekdays named (ordinals not shown)
     public DateTime? Until { get; init; }                 // UTC, inclusive
     public int? Count { get; init; }
+    /// <summary>The rule as given, without an "RRULE:" prefix — what Ical.Net evaluates.</summary>
+    public string Text { get; init; } = "";
 }
 
 public static class RRule
 {
-    // Hard stop for pathological series (a decades-old DAILY rule still
-    // iterates from DTSTART every expansion). Bounds CPU; real windows are
-    // minutes (scheduler) or weeks (calendar view), so hitting the cap
-    // means the series start is absurdly far from the query window.
-    private const int MaxIterations = 100_000;
+    // Bounds for pathological series: a rule that never matches stops after
+    // this many empty steps instead of spinning; one expansion hands over at
+    // most MaxOccurrences (an hourly rule over a year's view stays usable).
+    private static readonly EvaluationOptions Options = new() { MaxUnmatchedIncrementsLimit = 1000 };
+    private const int MaxOccurrences = 10_000;
 
     private static readonly string[] UntilFormats =
     {
@@ -51,97 +59,51 @@ public static class RRule
         if (body.StartsWith("RRULE:", StringComparison.OrdinalIgnoreCase))
             body = body["RRULE:".Length..];
 
-        RRuleFreq? freq = null;
-        var interval = 1;
-        List<DayOfWeek>? byDay = null;
-        DateTime? until = null;
-        int? count = null;
-
-        foreach (var part in body.Split(';', StringSplitOptions.RemoveEmptyEntries))
+        // COUNT and UNTIL together: RFC 5545 forbids it and Ical.Net refuses
+        // it, but older API clients may have stored one — COUNT goes to
+        // Ical.Net and UNTIL is applied on top (both bound the series, as
+        // before), so such an event keeps recurring.
+        DateTime? extraUntil = null;
+        var parts = body.Split(';', StringSplitOptions.RemoveEmptyEntries);
+        var untilPart = parts.FirstOrDefault(x => x.Trim().StartsWith("UNTIL=", StringComparison.OrdinalIgnoreCase));
+        if (untilPart is not null && parts.Any(x => x.Trim().StartsWith("COUNT=", StringComparison.OrdinalIgnoreCase)))
         {
-            var eq = part.IndexOf('=');
-            if (eq <= 0) return false;
-            var key = part[..eq].Trim().ToUpperInvariant();
-            var value = part[(eq + 1)..].Trim().ToUpperInvariant();
-            if (value.Length == 0) return false;
-
-            switch (key)
-            {
-                case "FREQ":
-                    freq = value switch
-                    {
-                        "DAILY" => RRuleFreq.Daily,
-                        "WEEKLY" => RRuleFreq.Weekly,
-                        "MONTHLY" => RRuleFreq.Monthly,
-                        "YEARLY" => RRuleFreq.Yearly,
-                        _ => null,
-                    };
-                    if (freq is null) return false;
-                    break;
-
-                case "INTERVAL":
-                    if (!int.TryParse(value, NumberStyles.None, CultureInfo.InvariantCulture, out interval)
-                        || interval < 1)
-                        return false;
-                    break;
-
-                case "BYDAY":
-                    byDay = new List<DayOfWeek>();
-                    foreach (var token in value.Split(','))
-                    {
-                        // Ordinal prefixes ("2MO", "-1FR") are out of subset.
-                        DayOfWeek? dow = token switch
-                        {
-                            "MO" => DayOfWeek.Monday,
-                            "TU" => DayOfWeek.Tuesday,
-                            "WE" => DayOfWeek.Wednesday,
-                            "TH" => DayOfWeek.Thursday,
-                            "FR" => DayOfWeek.Friday,
-                            "SA" => DayOfWeek.Saturday,
-                            "SU" => DayOfWeek.Sunday,
-                            _ => null,
-                        };
-                        if (dow is null) return false;
-                        if (!byDay.Contains(dow.Value)) byDay.Add(dow.Value);
-                    }
-                    if (byDay.Count == 0) return false;
-                    break;
-
-                case "UNTIL":
-                    if (!DateTime.TryParseExact(value, UntilFormats, CultureInfo.InvariantCulture,
-                            DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal, out var u))
-                        return false;
-                    until = u;
-                    break;
-
-                case "COUNT":
-                    if (!int.TryParse(value, NumberStyles.None, CultureInfo.InvariantCulture, out var c)
-                        || c < 1)
-                        return false;
-                    count = c;
-                    break;
-
-                case "WKST":
-                    // Accepted and ignored — only shifts INTERVAL>1 weekly
-                    // block boundaries, and we anchor blocks on DTSTART's
-                    // Monday-start week (WKST=MO, the RFC default).
-                    break;
-
-                default:
-                    return false; // BYMONTHDAY, BYSETPOS, … — out of subset
-            }
+            if (!DateTime.TryParseExact(untilPart.Trim()["UNTIL=".Length..], UntilFormats, CultureInfo.InvariantCulture,
+                    DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal, out var u))
+                return false;
+            extraUntil = DateTime.SpecifyKind(u, DateTimeKind.Utc);
+            body = string.Join(';', parts.Where(x => !ReferenceEquals(x, untilPart)));
         }
 
-        if (freq is null) return false;
-        if (byDay is not null && freq != RRuleFreq.Weekly) return false;
+        RecurrencePattern p;
+        try { p = new RecurrencePattern(body); }
+        catch (ArgumentException) { return false; }
+        catch (FormatException) { return false; }
 
+        var freq = p.Frequency switch
+        {
+            FrequencyType.Secondly => RRuleFreq.Secondly,
+            FrequencyType.Minutely => RRuleFreq.Minutely,
+            FrequencyType.Hourly => RRuleFreq.Hourly,
+            FrequencyType.Daily => RRuleFreq.Daily,
+            FrequencyType.Weekly => RRuleFreq.Weekly,
+            FrequencyType.Monthly => RRuleFreq.Monthly,
+            FrequencyType.Yearly => RRuleFreq.Yearly,
+            _ => (RRuleFreq?)null,
+        };
+        if (freq is null || p.Interval < 1 || p.Count is < 1) return false;
+        // Ical.Net skips an UNTIL it can't read; a rule that names one must have it.
+        if (body.Contains("UNTIL=", StringComparison.OrdinalIgnoreCase) && p.Until is null) return false;
+
+        var byDay = p.ByDay.Select(d => d.DayOfWeek).Distinct().ToList();
         spec = new RRuleSpec
         {
             Freq = freq.Value,
-            Interval = interval,
-            ByDay = byDay,
-            Until = until,
-            Count = count,
+            Interval = p.Interval,
+            ByDay = byDay.Count > 0 ? byDay : null,
+            Until = extraUntil ?? (p.Until is { } until ? DateTime.SpecifyKind(until.AsUtc, DateTimeKind.Utc) : null),
+            Count = p.Count,
+            Text = body,
         };
         return true;
     }
@@ -162,146 +124,52 @@ public static class RRule
         DateTime dtStart, RRuleSpec spec, DateTime windowStart, DateTime windowEnd,
         TimeZoneInfo? zone = null)
     {
-        if (windowEnd <= windowStart) yield break;
+        var from = DateTime.SpecifyKind(TimeUtil.AsUtc(windowStart), DateTimeKind.Utc);
+        var to = DateTime.SpecifyKind(TimeUtil.AsUtc(windowEnd), DateTimeKind.Utc);
+        if (to <= from) yield break;
 
-        IEnumerable<DateTime> stream;
-        if (zone is null || zone.BaseUtcOffset == TimeSpan.Zero && !zone.SupportsDaylightSavingTime)
+        var utcStart = DateTime.SpecifyKind(TimeUtil.AsUtc(dtStart), DateTimeKind.Utc);
+        var tzid = IanaId(zone);
+        var start = tzid is null
+            ? new CalDateTime(utcStart, "UTC", true)
+            : new CalDateTime(DateTime.SpecifyKind(TimeZoneInfo.ConvertTimeFromUtc(utcStart, zone!), DateTimeKind.Unspecified), tzid, true);
+
+        IEnumerator<Occurrence> occurrences;
+        try
         {
-            stream = Occurrences(dtStart, spec);
+            var ev = new CalendarEvent { DtStart = start, RecurrenceRule = new RecurrencePattern(spec.Text) };
+            occurrences = ev.GetOccurrences(new CalDateTime(from, "UTC", true), Options)
+                .TakeWhileBefore(new CalDateTime(to, "UTC", true))
+                .GetEnumerator();
         }
-        else
+        catch (Exception ex) when (ex is ArgumentException or FormatException or EvaluationException) { yield break; }
+
+        using (occurrences)
         {
-            var utcStart = DateTime.SpecifyKind(TimeUtil.AsUtc(dtStart), DateTimeKind.Utc);
-            var localStart = DateTime.SpecifyKind(
-                TimeZoneInfo.ConvertTimeFromUtc(utcStart, zone), DateTimeKind.Unspecified);
-            stream = Occurrences(localStart, spec).Select(local => ToUtc(local, zone));
-        }
-
-        var produced = 0;
-        foreach (var occ in stream)
-        {
-            if (spec.Count is int c && produced >= c) yield break;
-            if (spec.Until is DateTime u && occ > u) yield break;
-            if (occ >= windowEnd) yield break;
-            produced++;
-            if (occ >= windowStart) yield return occ;
-        }
-    }
-
-    // Unbounded chronological occurrence stream from DTSTART (capped at
-    // MaxIterations); Expand applies COUNT/UNTIL/window on top.
-    private static IEnumerable<DateTime> Occurrences(DateTime dtStart, RRuleSpec spec)
-    {
-        switch (spec.Freq)
-        {
-            case RRuleFreq.Daily:
-                for (var i = 0L; i < MaxIterations; i++)
-                {
-                    if (!TryAddDays(dtStart, i * spec.Interval, out var occ)) yield break;
-                    yield return occ;
-                }
-                break;
-
-            case RRuleFreq.Weekly when spec.ByDay is null:
-                for (var i = 0L; i < MaxIterations; i++)
-                {
-                    if (!TryAddDays(dtStart, i * 7 * spec.Interval, out var occ)) yield break;
-                    yield return occ;
-                }
-                break;
-
-            case RRuleFreq.Weekly:
-                {
-                    // Monday-start week blocks INTERVAL weeks apart, anchored on
-                    // DTSTART's week. Pattern-generated only: if DTSTART's
-                    // weekday isn't in BYDAY, DTSTART itself doesn't occur.
-                    var offsets = spec.ByDay!
-                        .Select(MondayOffset)
-                        .Distinct()
-                        .OrderBy(o => o)
-                        .ToArray();
-                    var blockAnchor = dtStart.Date.AddDays(-MondayOffset(dtStart.DayOfWeek));
-                    var timeOfDay = dtStart.TimeOfDay;
-                    for (var block = 0L; block < MaxIterations; block++)
-                    {
-                        if (!TryAddDays(blockAnchor, block * 7 * spec.Interval, out var monday)) yield break;
-                        foreach (var offset in offsets)
-                        {
-                            if (!TryAddDays(monday, offset, out var day)) yield break;
-                            var occ = day.Add(timeOfDay);
-                            if (occ < dtStart) continue;
-                            yield return occ;
-                        }
-                    }
-                    break;
-                }
-
-            case RRuleFreq.Monthly:
-                {
-                    // Same day-of-month as DTSTART; months without that day are
-                    // skipped without consuming COUNT (RFC 5545: invalid dates
-                    // MUST be ignored).
-                    var day = dtStart.Day;
-                    var anchor = new DateTime(dtStart.Year, dtStart.Month, 1, 0, 0, 0, dtStart.Kind);
-                    for (var i = 0L; i < MaxIterations; i++)
-                    {
-                        var months = i * spec.Interval;
-                        if (anchor.Year + months / 12 + 1 > 9999) yield break;
-                        var month = anchor.AddMonths((int)months);
-                        if (DateTime.DaysInMonth(month.Year, month.Month) < day) continue;
-                        yield return month.AddDays(day - 1).Add(dtStart.TimeOfDay);
-                    }
-                    break;
-                }
-
-            case RRuleFreq.Yearly:
-                {
-                    // Same month + day as DTSTART; Feb 29 only lands on leap years.
-                    var day = dtStart.Day;
-                    var anchor = new DateTime(dtStart.Year, dtStart.Month, 1, 0, 0, 0, dtStart.Kind);
-                    for (var i = 0L; i < MaxIterations; i++)
-                    {
-                        var years = i * spec.Interval;
-                        if (anchor.Year + years > 9999) yield break;
-                        var month = anchor.AddYears((int)years);
-                        if (DateTime.DaysInMonth(month.Year, month.Month) < day) continue;
-                        yield return month.AddDays(day - 1).Add(dtStart.TimeOfDay);
-                    }
-                    break;
-                }
+            for (var produced = 0; produced < MaxOccurrences; produced++)
+            {
+                bool more;
+                try { more = occurrences.MoveNext(); }
+                // A rule that stops matching (EvaluationLimitExceededException) or
+                // that Ical.Net can't walk ends the series here — never the caller.
+                catch (EvaluationException) { yield break; }
+                catch (ArgumentException) { yield break; }
+                if (!more) yield break;
+                var occ = DateTime.SpecifyKind(occurrences.Current.Period.StartTime.AsUtc, DateTimeKind.Utc);
+                if (occ >= to) yield break;
+                if (spec.Until is DateTime u && occ > u) yield break;   // also covers the COUNT + UNTIL case
+                if (occ >= from) yield return occ;
+            }
         }
     }
 
-    // A wall-clock time in `zone` to UTC. A time that doesn't exist (the
-    // spring-forward gap) moves forward by the gap; an ambiguous one (the
-    // fall-back hour) takes its first, daylight, occurrence (RFC 5545).
-    private static DateTime ToUtc(DateTime local, TimeZoneInfo zone)
+    // The zone as Ical.Net (NodaTime's tz database) names it — IANA; a
+    // Windows id is converted. Null (UTC expansion) for UTC itself or a zone
+    // without an IANA name.
+    private static string? IanaId(TimeZoneInfo? zone)
     {
-        if (zone.IsInvalidTime(local))
-        {
-            var before = zone.GetUtcOffset(local.AddHours(-3));
-            var after = zone.GetUtcOffset(local.AddHours(3));
-            local = local.Add(after - before);
-        }
-        if (zone.IsAmbiguousTime(local))
-        {
-            var offset = zone.GetAmbiguousTimeOffsets(local).Max();
-            return DateTime.SpecifyKind(local - offset, DateTimeKind.Utc);
-        }
-        return DateTime.SpecifyKind(TimeZoneInfo.ConvertTimeToUtc(local, zone), DateTimeKind.Utc);
-    }
-
-    private static int MondayOffset(DayOfWeek d) => ((int)d + 6) % 7;
-
-    private static bool TryAddDays(DateTime d, long days, out DateTime result)
-    {
-        var ticks = d.Ticks + days * TimeSpan.TicksPerDay;
-        if (ticks < DateTime.MinValue.Ticks || ticks > DateTime.MaxValue.Ticks)
-        {
-            result = default;
-            return false;
-        }
-        result = new DateTime(ticks, d.Kind);
-        return true;
+        if (zone is null || zone.BaseUtcOffset == TimeSpan.Zero && !zone.SupportsDaylightSavingTime) return null;
+        if (zone.HasIanaId) return zone.Id;
+        return TimeZoneInfo.TryConvertWindowsIdToIanaId(zone.Id, out var iana) ? iana : null;
     }
 }

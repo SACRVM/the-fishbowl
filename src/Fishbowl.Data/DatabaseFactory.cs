@@ -502,6 +502,29 @@ public class DatabaseFactory
             ApplyUserV20(connection);
             connection.Execute("PRAGMA user_version = 20");
             _logger.LogInformation("Applied user schema v20 to {DbPath}", ((SqliteConnection)connection).DataSource);
+            version = 20;
+        }
+
+        if (version < 21)
+        {
+            ApplyUserV21(connection);
+            connection.Execute("PRAGMA user_version = 21");
+            _logger.LogInformation("Applied user schema v21 to {DbPath}", ((SqliteConnection)connection).DataSource);
+        }
+    }
+
+    // Every event, todo and contact gets an iCalendar / vCard UID (sync spec,
+    // 2026-10-06): "<id>@fishbowl" for the rows there are, unique per table.
+    // Idempotent: a column that is there stays, a set uid isn't touched.
+    private static void ApplyUserV21(IDbConnection connection)
+    {
+        foreach (var table in new[] { "events", "todos", "contacts" })
+        {
+            var cols = connection.Query<string>($"SELECT name FROM pragma_table_info('{table}')").ToList();
+            if (cols.Count == 0) continue;   // a test DB without the table
+            if (!cols.Contains("uid")) connection.Execute($"ALTER TABLE {table} ADD COLUMN uid TEXT;");
+            connection.Execute($"UPDATE {table} SET uid = id || '@fishbowl' WHERE uid IS NULL OR uid = '';");
+            connection.Execute($"CREATE UNIQUE INDEX IF NOT EXISTS ux_{table}_uid ON {table}(uid);");
         }
     }
 
@@ -784,7 +807,31 @@ public class DatabaseFactory
             ApplySystemV17(connection);
             connection.Execute("PRAGMA user_version = 17");
             _logger.LogInformation("Applied system schema v17");
+            version = 17;
         }
+
+        if (version < 18)
+        {
+            ApplySystemV18(connection);
+            connection.Execute("PRAGMA user_version = 18");
+            _logger.LogInformation("Applied system schema v18");
+        }
+    }
+
+    // Calendar subscription links (sync spec, phase 1): a workspace's events
+    // as /feeds/<token>.ics; only the token's SHA-256 is kept.
+    private static void ApplySystemV18(IDbConnection connection)
+    {
+        connection.Execute(@"
+            CREATE TABLE IF NOT EXISTS calendar_feeds (
+                id           TEXT PRIMARY KEY,
+                token_hash   TEXT NOT NULL UNIQUE,
+                context_type TEXT NOT NULL,
+                context_id   TEXT NOT NULL,
+                created_by   TEXT NOT NULL,
+                created_at   TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS ix_calendar_feeds_context ON calendar_feeds(context_type, context_id, created_by);");
     }
 
     // OAuth for MCP clients (space-apps spec phase 7, claude.ai connectors):

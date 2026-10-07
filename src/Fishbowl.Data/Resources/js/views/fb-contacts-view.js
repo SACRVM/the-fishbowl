@@ -33,8 +33,13 @@ class FbContactsView extends HTMLElement {
         await this.load();
         if (!this.isConnected) return;
         this.paintToolbar();
-        // "New contact" from the palette or the desktop tile (fb.desktop.go).
-        this._onIntent = () => { if (fb.desktop?.takeIntent("contacts")?.action === "create" && this.writable) this.create("person"); };
+        // "New contact" from the palette or the desktop tile, a birthday in
+        // the calendar opening its contact (fb.desktop.go).
+        this._onIntent = () => {
+            const it = fb.desktop?.takeIntent("contacts");
+            if (it?.action === "create" && this.writable) this.create("person");
+            else if (it?.action === "open" && it.id) this.open(it.id);
+        };
         window.addEventListener("fb:intent", this._onIntent);
         this._onIntent();
     }

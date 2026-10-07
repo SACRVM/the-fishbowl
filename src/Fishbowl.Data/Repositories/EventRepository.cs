@@ -208,6 +208,7 @@ public class EventRepository : IEventRepository
 
         if (string.IsNullOrEmpty(evt.Id))
             evt.Id = Ulid.NewUlid().ToString();
+        if (string.IsNullOrWhiteSpace(evt.Uid)) evt.Uid = evt.Id + "@fishbowl";
 
         evt.CreatedAt = DateTime.UtcNow;
         evt.UpdatedAt = evt.CreatedAt;
@@ -218,12 +219,12 @@ public class EventRepository : IEventRepository
 
         using var db = _dbFactory.CreateContextConnection(ctx);
         await db.ExecuteAsync(new CommandDefinition(@"
-            INSERT INTO events (id, title, description, start_at, end_at, all_day,
+            INSERT INTO events (id, uid, title, description, start_at, end_at, all_day,
                                 start_date, end_date,
                                 rrule, time_zone, location, reminder_minutes,
                                 external_id, external_source,
                                 created_by, created_at, updated_at)
-            VALUES (@Id, @Title, @Description, @StartAt, @EndAt, @AllDay,
+            VALUES (@Id, @Uid, @Title, @Description, @StartAt, @EndAt, @AllDay,
                     @StartDate, @EndDate,
                     @RRule, @TimeZone, @Location, @ReminderMinutes,
                     @ExternalId, @ExternalSource,
@@ -231,6 +232,7 @@ public class EventRepository : IEventRepository
             new
             {
                 evt.Id,
+                evt.Uid,
                 evt.Title,
                 evt.Description,
                 StartAt = evt.StartAt.ToString("o"),

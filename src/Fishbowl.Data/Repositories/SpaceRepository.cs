@@ -163,7 +163,8 @@ public class SpaceRepository : ISpaceRepository
         if (role != SpaceRole.Owner.ToDbValue()) return false;
 
         await db.ExecuteAsync(new CommandDefinition(
-            "DELETE FROM space_members WHERE space_id = @spaceId; DELETE FROM space_invites WHERE space_id = @spaceId;",
+            "DELETE FROM space_members WHERE space_id = @spaceId; DELETE FROM space_invites WHERE space_id = @spaceId; "
+            + "DELETE FROM calendar_feeds WHERE context_type = 'space' AND context_id = @spaceId;",
             new { spaceId }, transaction: tx, cancellationToken: ct));
 
         var affected = await db.ExecuteAsync(new CommandDefinition(

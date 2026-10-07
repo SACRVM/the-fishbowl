@@ -10,6 +10,10 @@ namespace Fishbowl.Core.Models;
 public class Contact
 {
     public string Id { get; set; } = string.Empty; // ULID
+    // The iCalendar / vCard UID (user/space schema v21): "<id>@fishbowl" for
+    // what Fishbowl makes, the source's own for what an import or a synced
+    // device brings. Set once, never changed by an update.
+    public string? Uid { get; set; }
     public string Kind { get; set; } = ContactKinds.Person;
 
     // The display name: a person's "first last" when not given, an

@@ -50,6 +50,7 @@ public class TodoRepository : ITodoRepository
         {
             item.Id = Ulid.NewUlid().ToString();
         }
+        if (string.IsNullOrWhiteSpace(item.Uid)) item.Uid = item.Id + "@fishbowl";
 
         _logger.LogDebug("Creating todo {Id} in context {CtxType}:{CtxId}", item.Id, ctx.Type, ctx.Id);
 
@@ -62,11 +63,12 @@ public class TodoRepository : ITodoRepository
         item.Position ??= await db.ExecuteScalarAsync<double>(new CommandDefinition(
             "SELECT COALESCE(MAX(position), 0) + 1 FROM todos", cancellationToken: ct));
         await db.ExecuteAsync(new CommandDefinition(@"
-            INSERT INTO todos (id, title, description, due_at, reminder_at, source, created_by, created_at, updated_at, completed_at, position)
-            VALUES (@Id, @Title, @Description, @DueAt, @ReminderAt, @Source, @CreatedBy, @CreatedAt, @UpdatedAt, @CompletedAt, @Position)",
+            INSERT INTO todos (id, uid, title, description, due_at, reminder_at, source, created_by, created_at, updated_at, completed_at, position)
+            VALUES (@Id, @Uid, @Title, @Description, @DueAt, @ReminderAt, @Source, @CreatedBy, @CreatedAt, @UpdatedAt, @CompletedAt, @Position)",
             new
             {
                 item.Id,
+                item.Uid,
                 item.Title,
                 item.Description,
                 DueAt = item.DueAt?.ToString("o"),
