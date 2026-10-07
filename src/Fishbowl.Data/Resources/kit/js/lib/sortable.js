@@ -33,8 +33,11 @@
  *   editors keep their own mouse behaviour. Override with `ignore`.
  *
  * While dragging the item carries `data-sortable-dragging` (style the lift
- * with it — a shadow, a z-index) and is offset with a transform; its natural
- * slot is the gap. The nearest scrolling ancestor — crossing shadow roots —
+ * with it — a shadow, a z-index) and is offset with a transform — its own
+ * transition is off meanwhile, so it follows the pointer 1:1 even when its
+ * CSS animates transform (a .tile does); its natural slot is the gap. The
+ * container carries `data-sortable-active` for the length of the drag. A
+ * native drag (a link, an image) never starts while a press is live. The nearest scrolling ancestor — crossing shadow roots —
  * auto-scrolls when the pointer nears its edge.
  *
  * Shadow DOM: `container` may live inside a shadow root; nothing is moved
@@ -44,8 +47,9 @@
  * Keyboard reordering (Alt+Arrow and friends) is the component's job — this
  * helper is pointer-only on purpose, and it calls nothing for keys.
  *
- * Reduced motion: the item follows the pointer 1:1 either way; the helper
- * animates nothing on its own.
+ * Reduced motion: the item follows the pointer 1:1 either way; the list
+ * helper animates nothing on its own (sac.tiles.sortable slides and settles,
+ * except under reduced motion).
  */
 (function () {
     if (!window.sac) { console.warn("[sac.sortable] globals.js must load first — sortable unavailable."); return; }
@@ -55,7 +59,10 @@
     const LONG_PRESS_MS = 250;
     const EDGE = 32;              // px from a scroller's edge where auto-scroll starts
     const MAX_SPEED = 14;         // px per frame at the very edge
+    const SLIDE_MS = 200;         // neighbours sliding aside, the drop settling (tiles)
     const IGNORE = "input, textarea, select, [contenteditable], [data-sortable-ignore]";
+
+    const reducedMotion = () => !!(window.matchMedia && matchMedia("(prefers-reduced-motion: reduce)").matches);
 
     /** The nearest scrollable ancestor along the axis, crossing shadow roots. */
     function scrollParent(el, axis) {
@@ -75,14 +82,16 @@
 
     /**
      * The pointer side every drag-reorder shares: press, lift (4px / a
-     * 250ms long-press on touch), follow, auto-scroll, Escape, drop, the
-     * eaten click. What moves where is the caller's:
+     * 250ms long-press on touch), follow 1:1, auto-scroll, Escape, drop,
+     * the eaten click. What moves where is the caller's:
      *   pick(path, e)  → the item a press starts on, or null
      *   start(item)    → per-drag memo (from index, restore data)
      *   move(s)        → put s.item into the slot under s.x / s.y
      *   finish(s, ok)  → ok = dropped; else put everything back
+     * Options: scale — the lifted item's size (1 = none); settle — animate
+     * the item from the pointer into its slot on drop / Escape.
      */
-    function engine(container, { axis, handle, ignore, disabled, pick, start, move, finish }) {
+    function engine(container, { axis, handle, ignore, disabled, pick, start, move, finish, scale = 1, settle = false }) {
         const isDisabled = () => (typeof disabled === "function" ? disabled() : !!disabled);
         let state = null;         // the press/drag in progress, or null
 
@@ -94,6 +103,11 @@
         handleStyle();
         const mo = handle ? new MutationObserver(handleStyle) : null;
         if (mo) mo.observe(container, { childList: true, subtree: true });
+
+        // A link or an image is natively draggable: a native drag would
+        // start, and Chrome cancels the pointer (pointercancel) — the kit's
+        // drag would die. While a press is live, there is no native drag.
+        const noNativeDrag = (e) => { if (state) e.preventDefault(); };
 
         function onDown(e) {
             if (state || isDisabled()) return;
@@ -127,13 +141,27 @@
         function lift() {
             const s = state;
             s.dragging = true;
-            const r = s.item.getBoundingClientRect();
+            const it = s.item;
+            // Grabbed where it SHOWS (mid-slide, mid-settle, hover-lifted);
+            // then any animation of its own ends, and follow() keeps it there.
+            const r = it.getBoundingClientRect();
             s.grabX = s.x - r.left;
             s.grabY = s.y - r.top;
-            s.item.setAttribute("data-sortable-dragging", "");
-            s.item.style.position = "relative";
-            s.item.style.zIndex = "2";
-            s.item.style.pointerEvents = "none";
+            if (it._sacSettle) it._sacSettle();
+            if (it._sacSlide) it._sacSlide();
+            // 1:1 with the pointer: no transition on the item while lifted
+            // (a .tile has its own on transform — every move would animate).
+            s.saved = {
+                transition: it.style.transition, transformOrigin: it.style.transformOrigin,
+                position: it.style.position, zIndex: it.style.zIndex, pointerEvents: it.style.pointerEvents,
+            };
+            it.style.transition = "none";
+            it.style.transformOrigin = `${s.grabX}px ${s.grabY}px`;   // a scale keeps the grab point
+            it.setAttribute("data-sortable-dragging", "");
+            it.style.position = "relative";
+            it.style.zIndex = "2";
+            it.style.pointerEvents = "none";
+            container.setAttribute("data-sortable-active", "");
             container.style.userSelect = "none";
             const sel = window.getSelection && window.getSelection();
             if (sel) sel.removeAllRanges();
@@ -142,16 +170,21 @@
             place();
         }
 
-        /** Move the item to the slot under the pointer, then offset it onto the pointer. */
+        /** Offset the item from its slot onto the pointer. */
+        function follow(s) {
+            const it = s.item;
+            it.style.transform = "";
+            const r = it.getBoundingClientRect();
+            const dx = axis === "y" ? 0 : s.x - s.grabX - r.left;
+            const dy = axis === "x" ? 0 : s.y - s.grabY - r.top;
+            it.style.transform = `translate(${dx}px, ${dy}px)` + (scale !== 1 ? ` scale(${scale})` : "");
+        }
+
+        /** Move the item to the slot under the pointer, then onto the pointer. */
         function place() {
             const s = state;
             move(s);
-            // Where the slot is, versus where the pointer wants the item.
-            s.item.style.transform = "";
-            const r = s.item.getBoundingClientRect();
-            const dx = axis === "y" ? 0 : s.x - s.grabX - r.left;
-            const dy = axis === "x" ? 0 : s.y - s.grabY - r.top;
-            s.item.style.transform = `translate(${dx}px, ${dy}px)`;
+            follow(s);
         }
 
         function tick() {
@@ -219,17 +252,44 @@
             window.removeEventListener("keydown", onKey, true);
             if (!s.dragging) return;
 
-            s.item.removeAttribute("data-sortable-dragging");
-            s.item.style.transform = "";
-            s.item.style.position = "";
-            s.item.style.zIndex = "";
-            s.item.style.pointerEvents = "";
+            container.removeAttribute("data-sortable-active");
             container.style.userSelect = "";
             // The click that follows a drop (or a cancelled drag) is not a click.
             const eat = (ev) => { ev.stopPropagation(); ev.preventDefault(); };
             window.addEventListener("click", eat, { capture: true, once: true });
             setTimeout(() => window.removeEventListener("click", eat, true), 0);
+
             finish(s, !!commit);
+
+            const it = s.item;
+            const done = () => {
+                it._sacSettle = null;
+                clearTimeout(timer);
+                it.removeEventListener("transitionend", onEnd);
+                it.removeAttribute("data-sortable-dragging");
+                // Back in its slot with no transition, THEN its own back:
+                // the item's CSS one (a .tile's 0.4s) must not replay the move.
+                it.style.transition = "none";
+                it.style.transform = "";
+                void it.offsetWidth;
+                it.style.transition = s.saved.transition;
+                it.style.transformOrigin = s.saved.transformOrigin;
+                it.style.position = s.saved.position;
+                it.style.zIndex = s.saved.zIndex;
+                it.style.pointerEvents = s.saved.pointerEvents;
+            };
+            const onEnd = (ev) => { if (ev.target === it && ev.propertyName === "transform") done(); };
+            let timer = null;
+            if (!settle || reducedMotion()) { done(); return; }
+            // Settle: from where the pointer left it into its slot (the slot
+            // may have moved — Escape put it back), then hand the item back.
+            follow(s);
+            void it.offsetWidth;
+            it.style.transition = `transform ${SLIDE_MS}ms ease-out`;
+            it.style.transform = "translate(0px, 0px)" + (scale !== 1 ? " scale(1)" : "");
+            it.addEventListener("transitionend", onEnd);
+            timer = setTimeout(done, SLIDE_MS + 80);
+            it._sacSettle = done;
         }
 
         // While a finger drag is live the page must not scroll under it.
@@ -239,6 +299,7 @@
         const onContext = (e) => { if (state) e.preventDefault(); };
 
         container.addEventListener("pointerdown", onDown);
+        container.addEventListener("dragstart", noNativeDrag);
         container.addEventListener("touchmove", onTouchMove, { passive: false });
         container.addEventListener("contextmenu", onContext);
 
@@ -246,6 +307,7 @@
             destroy() {
                 if (state) end(false);
                 container.removeEventListener("pointerdown", onDown);
+                container.removeEventListener("dragstart", noNativeDrag);
                 container.removeEventListener("touchmove", onTouchMove);
                 container.removeEventListener("contextmenu", onContext);
                 if (mo) mo.disconnect();
@@ -330,12 +392,31 @@
      *   s.repack();   // after the host added / removed tiles itself
      *   s.destroy();
      *
+     * Feel (the home-screen kind):
+     *   lift    — the tile follows the pointer 1:1 at its grab offset, a
+     *             little larger (1.03), with a strong shadow, on top; the
+     *             grid carries data-sortable-active (ui.css: grabbing
+     *             cursor, no hover on the other tiles).
+     *   target  — hit-tested against the SETTLED layout (never against
+     *             tiles still sliding). The order changes only when the
+     *             pointer enters another tile — its before or after half —
+     *             and then holds until the pointer leaves whatever it is
+     *             over after the change: one reorder per tile entered,
+     *             never an oscillation. Over a gap, a fixed tile or outside
+     *             every tile the slot stays; past the last tile = the end.
+     *   slide   — displaced tiles (packs re-forming included) slide to their
+     *             new cells, 200ms ease-out.
+     *   settle  — on drop the tile glides from the pointer into its slot;
+     *             Escape glides it — and everything else — back to the
+     *             exact DOM from before the drag.
+     *   reduced motion — the same targeting, nothing animates.
+     *
      * Grid children that are neither an item nor a .tile-pack (a cover tile)
      * keep their place among the grid's children, and nothing moves past
      * them. Presses on a button, a <sac-menu> (a tile's "⋯") or a text field
-     * never drag. Input is sac.sortable's: 4px to lift with mouse / pen, a
-     * 250ms long-press on touch, Escape restores the exact previous DOM, the
-     * click after a drop is eaten. Reduced motion: nothing animates.
+     * never drag; a tile link's native drag is off while a press is live.
+     * Input is sac.sortable's: 4px to lift with mouse / pen, a 250ms
+     * long-press on touch, the click after a drop is eaten.
      */
     function tilesSortable(grid, opts = {}) {
         const {
@@ -394,8 +475,88 @@
             }
         }
 
+        /** Change the DOM and slide every tile but the lifted one from where
+         *  it shows now to its new cell (FLIP). Returns the settled layout:
+         *  each tile's rect relative to the grid, measured before any slide
+         *  offset is applied — what targeting tests against. */
+        function relayout(mutate, lifted) {
+            const all = flat();
+            const animate = !reducedMotion();
+            const was = new Map();
+            if (animate) for (const t of all) if (t !== lifted) was.set(t, t.getBoundingClientRect());
+            mutate();
+            const now = flat();
+            // The settled layout: no slide offsets, the lifted tile in its slot.
+            const liftedT = lifted ? lifted.style.transform : "";
+            if (lifted) lifted.style.transform = "";
+            for (const t of now) {
+                if (t === lifted || !t._sacSlide) continue;
+                t._sacSlide();
+            }
+            const g = grid.getBoundingClientRect();
+            const rects = new Map(now.map((t) => {
+                const r = t.getBoundingClientRect();
+                return [t, { left: r.left - g.left, top: r.top - g.top, right: r.right - g.left, bottom: r.bottom - g.top }];
+            }));
+            if (lifted) lifted.style.transform = liftedT;
+            if (!animate) return rects;
+            const moved = [];
+            for (const t of now) {
+                const a = was.get(t);
+                if (!a) continue;
+                const b = rects.get(t);
+                const dx = a.left - (b.left + g.left), dy = a.top - (b.top + g.top);
+                if (Math.abs(dx) < 0.5 && Math.abs(dy) < 0.5) continue;
+                const prev = t.style.transition;
+                t.style.transition = "none";
+                t.style.transform = `translate(${dx}px, ${dy}px)`;
+                moved.push([t, prev]);
+            }
+            if (!moved.length) return rects;
+            void grid.offsetWidth;
+            for (const [t, prev] of moved) {
+                t.style.transition = `transform ${SLIDE_MS}ms ease-out`;
+                t.style.transform = "";
+                const done = () => {
+                    clearTimeout(timer);
+                    t.removeEventListener("transitionend", onEnd);
+                    t._sacSlide = null;
+                    t.style.transition = prev;
+                    t.style.transform = "";
+                };
+                const onEnd = (ev) => { if (ev.target === t && ev.propertyName === "transform") done(); };
+                const timer = setTimeout(done, SLIDE_MS + 80);
+                t.addEventListener("transitionend", onEnd);
+                t._sacSlide = done;
+            }
+            return rects;
+        }
+
+        /** The tile under a viewport point in the settled layout: an item,
+         *  "self" (the lifted tile's own slot), or null (a gap, a fixed tile,
+         *  outside). */
+        function hitTest(m, item, x, y) {
+            const g = grid.getBoundingClientRect();
+            const gx = x - g.left, gy = y - g.top;
+            for (const [t, r] of m.rects) {
+                if (gx >= r.left && gx < r.right && gy >= r.top && gy < r.bottom) return t === item ? "self" : t;
+            }
+            return null;
+        }
+
+        /** Below the last tile, or right of it on its row. */
+        function pastEnd(m, others, x, y) {
+            const last = others[others.length - 1];
+            const r = last && m.rects.get(last);
+            if (!r) return false;
+            const g = grid.getBoundingClientRect();
+            const gx = x - g.left, gy = y - g.top;
+            return gy >= r.bottom || (gy >= r.top && gx >= r.right);
+        }
+
         const eng = engine(grid, {
             axis: "grid", handle: null, ignore, disabled,
+            scale: 1.03, settle: true,
             pick: (path) => {
                 for (const n of path) {
                     if (n === grid) return null;
@@ -412,28 +573,47 @@
                     kids,
                     packs: kids.filter(isPack).map((p) => [p, Array.from(p.children)]),
                     keep: fixed(),
+                    rects: null,     // the settled layout, relative to the grid
+                    hold: undefined, // what the pointer was over after the last change
                 };
             },
             move(s) {
+                const m = s.memo;
+                const item = s.item;
+                if (!m.rects) m.rects = relayout(() => {}, item);
+                const hit = hitTest(m, item, s.x, s.y);
+                // Hysteresis: after a change, nothing until the pointer leaves
+                // what it was over then — the reflow must not re-trigger.
+                if (m.hold !== undefined) {
+                    if (hit === m.hold) return;
+                    m.hold = undefined;
+                }
                 const order = flat();
-                const others = order.filter((t) => t !== s.item);
-                let best = null, bestD = Infinity;
-                others.forEach((t, i) => {
-                    const r = t.getBoundingClientRect();
-                    const cx = r.left + r.width / 2, cy = r.top + r.height / 2;
-                    const d = Math.hypot(cx - s.x, cy - s.y);
-                    if (d < bestD) { bestD = d; best = { i, cx }; }
-                });
-                const at = !best ? 0 : s.x < best.cx ? best.i : best.i + 1;
-                others.splice(at, 0, s.item);
-                if (others.every((t, i) => t === order[i])) return;
-                pack(others, s.memo.keep);
+                const others = order.filter((t) => t !== item);
+                let at;
+                if (hit && hit !== "self") {
+                    const r = m.rects.get(hit);
+                    const g = grid.getBoundingClientRect();
+                    const i = others.indexOf(hit);
+                    at = s.x - g.left < (r.left + r.right) / 2 ? i : i + 1;
+                } else if (!hit && pastEnd(m, others, s.x, s.y)) {
+                    at = others.length;
+                } else {
+                    return;                     // a gap, a fixed tile, its own slot: stay
+                }
+                const next = others.slice();
+                next.splice(at, 0, item);
+                if (next.every((t, i) => t === order[i])) return;
+                m.rects = relayout(() => pack(next, m.keep), item);
+                m.hold = hitTest(m, item, s.x, s.y);
             },
             finish(s, ok) {
                 const m = s.memo;
                 if (!ok) {
-                    m.packs.forEach(([p, kids]) => p.replaceChildren(...kids));
-                    grid.replaceChildren(...m.kids);
+                    relayout(() => {
+                        m.packs.forEach(([p, kids]) => p.replaceChildren(...kids));
+                        grid.replaceChildren(...m.kids);
+                    }, s.item);
                     return;
                 }
                 const to = flat().indexOf(s.item);

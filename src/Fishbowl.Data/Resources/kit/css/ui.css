@@ -1261,6 +1261,26 @@ a.nav-icon-btn { text-decoration: none; }
 .tile:hover > sac-icon {
     transform: scale(1.1) rotate(5deg);
 }
+/* Arranging tiles (sac.tiles.sortable). The grid carries
+   data-sortable-active for the length of a drag: the cursor is a grabbing
+   hand everywhere in it, and the tiles the lifted one passes over stay
+   still — no hover lift, ring or glow. The lifted tile itself is on top
+   with a strong shadow and the accent ring; its position and 1.03 scale
+   are the helper's inline transform. */
+[data-sortable-active],
+[data-sortable-active] * { cursor: grabbing !important; }
+[data-sortable-active] .tile:not([data-sortable-dragging]):hover {
+    transform: translateZ(0);
+    border-color: var(--border-strong);
+    box-shadow: none;
+    background: var(--tile);
+}
+[data-sortable-active] .tile:hover > sac-icon { transform: none; }
+.tile[data-sortable-dragging] {
+    border-color: var(--accent);
+    background: var(--tile-hover);
+    box-shadow: var(--shadow-2), 0 24px 48px color-mix(in srgb, var(--sink) 40%, transparent);
+}
 
 /* Variants — footprints: .wide 2 columns × 1 row, .large 2 × 2. */
 .tile.wide  { grid-column: span 2; }
