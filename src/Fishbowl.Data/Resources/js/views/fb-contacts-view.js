@@ -7,7 +7,10 @@
  * sections — saved as you type. A person belongs to at most one
  * organisation; an organisation shows its people; both show the table rows
  * that link to them. The toolbar imports (vCard / CSV), exports, and finds
- * duplicates to merge. A space Reader reads only.
+ * duplicates to merge. Several contacts are marked like files in Files —
+ * Ctrl/⌘+click, Shift+click for a range, Ctrl/⌘+A, a long press on a phone —
+ * and the list header then deletes them; Esc lets go. A space Reader reads
+ * only.
  *
  * Light-DOM so the kit's tokens and classes apply; view CSS is scoped with
  * `fb-contacts-view`.
@@ -20,6 +23,8 @@ class FbContactsView extends HTMLElement {
         this.filter = "all";
         this.query = "";
         this._saveTimer = null;
+        this.marked = new Set();   // ids marked for a bulk action
+        this._anchor = null;       // where a Shift+click range starts
     }
 
     async connectedCallback() {
@@ -29,7 +34,7 @@ class FbContactsView extends HTMLElement {
         this.render();
         this.writable = await fb.access.canWrite();
         this.toggleAttribute("readonly", !this.writable);
-        this.querySelector("#cv-new").hidden = !this.writable;
+        this.paintHead();
         await this.load();
         if (!this.isConnected) return;
         this.paintToolbar();
@@ -110,9 +115,16 @@ class FbContactsView extends HTMLElement {
                     padding: 8px 12px; border-radius: var(--radius-m); cursor: pointer;
                     border: 1px solid transparent; margin-bottom: 2px;
                 }
+                fb-contacts-view .cv-item { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
                 fb-contacts-view .cv-item:hover { background: var(--hover); }
                 fb-contacts-view .cv-item.selected { background: var(--accent-tint); border-color: color-mix(in srgb, var(--accent) 28%, transparent); }
-                fb-contacts-view .cv-item-text { min-width: 0; }
+                fb-contacts-view .cv-item.marked { background: var(--accent-tint); }
+                fb-contacts-view .cv-item.marked > sac-icon { color: var(--accent); }
+                /* While marking, the open contact keeps only its outline, so it doesn't read as marked. */
+                fb-contacts-view .cv-items.marking .cv-item.selected:not(.marked) { background: none; }
+                fb-contacts-view .cv-item-text { min-width: 0; flex: 1; }
+                fb-contacts-view .cv-item-action { --icon-btn-size: 26px; --icon-btn-icon: 14px; flex: none; }
+                fb-contacts-view #cv-items:focus { outline: none; }
                 fb-contacts-view .cv-item-name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
                 fb-contacts-view .cv-item-sub { color: var(--text-muted); font-size: 0.8125rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
                 fb-contacts-view .cv-item sac-icon { color: var(--text-muted); flex: none; }
@@ -145,6 +157,8 @@ class FbContactsView extends HTMLElement {
                     </div>
                     <div class="cv-head">
                         <span class="cv-head-title" id="cv-head-title"></span>
+                        <button type="button" class="icon-btn danger" id="cv-delete-marked" hidden title="${t("delete-marked", "Delete selected")}" aria-label="${t("delete-marked", "Delete selected")}"><sac-icon name="trash"></sac-icon></button>
+                        <button type="button" class="icon-btn" id="cv-clear-marks" hidden title="${t("clear-marks", "Clear selection")}" aria-label="${t("clear-marks", "Clear selection")}"><sac-icon name="close"></sac-icon></button>
                         <button type="button" class="icon-btn" data-filter="person" title="${t("only-people", "Only people")}" aria-label="${t("only-people", "Only people")}"><sac-icon name="user"></sac-icon></button>
                         <button type="button" class="icon-btn" data-filter="organisation" title="${t("only-organisations", "Only organisations")}" aria-label="${t("only-organisations", "Only organisations")}"><sac-icon name="users"></sac-icon></button>
                         <sac-menu id="cv-new">
@@ -153,7 +167,7 @@ class FbContactsView extends HTMLElement {
                             <button type="button" data-action="organisation"><sac-icon name="users"></sac-icon> ${t("new-organisation", "New organisation")}</button>
                         </sac-menu>
                     </div>
-                    <div class="cv-items" id="cv-items"></div>
+                    <div class="cv-items" id="cv-items" tabindex="-1"></div>
                 </aside>
                 <main class="cv-editor-pane" slot="end">
                     <div class="empty-state cv-empty" id="cv-empty">
@@ -164,20 +178,25 @@ class FbContactsView extends HTMLElement {
                 </main>
             </sac-split>`;
 
-        // People / organisations only: one toggle at a time, the label says what the list shows.
-        const titles = { all: t("all-contacts", "All contacts"), person: t("people", "People"), organisation: t("organisations", "Organisations") };
-        const showFilter = () => {
-            for (const b of this.querySelectorAll(".cv-head [data-filter]")) b.classList.toggle("active", b.dataset.filter === this.filter);
-            this.querySelector("#cv-head-title").textContent = titles[this.filter];
-        };
-        showFilter();
+        this.paintHead();
         for (const btn of this.querySelectorAll(".cv-head [data-filter]")) {
             btn.addEventListener("click", () => {
                 this.filter = this.filter === btn.dataset.filter ? "all" : btn.dataset.filter;
-                showFilter();
+                this.paintHead();
                 this.renderList();
             });
         }
+        this.querySelector("#cv-delete-marked").addEventListener("click", () => this.removeMany([...this.marked]));
+        this.querySelector("#cv-clear-marks").addEventListener("click", () => this.clearMarks());
+        this.addEventListener("keydown", (e) => {
+            if (e.key === "Escape" && this.marked.size) { this.clearMarks(); return; }
+            // Ctrl/⌘+A in the list marks every contact it shows.
+            if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "a" && this.writable && e.target === this.querySelector("#cv-items")) {
+                e.preventDefault();
+                for (const c of this.contacts) if (this.matches(c)) this.marked.add(c.id);
+                this.renderList();
+            }
+        });
         this.querySelector("#split").addEventListener("sac:resize", (e) => {
             try { localStorage.setItem("fb.contacts.split", e.detail.position); } catch { /* storage off */ }
         });
@@ -207,21 +226,110 @@ class FbContactsView extends HTMLElement {
         const box = this.querySelector("#cv-items");
         if (!box) return;
         const list = this.contacts.filter((c) => this.matches(c));
+        // Only what the list shows stays marked: a bulk delete never reaches
+        // a contact the search or the filter hides.
+        const shown = new Set(list.map((c) => c.id));
+        for (const id of this.marked) if (!shown.has(id)) this.marked.delete(id);
+        this._shown = list.map((c) => c.id);
+        box.classList.toggle("marking", this.marked.size > 0);
+        this.paintHead();
         if (!list.length) {
             box.innerHTML = `<p class="muted" style="padding: 8px 12px">${this.contacts.length ? this.t("no-match", "Nothing matches.") : this.t("empty", "No contacts yet.")}</p>`;
             return;
         }
+        const del = this.t("delete", "Delete contact");
         box.replaceChildren(...list.map((c) => {
             const row = document.createElement("div");
-            row.className = "cv-item" + (c.id === this.selectedId ? " selected" : "");
+            const marked = this.marked.has(c.id);
+            row.className = "cv-item reveal-on-hover" + (c.id === this.selectedId ? " selected" : "") + (marked ? " marked" : "");
             row.dataset.id = c.id;
-            row.innerHTML = `<sac-icon name="${c.kind === "organisation" ? "users" : "user"}"></sac-icon>
-                <div class="cv-item-text"><div class="cv-item-name"></div><div class="cv-item-sub"></div></div>`;
+            row.innerHTML = `<sac-icon name="${marked ? "check" : c.kind === "organisation" ? "users" : "user"}"></sac-icon>
+                <div class="cv-item-text"><div class="cv-item-name"></div><div class="cv-item-sub"></div></div>
+                ${this.writable ? `<button type="button" class="icon-btn hover-reveal danger cv-item-action" data-action="delete" title="${del}" aria-label="${del}"><sac-icon name="trash"></sac-icon></button>` : ""}`;
             row.querySelector(".cv-item-name").textContent = c.name;
             row.querySelector(".cv-item-sub").textContent = this.subline(c);
-            row.addEventListener("click", () => this.open(c.id));
+            row.addEventListener("click", (e) => {
+                if (e.target.closest("[data-action='delete']")) { e.stopPropagation(); this.removeMany([c.id]); return; }
+                this.onRowClick(e, c.id);
+            });
+            this.longPress(row, c.id);
             return row;
         }));
+    }
+
+    // A click opens the contact; Ctrl/⌘ toggles its mark, Shift marks the
+    // range from the last clicked one — and once something is marked, a tap on
+    // a phone toggles too.
+    onRowClick(e, id) {
+        if (this._pressed) { this._pressed = false; return; }   // the long press already marked it
+        this.querySelector("#cv-items").focus({ preventScroll: true });
+        const toggle = e.ctrlKey || e.metaKey || (this.marked.size > 0 && (this._pointer === "touch" || this._pointer === "pen"));
+        if (this.writable && e.shiftKey) {
+            const ids = this._shown || [];
+            const to = ids.indexOf(id);
+            let from = ids.indexOf(this._anchor ?? this.selectedId ?? id);
+            if (from < 0) from = to;
+            if (!(e.ctrlKey || e.metaKey)) this.marked.clear();
+            for (const x of ids.slice(Math.min(from, to), Math.max(from, to) + 1)) this.marked.add(x);
+            this.renderList();
+            return;
+        }
+        this._anchor = id;
+        if (this.writable && toggle) {
+            // The first Ctrl+click keeps the open contact in, like a file manager.
+            if (!this.marked.size && this.selectedId && this.selectedId !== id && (e.ctrlKey || e.metaKey)) this.marked.add(this.selectedId);
+            if (this.marked.has(id)) this.marked.delete(id); else this.marked.add(id);
+            this.renderList();
+            return;
+        }
+        this.marked.clear();
+        this.open(id);
+    }
+
+    // A long press (touch or pen) marks a contact — how marking starts on a phone.
+    longPress(row, id) {
+        let timer = null, x = 0, y = 0;
+        const stop = () => { clearTimeout(timer); timer = null; };
+        row.addEventListener("pointerdown", (e) => {
+            this._pointer = e.pointerType;
+            if (e.pointerType === "mouse" || !this.writable) return;
+            x = e.clientX; y = e.clientY;
+            timer = setTimeout(() => {
+                timer = null;
+                this._pressed = true;
+                this._anchor = id;
+                this.marked.add(id);
+                this.renderList();
+            }, 500);
+        });
+        row.addEventListener("pointermove", (e) => { if (timer && Math.hypot(e.clientX - x, e.clientY - y) > 10) stop(); });
+        row.addEventListener("pointerup", stop);
+        row.addEventListener("pointercancel", stop);
+        row.addEventListener("contextmenu", (e) => { if (this._pressed) e.preventDefault(); });
+    }
+
+    clearMarks() {
+        this.marked.clear();
+        this.renderList();
+    }
+
+    // The header names the filter — or, while contacts are marked, how many,
+    // with Delete and Clear in place of the filter and "+".
+    paintHead() {
+        const head = this.querySelector(".cv-head");
+        if (!head) return;
+        const n = this.marked.size;
+        const titles = { all: this.t("all-contacts", "All contacts"), person: this.t("people", "People"), organisation: this.t("organisations", "Organisations") };
+        this.querySelector("#cv-head-title").textContent = n
+            ? (n === 1 ? this.t("marked-1", "1 selected") : this.t("marked", "{n} selected", { n }))
+            : titles[this.filter];
+        for (const b of head.querySelectorAll("[data-filter]")) {
+            b.classList.toggle("active", b.dataset.filter === this.filter);
+            b.hidden = n > 0;
+        }
+        this.querySelector("#cv-new").hidden = !this.writable || n > 0;
+        this.querySelector("#cv-delete-marked").hidden = n === 0;
+        this.querySelector("#cv-clear-marks").hidden = n === 0;
     }
 
     // ---------------------------------------------------------- editor --
@@ -455,21 +563,50 @@ class FbContactsView extends HTMLElement {
         }
     }
 
-    async remove() {
-        const c = this.byId(this.selectedId);
-        if (!c) return;
-        // A pending edit would PUT the contact after it is gone.
-        clearTimeout(this._saveTimer);
-        this._saveTimer = null;
-        try {
-            await this.api.delete(c.id);
-            this.selectedId = null;
-            this.editing = null;
-            await this.load();
-            this.open(null);
-            sac.toast?.(this.t("deleted", "Moved to the trash."));
-        } catch (err) {
-            sac.toast?.(fb.errors.text(err, this.t("delete-failed", "Couldn't delete the contact.")), { kind: "error" });
+    remove() {
+        if (this.selectedId) return this.removeMany([this.selectedId]);
+    }
+
+    // One delete for the toolbar, a row's trash and the marked contacts: asked
+    // first, then into the trash one by one — people before organisations, so
+    // an organisation going with its people isn't refused for them.
+    async removeMany(ids) {
+        const items = ids.map((id) => this.byId(id)).filter(Boolean);
+        if (!items.length || !this.writable) return;
+        const one = items.length === 1;
+        const answer = await sac.dialog.confirm({
+            title: one ? this.t("delete-title-1", "Delete {name}?", { name: items[0].name }) : this.t("delete-title", "Delete {n} contacts?", { n: items.length }),
+            message: one ? this.t("delete-msg-1", "It moves to the trash — you can restore it there.") : this.t("delete-msg", "They move to the trash — you can restore them there."),
+            buttons: [
+                { action: "cancel", label: fb.t("fb.common.cancel", "Cancel"), kind: "default" },
+                { action: "delete", label: fb.t("fb.common.delete", "Delete"), kind: "destructive", armAfterMs: 2000 },
+            ],
+        });
+        if (answer !== "delete") return;
+        if (items.some((c) => c.id === this.selectedId)) {
+            // A pending edit would PUT the contact after it is gone.
+            clearTimeout(this._saveTimer);
+            this._saveTimer = null;
+        }
+        items.sort((a, b) => (a.kind === "organisation") - (b.kind === "organisation"));
+        let done = 0, firstError = null;
+        for (const c of items) {
+            try {
+                await this.api.delete(c.id);
+                done++;
+                this.marked.delete(c.id);
+                if (c.id === this.selectedId) { this.selectedId = null; this.editing = null; }
+            } catch (err) { firstError ??= err; }
+        }
+        await this.load();
+        if (!this.selectedId) this.open(null);
+        if (!firstError) {
+            sac.toast?.(one ? this.t("deleted", "Moved to the trash.") : this.t("deleted-n", "{n} contacts moved to the trash.", { n: done }));
+        } else if (one) {
+            sac.toast?.(fb.errors.text(firstError, this.t("delete-failed", "Couldn't delete the contact.")), { kind: "error" });
+        } else {
+            sac.toast?.(this.t("delete-some-failed", "{done} moved to the trash; {failed} couldn't be deleted: {reason}",
+                { done, failed: items.length - done, reason: fb.errors.text(firstError, this.t("delete-failed", "Couldn't delete the contact.")) }), { kind: "error" });
         }
     }
 
