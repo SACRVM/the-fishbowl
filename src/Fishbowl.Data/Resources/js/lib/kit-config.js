@@ -33,6 +33,12 @@
             '<rect x="3" y="8" width="18" height="4" rx="1"/><path d="M12 8v13"/><path d="M19 12v7a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2v-7"/>' +
             '<path d="M7.5 8a2.5 2.5 0 0 1 0-5C9.5 3 11 5.5 12 8c1-2.5 2.5-5 4.5-5a2.5 2.5 0 0 1 0 5"/>');
     }
+    // A series in the calendar (the repeat arrows calendars use); the kit's
+    // "sync" is a refresh, not a repeat.
+    if (!sac.icons.has("fb-repeat")) {
+        sac.icons.register("fb-repeat",
+            '<path d="m17 2 4 4-4 4"/><path d="M3 11v-1a4 4 0 0 1 4-4h14"/><path d="m7 22-4-4 4-4"/><path d="M21 13v1a4 4 0 0 1-4 4H3"/>');
+    }
     // A phone number (the calendar's birthday card); the kit ships no phone.
     if (!sac.icons.has("fb-phone")) {
         sac.icons.register("fb-phone",

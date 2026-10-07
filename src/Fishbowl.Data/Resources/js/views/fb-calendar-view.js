@@ -68,11 +68,20 @@ class FbCalendarView extends HTMLElement {
         };
     }
 
-    /** The mark before an entry's title: the gift for a birthday, the
-     *  repeat arrow for a series. */
+    /** An entry from a space shown in the personal calendar (spaces as
+     *  sources): its colour as the entry's --accent, so chip and dot follow
+     *  the space — a space without a colour is grey, never "personal". */
+    static sourceStyle(e) {
+        if (!e._source) return "";
+        const colour = e._source.color ? fb.accents.cssVar(e._source.color) : "var(--text-muted)";
+        return ` style="--accent: ${colour}"`;
+    }
+
+    /** The mark before an entry's title, the same everywhere (grid, agenda,
+     *  "+N more"): the gift for a birthday, the repeat arrows for a series. */
     static mark(e) {
-        if (e._birthday) return `<sac-icon class="cv-bday-mark" name="fb-gift" title="${fb.t("fb.calendar.birthday", "Birthday")}"></sac-icon>`;
-        return e.rRule ? `<span class="cv-repeat-mark" title="${fb.t("fb.calendar.repeats", "Repeats")}">&#8635;</span>` : "";
+        if (e._birthday) return `<sac-icon class="cv-mark" name="fb-gift" title="${fb.t("fb.calendar.birthday", "Birthday")}"></sac-icon>`;
+        return e.rRule ? `<sac-icon class="cv-mark" name="fb-repeat" title="${fb.t("fb.calendar.repeats", "Repeats")}"></sac-icon>` : "";
     }
 
     async connectedCallback() {
@@ -88,19 +97,31 @@ class FbCalendarView extends HTMLElement {
         // A space Reader gets no write actions (the server would refuse them):
         // no new events, and the editor only shows.
         this.writable = await fb.access.canWrite();
-        this.querySelector("#cv-new-btn").hidden = !this.writable;
+        // The personal calendar can show spaces too (spaces as sources).
+        if (this.workspace === "personal") {
+            await this.loadSources();
+            this._onSpaces = async () => { await this.loadSources(); if (!this.editing) this.paintToolbar(); this.loadEvents(); };
+            window.addEventListener("fb:spaces-changed", this._onSpaces);
+        }
+        this.querySelector("#cv-new-btn").hidden = !this.canCreate();
         this.querySelector("#cv-editor-wrap").toggleAttribute("inert", !this.writable);
         await this.loadEvents();
         if (!this.isConnected) return;   // left during the load — don't hook a dead view
         if (!this.editing) this.paintToolbar();
-        // "New event" from the Ctrl-K palette (fb.desktop.go).
-        this._onIntent = () => { if (fb.desktop?.takeIntent("calendar")?.action === "create" && this.writable) this.createEvent(); };
+        // "New event" from the Ctrl-K palette; an event opened from the
+        // personal calendar in its space (fb.desktop.go).
+        this._onIntent = () => {
+            const it = fb.desktop?.takeIntent("calendar");
+            if (it?.action === "create" && this.canCreate()) this.createEvent();
+            else if (it?.action === "open" && it.id) this.openEvent(it.id);
+        };
         window.addEventListener("fb:intent", this._onIntent);
         this._onIntent();
     }
 
     disconnectedCallback() {
         if (this._onIntent) window.removeEventListener("fb:intent", this._onIntent);
+        if (this._onSpaces) window.removeEventListener("fb:spaces-changed", this._onSpaces);
         this.flushSave();
         if (window.fb?.toolbar) fb.toolbar.clear();
     }
@@ -112,28 +133,100 @@ class FbCalendarView extends HTMLElement {
         return new Date(first.getFullYear(), first.getMonth(), 1 - offset);
     }
 
+    // ------------------------------------------------------- sources --
+    // The personal calendar shows its own events and those of the spaces
+    // switched on (docs/superpowers/specs/2026-10-07-space-sources-design.md):
+    // read live from each space for the range on screen, never copied, and
+    // read-only here. Which ones is per user, on the server.
+
+    async loadSources() {
+        try {
+            const [sources, spaces] = await Promise.all([fb.api.me.sources(), fb.api.spaces.list()]);
+            this.sources = sources?.calendar || ["personal"];
+            this.spaces = Array.isArray(spaces) ? spaces : [];
+        } catch (err) {
+            console.error("[fb-calendar-view] sources failed:", err);
+            this.sources = ["personal"];
+            this.spaces = [];
+        }
+    }
+
+    /** The spaces switched on, in the switcher's order (personal view only). */
+    sourceSpaces() {
+        if (this.workspace !== "personal" || !this.sources) return [];
+        return (this.spaces || []).filter((s) => this.sources.includes(s.id));
+    }
+
+    showsPersonal() { return this.workspace !== "personal" || !this.sources || this.sources.includes("personal"); }
+
+    /** New events go to the workspace on screen — in the personal view only
+     *  while personal is shown, or a new event would vanish on save. */
+    canCreate() { return this.writable !== false && this.showsPersonal(); }
+
+    async toggleSource(source) {
+        const on = !this.sources.includes(source);
+        try {
+            this.sources = (await fb.api.me.setSource("calendar", source, on)).calendar;
+        } catch (err) {
+            sac.toast?.(fb.errors.text(err, fb.t("fb.calendar.sources-failed", "Couldn't change what the calendar shows.")), { kind: "error" });
+            return;
+        }
+        this.querySelector("#cv-new-btn").hidden = !this.canCreate();
+        if (!this.editing) this.paintToolbar();
+        await this.loadEvents();
+    }
+
     async loadEvents() {
         const from = this._gridStart();
         const to = new Date(from.getFullYear(), from.getMonth(), from.getDate() + 42);
         const seq = ++this._loadSeq;
-        let events;
-        try {
-            // The contacts' birthdays come along as read-only all-day entries
-            // (never stored events); a failure there leaves the events.
+        // One workspace's range: its events and — never stored events — its
+        // contacts' birthdays as read-only all-day entries, each marked with
+        // the space it came from (none for this view's own).
+        const range = async (api, source) => {
             const [list, bdays] = await Promise.all([
-                this.api.list({ from, to }),
-                this.api.birthdays(FbCalendarView.dayKey(from), FbCalendarView.dayKey(to)).catch(() => null),
+                api.list({ from, to }),
+                api.birthdays(FbCalendarView.dayKey(from), FbCalendarView.dayKey(to)).catch(() => null),
             ]);
-            events = (Array.isArray(list) ? list : [])
-                .concat((bdays?.birthdays || []).map(FbCalendarView.birthdayEntry))
-                .sort((a, b) => new Date(a.startAt) - new Date(b.startAt));
-        } catch (err) {
-            console.error("[fb-calendar-view] list failed:", err);
-            events = [];
+            const all = (Array.isArray(list) ? list : []).concat((bdays?.birthdays || []).map(FbCalendarView.birthdayEntry));
+            if (source) for (const e of all) e._source = source;
+            return all;
+        };
+        let events = [];
+        if (this.showsPersonal()) {
+            try { events = await range(this.api, null); }
+            catch (err) { console.error("[fb-calendar-view] list failed:", err); }
         }
+        const failed = new Set();
+        const theirs = await Promise.all(this.sourceSpaces().map((s) =>
+            range(fb.api.events.in(`space:${s.slug}`), s).catch((err) => {
+                console.error(`[fb-calendar-view] ${s.slug} failed:`, err);
+                failed.add(s.id);
+                return [];
+            })));
+        events = events.concat(...theirs).sort((a, b) => new Date(a.startAt) - new Date(b.startAt));
         if (seq !== this._loadSeq) return;   // another month was asked for meanwhile
         this.events = events;
         this.renderMonth();
+        const wasFailing = this._failedSources?.size;
+        this._failedSources = failed;
+        if ((failed.size || wasFailing) && !this.editing) this.paintToolbar();
+    }
+
+    /** An event opened in this workspace by id (the personal calendar's Open
+     *  in <space>): its month on screen, then the editor on its master. */
+    async openEvent(id) {
+        try {
+            const ev = await this.api.get(id);
+            if (!ev) return;
+            const d = ev.allDay && ev.startDate ? new Date(`${ev.startDate}T00:00`) : new Date(ev.startAt);
+            this.cursor = new Date(d.getFullYear(), d.getMonth(), 1);
+            this.selectedDay = FbCalendarView.dayKey(d);
+            await this.loadEvents();
+            this._openEditor(ev);
+        } catch (err) {
+            console.error("[fb-calendar-view] open failed:", err);
+        }
     }
 
     render() {
@@ -360,7 +453,7 @@ class FbCalendarView extends HTMLElement {
                     flex-shrink: 0;
                 }
                 fb-calendar-view .cv-chip:hover { background: color-mix(in srgb, var(--accent) 28%, transparent); }
-                fb-calendar-view .cv-bday-mark { --icon-size: 12px; vertical-align: -1px; margin-right: 3px; color: var(--accent); }
+                fb-calendar-view .cv-mark, #cv-more-menu .cv-mark { --icon-size: 12px; vertical-align: -1px; margin-right: 4px; color: var(--accent); flex: none; }
                 #cv-feeds-dialog .cv-feeds { display: flex; flex-direction: column; gap: 12px; }
                 #cv-feeds-dialog .cv-feeds:empty { display: none; }
                 #cv-feeds-dialog .cv-feed-row { display: flex; align-items: center; gap: 8px; }
@@ -369,12 +462,14 @@ class FbCalendarView extends HTMLElement {
                 #cv-feeds-dialog #cv-feed-new { align-self: flex-start; }
                 #cv-feeds-dialog .cv-feed-url { flex: 1; min-width: 0; width: auto; }
                 #cv-feeds-dialog p { margin: 0; }
-                #cv-bday-dialog .cv-bday { display: flex; flex-direction: column; gap: 10px; min-width: min(340px, 75vw); }
-                #cv-bday-dialog .cv-bday-line { display: flex; align-items: center; gap: 10px; color: var(--text-muted); text-decoration: none; overflow-wrap: anywhere; }
-                #cv-bday-dialog .cv-bday-line sac-icon { --icon-size: 16px; flex: none; }
-                #cv-bday-dialog .cv-bday-line.lead { color: var(--text); font-weight: 600; }
-                #cv-bday-dialog .cv-bday-line.lead sac-icon { color: var(--accent); }
-                #cv-bday-dialog a.cv-bday-line:hover span { color: var(--text); text-decoration: underline; }
+                .cv-card .cv-card-body { display: flex; flex-direction: column; gap: 10px; min-width: min(340px, 75vw); max-width: 520px; }
+                .cv-card .cv-card-line { display: flex; align-items: flex-start; gap: 10px; color: var(--text-muted); text-decoration: none; overflow-wrap: anywhere; white-space: pre-line; }
+                .cv-card .cv-card-line sac-icon { --icon-size: 16px; flex: none; margin-top: 2px; }
+                .cv-card .cv-card-line.lead { color: var(--text); font-weight: 600; }
+                .cv-card .cv-card-line.lead sac-icon, .cv-card .cv-card-line.src sac-icon { color: var(--accent); }
+                .cv-card a.cv-card-line:hover span { color: var(--text); text-decoration: underline; }
+                /* A space's entry: its colour on the chip (sourceStyle), a dot in the agenda. */
+                fb-calendar-view .cv-src-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--accent); margin-right: 6px; vertical-align: 1px; }
                 fb-calendar-view .cv-chip-time {
                     color: var(--text-muted);
                     margin-right: 4px;
@@ -509,11 +604,6 @@ class FbCalendarView extends HTMLElement {
                 fb-calendar-view .cv-desc-input::placeholder {
                     color: var(--text-muted);
                     opacity: 0.55;
-                }
-                fb-calendar-view .cv-repeat-mark {
-                    color: var(--text-muted);
-                    font-size: 0.9em;
-                    margin-right: 3px;
                 }
                 fb-calendar-view .cv-editor-footer {
                     display: flex;
@@ -742,9 +832,10 @@ class FbCalendarView extends HTMLElement {
 
             const chips = dayEvents.slice(0, MAX_CHIPS).map(e => {
                 const time = e.allDay || e._cont ? "" : fb.format.time(e.startAt);
-                const repeat = FbCalendarView.mark(e);
-                return `<div class="cv-chip ${e.allDay ? "all-day" : ""} ${e._cont ? "cont" : ""} ${e._birthday ? "birthday" : ""}" data-id="${e.id}" title="${escapeHtml(e.title || fb.t("fb.calendar.untitled", "Untitled"))}">
-                            ${time ? `<span class="cv-chip-time">${time}</span>` : ""}${repeat}${escapeHtml(e.title || fb.t("fb.calendar.untitled", "Untitled"))}
+                const mark = FbCalendarView.mark(e);
+                const from = e._source ? ` · ${escapeHtml(e._source.name || e._source.slug)}` : "";
+                return `<div class="cv-chip ${e.allDay ? "all-day" : ""} ${e._cont ? "cont" : ""} ${e._birthday ? "birthday" : ""} ${e._source ? "from-space" : ""}" data-id="${e.id}"${FbCalendarView.sourceStyle(e)} title="${escapeHtml(e.title || fb.t("fb.calendar.untitled", "Untitled"))}${from}">
+                            ${time ? `<span class="cv-chip-time">${time}</span>` : ""}${mark}${escapeHtml(e.title || fb.t("fb.calendar.untitled", "Untitled"))}
                         </div>`;
             }).join("");
             const more = dayEvents.length - MAX_CHIPS;
@@ -768,7 +859,7 @@ class FbCalendarView extends HTMLElement {
                 this.renderAgenda();
             });
             cell.addEventListener("dblclick", (e) => {
-                if (e.target.closest(".cv-chip") || this.writable === false) return;
+                if (e.target.closest(".cv-chip") || !this.canCreate()) return;
                 this.selectedDay = cell.dataset.key;
                 this.createEvent(cell.dataset.key);
             });
@@ -797,8 +888,7 @@ class FbCalendarView extends HTMLElement {
             b.type = "button";
             b.dataset.action = ev.id;
             const t = ev.allDay || ev._cont ? fb.t("fb.calendar.all-day-short", "all day") : fb.format.time(ev.startAt);
-            const repeat = " " + FbCalendarView.mark(ev);
-            b.innerHTML = `<span class="cv-chip-time">${t}</span> ${escapeHtml(ev.title || fb.t("fb.calendar.untitled", "Untitled"))}${repeat}`;
+            b.innerHTML = `<span class="cv-chip-time">${t}</span> ${FbCalendarView.mark(ev)}${escapeHtml(ev.title || fb.t("fb.calendar.untitled", "Untitled"))}`;
             menu.appendChild(b);
         }
         menu.addEventListener("sac:select", (ev) => {
@@ -829,6 +919,8 @@ class FbCalendarView extends HTMLElement {
             return;
         }
 
+        // With spaces on, every row carries its source's dot (personal's in the accent).
+        const dots = this.sourceSpaces().length > 0;
         agenda.innerHTML = dayKeys.map(key => {
             const d = new Date(key + "T00:00");
             const header = `${fb.format.weekday(d)} ${fb.format.dayMonth(d)}`;
@@ -836,11 +928,11 @@ class FbCalendarView extends HTMLElement {
                 // A multi-day event's following days: no start time again,
                 // dimmed like its grid chip.
                 const time = e.allDay || e._cont ? fb.t("fb.calendar.all-day-short", "all day") : fb.format.time(e.startAt);
-                const repeat = " " + FbCalendarView.mark(e);
+                const mark = FbCalendarView.mark(e);
                 return `
-                    <div class="cv-agenda-item ${e.id === this.editing?.id ? "selected" : ""} ${e._cont ? "cont" : ""} ${e._birthday ? "birthday" : ""}" data-id="${e.id}">
+                    <div class="cv-agenda-item ${e.id === this.editing?.id ? "selected" : ""} ${e._cont ? "cont" : ""} ${e._birthday ? "birthday" : ""} ${e._source ? "from-space" : ""}" data-id="${e.id}"${FbCalendarView.sourceStyle(e)}>
                         <span class="cv-agenda-time">${time}</span>
-                        <span class="cv-agenda-title">${escapeHtml(e.title || fb.t("fb.calendar.untitled", "Untitled"))}${repeat}</span>
+                        <span class="cv-agenda-title">${dots ? `<span class="cv-src-dot" title="${escapeHtml(e._source ? e._source.name || e._source.slug : fb.t("fb.shell.personal", "Personal"))}"></span>` : ""}${mark}${escapeHtml(e.title || fb.t("fb.calendar.untitled", "Untitled"))}</span>
                         ${e.location ? `<span class="cv-agenda-loc">${escapeHtml(e.location)}</span>` : ""}
                     </div>
                 `;
@@ -863,7 +955,9 @@ class FbCalendarView extends HTMLElement {
         const evt = this.events.find(e => e.id === id);
         if (!evt) return;
         // A birthday is the contact's: a brief card, the contact one click away.
-        if (evt._birthday) { this.birthdayDialog(evt._birthday); return; }
+        if (evt._birthday) { this.birthdayDialog(evt._birthday, evt._source); return; }
+        // A space's event is read-only here: a brief card, its space one click away.
+        if (evt._source) { this.sourceDialog(evt); return; }
         if (evt.isRecurringInstance) {
             // Instances share the master's id and carry a shifted startAt —
             // editing must happen on the master or a blur would silently
@@ -1023,6 +1117,25 @@ class FbCalendarView extends HTMLElement {
      *  and out, and the subscription links. */
     paintToolbar() {
         const items = [];
+        // What the personal calendar shows: personal and each space, ✓ when on.
+        if (this.workspace === "personal" && this.spaces?.length) {
+            const failed = this._failedSources || new Set();
+            items.push({
+                id: "cv-sources", icon: "layers", title: fb.t("fb.calendar.sources", "Calendars shown"),
+                menu: [
+                    { action: "personal", label: fb.t("fb.shell.personal", "Personal"), icon: "user", color: "var(--accent)", checked: this.sources.includes("personal") },
+                    "-",
+                    ...this.spaces.map((s) => ({
+                        action: s.id,
+                        label: (s.name || s.slug) + (failed.has(s.id) ? ` — ${fb.t("fb.calendar.source-failed", "not loaded")}` : ""),
+                        icon: "users",
+                        color: s.color ? fb.accents.cssVar(s.color) : "var(--text-muted)",
+                        checked: this.sources.includes(s.id),
+                    })),
+                ],
+                onSelect: (source) => this.toggleSource(source),
+            });
+        }
         if (this.writable) items.push({ id: "cv-import", icon: "upload", title: fb.t("fb.calendar.import", "Import an .ics file"), onClick: () => this.importIcs() });
         items.push({ id: "cv-export", icon: "download", title: fb.t("fb.calendar.export", "Export as an .ics file"), onClick: () => this.exportIcs() });
         items.push({ id: "cv-feeds", icon: "link", title: fb.t("fb.calendar.feeds", "Subscription links"), onClick: () => this.feedsDialog() });
@@ -1062,14 +1175,52 @@ class FbCalendarView extends HTMLElement {
         input.click();
     }
 
-    /** The caller's subscription links of this workspace: each with when it
-     *  was made and Revoke; "New link" shows the URL once. */
+    /** A brief read-only card over the calendar (sac-dialog): a title, lines
+     *  of [icon, text, href?, lead?, class?] — the first one leading in the
+     *  entry's colour — and Close plus one way on. */
+    card({ id, title, accent, lines, go, onGo }) {
+        const line = ([icon, text, href, lead, cls]) => {
+            const el = document.createElement(href ? "a" : "div");
+            el.className = "cv-card-line" + (lead ? " lead" : "") + (cls ? ` ${cls}` : "");
+            if (href) el.href = href;
+            el.innerHTML = `<sac-icon name="${icon}"></sac-icon><span></span>`;
+            el.querySelector("span").textContent = text;
+            return el;
+        };
+        const body = document.createElement("div");
+        body.className = "cv-card-body";
+        if (accent) body.style.setProperty("--accent", accent);
+        body.append(...lines.filter(Boolean).map(line));
+        const dlg = document.createElement("sac-dialog");
+        dlg.id = id;
+        dlg.className = "cv-card";
+        dlg.setAttribute("title", title);
+        dlg.appendChild(body);
+        dlg.buttons = [
+            { action: "close", label: fb.t("fb.common.close", "Close"), kind: "default" },
+            { action: "go", label: go, kind: "primary" },
+        ];
+        dlg.addEventListener("sac:action", (e) => {
+            if (e.detail?.action === "go") onGo();
+            setTimeout(() => dlg.remove(), 120);
+        });
+        document.body.appendChild(dlg);
+        setTimeout(() => dlg.open?.(), 0);
+    }
+
+    /** A space's line on a card: its name, in its colour. */
+    static sourceLine(source) {
+        return source ? ["users", source.name || source.slug, null, false, "src"] : null;
+    }
+
     // A birthday in brief: the day and the age, what the person does, how to
-    // reach them (mail and phone as links) — and Go to contact. The details
-    // come from the contact; without them the card shows the day alone.
-    async birthdayDialog(b) {
+    // reach them (mail and phone as links) — and Go to contact, in the space
+    // the contact lives in. The details come from the contact; without them
+    // the card shows the day alone.
+    async birthdayDialog(b, source) {
         const t = (k, f, v) => fb.t(`fb.calendar.${k}`, f, v);
-        const contacts = fb.api.contacts.in(this.workspace);
+        const ws = source ? `space:${source.slug}` : this.workspace;
+        const contacts = fb.api.contacts.in(ws);
         let c = null, org = null;
         try {
             c = await contacts.get(b.contactId);
@@ -1079,39 +1230,58 @@ class FbCalendarView extends HTMLElement {
         const when = `${fb.format.longDate(new Date(y, m - 1, d))} ${y}`;
         const age = b.age == null ? null
             : b.date < FbCalendarView.dayKey(new Date()) ? t("bday-turned", "Turned {n}", { n: b.age }) : t("bday-turns", "Turns {n}", { n: b.age });
-        const line = (icon, text, href, cls) => {
-            const el = document.createElement(href ? "a" : "div");
-            el.className = "cv-bday-line" + (cls ? ` ${cls}` : "");
-            if (href) el.href = href;
-            el.innerHTML = `<sac-icon name="${icon}"></sac-icon><span></span>`;
-            el.querySelector("span").textContent = text;
-            return el;
-        };
-        const body = document.createElement("div");
-        body.className = "cv-bday";
-        body.append(line("fb-gift", [age, when].filter(Boolean).join(" · "), null, "lead"));
-        const work = [c?.role, org?.name].filter(Boolean).join(" · ");
-        if (work) body.append(line("users", work));
         const email = (c?.emails || []).find((e) => e.value)?.value;
-        if (email) body.append(line("mail", email, `mailto:${email}`));
         const phone = (c?.phones || []).find((p) => p.value)?.value;
-        if (phone) body.append(line("fb-phone", phone, `tel:${phone.replace(/[^\d+]/g, "")}`));
-        const dlg = document.createElement("sac-dialog");
-        dlg.id = "cv-bday-dialog";
-        dlg.setAttribute("title", b.name);
-        dlg.appendChild(body);
-        dlg.buttons = [
-            { action: "close", label: fb.t("fb.common.close", "Close"), kind: "default" },
-            { action: "contact", label: t("bday-open", "Go to contact"), kind: "primary" },
-        ];
-        dlg.addEventListener("sac:action", (e) => {
-            if (e.detail?.action === "contact") fb.desktop.go("contacts", "open", b.contactId);
-            setTimeout(() => dlg.remove(), 120);
+        this.card({
+            id: "cv-bday-dialog",
+            title: b.name,
+            accent: source ? (source.color ? fb.accents.cssVar(source.color) : "var(--text-muted)") : null,
+            lines: [
+                ["fb-gift", [age, when].filter(Boolean).join(" · "), null, true],
+                [c?.role, org?.name].some(Boolean) ? ["users", [c?.role, org?.name].filter(Boolean).join(" · ")] : null,
+                email ? ["mail", email, `mailto:${email}`] : null,
+                phone ? ["fb-phone", phone, `tel:${phone.replace(/[^\d+]/g, "")}`] : null,
+                FbCalendarView.sourceLine(source),
+            ],
+            go: t("bday-open", "Go to contact"),
+            onGo: () => fb.desktop.go("contacts", "open", b.contactId, source ? ws : undefined),
         });
-        document.body.appendChild(dlg);
-        setTimeout(() => dlg.open?.(), 0);
     }
 
+    // A space's event in the personal calendar, read-only: when, how often,
+    // where, its notes, its space — and Open in <space>, where it is edited.
+    sourceDialog(e) {
+        const t = (k, f, v) => fb.t(`fb.calendar.${k}`, f, v);
+        const s = e._source;
+        const dayOf = (key) => { const [y, m, d] = key.split("-").map(Number); return new Date(y, m - 1, d); };
+        let when;
+        if (e.allDay && e.startDate) {
+            const last = FbCalendarView.addDays(e.endDate || FbCalendarView.addDays(e.startDate, 1), -1);
+            when = last > e.startDate ? `${fb.format.longDate(dayOf(e.startDate))} – ${fb.format.longDate(dayOf(last))}` : fb.format.longDate(dayOf(e.startDate));
+        } else {
+            const start = new Date(e.startAt), end = e.endAt ? new Date(e.endAt) : null;
+            const sameDay = end && FbCalendarView.dayKey(start) === FbCalendarView.dayKey(end);
+            when = `${fb.format.longDate(start)}, ${fb.format.time(start)}`
+                + (end ? (sameDay ? ` – ${fb.format.time(end)}` : ` – ${fb.format.longDate(end)}, ${fb.format.time(end)}`) : "");
+        }
+        this.card({
+            id: "cv-source-dialog",
+            title: e.title || fb.t("fb.calendar.untitled", "Untitled"),
+            accent: s.color ? fb.accents.cssVar(s.color) : "var(--text-muted)",
+            lines: [
+                ["clock", when, null, true],
+                e.rRule ? ["calendar", t("repeats", "Repeats")] : null,
+                e.location ? ["pin", e.location] : null,
+                e.description ? ["document", e.description] : null,
+                FbCalendarView.sourceLine(s),
+            ],
+            go: t("source-open", "Open in {space}", { space: s.name || s.slug }),
+            onGo: () => fb.desktop.go("calendar", "open", e.id, `space:${s.slug}`),
+        });
+    }
+
+    /** The caller's subscription links of this workspace: each with when it
+     *  was made and Revoke; "New link" shows the URL once. */
     async feedsDialog() {
         const dlg = document.createElement("sac-dialog");
         dlg.id = "cv-feeds-dialog";

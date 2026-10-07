@@ -591,6 +591,7 @@ window.sac?.i18n?.add?.("de", {
     "fb.errors.range_too_long": "Ein Zeitraum darf höchstens {maxDays} Tage umfassen.",
     "fb.errors.invalid_file": "Die Datei ist kein iCalendar (.ics).",
     "fb.errors.feed_missing": "Diesen Link gibt es nicht.",
+    "fb.errors.invalid_source": "Das ist keiner deiner Arbeitsbereiche.",
     "fb.errors.merge_too_large": "Zusammen sind die beiden Kontakte zu viel für einen ({field}) — kürze erst das Duplikat.",
     "fb.errors.apps_folder_fixed": "Den Ordner .apps selbst kann man nicht umbenennen, verschieben oder löschen.",
     "fb.errors.role_design": "Tabellen ändern braucht mindestens die Rolle Designer.",

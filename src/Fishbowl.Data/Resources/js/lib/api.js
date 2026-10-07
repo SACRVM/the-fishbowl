@@ -691,6 +691,11 @@
             // Personal settings, partial: send only what changes —
             // { accent } (palette slot or null) and/or { dateFormat }.
             update: (settings) => request("/me", { method: "PATCH", body: JSON.stringify(settings) }),
+            // Which workspaces the personal Calendar and Contacts show:
+            // { calendar: [...], contacts: [...] } — "personal" and space ids.
+            // setSource switches one and resolves to the lists after it.
+            sources:   ()                  => request("/me/sources"),
+            setSource: (app, source, on)   => request("/me/sources", { method: "PUT", body: JSON.stringify({ app, source, on }) }),
         },
         // Secret vault key slots — personal only, never context-prefixed
         // (spaces have no vault). Cookie-only server-side. Used by fb.vault.

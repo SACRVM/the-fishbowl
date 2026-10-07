@@ -57,6 +57,16 @@ public class ContactsTests
             await view.Locator("#cv-emails input[data-f='value']").FillAsync("ada@acme.test");
             await Assertions.Expect(view.Locator(".cv-item.selected")).ToContainTextAsync("Ada Lovelace", new() { Timeout = 5000 });
             await Assertions.Expect(view.Locator(".cv-item.selected")).ToContainTextAsync("Acme GmbH");
+
+            // An address on two lines: the street, then postal code, city, region
+            // and country under it, starting on the street's edge.
+            await view.Locator("#cv-editor button[data-add='addresses']").ClickAsync();
+            var street = (await view.Locator("#cv-addresses input[data-f='street']").BoundingBoxAsync())!;
+            var postal = (await view.Locator("#cv-addresses input[data-f='postalCode']").BoundingBoxAsync())!;
+            var country = (await view.Locator("#cv-addresses input[data-f='country']").BoundingBoxAsync())!;
+            Assert.True(postal.Y > street.Y + street.Height, $"postal code at {postal.Y}, street ends at {street.Y + street.Height}");
+            Assert.Equal(street.X, postal.X, 1);
+            Assert.Equal(street.X + street.Width, country.X + country.Width, 1);
             await page.ScreenshotAsync(new() { Path = Path.Combine(Path.GetTempPath(), "contacts-person.png") });
 
             // The server has it; the organisation lists its person.
@@ -64,7 +74,18 @@ public class ContactsTests
             var ada = list.EnumerateArray().Single(c => c.GetProperty("kind").GetString() == "person");
             Assert.Equal("ada@acme.test", ada.GetProperty("email").GetString());
             await view.Locator(".cv-item").Filter(new() { Has = page.Locator(".cv-item-name", new() { HasTextString = "Acme GmbH" }) }).ClickAsync();
-            await Assertions.Expect(view.Locator("#cv-links")).ToContainTextAsync("Ada Lovelace");
+            // The organisation lists its people at the end; a click opens the person.
+            var person = view.Locator("#cv-links .cv-link-row", new() { HasText = "Ada Lovelace" });
+            await Assertions.Expect(person).ToContainTextAsync("ada@acme.test");
+            await person.ScrollIntoViewIfNeededAsync();
+            await page.ScreenshotAsync(new() { Path = Path.Combine(Path.GetTempPath(), "contacts-org.png") });
+            await person.ClickAsync();
+            await Assertions.Expect(view.Locator(".cv-item.selected")).ToContainTextAsync("Ada Lovelace");
+
+            // A person's name on one line.
+            var first = (await view.Locator("#cv-editor input[data-key='firstName']").BoundingBoxAsync())!;
+            var last = (await view.Locator("#cv-editor input[data-key='lastName']").BoundingBoxAsync())!;
+            Assert.Equal(first.Y, last.Y, 1);
             Assert.Empty(errors);
         }
         finally

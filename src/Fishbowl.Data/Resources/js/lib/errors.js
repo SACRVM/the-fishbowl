@@ -66,6 +66,7 @@
         "range_too_long": "A range may span at most {maxDays} days.",
         "invalid_file": "The file isn't iCalendar (.ics).",
         "feed_missing": "There is no such link.",
+        "invalid_source": "That isn't one of your workspaces.",
         "merge_too_large": "Together the two contacts are more than one contact holds ({field}) — trim the duplicate first.",
         // System settings and setup
         "unknown_config_key": "That setting doesn't exist.",

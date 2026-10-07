@@ -226,7 +226,7 @@ public class UserAdminRepository : IUserAdminRepository
             "DELETE FROM discord_link_codes WHERE user_id = @userId",
             "DELETE FROM space_members WHERE user_id = @userId",
             "DELETE FROM messages WHERE recipient_id = @userId",
-            "DELETE FROM system_config WHERE key IN ('Digest:LastSent:' || @userId, 'Files:QuotaWarned:' || @userId, 'Messages:Muted:' || @userId)",
+            "DELETE FROM system_config WHERE key IN ('Digest:LastSent:' || @userId, 'Files:QuotaWarned:' || @userId, 'Messages:Muted:' || @userId, 'View:Sources:' || @userId)",
             "DELETE FROM user_mappings WHERE user_id = @userId",
             "DELETE FROM users WHERE id = @userId",
             "INSERT OR REPLACE INTO deleted_users (id, deleted_at) VALUES (@userId, @now)",

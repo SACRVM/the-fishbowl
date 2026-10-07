@@ -134,17 +134,55 @@ class FbContactsView extends HTMLElement {
                 fb-contacts-view .cv-empty { min-height: 60%; justify-content: center; }
                 fb-contacts-view .cv-title { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
                 fb-contacts-view .cv-title h2 { margin: 0; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-                fb-contacts-view .cv-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 10px 14px; margin: 8px 0 18px; }
+                /* auto-fit: the fields a section has share its whole width (two fields → two halves). */
+                fb-contacts-view .cv-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px 14px; margin: 8px 0 18px; }
+                fb-contacts-view .cv-grid sac-select { display: block; width: 100%; }
+                /* A person's name on one line: salutation and title narrow, first and last name wide. */
+                fb-contacts-view .cv-grid.cv-names { grid-template-columns: minmax(90px, 1fr) minmax(90px, 1fr) 2fr 2fr; }
+                /* An organisation's people and what links here: rows like the list's, a click opens. */
+                fb-contacts-view .cv-link-list { display: grid; gap: 2px; margin: 8px 0 18px; }
+                fb-contacts-view .cv-link-row {
+                    display: flex; align-items: center; gap: 10px; width: 100%;
+                    padding: 8px 12px; border: 0; border-radius: var(--radius-m);
+                    background: none; color: var(--text); font: inherit; text-align: left; text-decoration: none; cursor: pointer;
+                }
+                fb-contacts-view .cv-link-row:hover { background: var(--hover); }
+                fb-contacts-view .cv-link-row sac-icon { color: var(--text-muted); flex: none; }
+                fb-contacts-view .cv-link-text { flex: 1; min-width: 0; }
+                fb-contacts-view .cv-link-name, fb-contacts-view .cv-link-sub { display: block; }
+                fb-contacts-view .cv-link-name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+                fb-contacts-view .cv-link-sub { color: var(--text-muted); font-size: 0.8125rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
                 fb-contacts-view .cv-grid label, fb-contacts-view .cv-list label { display: grid; gap: 4px; font-size: 0.8125rem; color: var(--text-muted); }
                 fb-contacts-view .cv-grid input, fb-contacts-view .cv-list input, fb-contacts-view textarea { width: 100%; box-sizing: border-box; color: var(--text); }
                 fb-contacts-view .cv-wide { grid-column: 1 / -1; }
                 fb-contacts-view .cv-list { margin: 8px 0 12px; display: grid; gap: 8px; }
                 fb-contacts-view .cv-list:empty { display: none; }
                 fb-contacts-view .cv-row { display: grid; grid-template-columns: 120px 1fr auto; gap: 8px; align-items: end; }
-                fb-contacts-view .cv-addr { display: grid; grid-template-columns: 120px 2fr 1fr 1.5fr 1fr 1fr auto; gap: 8px; align-items: end; }
+                /* An address on two lines: label and street (and Remove), then
+                   postal code, city, region and country under the street. Children:
+                   1 label, 2 street, 3 postal code, 4 city, 5 region, 6 country, 7 Remove. */
+                fb-contacts-view #cv-addresses { gap: 16px; }
+                fb-contacts-view .cv-addr { display: grid; grid-template-columns: 120px minmax(120px, 1fr) 2fr 1.5fr 1.5fr auto; gap: 8px; align-items: end; }
+                fb-contacts-view .cv-addr > :nth-child(1) { grid-area: 1 / 1; }
+                fb-contacts-view .cv-addr > :nth-child(2) { grid-area: 1 / 2 / 2 / 6; }
+                fb-contacts-view .cv-addr > :nth-child(3) { grid-area: 2 / 2; }
+                fb-contacts-view .cv-addr > :nth-child(4) { grid-area: 2 / 3; }
+                fb-contacts-view .cv-addr > :nth-child(5) { grid-area: 2 / 4; }
+                fb-contacts-view .cv-addr > :nth-child(6) { grid-area: 2 / 5; }
+                fb-contacts-view .cv-addr > :nth-child(7) { grid-area: 1 / 6; }
                 @media (max-width: 768px) {
-                    fb-contacts-view .cv-row, fb-contacts-view .cv-addr { grid-template-columns: 1fr auto; }
-                    fb-contacts-view .cv-row label:first-child, fb-contacts-view .cv-addr label:first-child { grid-column: 1 / -1; }
+                    fb-contacts-view .cv-row { grid-template-columns: 1fr auto; }
+                    fb-contacts-view .cv-grid.cv-names { grid-template-columns: 1fr 1fr; }
+                    fb-contacts-view .cv-row label:first-child { grid-column: 1 / -1; }
+                    /* A phone: label (and Remove), street, then two pairs. */
+                    fb-contacts-view .cv-addr { grid-template-columns: 1fr 1fr auto; }
+                    fb-contacts-view .cv-addr > :nth-child(1) { grid-area: 1 / 1 / 2 / 3; }
+                    fb-contacts-view .cv-addr > :nth-child(2) { grid-area: 2 / 1 / 3 / 4; }
+                    fb-contacts-view .cv-addr > :nth-child(3) { grid-area: 3 / 1; }
+                    fb-contacts-view .cv-addr > :nth-child(4) { grid-area: 3 / 2 / 4 / 4; }
+                    fb-contacts-view .cv-addr > :nth-child(5) { grid-area: 4 / 1; }
+                    fb-contacts-view .cv-addr > :nth-child(6) { grid-area: 4 / 2 / 5 / 4; }
+                    fb-contacts-view .cv-addr > :nth-child(7) { grid-area: 1 / 3; }
                 }
                 fb-contacts-view textarea { min-height: 90px; resize: vertical; }
                 fb-contacts-view .cv-links a { cursor: pointer; }
@@ -382,7 +420,7 @@ class FbContactsView extends HTMLElement {
                 <sac-chip label="${person ? t("person", "Person") : t("organisation", "Organisation")}"></sac-chip>
             </div>
             <sac-section title="${t("names", "Name")}"></sac-section>
-            <div class="cv-grid">
+            <div class="cv-grid${person ? " cv-names" : ""}">
                 ${person
                     ? this.field(t("salutation", "Salutation"), "salutation") + this.field(t("honorific", "Title"), "honorific")
                       + this.field(t("first-name", "First name"), "firstName") + this.field(t("last-name", "Last name"), "lastName")
@@ -498,26 +536,44 @@ class FbContactsView extends HTMLElement {
         const box = this.querySelector("#cv-links");
         if (!box || (!data.people?.length && !data.links?.length)) { if (box) box.replaceChildren(); return; }
         const t = (k, f) => this.t(k, f);
-        box.innerHTML = `<sac-section title="${t("history", "Linked here")}"></sac-section><div class="cv-links"></div>`;
-        const list = box.querySelector(".cv-links");
-        for (const p of data.people || []) {
-            const row = document.createElement("div");
-            row.className = "fb-row";
-            row.innerHTML = `<sac-icon name="user"></sac-icon><div class="fb-row-info"><a class="fb-row-name"></a><div class="fb-row-meta"></div></div>`;
-            row.querySelector("a").textContent = p.name;
-            row.querySelector(".fb-row-meta").textContent = p.role || "";
-            row.querySelector("a").addEventListener("click", () => this.open(p.id));
-            list.appendChild(row);
+        // One row: an icon, a name, a muted line, and the chevron that says "opens".
+        const row = (tag, icon, name, sub) => {
+            const el = document.createElement(tag);
+            el.className = "cv-link-row";
+            if (tag === "button") el.type = "button";
+            el.innerHTML = `<sac-icon name="${icon}"></sac-icon><span class="cv-link-text"><span class="cv-link-name"></span><span class="cv-link-sub"></span></span><sac-icon name="chevron-right"></sac-icon>`;
+            el.querySelector(".cv-link-name").textContent = name;
+            const subEl = el.querySelector(".cv-link-sub");
+            if (sub) subEl.textContent = sub; else subEl.remove();
+            return el;
+        };
+        box.replaceChildren();
+        // An organisation's people: a click opens the person.
+        if (data.people?.length) {
+            const head = document.createElement("sac-section");
+            head.setAttribute("title", t("people", "People"));
+            const list = document.createElement("div");
+            list.className = "cv-link-list";
+            for (const p of data.people) {
+                const email = (this.byId(p.id)?.emails || [])[0]?.value;
+                const el = row("button", "user", p.name, [p.role, email].filter(Boolean).join(" · "));
+                el.addEventListener("click", () => this.open(p.id));
+                list.appendChild(el);
+            }
+            box.append(head, list);
         }
-        for (const l of data.links || []) {
-            const row = document.createElement("div");
-            row.className = "fb-row";
-            row.innerHTML = `<sac-icon name="grid"></sac-icon><div class="fb-row-info"><a class="fb-row-name"></a><div class="fb-row-meta"></div></div>`;
-            const a = row.querySelector("a");
-            a.textContent = l.title;
-            a.href = sac.scope.hashFor(`#/tables/${encodeURIComponent(l.table)}`);
-            row.querySelector(".fb-row-meta").textContent = `${l.table} · ${l.column}`;
-            list.appendChild(row);
+        // Table rows that link here: a click opens the table.
+        if (data.links?.length) {
+            const head = document.createElement("sac-section");
+            head.setAttribute("title", t("history", "Linked here"));
+            const list = document.createElement("div");
+            list.className = "cv-link-list";
+            for (const l of data.links) {
+                const el = row("a", "grid", l.title, `${l.table} · ${l.column}`);
+                el.href = sac.scope.hashFor(`#/tables/${encodeURIComponent(l.table)}`);
+                list.appendChild(el);
+            }
+            box.append(head, list);
         }
     }
 

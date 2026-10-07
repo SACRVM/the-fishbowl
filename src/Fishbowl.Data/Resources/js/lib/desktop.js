@@ -151,10 +151,14 @@
     // fb:intent event.
     let pending = null;
 
-    function go(view, action, id) {
+    // `ws` ("personal" | "space:<slug>") sends the hand-off to another
+    // workspace — the personal Calendar opening a space's event there.
+    function go(view, action, id, ws) {
         pending = { view, action, id: id ?? null };
-        const hash = sac.scope.hashFor(`#/${view}`);
-        if (sac.router.currentResource() === `#/${view}`) {
+        const elsewhere = ws && ws !== fb.api.workspace();
+        const hash = !elsewhere ? sac.scope.hashFor(`#/${view}`)
+            : ws === "personal" ? `#/${view}` : `#/space/${ws.slice(6)}/${view}`;
+        if (!elsewhere && sac.router.currentResource() === `#/${view}`) {
             window.dispatchEvent(new CustomEvent("fb:intent", { detail: { view } }));
         } else {
             sac.router.navigate(hash);

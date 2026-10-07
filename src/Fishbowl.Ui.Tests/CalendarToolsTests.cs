@@ -86,7 +86,7 @@ public class CalendarToolsTests
             // A birthday shows the person in brief; Go to contact opens the contact.
             await chip.ClickAsync();
             var card = page.Locator("sac-dialog#cv-bday-dialog[title='Grace Hopper']");
-            await Assertions.Expect(card.Locator(".cv-bday-line.lead")).ToContainTextAsync("30");
+            await Assertions.Expect(card.Locator(".cv-card-line.lead")).ToContainTextAsync("30");
             await Assertions.Expect(card.Locator("a[href='mailto:grace@navy.test']")).ToHaveCountAsync(1);
             await page.ScreenshotAsync(new() { Path = Path.Combine(Path.GetTempPath(), "calendar-birthday-card.png") });
             Assert.EndsWith($"#/space/{slug}/calendar", page.Url);

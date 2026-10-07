@@ -935,6 +935,7 @@ app.MapFilesApi();
 app.MapDesktopApi();
 app.MapSpaceAppsApi();
 app.MapAppMessagesApi();
+app.MapViewSourcesApi();
 app.MapOAuthApi();
 app.MapMcpEndpoint();
 

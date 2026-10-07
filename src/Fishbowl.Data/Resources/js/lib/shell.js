@@ -16,12 +16,48 @@
     // --- View toolbar -----------------------------------------------------
     // Item shape (unchanged from the fb-nav era): { icon, title, onClick,
     // active?, disabled? }. Views may mutate items in place and call
-    // fb.toolbar._nav.renderToolbar() to repaint cheaply.
+    // fb.toolbar._nav.renderToolbar() to repaint cheaply. An item with `menu`
+    // is a kit menu instead: menu = [{ action, label, icon?, color?, checked? }
+    // or "-" for a separator], onSelect(action) takes the pick (the kit's "…"
+    // folds it on a phone like the account menu).
     const toolbarEl = document.getElementById("fb-view-toolbar");
+    function toolbarMenu(item) {
+        const menu = document.createElement("sac-menu");
+        menu.className = "fb-toolbar-menu";
+        if (item.id) menu.id = item.id;
+        const trigger = document.createElement("button");
+        trigger.slot = "trigger";
+        trigger.type = "button";
+        trigger.className = "nav-icon-btn";
+        trigger.title = item.title || "";
+        trigger.setAttribute("aria-label", item.title || item.icon || "");
+        const icon = document.createElement("sac-icon");
+        icon.setAttribute("name", item.icon);
+        trigger.appendChild(icon);
+        menu.appendChild(trigger);
+        for (const entry of item.menu) {
+            if (entry === "-") { menu.appendChild(document.createElement("hr")); continue; }
+            const b = document.createElement("button");
+            b.dataset.action = entry.action;
+            b.innerHTML = `<sac-icon name="${entry.icon || "check"}"></sac-icon><span></span>`;
+            b.querySelector("span").textContent = entry.label;
+            // The menu forces the item's colour, not its icon's (as in the
+            // workspace switcher); the ✓ says what is on.
+            if (entry.color) b.querySelector("sac-icon").style.color = entry.color;
+            if (entry.checked) {
+                b.setAttribute("aria-checked", "true");
+                b.insertAdjacentHTML("beforeend", `<sac-icon class="fb-context-check" name="check"></sac-icon>`);
+            }
+            menu.appendChild(b);
+        }
+        menu.addEventListener("sac:select", (e) => item.onSelect?.(e.detail.action));
+        return menu;
+    }
     fb.toolbar._nav = {
         renderToolbar() {
             const items = fb.toolbar._items || [];
             toolbarEl.replaceChildren(...items.map((item) => {
+                if (item.menu) return toolbarMenu(item);
                 const btn = document.createElement("button");
                 btn.type = "button";
                 btn.className = "nav-icon-btn" + (item.active ? " active" : "");
