@@ -42,7 +42,8 @@
         "lib/apps.js",
         "lib/app-bridge.js", // isolated apps: host half (the guest runtime app-guest.js is loaded by the frame, never here)
         "lib/hotkeys.js",
-        "lib/sortable.js", // drag-reorder — filmstrip + layer list use it
+        "lib/sortable.js", // drag-reorder (sac.sortable, sac.tiles.sortable) — filmstrip, layer list, launcher
+        "lib/selection.js", // sac.selection — mark several rows of a plain list
         "lib/color.js",
         "lib/fs.js",      // storage capability — apps.js hands it to apps
         "lib/identity.js",// who is at this desktop (rides on the fs backend)

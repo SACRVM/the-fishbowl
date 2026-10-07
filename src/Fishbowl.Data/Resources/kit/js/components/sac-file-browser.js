@@ -79,8 +79,10 @@
  *                   never in sac:choose / sac:select / sac:mark, `selected`,
  *                   `marked` or `items`. Enter, a click or a double-click =
  *                   up(); a drop on it drops into the parent folder. On it,
- *                   `cursor` is null and sac:cursor says kind "parent". The
- *                   bar's Up button stays.
+ *                   `cursor` is null and sac:cursor says kind "parent". It
+ *                   is the one way up by pointer: the bar's Up button goes,
+ *                   and the current folder's icon (part="here") stands over
+ *                   the rows' icon column instead.
  *   delete-button — the per-row trash button: "cursor" (default) shows it
  *                   on the hovered row and on the cursor row, always on
  *                   touch; "hover" only on the row under a hovering pointer
@@ -697,13 +699,15 @@
             if (!store) { this._setRows([]); this._paint(); return; }
             const token = ++this._loadToken;
             const prefix = this._path ? this._path + "/" : "";
-            const prev = this.cursor;
             let listing;
             try { listing = await this._load(store, prefix); }
             catch (err) { console.error("[sac-file-browser] listing failed:", err); listing = { folders: [], files: [] }; }
             if (token !== this._loadToken) return;       // a newer load won
-            // A cursor asked for meanwhile (up(), rename, the setter) wins over the old row.
-            const keep = this._pendingCursor != null ? this._pendingCursor : prev;
+            // The cursor row as it is NOW, after the load — read before the
+            // await it lost a click, tap or arrow made meanwhile. A cursor
+            // asked for meanwhile (up(), rename, the setter) wins over it.
+            const r0 = this._rows[this._focus];
+            const keep = this._pendingCursor != null ? this._pendingCursor : (r0 ? r0.path : null);
             this._pendingCursor = null;
             const ok = acceptTest(this.getAttribute("accept"));
             // Dot entries stay out unless show-hidden asks for them.
@@ -913,6 +917,23 @@
                         cursor: pointer;
                     }
                     .tool svg, .del svg { width: 16px; height: 16px; }
+                    /* parent-row: ".." is the one way up, so the Up button
+                       goes; the current folder's icon stands in its place,
+                       exactly over the rows' icon column (list border + pad +
+                       row inset), its name over theirs. */
+                    .here { display: none; }
+                    :host([parent-row]) .up { display: none; }
+                    :host([parent-row]) .here {
+                        flex: none;
+                        display: grid;
+                        place-items: center;
+                        width: 28px;
+                        height: 28px;
+                        margin-left: ${PAD + 7}px;
+                        margin-right: calc(0.6rem - 10px);
+                        color: var(--accent-text);
+                    }
+                    .here svg { width: 18px; height: 18px; }
                     .tool:hover:not(:disabled) { background: var(--hover); color: var(--text); }
                     .tool:disabled { opacity: 0.35; cursor: default; }
 
@@ -1098,7 +1119,7 @@
                     }
                     .bar.selecting .count { display: block; }
                     .bar.selecting .done { display: grid; }
-                    .bar.selecting :is(.up, .crumbs, .mk) { display: none; }
+                    .bar.selecting :is(.up, .here, .crumbs, .mk) { display: none; }
                     :host([readonly]) .del,
                     :host([readonly]) .mk { display: none; }
                     .rename {
@@ -1184,6 +1205,7 @@
                     <button class="tool up" type="button" part="up"
                             title="${esc(t("files.up", "Up one folder"))}"
                             aria-label="${esc(t("files.up", "Up one folder"))}">${icon("chevron-up")}</button>
+                    <span class="here" part="here" aria-hidden="true">${icon("folder")}</span>
                     <slot name="title"></slot>
                     <nav class="crumbs" part="crumbs" aria-label="${esc(t("files.location", "Location"))}"></nav>
                     <span class="count" part="count" role="status"></span>

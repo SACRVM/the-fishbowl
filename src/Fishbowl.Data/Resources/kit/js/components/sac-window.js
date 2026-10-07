@@ -8,6 +8,14 @@
  *
  * Content = light-DOM children.
  *
+ * Slot toolbar: <div slot="toolbar">…</div> — a row between the title bar
+ *             and the content, OUTSIDE the scroll container: a window's
+ *             actions, search or filters stay put while the content
+ *             scrolls. Same side padding as the content, no ground of its
+ *             own (it is part of the glass); a 1px hairline under it shows
+ *             only while the content is scrolled away from its top. Empty =
+ *             gone. Shadow part: toolbar.
+ *
  * Attributes: title, width, height, top, left, open,
  *             width / height — any CSS length; height="auto" sizes the
  *                         window to its content (until the user resizes).
@@ -75,7 +83,8 @@
  *
  * CSS custom properties: --window-padding — the content's inner padding,
  *             default 20px (a tool palette wants ~8px; 0 for edge-to-edge
- *             content). Shadow part: content — the scrolling content box.
+ *             content). Shadow parts: content — the scrolling content box;
+ *             toolbar — the fixed row above it.
  *
  * Compact (ui.css §15 — ≤768px, or a phone held sideways): drag-and-resize is a desktop metaphor, so a
  * window is ALWAYS maximized there — an open window maximizes itself, the
@@ -283,6 +292,7 @@ class SacWindow extends HTMLElement {
                what disappears, what stops being grabbable, how the corners
                change. */
             :host([minimized]) .content,
+            :host([minimized]) .toolbar,
             :host([minimized]) .resize-handle,
             :host([maximized]) .resize-handle,
             :host([no-resize]) .resize-handle {
@@ -416,6 +426,25 @@ class SacWindow extends HTMLElement {
                 line-height: 1.6;
             }
 
+            /* Toolbar slot: fixed above the scrolling content, part of the
+               glass (no ground). Toolbar + content split the window padding
+               between them, so the gap to the first row is the usual one;
+               the content's top edge turns into a hairline only while
+               something has scrolled under it. */
+            .toolbar {
+                flex: none;
+                display: none;
+                padding: var(--window-padding, 20px) var(--window-padding, 20px)
+                         calc(var(--window-padding, 20px) / 2);
+            }
+            .window-container.has-toolbar .toolbar { display: block; }
+            .window-container.has-toolbar .content {
+                padding-top: calc(var(--window-padding, 20px) / 2);
+                border-top: 1px solid transparent;
+                transition: border-color 0.15s ease;
+            }
+            .window-container.has-toolbar.scrolled .content { border-top-color: var(--border); }
+
             /* Scrollbar — the kit recipe (ui.css §5), re-stated because
                ::-webkit-scrollbar does not pierce a shadow root. Firefox, which has
                no ::-webkit-scrollbar, gets the standard pair instead. */
@@ -485,6 +514,7 @@ class SacWindow extends HTMLElement {
                     <button class="ctrl-btn close-btn" id="window-close-btn" title="${L.close}" aria-label="${L.close}"></button>
                 </div>
             </div>
+            <div class="toolbar" part="toolbar"><slot name="toolbar"></slot></div>
             <div class="content" id="window-content" part="content">
                 <slot></slot>
             </div>
@@ -552,6 +582,19 @@ class SacWindow extends HTMLElement {
     }
 
     setupEventListeners() {
+        // Toolbar slot: shown only when filled; the hairline under it only
+        // while the content is scrolled.
+        const container = this.shadowRoot.querySelector('.window-container');
+        const barSlot = this.shadowRoot.querySelector('slot[name="toolbar"]');
+        const content = this.shadowRoot.querySelector('.content');
+        const syncBar = () => container.classList.toggle('has-toolbar', barSlot.assignedNodes().some(
+            (n) => n.nodeType === 1 || (n.nodeType === 3 && n.textContent.trim())));
+        barSlot.addEventListener('slotchange', syncBar);
+        syncBar();
+        content.addEventListener('scroll', () => {
+            container.classList.toggle('scrolled', content.scrollTop > 0);
+        }, { passive: true });
+
         const titleBar = this.shadowRoot.querySelector('.title-bar');
         const closeBtn = this.shadowRoot.getElementById('window-close-btn');
         const minBtn = this.shadowRoot.getElementById('window-min-btn');

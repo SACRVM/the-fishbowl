@@ -801,6 +801,14 @@ a.nav-icon-btn { text-decoration: none; }
     color: var(--text-muted);
 }
 
+/* sac.selection — rows of a list that marks several (kit/js/lib/selection.js).
+   No text selection or touch callout (Shift+click and a long-press would
+   start one); a marked row is the --accent-tint ground, its swapped icon
+   the accent. */
+[data-sac-row] { user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
+[data-sac-row].marked { background: var(--accent-tint); }
+[data-sac-row].marked [data-sac-mark-icon] { color: var(--accent); }
+
 /* About window content — rendered by sac.about.open() into a <sac-window>.
    The one shared credits/licence surface: a host and an app both use it, so
    the two look related by construction. Reuses .sac-caption for the version

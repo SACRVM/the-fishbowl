@@ -327,6 +327,8 @@ class SacNav extends HTMLElement {
         if (this._scopeHandler) window.removeEventListener("sac:scope-changed", this._scopeHandler);
         if (this._hostChangedHandler) document.removeEventListener("sac:host-changed", this._hostChangedHandler);
         this._mq?.removeEventListener("change", this._mqHandler);
+        this._dprMq?.removeEventListener("change", this._dprHandler);
+        this._dprMq = null;
         this._ro?.disconnect();
         this._mo?.disconnect();
         cancelAnimationFrame(this._overflowFrame);
@@ -468,7 +470,7 @@ class SacNav extends HTMLElement {
                     flex-direction: column;
                     justify-content: center;
                     align-items: center;
-                    gap: 4px;
+                    gap: var(--bar-gap, 4px);
                     padding: 0;
                     flex: none;
                 }
@@ -478,17 +480,23 @@ class SacNav extends HTMLElement {
                     outline: 2px solid var(--accent);
                     outline-offset: 2px;
                 }
+                /* Thickness and gap are whole device pixels (_snapBurger): at
+                   125% / 175% a 2px line is 2.5 device pixels, and the
+                   half-lit row fell above one line and below the next —
+                   three lines, three thicknesses. On the device grid the
+                   three share one offset, so they rasterize alike. */
                 .menu-btn span {
                     display: block;
                     width: 18px;
-                    height: 2px;
+                    height: var(--bar-h, 2px);
                     background: var(--text);
                     border-radius: var(--radius-s);
-                    transition: all 0.3s ease;
+                    /* Not "all": the snapped size and shift must not animate. */
+                    transition: transform 0.3s ease, opacity 0.3s ease;
                 }
-                .menu-btn.active span:nth-child(1) { transform: translateY(6px) rotate(45deg); }
+                .menu-btn.active span:nth-child(1) { transform: translateY(var(--bar-pitch, 6px)) rotate(45deg); }
                 .menu-btn.active span:nth-child(2) { opacity: 0; }
-                .menu-btn.active span:nth-child(3) { transform: translateY(-6px) rotate(-45deg); }
+                .menu-btn.active span:nth-child(3) { transform: translateY(calc(-1 * var(--bar-pitch, 6px))) rotate(-45deg); }
                 /* Icon-to-text spacing is the .brand gap alone (0.5rem) — a
                    margin here on top of it doubled the space. */
                 .brand-mark {
@@ -1256,7 +1264,31 @@ class SacNav extends HTMLElement {
 
     _scheduleOverflow() {
         cancelAnimationFrame(this._overflowFrame);
-        this._overflowFrame = requestAnimationFrame(() => this._layoutOverflow());
+        this._overflowFrame = requestAnimationFrame(() => { this._snapBurger(); this._layoutOverflow(); });
+    }
+
+    /** The burger's three lines on the device grid: thickness and gap
+     *  rounded to whole device pixels, so every line sits the same fraction
+     *  off a pixel row and the browser's paint snapping treats all three
+     *  alike. Runs with every layout pass — a render, a resize, a browser
+     *  zoom — and on a resolution change (a window moved to a screen with
+     *  another scale). */
+    _snapBurger() {
+        const btn = this.shadowRoot.querySelector(".menu-btn");
+        const dpr = window.devicePixelRatio || 1;
+        if (this._dprMq?.dpr !== dpr) {
+            this._dprMq?.removeEventListener("change", this._dprHandler);
+            this._dprHandler = this._dprHandler || (() => this._scheduleOverflow());
+            this._dprMq = window.matchMedia(`(resolution: ${dpr}dppx)`);
+            this._dprMq.dpr = dpr;
+            this._dprMq.addEventListener("change", this._dprHandler);
+        }
+        if (!btn) return;
+        const dev = (css) => Math.max(1, Math.round(css * dpr)) / dpr;
+        const h = dev(2), gap = dev(4);
+        btn.style.setProperty("--bar-h", `${h}px`);
+        btn.style.setProperty("--bar-gap", `${gap}px`);
+        btn.style.setProperty("--bar-pitch", `${h + gap}px`);
     }
 
     /** Toolbar controls that may move into the "…" menu, in ribbon order. */
