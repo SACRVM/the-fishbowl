@@ -76,4 +76,63 @@ public class ContactFormatsVCardTests
 
         Assert.Equal("a=", c.Notes);
     }
+
+    // An Apple export: labels in item groups (the X-ABLabel before or after its
+    // value), Apple's and Exchange's own label words, typed ones as typed.
+    [Fact]
+    public void Parse_AppleItemLabels_BecomeTheValuesLabels()
+    {
+        var vcf = "BEGIN:VCARD\r\nVERSION:3.0\r\nN:Hopper;Grace;;;\r\nFN:Grace Hopper\r\n"
+            + "item1.TEL;type=pref:+1 555 0100\r\nitem1.X-ABLabel:EX-BusinessPhone\r\n"
+            + "item2.X-ABLabel:_$!<Mobile>!$_\r\nitem2.TEL:+1 555 0101\r\n"
+            + "TEL;type=HOME;type=VOICE:+1 555 0102\r\n"
+            + "item3.TEL:+1 555 0103\r\nitem3.X-ABLabel:_$!<iPhone>!$_\r\n"
+            + "item4.EMAIL;type=INTERNET:grace@example.com\r\nitem4.X-ABLabel:E-Mail senden\r\n"
+            + "item5.EMAIL;type=INTERNET;type=HOME:other@example.com\r\nitem5.X-ABLabel:_$!<Other>!$_\r\n"
+            + "item6.ADR;type=WORK:;;1 Main St;Arlington;VA;22201;USA\r\nitem6.X-ABLabel:\r\n"
+            + "item7.URL:https\\://example.com\r\nitem7.X-ABLabel:_$!<HomePage>!$_\r\n"
+            + "END:VCARD\r\n";
+
+        var c = Assert.Single(ContactFormats.ParseVCards(vcf)).Contact;
+
+        Assert.Equal(new[] { "work", "cell", "home", "iphone" }, c.Phones.Select(p => p.Label));
+        Assert.Equal(new[] { "E-Mail senden", "other" }, c.Emails.Select(e => e.Label));
+        Assert.Equal("work", Assert.Single(c.Addresses).Label);   // an empty X-ABLabel keeps the TYPE
+        Assert.Equal("https://example.com", c.Website);
+    }
+
+    // A card without a name: Apple shows its company, else its first address
+    // or number — so does the import; a card with nothing to show stays out.
+    [Fact]
+    public void Parse_CardWithoutAName_IsNamedLikeApple()
+    {
+        var vcf = "BEGIN:VCARD\r\nVERSION:3.0\r\nN:;;;;\r\nFN:\r\nEMAIL;type=INTERNET:ada@example.com\r\nEND:VCARD\r\n"
+            + "BEGIN:VCARD\r\nVERSION:3.0\r\nN:;;;;\r\nFN:\r\nTEL:+49 30 1234\r\nEND:VCARD\r\n"
+            + "BEGIN:VCARD\r\nVERSION:3.0\r\nN:;;;;\r\nFN:\r\nORG:Acme;\r\nTEL:+49 30 5678\r\nEND:VCARD\r\n"
+            + "BEGIN:VCARD\r\nVERSION:3.0\r\nN:;;;;\r\nFN:\r\nEND:VCARD\r\n";
+
+        var cards = ContactFormats.ParseVCards(vcf);
+
+        Assert.Equal(new[] { "ada@example.com", "+49 30 1234", "Acme" }, cards.Select(x => x.Contact.Name));
+        Assert.Equal(ContactKinds.Organisation, cards[2].Contact.Kind);
+        Assert.Null(cards[2].Organisation);
+    }
+
+    // Labels go out and come back: the standard ones as TYPE, any other through X-ABLabel.
+    [Fact]
+    public void Export_CustomLabels_RoundTripThroughXAbLabel()
+    {
+        var contact = new Contact { Name = "Ada Lovelace", FirstName = "Ada", LastName = "Lovelace" };
+        contact.Emails.Add(new ContactValue { Label = "E-Mail senden", Value = "ada@example.com" });
+        contact.Phones.Add(new ContactValue { Label = "work", Value = "+44 20 1234" });
+        contact.Phones.Add(new ContactValue { Label = "Boot; Hafen", Value = "+44 20 5678" });
+
+        var vcf = ContactFormats.ToVCard(new[] { contact }, _ => null);
+
+        Assert.Contains("TEL;TYPE=work:+44 20 1234\r\n", vcf);
+        Assert.Contains("item2.TEL:+44 20 5678\r\nitem2.X-ABLabel:Boot\\; Hafen\r\n", vcf);
+        var back = Assert.Single(ContactFormats.ParseVCards(vcf)).Contact;
+        Assert.Equal("E-Mail senden", Assert.Single(back.Emails).Label);
+        Assert.Equal(new[] { "work", "Boot; Hafen" }, back.Phones.Select(p => p.Label));
+    }
 }

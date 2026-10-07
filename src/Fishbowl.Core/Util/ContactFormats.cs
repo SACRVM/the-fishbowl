@@ -31,10 +31,11 @@ public static class ContactFormats
                 Line(sb, "N", $"{Esc(c.LastName)};{Esc(c.FirstName)};;{Esc(c.Honorific)};");
             if (org is not null) Line(sb, "ORG", Esc(org));
             if (!string.IsNullOrEmpty(c.Role)) Line(sb, "TITLE", Esc(c.Role));
-            foreach (var e in c.Emails) Line(sb, Typed("EMAIL", e.Label), Esc(e.Value));
-            foreach (var p in c.Phones) Line(sb, Typed("TEL", p.Label), Esc(p.Value));
+            var item = 0;
+            foreach (var e in c.Emails) Labelled(sb, ref item, "EMAIL", e.Label, Esc(e.Value));
+            foreach (var p in c.Phones) Labelled(sb, ref item, "TEL", p.Label, Esc(p.Value));
             foreach (var a in c.Addresses)
-                Line(sb, Typed("ADR", a.Label), $";;{Esc(a.Street)};{Esc(a.City)};{Esc(a.Region)};{Esc(a.PostalCode)};{Esc(a.Country)}");
+                Labelled(sb, ref item, "ADR", a.Label, $";;{Esc(a.Street)};{Esc(a.City)};{Esc(a.Region)};{Esc(a.PostalCode)};{Esc(a.Country)}");
             if (!string.IsNullOrEmpty(c.Website)) Line(sb, "URL", Esc(c.Website));
             if (!string.IsNullOrEmpty(c.Birthday)) Line(sb, "BDAY", c.Birthday);
             if (c.Tags.Count > 0) Line(sb, "CATEGORIES", string.Join(',', c.Tags.Select(Esc)));
@@ -48,8 +49,21 @@ public static class ContactFormats
         return sb.ToString();
     }
 
-    private static string Typed(string name, string? label) =>
-        string.IsNullOrWhiteSpace(label) ? name : $"{name};TYPE={new string(label.Where(ch => char.IsLetterOrDigit(ch) || ch == '-').ToArray())}";
+    // The types every address book knows go out as TYPE; any other label as an
+    // item group with X-ABLabel — what Apple and Google write and read — so a
+    // label like "E-Mail senden" comes back as it went out.
+    private static readonly HashSet<string> StandardTypes = new(StringComparer.OrdinalIgnoreCase)
+        { "home", "work", "other", "cell", "main", "fax", "pager", "iphone", "voice", "text", "video" };
+
+    private static void Labelled(StringBuilder sb, ref int item, string name, string? label, string value)
+    {
+        label = label?.Trim();
+        if (string.IsNullOrEmpty(label)) { Line(sb, name, value); return; }
+        if (StandardTypes.Contains(label)) { Line(sb, $"{name};TYPE={label.ToLowerInvariant()}", value); return; }
+        item++;
+        Line(sb, $"item{item}.{name}", value);
+        Line(sb, $"item{item}.X-ABLabel", Esc(label));
+    }
 
     // Lines over 75 octets fold (RFC 6350 § 3.2), counted in UTF-8 octets and
     // never inside a character: a split surrogate pair (or UTF-8 sequence)
@@ -118,13 +132,22 @@ public static class ContactFormats
         Contact? c = null;
         string? org = null;
         var isOrg = false;
+        // Apple groups a value with its label (item1.TEL:… + item1.X-ABLabel:…),
+        // the label line before or after the value.
+        var labelFor = new Dictionary<string, Action<string>>();
+        var pendingLabel = new Dictionary<string, string>();
         foreach (var line in lines)
         {
             var colon = line.IndexOf(':');
             if (colon < 0) continue;
             var head = line[..colon].Split(';');
             var name = head[0].ToUpperInvariant();
-            if (name.Contains('.')) name = name[(name.LastIndexOf('.') + 1)..];   // item1.EMAIL
+            string? group = null;
+            if (name.Contains('.'))   // item1.EMAIL
+            {
+                group = name[..name.LastIndexOf('.')];
+                name = name[(name.LastIndexOf('.') + 1)..];
+            }
             var value = line[(colon + 1)..];
             // vCard 2.1 (Android's export): ENCODING=QUOTED-PRINTABLE (or the
             // bare QUOTED-PRINTABLE) with the bytes' CHARSET.
@@ -144,11 +167,18 @@ public static class ContactFormats
 
             switch (name)
             {
-                case "BEGIN": c = new Contact(); org = null; isOrg = false; break;
+                case "BEGIN": c = new Contact(); org = null; isOrg = false; labelFor.Clear(); pendingLabel.Clear(); break;
                 case "END":
                     if (c is not null)
                     {
                         if (isOrg) { c.Kind = ContactKinds.Organisation; if (string.IsNullOrWhiteSpace(c.Name)) c.Name = org ?? ""; org = null; }
+                        else if (string.IsNullOrWhiteSpace(c.Name) && string.IsNullOrWhiteSpace(c.FirstName) && string.IsNullOrWhiteSpace(c.LastName))
+                        {
+                            // A card without a name: Apple shows its company, else its
+                            // first address or number — so does the import.
+                            if (!string.IsNullOrWhiteSpace(org)) { c.Kind = ContactKinds.Organisation; c.Name = org; org = null; }
+                            else c.Name = c.Emails.Concat(c.Phones).FirstOrDefault(v => !string.IsNullOrWhiteSpace(v.Value))?.Value ?? "";
+                        }
                         if (!string.IsNullOrWhiteSpace(c.Name) || !string.IsNullOrWhiteSpace(c.FirstName) || !string.IsNullOrWhiteSpace(c.LastName))
                             result.Add((c, org));
                     }
@@ -163,11 +193,28 @@ public static class ContactFormats
                 case "TITLE" when c is not null: c.Role = Unesc(value); break;
                 case "KIND" when c is not null: isOrg |= value.Trim().Equals("org", StringComparison.OrdinalIgnoreCase); break;
                 case "X-ABSHOWAS" when c is not null: isOrg |= value.Trim().Equals("COMPANY", StringComparison.OrdinalIgnoreCase); break;
-                case "EMAIL" when c is not null: c.Emails.Add(new ContactValue { Label = type, Value = Unesc(value) }); break;
-                case "TEL" when c is not null: c.Phones.Add(new ContactValue { Label = type, Value = Unesc(value) }); break;
+                case "EMAIL" when c is not null:
+                    var email = new ContactValue { Label = type, Value = Unesc(value) };
+                    c.Emails.Add(email);
+                    BindLabel(group, l => email.Label = l, labelFor, pendingLabel);
+                    break;
+                case "TEL" when c is not null:
+                    var phone = new ContactValue { Label = type, Value = Unesc(value) };
+                    c.Phones.Add(phone);
+                    BindLabel(group, l => phone.Label = l, labelFor, pendingLabel);
+                    break;
                 case "ADR" when c is not null:
                     var a = Split(value, ';');
-                    c.Addresses.Add(new ContactAddress { Label = type, Street = Opt(a, 2), City = Opt(a, 3), Region = Opt(a, 4), PostalCode = Opt(a, 5), Country = Opt(a, 6) });
+                    var address = new ContactAddress { Label = type, Street = Opt(a, 2), City = Opt(a, 3), Region = Opt(a, 4), PostalCode = Opt(a, 5), Country = Opt(a, 6) };
+                    c.Addresses.Add(address);
+                    BindLabel(group, l => address.Label = l, labelFor, pendingLabel);
+                    break;
+                case "X-ABLABEL" when c is not null && group is not null:
+                    if (AppleLabel(Unesc(value)) is { } label)
+                    {
+                        if (labelFor.TryGetValue(group, out var set)) set(label);
+                        else pendingLabel[group] = label;
+                    }
                     break;
                 case "URL" when c is not null: c.Website = Unesc(value); break;
                 case "BDAY" when c is not null: c.Birthday = Date(value); break;
@@ -180,6 +227,38 @@ public static class ContactFormats
             }
         }
         return result;
+    }
+
+    // A grouped value (item1.TEL) takes its group's X-ABLabel, which may have come first.
+    private static void BindLabel(string? group, Action<string> set, Dictionary<string, Action<string>> labelFor, Dictionary<string, string> pendingLabel)
+    {
+        if (group is null) return;
+        labelFor[group] = set;
+        if (pendingLabel.Remove(group, out var label)) set(label);
+    }
+
+    // Apple's label text as Fishbowl's: Apple's own labels come as
+    // _$!<Mobile>!$_, Exchange's as EX-MobilePhone; a label the person typed
+    // stays as typed. Empty → none (the TYPE stays).
+    private static string? AppleLabel(string raw)
+    {
+        var label = raw.Trim();
+        if (label.Length == 0) return null;
+        string word;
+        var exchange = false;
+        if (label.StartsWith("_$!<", StringComparison.Ordinal) && label.EndsWith(">!$_", StringComparison.Ordinal) && label.Length > 8)
+            word = label[4..^4];
+        else if (label.StartsWith("EX-", StringComparison.Ordinal) && label.Length > 3)
+            (word, exchange) = (label[3..], true);
+        else
+            return label;
+        bool Has(string s) => word.Contains(s, StringComparison.OrdinalIgnoreCase);
+        if (Has("fax")) return "fax";
+        if (Has("mobile")) return "cell";
+        if (Has("business") || Has("company") || word.Equals("work", StringComparison.OrdinalIgnoreCase)) return "work";
+        if (word.StartsWith("home", StringComparison.OrdinalIgnoreCase)) return "home";
+        if (exchange && word.Length > 5 && word.EndsWith("phone", StringComparison.OrdinalIgnoreCase)) word = word[..^5];   // EX-CarPhone
+        return word.ToLowerInvariant();
     }
 
     // Logical lines: a line starting with a space or tab continues the one
