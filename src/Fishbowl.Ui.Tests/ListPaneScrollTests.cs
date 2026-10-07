@@ -71,4 +71,44 @@ public class ListPaneScrollTests
             await context.CloseAsync();
         }
     }
+
+    // A window app's actions sit in the window's toolbar slot (kit 2.27),
+    // outside the scrolling content: they stay while the content scrolls.
+    [Fact]
+    public async Task WindowActions_StayPut_WhileTheWindowScrolls_Test()
+    {
+        var context = await _fixture.Browser!.NewContextAsync(new BrowserNewContextOptions
+        {
+            IgnoreHTTPSErrors = true,
+            BypassCSP = true,
+            ViewportSize = new ViewportSize { Width = 1200, Height = 700 },
+        });
+        var page = await context.NewPageAsync();
+        string? slug = null;
+        try
+        {
+            var res = await page.APIRequest.PostAsync($"{_fixture.BaseUrl}/api/v1/spaces", new() { DataObject = new { name = "Bin " + Guid.NewGuid().ToString("N")[..6] } });
+            slug = (await res.JsonAsync())!.Value.GetProperty("slug").GetString();
+            for (var i = 1; i <= 25; i++)
+            {
+                var note = (await (await page.APIRequest.PostAsync($"{_fixture.BaseUrl}/api/v1/spaces/{slug}/notes", new() { DataObject = new { title = $"Gone {i:00}", content = "x" } })).JsonAsync())!.Value;
+                await page.APIRequest.DeleteAsync($"{_fixture.BaseUrl}/api/v1/spaces/{slug}/notes/{note.GetProperty("id").GetString()}");
+            }
+            await page.GotoAsync($"{_fixture.BaseUrl}/#/space/{slug}/");
+            await page.WaitForFunctionAsync("() => window.fb?.windowApps");
+            await page.EvaluateAsync("() => fb.windowApps.open('trash')");
+            var bar = page.Locator("#fb-win-trash > .wa-bar[slot='toolbar']");
+            await Assertions.Expect(bar.Locator("button")).ToHaveCountAsync(1, new() { Timeout = 15000 });
+            var before = (await bar.BoundingBoxAsync())!.Y;
+            await page.Locator("#fb-win-trash fb-trash-view").HoverAsync();
+            await page.Mouse.WheelAsync(0, 3000);
+            await page.WaitForFunctionAsync("() => document.querySelector('#fb-win-trash').shadowRoot.querySelector('.content').scrollTop > 0");
+            Assert.Equal(before, (await bar.BoundingBoxAsync())!.Y);
+        }
+        finally
+        {
+            if (slug is not null) await page.APIRequest.DeleteAsync($"{_fixture.BaseUrl}/api/v1/spaces/{slug}?archive=false");
+            await context.CloseAsync();
+        }
+    }
 }

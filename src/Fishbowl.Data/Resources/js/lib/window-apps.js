@@ -73,7 +73,12 @@
             b.addEventListener("click", () => item.onClick?.());
             return b;
         }));
-        bar.hidden = !bar.childElementCount;
+        // In the window's toolbar slot (kit 2.27), outside the scrolling
+        // content, so the actions stay put; only while there are any — the
+        // kit shows the row for anything slotted there.
+        const any = bar.childElementCount > 0;
+        bar.hidden = !any;
+        if (any) bar.slot = "toolbar"; else bar.removeAttribute("slot");
     }
 
     // A space became active: the personal-only windows go.

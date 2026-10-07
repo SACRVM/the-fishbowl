@@ -46,8 +46,10 @@
  * Each tile has SACRVM Desktop's "⋯" menu: Medium / Wide / Large tile (✓ on
  * the current one) and Hide — no colour row: a space's colour is the one
  * colour of its workspace, a colour per tile would fight it. The arrangement is the SERVER's, per workspace (fb.api.desktop):
- * a menu pick writes that one tile. There is no reordering UI; tiles keep
- * their stored position, unarranged ones sort by registry index. Hidden
+ * a menu pick writes that one tile. A tile is dragged to a new place (the
+ * kit's sac.tiles.sortable — small tiles re-pack as they go, the cover stays
+ * first) and takes the midpoint between its new neighbours' positions; tiles
+ * never moved sort by registry index. Hidden
  * tiles come back from the toolbar ("Show hidden tiles"). A space member
  * who may not arrange gets no menus and no toolbar item.
  *
@@ -159,6 +161,7 @@ class FbHubView extends HTMLElement {
         clearTimeout(this._clock);
         cancelAnimationFrame(this._fitFrame);
         this._ro?.disconnect();
+        this._sortable?.destroy();
     }
 
     async _loadVersion() {
@@ -544,6 +547,14 @@ class FbHubView extends HTMLElement {
         this._cover = this._buildCover();
         this._grid.append(this._cover);
         this._paintCover();
+        // Drag a tile to move it: one flat order over the grid's and the
+        // packs' tiles, packs re-formed live; the cover isn't an item and
+        // stays first. Only whoever may arrange.
+        this._sortable = sac.tiles.sortable(this._grid, {
+            items: ".tile:not(.fb-cover)",
+            disabled: () => !this._canArrange,
+            onReorder: (from, to, tile) => this._moved(tile),
+        });
     }
 
     /* -------------------------------------------------------- cover -- */
@@ -941,6 +952,34 @@ class FbHubView extends HTMLElement {
         fb.desktopLive.setQuiet(ws, e.key, !fb.desktopLive.isQuiet(ws, e.key));
         this._renderTiles();
         this._loadLive([e.key]);
+    }
+
+    /** A tile dragged to a new place (the DOM already shows it): it takes the
+     *  midpoint between its new neighbours' positions — one row written. If
+     *  they leave no room between them, the shown order is numbered afresh. */
+    async _moved(tile) {
+        const shown = [...this._grid.querySelectorAll(".tile[data-key]:not(.fb-cover)")]
+            .map((t) => this._entries.find((e) => e.key === t.dataset.key))
+            .filter(Boolean);
+        const i = shown.findIndex((e) => e.key === tile.dataset.key);
+        if (i < 0 || shown.length < 2) return;
+        const prev = shown[i - 1]?.position, next = shown[i + 1]?.position;
+        const pos = prev == null ? next - 1 : next == null ? prev + 1 : (prev + next) / 2;
+        const changed = [];
+        if (prev != null && next != null && !(pos > prev && pos < next)) {
+            shown.forEach((e, n) => { if (e.position !== n + 1) { e.position = n + 1; changed.push(e); } });
+        } else {
+            shown[i].position = pos;
+            changed.push(shown[i]);
+        }
+        this._entries.sort((a, b) => a.position - b.position);
+        try {
+            for (const e of changed) await fb.desktop.save(e);
+        } catch (err) {
+            console.warn("[fb-hub-view] tile move failed:", err?.message || err);
+            window.sac?.toast?.(fb.t("fb.desk.save-failed", "Couldn't save the desktop."), { kind: "error" });
+            this.refresh();
+        }
     }
 
     /** Change one tile, repaint, store it; a failed save reloads the server's state. */

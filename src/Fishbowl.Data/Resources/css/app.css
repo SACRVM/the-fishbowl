@@ -180,7 +180,8 @@ sac-window.fb-window { --window-padding: 24px; }
 /* Secrets keeps its one line: it says what the operator can and can't read. */
 fb-secrets-settings-view.in-window > header { display: flex; margin-bottom: 16px; }
 fb-secrets-settings-view.in-window > header h1 { display: none; }
-sac-window > .wa-bar { padding: 0 0 16px; }
+/* The action bar sits in the window's toolbar slot, whose padding is the window's. */
+sac-window > .wa-bar { padding: 0; }
 
 /* One row style: the kit's list-detail row — flat, a divider between. */
 .fb-row { display: flex; align-items: center; gap: 14px; padding: 12px 0; }

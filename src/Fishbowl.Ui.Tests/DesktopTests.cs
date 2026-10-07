@@ -415,4 +415,53 @@ public class DesktopTests
             await context.CloseAsync();
         }
     }
+    // Dragging a tile (kit 2.27, sac.tiles.sortable): it lands where it is
+    // dropped, the server keeps its new position, and a reload shows it there.
+    [Fact]
+    public async Task Desktop_DragATile_KeepsTheNewOrder_Test()
+    {
+        var context = await _fixture.Browser!.NewContextAsync(new BrowserNewContextOptions
+        {
+            IgnoreHTTPSErrors = true,
+            BypassCSP = true,
+            ViewportSize = new ViewportSize { Width = 1400, Height = 900 },
+        });
+        var page = await context.NewPageAsync();
+        var slug = await CreateSpaceAsync(page, "Drag");
+        try
+        {
+            await page.GotoAsync($"{_fixture.BaseUrl}/#/space/{slug}/");
+            await Assertions.Expect(Cell(page, "builtin:todos")).ToBeVisibleAsync(new() { Timeout = 15000 });
+            async Task<string> FirstKey() => await page.Locator("fb-hub-view a.tile[data-key]").First.GetAttributeAsync("data-key") ?? "";
+            Assert.Equal("builtin:notes", await FirstKey());
+
+            var from = (await Cell(page, "builtin:todos").BoundingBoxAsync())!;
+            var to = (await Cell(page, "builtin:notes").BoundingBoxAsync())!;
+            await page.Mouse.MoveAsync(from.X + from.Width / 2, from.Y + 20);
+            await page.Mouse.DownAsync();
+            await page.Mouse.MoveAsync(to.X + 12, to.Y + to.Height / 2, new() { Steps = 15 });
+            await page.Mouse.UpAsync();
+            await Assertions.Expect(page.Locator("fb-hub-view a.tile[data-key]").First).ToHaveAttributeAsync("data-key", "builtin:todos");
+            Assert.EndsWith($"#/space/{slug}/", page.Url);   // a drag is no click
+
+            // On the server: todos now sorts before notes.
+            var deadline = DateTime.UtcNow.AddSeconds(10);
+            while (true)
+            {
+                var tiles = (await (await page.APIRequest.GetAsync($"{_fixture.BaseUrl}/api/v1/spaces/{slug}/desktop")).JsonAsync())!.Value
+                    .GetProperty("tiles").EnumerateArray().ToArray();
+                if (Tile(tiles, "builtin:todos") is { } t && t.GetProperty("position").ValueKind == System.Text.Json.JsonValueKind.Number
+                    && t.GetProperty("position").GetDouble() < 1) break;
+                Assert.True(DateTime.UtcNow < deadline, "the new position never reached the server");
+                await page.WaitForTimeoutAsync(100);
+            }
+            await page.ReloadAsync();
+            await Assertions.Expect(page.Locator("fb-hub-view a.tile[data-key]").First).ToHaveAttributeAsync("data-key", "builtin:todos", new() { Timeout = 15000 });
+        }
+        finally
+        {
+            await page.APIRequest.DeleteAsync($"{_fixture.BaseUrl}/api/v1/spaces/{slug}?archive=false");
+            await context.CloseAsync();
+        }
+    }
 }
