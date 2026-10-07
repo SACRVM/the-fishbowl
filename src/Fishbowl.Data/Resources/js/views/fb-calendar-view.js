@@ -55,7 +55,7 @@ class FbCalendarView extends HTMLElement {
     }
 
     /** A contact's birthday as a calendar entry: all day, read-only, its id
-     *  "bday:<contact>:<date>"; opening it opens the contact. */
+     *  "bday:<contact>:<date>"; opening it shows the person in brief. */
     static birthdayEntry(b) {
         return {
             id: `bday:${b.contactId}:${b.date}`,
@@ -78,7 +78,8 @@ class FbCalendarView extends HTMLElement {
     async connectedCallback() {
         // The workspace this view shows, pinned: a save flushed on leaving
         // still goes there, not to the workspace the hash moved on to.
-        this.api = fb.api.events.in(fb.api.workspace());
+        this.workspace = fb.api.workspace();
+        this.api = fb.api.events.in(this.workspace);
         // A format change remounts the view, so this follows the setting.
         const longTime = fb.format.time(new Date(2000, 0, 1, 22, 0)).length > 5
             || fb.t("fb.calendar.all-day-short", "all day").length > 7;   // "ganztägig"
@@ -150,7 +151,8 @@ class FbCalendarView extends HTMLElement {
 
                 /* --- LIST PANE ------------------------------------------------ */
                 fb-calendar-view .cv-list-pane {
-                    min-height: 100%;
+                    /* Exactly the pane's height: the search and the header stay, only the list scrolls. */
+                    height: 100%;
                     background: var(--panel);
                     display: flex;
                     flex-direction: column;
@@ -189,6 +191,7 @@ class FbCalendarView extends HTMLElement {
                 }
                 fb-calendar-view .cv-items {
                     flex: 1;
+                    min-height: 0;
                     overflow-y: auto;
                     padding: 2px 12px 12px;
                 }
@@ -357,11 +360,6 @@ class FbCalendarView extends HTMLElement {
                     flex-shrink: 0;
                 }
                 fb-calendar-view .cv-chip:hover { background: color-mix(in srgb, var(--accent) 28%, transparent); }
-                fb-calendar-view .cv-chip.all-day {
-                    background: color-mix(in srgb, var(--accent-warm) 14%, transparent);
-                    border-left-color: var(--accent-warm);
-                }
-                fb-calendar-view .cv-chip.all-day:hover { background: color-mix(in srgb, var(--accent-warm) 26%, transparent); }
                 fb-calendar-view .cv-bday-mark { --icon-size: 12px; vertical-align: -1px; margin-right: 3px; color: var(--accent); }
                 #cv-feeds-dialog .cv-feeds { display: flex; flex-direction: column; gap: 12px; }
                 #cv-feeds-dialog .cv-feeds:empty { display: none; }
@@ -371,6 +369,12 @@ class FbCalendarView extends HTMLElement {
                 #cv-feeds-dialog #cv-feed-new { align-self: flex-start; }
                 #cv-feeds-dialog .cv-feed-url { flex: 1; min-width: 0; width: auto; }
                 #cv-feeds-dialog p { margin: 0; }
+                #cv-bday-dialog .cv-bday { display: flex; flex-direction: column; gap: 10px; min-width: min(340px, 75vw); }
+                #cv-bday-dialog .cv-bday-line { display: flex; align-items: center; gap: 10px; color: var(--text-muted); text-decoration: none; overflow-wrap: anywhere; }
+                #cv-bday-dialog .cv-bday-line sac-icon { --icon-size: 16px; flex: none; }
+                #cv-bday-dialog .cv-bday-line.lead { color: var(--text); font-weight: 600; }
+                #cv-bday-dialog .cv-bday-line.lead sac-icon { color: var(--accent); }
+                #cv-bday-dialog a.cv-bday-line:hover span { color: var(--text); text-decoration: underline; }
                 fb-calendar-view .cv-chip-time {
                     color: var(--text-muted);
                     margin-right: 4px;
@@ -541,7 +545,7 @@ class FbCalendarView extends HTMLElement {
                         <button class="icon-btn" id="cv-today-btn" title="${fb.t("fb.calendar.today", "Jump to today")}" aria-label="${fb.t("fb.calendar.today", "Jump to today")}"><sac-icon name="clock"></sac-icon></button>
                         <button class="icon-btn" id="cv-new-btn" title="${fb.t("fb.calendar.new", "New event")}" aria-label="${fb.t("fb.calendar.new", "New event")}"><sac-icon name="plus"></sac-icon></button>
                     </div>
-                    <div class="cv-items" id="cv-agenda"></div>
+                    <div class="cv-items fb-scroll-fade" id="cv-agenda"></div>
                 </aside>
 
                 <main class="cv-main-pane" slot="end">
@@ -858,8 +862,8 @@ class FbCalendarView extends HTMLElement {
         await this.flushSave();
         const evt = this.events.find(e => e.id === id);
         if (!evt) return;
-        // A birthday is the contact's: it opens there.
-        if (evt._birthday) { fb.desktop.go("contacts", "open", evt._birthday.contactId); return; }
+        // A birthday is the contact's: a brief card, the contact one click away.
+        if (evt._birthday) { this.birthdayDialog(evt._birthday); return; }
         if (evt.isRecurringInstance) {
             // Instances share the master's id and carry a shifted startAt —
             // editing must happen on the master or a blur would silently
@@ -1045,9 +1049,11 @@ class FbCalendarView extends HTMLElement {
                 // Floating times (no zone in the file) are this browser's.
                 const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
                 const r = await this.api.import(await file.text(), tz);
+                const one = r.created === 1;
                 sac.toast?.(r.skipped
-                    ? fb.t("fb.calendar.imported-skipped", "Imported {n} events; {skipped} were already here or are changed single occurrences.", { n: r.created, skipped: r.skipped })
-                    : fb.t("fb.calendar.imported", "Imported {n} events.", { n: r.created }));
+                    ? (one ? fb.t("fb.calendar.imported-skipped-1", "Imported 1 event; {skipped} were already here or are changed single occurrences.", { skipped: r.skipped })
+                        : fb.t("fb.calendar.imported-skipped", "Imported {n} events; {skipped} were already here or are changed single occurrences.", { n: r.created, skipped: r.skipped }))
+                    : one ? fb.t("fb.calendar.imported-1", "Imported 1 event.") : fb.t("fb.calendar.imported", "Imported {n} events.", { n: r.created }));
                 await this.loadEvents();
             } catch (err) {
                 sac.toast?.(fb.errors.text(err, fb.t("fb.calendar.import-failed", "Couldn't import the file.")), { kind: "error" });
@@ -1058,6 +1064,54 @@ class FbCalendarView extends HTMLElement {
 
     /** The caller's subscription links of this workspace: each with when it
      *  was made and Revoke; "New link" shows the URL once. */
+    // A birthday in brief: the day and the age, what the person does, how to
+    // reach them (mail and phone as links) — and Go to contact. The details
+    // come from the contact; without them the card shows the day alone.
+    async birthdayDialog(b) {
+        const t = (k, f, v) => fb.t(`fb.calendar.${k}`, f, v);
+        const contacts = fb.api.contacts.in(this.workspace);
+        let c = null, org = null;
+        try {
+            c = await contacts.get(b.contactId);
+            if (c?.organisationId) org = await contacts.get(c.organisationId).catch(() => null);
+        } catch { /* the day alone */ }
+        const [y, m, d] = b.date.split("-").map(Number);
+        const when = `${fb.format.longDate(new Date(y, m - 1, d))} ${y}`;
+        const age = b.age == null ? null
+            : b.date < FbCalendarView.dayKey(new Date()) ? t("bday-turned", "Turned {n}", { n: b.age }) : t("bday-turns", "Turns {n}", { n: b.age });
+        const line = (icon, text, href, cls) => {
+            const el = document.createElement(href ? "a" : "div");
+            el.className = "cv-bday-line" + (cls ? ` ${cls}` : "");
+            if (href) el.href = href;
+            el.innerHTML = `<sac-icon name="${icon}"></sac-icon><span></span>`;
+            el.querySelector("span").textContent = text;
+            return el;
+        };
+        const body = document.createElement("div");
+        body.className = "cv-bday";
+        body.append(line("fb-gift", [age, when].filter(Boolean).join(" · "), null, "lead"));
+        const work = [c?.role, org?.name].filter(Boolean).join(" · ");
+        if (work) body.append(line("users", work));
+        const email = (c?.emails || []).find((e) => e.value)?.value;
+        if (email) body.append(line("mail", email, `mailto:${email}`));
+        const phone = (c?.phones || []).find((p) => p.value)?.value;
+        if (phone) body.append(line("fb-phone", phone, `tel:${phone.replace(/[^\d+]/g, "")}`));
+        const dlg = document.createElement("sac-dialog");
+        dlg.id = "cv-bday-dialog";
+        dlg.setAttribute("title", b.name);
+        dlg.appendChild(body);
+        dlg.buttons = [
+            { action: "close", label: fb.t("fb.common.close", "Close"), kind: "default" },
+            { action: "contact", label: t("bday-open", "Go to contact"), kind: "primary" },
+        ];
+        dlg.addEventListener("sac:action", (e) => {
+            if (e.detail?.action === "contact") fb.desktop.go("contacts", "open", b.contactId);
+            setTimeout(() => dlg.remove(), 120);
+        });
+        document.body.appendChild(dlg);
+        setTimeout(() => dlg.open?.(), 0);
+    }
+
     async feedsDialog() {
         const dlg = document.createElement("sac-dialog");
         dlg.id = "cv-feeds-dialog";

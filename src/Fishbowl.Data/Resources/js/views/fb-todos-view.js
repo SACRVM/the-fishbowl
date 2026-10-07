@@ -86,7 +86,8 @@ class FbTodosView extends HTMLElement {
 
                 /* --- LIST PANE ------------------------------------------------ */
                 fb-todos-view .tv-list-pane {
-                    min-height: 100%;
+                    /* Exactly the pane's height: the search and the header stay, only the list scrolls. */
+                    height: 100%;
                     background: var(--panel);
                     display: flex;
                     flex-direction: column;
@@ -149,6 +150,7 @@ class FbTodosView extends HTMLElement {
 
                 fb-todos-view .tv-items {
                     flex: 1;
+                    min-height: 0;
                     overflow-y: auto;
                     padding: 2px 12px 12px;
                 }
@@ -425,7 +427,7 @@ class FbTodosView extends HTMLElement {
                             <sac-icon name="plus"></sac-icon>
                         </button>
                     </div>
-                    <div class="tv-items" id="todo-list"></div>
+                    <div class="tv-items fb-scroll-fade" id="todo-list"></div>
                 </aside>
 
                 <main class="tv-editor-pane" slot="end">

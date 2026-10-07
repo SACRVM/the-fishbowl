@@ -388,3 +388,22 @@ label.fb-quota-field input { width: 6em; }
 .fb-oauth-field select { width: 100%; }
 .fb-oauth-field label { display: flex; align-items: center; gap: 8px; }
 .fb-oauth-field [hidden] { display: none; }
+
+/* A list that scrolls under a fixed header (the list-and-editor apps) fades
+   out at its top edge once it is scrolled, instead of cutting its rows off
+   hard. Scroll-driven, no script: at the top nothing fades; over the first
+   24px of scrolling the fade grows to 24px. A browser without scroll
+   timelines keeps the hard edge. */
+@property --fb-scroll-fade { syntax: "<length>"; inherits: false; initial-value: 0px; }
+@keyframes fb-scroll-fade { to { --fb-scroll-fade: 24px; } }
+.fb-scroll-fade {
+    -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 var(--fb-scroll-fade));
+    mask-image: linear-gradient(to bottom, transparent 0, #000 var(--fb-scroll-fade));
+}
+@supports (animation-timeline: scroll()) {
+    .fb-scroll-fade {
+        animation: fb-scroll-fade linear both;
+        animation-timeline: scroll(self);
+        animation-range: 0 24px;
+    }
+}

@@ -251,7 +251,8 @@ class FbNotesView extends HTMLElement {
 
                 /* --- LIST PANE ------------------------------------------------- */
                 fb-notes-view .nv-list-pane {
-                    min-height: 100%;
+                    /* Exactly the pane's height: the search and the header stay, only the list scrolls. */
+                    height: 100%;
                     background: var(--panel);
                     display: flex;
                     flex-direction: column;
@@ -321,6 +322,7 @@ class FbNotesView extends HTMLElement {
 
                 fb-notes-view .nv-items {
                     flex: 1;
+                    min-height: 0;
                     overflow-y: auto;
                     padding: 2px 12px 12px;
                 }
@@ -656,7 +658,7 @@ class FbNotesView extends HTMLElement {
                             <sac-icon name="plus"></sac-icon>
                         </button>
                     </div>
-                    <div class="nv-items" id="note-list"></div>
+                    <div class="nv-items fb-scroll-fade" id="note-list"></div>
                 </aside>
 
                 <main class="nv-editor-pane" slot="end">

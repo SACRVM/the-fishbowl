@@ -7,7 +7,7 @@ namespace Fishbowl.Ui.Tests;
 
 // The desktop in the browser: SACRVM Desktop's tiles and tile menu on the
 // kit's .grid, fed from fb.desktop's registry; their arrangement (size,
-// colour, hide) stored per workspace on the server, hidden tiles offered
+// hide — no colour per tile) stored per workspace on the server, hidden tiles offered
 // back in the toolbar, and the Ctrl/⌘K palette. Every test that
 // arranges puts the personal desktop back, so the hub smoke test sees the
 // defaults.
@@ -176,10 +176,10 @@ public class DesktopTests
             var m = matrix[7..^1].Split(',').Select(x => double.Parse(x.Trim(), System.Globalization.CultureInfo.InvariantCulture)).ToArray();
             Assert.True(m[0] > 1.05 && Math.Abs(m[1]) < 0.001 && Math.Abs(m[2]) < 0.001, $"icon transform {matrix}");
 
-            // Colour, from the menu's colour row.
+            // No colour row: a space's colour is the workspace's one colour.
             await OpenMenuAsync(page, "builtin:calendar");
-            await Cell(page, "builtin:calendar").Locator(".tile-tint sac-swatch").Nth(3).ClickAsync();
-            await Assertions.Expect(Cell(page, "builtin:calendar")).ToHaveAttributeAsync("style", new System.Text.RegularExpressions.Regex("--accent: var\\(--palette-"));
+            await Assertions.Expect(Cell(page, "builtin:calendar").Locator(".tile-menu sac-swatch-grid")).ToHaveCountAsync(0);
+            await page.Keyboard.PressAsync("Escape");
 
             // Hide: gone from the desktop, offered back in the toolbar.
             await OpenMenuAsync(page, "builtin:notes");
@@ -188,15 +188,13 @@ public class DesktopTests
             await Assertions.Expect(ShowHiddenButton(page)).ToHaveAttributeAsync("title", "Show hidden tiles (1)");
 
             await WaitForServerAsync(page, t => Hidden(t, "builtin:notes")
-                && Tile(t, "builtin:todos")?.GetProperty("size").GetString() == "wide"
-                && Tile(t, "builtin:calendar")?.GetProperty("color").ValueKind == System.Text.Json.JsonValueKind.String);
+                && Tile(t, "builtin:todos")?.GetProperty("size").GetString() == "wide");
 
             // All of it on the server: a reload, and another browser.
             foreach (var p in new[] { page, await (await _fixture.Browser!.NewContextAsync(new() { IgnoreHTTPSErrors = true, BypassCSP = true })).NewPageAsync() })
             {
                 await p.GotoAsync(_fixture.BaseUrl + "/#/");
                 await Assertions.Expect(Cell(p, "builtin:todos")).ToHaveClassAsync(new System.Text.RegularExpressions.Regex("size-wide"), new() { Timeout = 5000 });
-                await Assertions.Expect(Cell(p, "builtin:calendar")).ToHaveAttributeAsync("style", new System.Text.RegularExpressions.Regex("--palette-"));
                 await Assertions.Expect(Cell(p, "builtin:notes")).ToHaveCountAsync(0);
             }
 

@@ -90,7 +90,8 @@ class FbContactsView extends HTMLElement {
                     background: var(--bg);
                 }
                 fb-contacts-view [hidden] { display: none !important; }
-                fb-contacts-view .cv-list-pane { min-height: 100%; background: var(--panel); display: flex; flex-direction: column; }
+                /* Exactly the pane's height: the search and the header stay, only the list scrolls. */
+                fb-contacts-view .cv-list-pane { height: 100%; background: var(--panel); display: flex; flex-direction: column; }
                 fb-contacts-view .cv-search { padding: 12px 12px 0; }
                 fb-contacts-view .cv-search input { width: 100%; box-sizing: border-box; }
                 /* The list header like Todos': a small muted label on the rows' text edge, icon actions on the right. */
@@ -109,7 +110,7 @@ class FbContactsView extends HTMLElement {
                     background: var(--accent-tint);
                     color: var(--accent);
                 }
-                fb-contacts-view .cv-items { flex: 1; overflow-y: auto; padding: 2px 12px 12px; }
+                fb-contacts-view .cv-items { flex: 1; min-height: 0; overflow-y: auto; padding: 2px 12px 12px; }
                 fb-contacts-view .cv-item {
                     display: flex; align-items: center; gap: 10px;
                     padding: 8px 12px; border-radius: var(--radius-m); cursor: pointer;
@@ -167,7 +168,7 @@ class FbContactsView extends HTMLElement {
                             <button type="button" data-action="organisation"><sac-icon name="users"></sac-icon> ${t("new-organisation", "New organisation")}</button>
                         </sac-menu>
                     </div>
-                    <div class="cv-items" id="cv-items" tabindex="-1"></div>
+                    <div class="cv-items fb-scroll-fade" id="cv-items" tabindex="-1"></div>
                 </aside>
                 <main class="cv-editor-pane" slot="end">
                     <div class="empty-state cv-empty" id="cv-empty">

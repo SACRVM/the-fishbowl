@@ -44,8 +44,8 @@
  * tagline, the project's licence and the bundled parts'.
  *
  * Each tile has SACRVM Desktop's "⋯" menu: Medium / Wide / Large tile (✓ on
- * the current one), the colour row (kit palette slots, "Default" = none),
- * and Hide. The arrangement is the SERVER's, per workspace (fb.api.desktop):
+ * the current one) and Hide — no colour row: a space's colour is the one
+ * colour of its workspace, a colour per tile would fight it. The arrangement is the SERVER's, per workspace (fb.api.desktop):
  * a menu pick writes that one tile. There is no reordering UI; tiles keep
  * their stored position, unarranged ones sort by registry index. Hidden
  * tiles come back from the toolbar ("Show hidden tiles"). A space member
@@ -210,10 +210,6 @@ class FbHubView extends HTMLElement {
                     opacity: 1;
                     outline: 2px solid var(--accent);
                     outline-offset: 1px;
-                }
-                fb-hub-view .tile-menu .tile-tint {
-                    padding: 0.45rem 0.9rem 0.25rem;
-                    width: 13rem;
                 }
 
                 /* SACRVM Desktop's origin line (.tile-meta), desktop.css. */
@@ -782,8 +778,6 @@ class FbHubView extends HTMLElement {
                 tile.classList.add("small");   // the kit's .small: icon only
                 tile.title = e.name;
             }
-            // Tile colour = the app's highlight, the SACRVM Desktop move.
-            if (e.color) tile.style.setProperty("--accent", fb.accents.cssVar(e.color));
             return tile;
         });
         // The cover stays (its animation keeps running); everything else is replaced.
@@ -871,7 +865,7 @@ class FbHubView extends HTMLElement {
         setTimeout(() => dlg.open(), 0);
     }
 
-    /** SACRVM Desktop's tile menu: size, colour, and the way out (Hide). */
+    /** SACRVM Desktop's tile menu: size and the way out (Hide) — no colour row. */
     _menu(e) {
         const menu = document.createElement("sac-menu");
         menu.className = "tile-menu";
@@ -895,16 +889,6 @@ class FbHubView extends HTMLElement {
             return b;
         };
 
-        // The colour row: "Default" (no colour) plus every kit palette slot.
-        const tint = document.createElement("sac-swatch-grid");
-        tint.setAttribute("columns", "8");
-        tint.setAttribute("selectable", "");
-        tint.className = "tile-tint";
-        tint.colors = fb.accents.swatches(e.color);
-        tint.addEventListener("sac:change", (ev) => {
-            this._update(e, { color: fb.accents.slotOf(ev.detail.value) });
-        });
-
         // The per-browser privacy switch of a tile that can show content
         // (medium and up): ✓ while it does.
         const content = [];
@@ -922,8 +906,6 @@ class FbHubView extends HTMLElement {
             item("size:wide", fb.t("fb.desk.size-wide", "Wide tile")),
             item("size:large", fb.t("fb.desk.size-large", "Large tile")),
             ...content,
-            document.createElement("hr"),
-            tint,
             document.createElement("hr"),
             item("hide", fb.t("fb.desk.hide", "Hide from this desktop")),
         );

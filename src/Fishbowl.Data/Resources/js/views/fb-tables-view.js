@@ -64,7 +64,8 @@ class FbTablesView extends HTMLElement {
                 }
                 fb-tables-view [hidden] { display: none !important; }
                 fb-tables-view .tb-list {
-                    min-height: 100%;
+                    /* Exactly the pane's height: the header stays, only the list scrolls. */
+                    height: 100%;
                     background: var(--panel);
                     display: flex;
                     flex-direction: column;
@@ -81,6 +82,7 @@ class FbTablesView extends HTMLElement {
                     letter-spacing: 0.1em;
                     color: var(--text-muted);
                 }
+                fb-tables-view #tb-items { flex: 1; min-height: 0; overflow-y: auto; }
                 fb-tables-view .tb-item {
                     display: block;
                     padding: 8px 12px;
@@ -108,7 +110,7 @@ class FbTablesView extends HTMLElement {
                        aria-label="${fb.t("fb.tables.resize", "Resize the table list")}">
                 <aside class="tb-list" slot="start">
                     <div class="tb-list-title">${fb.t("fb.tables.title", "Tables")}</div>
-                    <div id="tb-items"></div>
+                    <div id="tb-items" class="fb-scroll-fade"></div>
                 </aside>
                 <section class="tb-main" slot="end">
                     <div class="empty-state" id="tb-empty">

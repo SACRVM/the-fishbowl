@@ -4,7 +4,7 @@ using Microsoft.Playwright;
 namespace Fishbowl.Ui.Tests;
 
 // The calendar's tools (sync spec, phase 1): the contacts' birthdays as
-// read-only entries that open their contact, the toolbar's .ics import and
+// read-only entries that show the person in brief (Go to contact opens it), the toolbar's .ics import and
 // export, and subscription links — made, read without signing in, revoked.
 [Collection(UiCollection.Name)]
 public class CalendarToolsTests
@@ -36,7 +36,7 @@ public class CalendarToolsTests
             var today = DateTime.Today;
             var day = new DateTime(today.Year, today.Month, 15);
             await page.APIRequest.PostAsync($"{_fixture.BaseUrl}/api/v1/spaces/{slug}/contacts",
-                new() { DataObject = new { kind = "person", firstName = "Grace", lastName = "Hopper", birthday = day.AddYears(-30).ToString("yyyy-MM-dd") } });
+                new() { DataObject = new { kind = "person", firstName = "Grace", lastName = "Hopper", birthday = day.AddYears(-30).ToString("yyyy-MM-dd"), email = "grace@navy.test", role = "Rear Admiral" } });
 
             await page.GotoAsync($"{_fixture.BaseUrl}/#/space/{slug}/calendar");
             var view = page.Locator("fb-calendar-view");
@@ -83,8 +83,14 @@ public class CalendarToolsTests
             await dlg.GetByRole(AriaRole.Button, new() { Name = "Close" }).ClickAsync();
             await Assertions.Expect(dlg).ToHaveCountAsync(0, new() { Timeout = 5000 });
 
-            // A birthday opens its contact.
+            // A birthday shows the person in brief; Go to contact opens the contact.
             await chip.ClickAsync();
+            var card = page.Locator("sac-dialog#cv-bday-dialog[title='Grace Hopper']");
+            await Assertions.Expect(card.Locator(".cv-bday-line.lead")).ToContainTextAsync("30");
+            await Assertions.Expect(card.Locator("a[href='mailto:grace@navy.test']")).ToHaveCountAsync(1);
+            await page.ScreenshotAsync(new() { Path = Path.Combine(Path.GetTempPath(), "calendar-birthday-card.png") });
+            Assert.EndsWith($"#/space/{slug}/calendar", page.Url);
+            await card.GetByRole(AriaRole.Button, new() { Name = "Go to contact" }).ClickAsync();
             await page.WaitForURLAsync(new System.Text.RegularExpressions.Regex($"#/space/{slug}/contacts$"));
             await Assertions.Expect(page.Locator("fb-contacts-view input[data-key='lastName']")).ToHaveValueAsync("Hopper", new() { Timeout = 10000 });
             Assert.Empty(errors);
