@@ -1290,23 +1290,24 @@ a.nav-icon-btn { text-decoration: none; }
     .grid > .tile.wide,
     .grid > .tile.large { grid-column: auto; grid-row: auto; --grid-rows: 1; }
 }
-/* .small — a quarter of a medium: up to four go in a .tile-pack, which
-   takes one medium cell and splits it 2×2 with the grid's own gap, so the
-   block lines up edge to edge with its neighbours. Icon only: the h2 stays
-   as the accessible name (visually hidden) — give the tile a title for the
-   tooltip. Small tiles stay small on phones; a one-column grid lays the
-   pack out as one row of four. */
+/* .small — a ninth of a medium: up to nine go in a .tile-pack, which
+   takes one medium cell and splits it 3×3 with the grid's own gap, so the
+   block lines up edge to edge with its neighbours and the rhythm of the
+   grid runs through it. Icon only: the h2 stays as the accessible name
+   (visually hidden) — give the tile a title for the tooltip. Small tiles
+   stay small on phones; a one-column grid lays the pack out as a wrapping
+   row of ~72px squares. */
 .tile-pack {
     display: grid;
-    grid-template-columns: 1fr 1fr;
-    grid-template-rows: 1fr 1fr;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-rows: repeat(3, minmax(0, 1fr));
     gap: var(--grid-gap);
     min-width: 0;
 }
 .grid > .tile-pack { min-height: 0; }
 @container (width < 581px) {
     .grid > .tile-pack {
-        grid-template-columns: repeat(4, minmax(0, 1fr));
+        grid-template-columns: repeat(auto-fill, minmax(72px, 1fr));
         grid-template-rows: auto;
         align-self: start;
     }
@@ -1316,9 +1317,11 @@ a.nav-icon-btn { text-decoration: none; }
     padding: 0;
     align-items: center;
     justify-content: center;
+    /* ~90px: the large radius would read as a pill. */
+    border-radius: var(--radius-m);
 }
 .tile.small > sac-icon {
-    --icon-size: 40px;
+    --icon-size: 32px;
     margin: 0;
 }
 .tile.small h2 {

@@ -126,14 +126,15 @@
  *   opened through it — tile color = app highlight. The optional manifest
  *   field `tile` sets the footprint: "medium" (default) | "wide" spans 2
  *   grid columns | "large" spans 2 columns AND 2 rows | "small" is a
- *   quarter of a medium: four in a row fill one medium cell as a 2×2 block
- *   (top-left, top-right, bottom-left, bottom-right; any other footprint
- *   between them starts a new block). A small tile shows its icon only —
+ *   ninth of a medium: nine in a row fill one medium cell as a 3×3 block
+ *   (row by row, left to right; any other footprint between them starts a
+ *   new block). A small tile shows its icon only —
  *   the name is its tooltip and accessible name. Unknown values fall
  *   back to medium silently. Tiles are square like the .grid pattern's
  *   (a wide one as tall as one column is wide, a large one 2×2). Small
  *   tiles stay small everywhere — a phone gains the most from the
- *   density: in a one-column grid a block is one row of four. Wide and
+ *   density: in a one-column grid a block is a wrapping row of ~72px
+ *   squares. Wide and
  *   large collapse to medium on narrow viewports (≤768px), matching
  *   the .grid pattern — and whenever the grid itself is too narrow for two
  *   columns (a launcher inside a sac-window or split panel on a wide
@@ -153,8 +154,8 @@
  * stored and sac:layout fires); the buttons stay the keyboard path.
  *
  * Small tiles need a finer grid than CSS auto-placement can pack into
- * 2×2 blocks, so while at least one is shown the launcher places every
- * cell itself on a half-size grid (grid-row/grid-column inline, re-run on
+ * 3×3 blocks, so while at least one is shown the launcher places every
+ * cell itself on a third-size grid (grid-row/grid-column inline, re-run on
  * resize and every DOM move — drag included). With no small tile the grid
  * is the plain .grid pattern, untouched.
  *
@@ -631,11 +632,12 @@ class SacLauncher extends HTMLElement {
     }
 
     /**
-     * Places the cells on a half-size grid while a small tile is shown (see
+     * Places the cells on a third-size grid while a small tile is shown (see
      * the header). Mirrors CSS sparse auto-placement in medium units — a
      * cursor that only moves forward, each item at the first free spot that
-     * fits — except that consecutive small tiles share one medium cell.
-     * One-column grid: a medium cell is a row, its block four across.
+     * fits — except that consecutive small tiles share one medium cell, nine
+     * to a block (3×3). One-column grid: a medium cell is a row; a block is
+     * as many ~72px squares across as fit, wrapping onto further rows.
      */
     _layout() {
         const grid = this._grid;
@@ -661,7 +663,8 @@ class SacLauncher extends HTMLElement {
         const n = Math.max(1, Math.floor((width + gap) / (280 + gap)));
         const list = n === 1;
         const collapse = list || window.matchMedia(SacLauncher.COMPACT).matches;
-        const sub = list ? 4 : 2 * n;
+        // One column: as many ~72px squares across as fit (at least three).
+        const sub = list ? Math.max(3, Math.floor((width + gap) / (72 + gap))) : 3 * n;
         grid.classList.add("sac-launcher-fine");
         grid.classList.toggle("sac-launcher-list", list);
         grid.style.setProperty("grid-template-columns", `repeat(${sub}, minmax(0, 1fr))`);
@@ -675,6 +678,18 @@ class SacLauncher extends HTMLElement {
             }
             return true;
         };
+        // Blocks: runs of consecutive small cells, nine (3×3) to a block —
+        // known up front, since a one-column block takes ceil(k / sub) rows.
+        const BLOCK = 9;
+        const blockOf = new Map();
+        let run = [];
+        const flush = () => { run.forEach((c) => blockOf.set(c, run.length)); run = []; };
+        for (const cell of cells) {
+            if (!cell.classList.contains("size-small")) { flush(); continue; }
+            run.push(cell);
+            if (run.length === BLOCK) flush();
+        }
+        flush();
         let cr = 0, cc = 0, pack = null;
         const place = (w, h) => {
             let r = cr, c = cc;
@@ -690,17 +705,18 @@ class SacLauncher extends HTMLElement {
         for (const cell of cells) {
             const st = cell.style;
             if (cell.classList.contains("size-small")) {
-                if (!pack || pack.k === 4) {
-                    const [r, c] = place(1, 1);
+                if (!pack || pack.k === BLOCK) {
+                    const rows = list ? Math.ceil(blockOf.get(cell) / sub) : 1;
+                    const [r, c] = place(1, rows);
                     pack = { r, c, k: 0 };
                 }
                 const k = pack.k++;
                 if (list) {
-                    st.gridColumn = `${k + 1}`;
-                    st.gridRow = `${pack.r + 1}`;
+                    st.gridColumn = `${(k % sub) + 1}`;
+                    st.gridRow = `${pack.r + Math.floor(k / sub) + 1}`;
                 } else {
-                    st.gridColumn = `${2 * pack.c + (k & 1) + 1}`;
-                    st.gridRow = `${2 * pack.r + (k >> 1) + 1}`;
+                    st.gridColumn = `${3 * pack.c + (k % 3) + 1}`;
+                    st.gridRow = `${3 * pack.r + Math.floor(k / 3) + 1}`;
                 }
                 continue;
             }
@@ -713,8 +729,8 @@ class SacLauncher extends HTMLElement {
                 st.gridColumn = "1 / -1";
                 st.gridRow = `${r + 1}`;
             } else {
-                st.gridColumn = `${2 * c + 1} / span ${2 * w}`;
-                st.gridRow = `${2 * r + 1} / span ${2 * h}`;
+                st.gridColumn = `${3 * c + 1} / span ${3 * w}`;
+                st.gridRow = `${3 * r + 1} / span ${3 * h}`;
             }
         }
     }
@@ -1315,10 +1331,10 @@ class SacLauncher extends HTMLElement {
                     --grid-rows: 1;
                 }
             }
-            /* Small tiles: _layout() places every cell on a half-size grid
+            /* Small tiles: _layout() places every cell on a third-size grid
                (inline grid-row / grid-column + the grid's own track list),
                so a cell's height is its rows', not the square of ui.css. A
-               one-column grid lays a block of four out as one row: square
+               one-column grid lays a block out as wrapping rows of square
                cells of natural height. */
             sac-launcher > .grid.sac-launcher-fine > .sac-launcher-cell { height: auto; }
             sac-launcher > .grid.sac-launcher-fine > .sac-launcher-cell.size-small { min-height: 0; }

@@ -151,16 +151,17 @@ public class DesktopTests
             var wide = (await Cell(page, "builtin:todos").BoundingBoxAsync())!;
             Assert.True(wide.Width > medium.Width * 2 - 2, $"wide {wide.Width} vs medium {medium.Width}");
 
-            // Small: the housekeeping tiles start small — a quarter of a
-            // medium, together in the kit's .tile-pack, icon only.
+            // Small: the housekeeping tiles start small — a ninth of a
+            // medium (3×3, kit 2.28), together in the kit's .tile-pack.
             await Assertions.Expect(page.Locator(".tile-pack > a.tile.small[data-key='builtin:messages']")).ToHaveCountAsync(1);
             await Assertions.Expect(page.Locator(".tile-pack > a.tile.small[data-key='builtin:trash']")).ToHaveCountAsync(1);
             await OpenMenuAsync(page, "builtin:messages");
             await Assertions.Expect(Cell(page, "builtin:messages").Locator(".tile-menu button[data-action='size:small']")).ToHaveTextAsync("✓ Small tile");
             await page.Keyboard.PressAsync("Escape");
             var small = (await Cell(page, "builtin:messages").BoundingBoxAsync())!;
-            Assert.True(small.Width < medium.Width / 2 && small.Width > medium.Width / 3, $"small {small.Width} vs medium {medium.Width}");
+            Assert.True(small.Width < medium.Width / 3 && small.Width > medium.Width / 4, $"small {small.Width} vs medium {medium.Width}");
             await Assertions.Expect(Cell(page, "builtin:messages").Locator("p").First).ToBeHiddenAsync();
+            await page.ScreenshotAsync(new PageScreenshotOptions { Path = Path.Combine(Path.GetTempPath(), "fishbowl_ui_desktop_pack.png") });
             // Its name under the icon (the kit's small tile hides it).
             var label = Cell(page, "builtin:messages").Locator("h2");
             await Assertions.Expect(label).ToHaveTextAsync("Notifications");

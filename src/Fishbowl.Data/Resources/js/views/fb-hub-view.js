@@ -843,13 +843,13 @@ class FbHubView extends HTMLElement {
     }
 
     /** The kit's .tile-pack: consecutive small tiles share one medium cell,
-     *  four at most; any other tile between them starts a new pack. */
+     *  nine at most (3×3, kit 2.28); any other tile between them starts a new pack. */
     _packSmall(tiles) {
         const out = [];
         let pack = null;
         for (const t of tiles) {
             if (!t.classList.contains("small")) { pack = null; out.push(t); continue; }
-            if (!pack || pack.childElementCount === 4) {
+            if (!pack || pack.childElementCount === 9) {
                 pack = document.createElement("div");
                 pack.className = "tile-pack";
                 out.push(pack);

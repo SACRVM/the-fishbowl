@@ -60,6 +60,7 @@
     const EDGE = 32;              // px from a scroller's edge where auto-scroll starts
     const MAX_SPEED = 14;         // px per frame at the very edge
     const SLIDE_MS = 200;         // neighbours sliding aside, the drop settling (tiles)
+    const PACK = 9;               // small tiles per .tile-pack (3×3, ui.css)
     const IGNORE = "input, textarea, select, [contenteditable], [data-sortable-ignore]";
 
     const reducedMotion = () => !!(window.matchMedia && matchMedia("(prefers-reduced-motion: reduce)").matches);
@@ -377,7 +378,7 @@
      * Drag-to-reorder for a hub grid (ui.css .grid) whose small tiles sit in
      * .tile-pack cells. Every tile is an item in ONE flat order — grid tiles
      * and pack tiles alike — and the packing follows the drag live:
-     * consecutive .small tiles share a pack, four per pack; a small tile
+     * consecutive .small tiles share a pack, nine per pack (3×3); a small tile
      * dragged out leaves its pack (it closes up, an empty one goes), one
      * dragged next to others joins theirs, a bigger tile pushes the rest
      * (packs included) aside. The helper owns the packing, so the hub keeps
@@ -446,7 +447,7 @@
             return out;
         }
 
-        /** Lay `order` out: runs of small tiles in packs of four (existing
+        /** Lay `order` out: runs of small tiles in packs of nine (existing
          *  packs reused in order, new ones made, empty ones dropped), the
          *  fixed children back at their indices. */
         function pack(order, keep) {
@@ -455,7 +456,7 @@
             let cur = null;
             for (const t of order) {
                 if (t.classList.contains("small")) {
-                    if (!cur || cur.length === 4) { cur = []; units.push(cur); }
+                    if (!cur || cur.length === PACK) { cur = []; units.push(cur); }
                     cur.push(t);
                 } else {
                     cur = null;
