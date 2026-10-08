@@ -96,6 +96,11 @@ public class MailTests
                 return d && d.body && d.body.scrollHeight > 40 && d.documentElement.scrollHeight <= f.clientHeight + 1
                     && d.documentElement.scrollWidth <= d.documentElement.clientWidth;
             }");
+            // Text the mail gives no font of its own is set like the app: the kit's Inter.
+            Assert.Equal("Inter|loaded", await frame.EvaluateAsync<string>(@"async f => {
+                const d = f.contentDocument, faces = await d.fonts.load('14px Inter');
+                return getComputedStyle(d.querySelector('h1')).fontFamily.split(',')[0] + '|' + (faces[0]?.status ?? 'none');
+            }"));
             var src = await frame.GetAttributeAsync("src");
             var html = await page.APIRequest.GetAsync(src!.StartsWith("http") ? src : _fixture.BaseUrl + src);
             var csp = html.Headers["content-security-policy"];

@@ -343,9 +343,12 @@ public class MailApiTests : IClassFixture<WebApplicationFactory<Program>>, IDisp
         Assert.Contains("sandbox", csp);
         Assert.DoesNotContain("allow-scripts", csp);
         Assert.Contains("img-src data:", csp);
+        Assert.Contains("font-src 'self';", csp);   // the kit's Inter, nothing from elsewhere
         Assert.DoesNotContain("https:", csp);
         Assert.Equal("nosniff", plain.Headers.GetValues("X-Content-Type-Options").Single());
-        Assert.Contains("Engines everywhere", await plain.Content.ReadAsStringAsync(Ct));
+        var page = await plain.Content.ReadAsStringAsync(Ct);
+        Assert.Contains("Engines everywhere", page);
+        Assert.Contains("url(/kit/fonts/inter-latin.woff2)", page);
 
         var withImages = await c.GetAsync($"{P}/messages/{msgId}/html?images=true", Ct);
         var csp2 = string.Join(";", withImages.Headers.GetValues("Content-Security-Policy"));

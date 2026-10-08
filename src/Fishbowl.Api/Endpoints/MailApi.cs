@@ -79,12 +79,23 @@ public static partial class MailApi
     /// fire on white —, unless it is made for dark too: then, in the dark theme,
     /// it is set dark on the app's ground and its dark design applies. A plain
     /// one is transparent, in the app's colours: dark is the light page
-    /// inverted with its hues kept, and images inverted back.
+    /// inverted with its hues kept, and images inverted back. Text the mail
+    /// gives no font of its own is set like the app — the kit's Inter, 14px —
+    /// so a plain HTML mail reads like a text one.
     /// </summary>
+    // The kit's two Inter faces (kit/css/ui.css), the files served from
+    // /kit/fonts — the frame's policy allows fonts from 'self' for them.
+    private const string InterFace =
+        "@font-face{font-family:Inter;font-weight:400 600;font-display:swap;src:url(/kit/fonts/inter-latin.woff2) format('woff2');" +
+        "unicode-range:U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD}" +
+        "@font-face{font-family:Inter;font-weight:400 600;font-display:swap;src:url(/kit/fonts/inter-latin-ext.woff2) format('woff2');" +
+        "unicode-range:U+0100-02BA,U+02BD-02C5,U+02C7-02CC,U+02CE-02D7,U+02DD-02FF,U+0304,U+0308,U+0329,U+1D00-1DBF,U+1E00-1E9F,U+1EF2-1EFF,U+2020,U+20A0-20AB,U+20AD-20C0,U+2113,U+2C60-2C7F,U+A720-A7FF}";
+
     private static string Head(string look, bool dark)
     {
-        var css = "html{overflow-y:hidden}body{margin:16px;font:14px/1.5 system-ui,sans-serif;overflow-wrap:break-word}" +
-            "img{max-width:100%;height:auto}";
+        var css = InterFace +
+            "html{overflow-y:hidden}body{margin:16px;font:14px/1.5 Inter,-apple-system,BlinkMacSystemFont,sans-serif;" +
+            "-webkit-font-smoothing:antialiased;overflow-wrap:break-word}img{max-width:100%;height:auto}";
         css += (look, dark) switch
         {
             ("plain", false) => "html{background:transparent;color:#1a1a1a;color-scheme:light}",
@@ -364,11 +375,11 @@ public static partial class MailApi
             // The sender's HTML as it came — the policy is what makes it safe:
             // a sandbox without scripts, forms or plugins, nothing fetched but
             // inline styles, data: images and this message's own embedded parts
-            // (cid:, rewritten to …/cid/<id> — 'self'); remote images on
-            // request; links open a new tab.
+            // (cid:, rewritten to …/cid/<id> — 'self') and the kit's Inter
+            // ('self'); remote images on request; links open a new tab.
             http.Response.Headers[HeaderNames.ContentSecurityPolicy] =
                 "sandbox allow-same-origin allow-popups allow-popups-to-escape-sandbox; default-src 'none'; " +
-                "style-src 'unsafe-inline'; img-src data: 'self'" + (images == true ? " https: http:" : "") + "; frame-ancestors 'self'";
+                "style-src 'unsafe-inline'; font-src 'self'; img-src data: 'self'" + (images == true ? " https: http:" : "") + "; frame-ancestors 'self'";
             http.Response.Headers["X-Content-Type-Options"] = "nosniff";
             http.Response.Headers["Referrer-Policy"] = "no-referrer";
             http.Response.Headers[HeaderNames.CacheControl] = "private, no-store";
