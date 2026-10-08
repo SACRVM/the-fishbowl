@@ -103,7 +103,6 @@ window.sac?.i18n?.add?.("de", {
     "fb.desk.show-hidden": "Ausgeblendete Kacheln zeigen ({n})",
     "fb.desk.hidden-title": "Ausgeblendete Kacheln",
     "fb.desk.show": "Zeigen",
-    "fb.desk.options": "Optionen für {name}",
     "fb.desk.size-small": "Kleine Kachel",
     "fb.desk.size-medium": "Mittlere Kachel",
     "fb.desk.size-wide": "Breite Kachel",

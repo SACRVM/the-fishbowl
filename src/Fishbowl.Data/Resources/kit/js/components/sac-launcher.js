@@ -93,11 +93,11 @@
  *
  * Per-tile menu: `menu` on a manifest, a manifest `tiles` entry, a link, or
  * via setMenu() — [{ id, label, labelKey, icon, danger, disabled, onClick }]
- * with "-" for a separator. It renders a <sac-menu> behind a "…" button in
- * the tile's top-right corner — always there, never moved. In edit mode
- * the edit controls take that corner and the menu returns on Done. On narrow phones (≤480px, where tiles are rows) it sits
- * centred on the row's right edge. `labelKey` relabels the item on a
- * language switch (t(labelKey, label)). onClick(info) gets
+ * with "-" for a separator. It is the tile's CONTEXT menu (sac.contextMenu):
+ * right-click, a long-press on touch, Shift+F10 / the Menu key on a
+ * focused tile — no corner button. Its last entry, while the layout can be
+ * edited, is "Arrange": the edit mode below. No menu in edit mode.
+ * `labelKey` translates the item (t(labelKey, label)). onClick(info) gets
  * { key, appId, action, launcher }; `appId` is null for a link tile.
  *
  * Events:
@@ -233,7 +233,20 @@ class SacLauncher extends HTMLElement {
                 ignore: "input, textarea, select, [contenteditable], [data-sortable-ignore], " +
                         ".sac-launcher-controls, sac-menu",
                 disabled: () => !this._dragAllowed(),
+                // A finger drags only while arranging (edit) — then at once.
+                touch: () => (this.hasAttribute("edit") ? "move" : "off"),
                 onReorder: () => this._onDrop(),
+            });
+        }
+        if (!this._ctx && window.sac && typeof sac.contextMenu === "function") {
+            this._ctx = sac.contextMenu(this._grid, {
+                targets: ".sac-launcher-cell",
+                items: (cell) => this._contextItems(cell),
+                onSelect: (item, cell) => {
+                    if (item.id === "__arrange") this.setAttribute("edit", "");
+                    else this._onMenuSelect(cell, item._index);
+                },
+                disabled: () => this.hasAttribute("edit"),
             });
         }
         if (!this._dragObserver) {
@@ -259,6 +272,7 @@ class SacLauncher extends HTMLElement {
 
     disconnectedCallback() {
         if (this._sortable) { this._sortable.destroy(); this._sortable = null; }
+        if (this._ctx) { this._ctx.destroy(); this._ctx = null; }
         if (this._dragObserver) { this._dragObserver.disconnect(); this._dragObserver = null; }
         if (this._layoutObserver) {
             this._layoutObserver.disconnect(); this._layoutObserver = null;
@@ -298,7 +312,7 @@ class SacLauncher extends HTMLElement {
         this._empty.textContent = t("launcher.no-apps", "No apps registered.");
         this._editBtn.textContent = this.hasAttribute("edit")
             ? t("launcher.done", "Done") : t("launcher.edit", "Edit");
-        this._tiles.forEach((cell) => { this._labelCell(cell); this._labelMenu(cell); });
+        this._tiles.forEach((cell) => this._labelCell(cell));
         if (this._dialog) this._labelForm();
     }
 
@@ -859,77 +873,29 @@ class SacLauncher extends HTMLElement {
     }
 
     /**
-     * The corner menu: a setMenu() override wins over the entry's `menu`.
-     * Rebuilt only when the item list itself changes, so a re-sync never
-     * closes an open menu under the user's finger.
+     * The tile's menu items: a setMenu() override wins over the entry's
+     * `menu`. Kept on the cell; the context menu reads them when it opens.
      */
     _paintMenu(cell) {
         const key = cell._entry.key;
         const src = this._menus.has(key) ? this._menus.get(key) : cell._entry.menu;
         const items = Array.isArray(src) ? src.filter(it => it === "-" || (it && typeof it === "object")) : [];
-        const has = items.some(it => it !== "-");
-        if (cell._menuSrc === src && !!cell._menu === has) return;
-        cell._menuSrc = src;
-        cell.classList.toggle("has-menu", has);
-        if (!has) {
-            if (cell._menu) { cell._menu.remove(); cell._menu = null; }
-            return;
-        }
-        if (!cell._menu) {
-            const menu = document.createElement("sac-menu");
-            menu.className = "sac-launcher-menu";
-            const btn = document.createElement("button");
-            btn.type = "button";
-            btn.slot = "trigger";
-            btn.className = "sac-launcher-ctrl sac-launcher-menu-btn";
-            const ic = document.createElement("sac-icon");
-            ic.setAttribute("name", "more");
-            btn.appendChild(ic);
-            menu.appendChild(btn);
-            menu.addEventListener("sac:select", (e) => {
-                e.stopPropagation();
-                this._onMenuSelect(cell, e.detail && e.detail.action);
-            });
-            cell._menu = menu;
-            cell._menuBtn = btn;
-            cell.appendChild(menu);
-        }
-        // Items: replace everything but the trigger.
-        Array.from(cell._menu.children).forEach((n) => { if (n !== cell._menuBtn) n.remove(); });
-        cell._menuItems = [];
-        items.forEach((it, i) => {
-            if (it === "-") { cell._menu.appendChild(document.createElement("hr")); return; }
-            const b = document.createElement("button");
-            b.type = "button";
-            b.dataset.action = String(i);
-            if (it.danger) b.setAttribute("data-danger", "");
-            if (it.disabled) b.disabled = true;
-            if (it.icon) {
-                const ic = document.createElement("sac-icon");
-                ic.setAttribute("name", it.icon);
-                b.appendChild(ic);
-            }
-            const lab = document.createElement("span");
-            b.appendChild(lab);
-            b._item = it;
-            b._label = lab;
-            cell._menuItems[i] = it;
-            cell._menu.appendChild(b);
-        });
-        this._labelMenu(cell);
+        cell._menuItems = items;
+        cell.classList.toggle("has-menu", items.some(it => it !== "-"));
     }
 
-    /** The menu trigger's label and every item's text (host strings via
-     *  t(labelKey, label), so a language switch relabels them too). */
-    _labelMenu(cell) {
-        if (!cell._menu) return;
-        const name = cell._entry.name || cell._entry.appId || cell._entry.key;
-        cell._menuBtn.setAttribute("aria-label",
-            t("launcher.tile-menu", "Actions for {name}").replace("{name}", name));
-        cell._menu.querySelectorAll(":scope > button[data-action]").forEach((b) => {
-            const it = b._item;
-            b._label.textContent = it.labelKey ? t(it.labelKey, it.label || "") : String(it.label || "");
+    /** What the context menu shows for a cell: its items, then "Arrange"
+     *  while the layout can be edited. Labels in the current language. */
+    _contextItems(cell) {
+        if (!cell || !cell._entry || cell.classList.contains("sac-launcher-add-cell")) return null;
+        const list = (cell._menuItems || []).map((it, i) => it === "-" ? "-" : {
+            id: it.id, icon: it.icon, danger: !!it.danger, disabled: !!it.disabled, _index: i,
+            label: it.labelKey ? t(it.labelKey, it.label || "") : String(it.label || ""),
         });
+        if (this._canEdit() && this.getAttribute("drag") !== "none") {
+            list.push("-", { id: "__arrange", label: t("launcher.arrange", "Arrange"), icon: "move" });
+        }
+        return list;
     }
 
     _onMenuSelect(cell, action) {
@@ -969,6 +935,8 @@ class SacLauncher extends HTMLElement {
             return;
         }
         const editing = this.hasAttribute("edit");
+        // Arranging: no context menus, no long-press menu, a finger drags.
+        if (this._grid) this._grid.toggleAttribute("data-arranging", editing);
         this._footer.hidden = !this._canEdit();
         this._empty.hidden = this._order.length > 0 || editing;
         this._editBtn.textContent = editing ? t("launcher.done", "Done") : t("launcher.edit", "Edit");
@@ -1445,58 +1413,31 @@ class SacLauncher extends HTMLElement {
             /* Icons inside our buttons never take the pointer: a press must
                land on the button itself (sac.sortable's ignore list matches
                the pressed node, and sac-icon's svg sits in a shadow root). */
-            sac-launcher .sac-launcher-ctrl sac-icon,
-            sac-launcher .sac-launcher-menu > button sac-icon { pointer-events: none; }
+            sac-launcher .sac-launcher-ctrl sac-icon { pointer-events: none; }
 
-            /* Per-tile corner menu: top-right — the corner a tile's "…" lives
-               in, and it never moves elsewhere. In edit mode the edit
-               controls take the corner and the menu returns on Done. It rides the tile's hover lift. */
-            sac-launcher .sac-launcher-menu {
-                position: absolute;
-                right: 20px;
-                top: 21px;
-                transition: transform 0.4s var(--ease-bounce);
+            /* Edit mode is the arrange mode (the iPhone's): the cells wiggle
+               on the rotate property (ui.css keyframes), staggered; the one
+               in flight holds still. Reduced motion: a dashed hairline. */
+            sac-launcher[edit] .sac-launcher-cell:not(.sac-launcher-add-cell) {
+                animation: sac-wiggle 0.26s ease-in-out infinite alternate;
+                touch-action: none;
             }
-            sac-launcher[edit] .sac-launcher-menu { display: none; }
-            sac-launcher .size-small > .sac-launcher-menu { right: 6px; top: 6px; margin-top: 0; }
-            sac-launcher:not([edit]) .sac-launcher-cell:has(> .sac-launcher-tile:hover) > .sac-launcher-menu {
-                transform: translateY(-8px);
-            }
-            /* The trigger is an edit control (.sac-launcher-ctrl) and keeps
-               that look: sac-menu styles only its panel's items. */
-            sac-launcher .sac-launcher-menu-btn { --icon-size: 16px; }
-            sac-launcher .sac-launcher-menu[open] .sac-launcher-menu-btn { background: var(--hover-strong); }
-            @media (hover: none) {
-                sac-launcher:not([edit]) .sac-launcher-cell:has(> .sac-launcher-tile:hover) > .sac-launcher-menu {
-                    transform: none;
+            sac-launcher[edit] .sac-launcher-cell.size-small { animation-name: sac-wiggle-small; }
+            sac-launcher[edit] .sac-launcher-cell:nth-child(2n) { animation-delay: -0.13s; animation-duration: 0.3s; }
+            sac-launcher[edit] .sac-launcher-cell:nth-child(3n) { animation-delay: -0.07s; animation-duration: 0.28s; }
+            sac-launcher[edit] .sac-launcher-cell[data-sortable-dragging] { animation: none; }
+            @media (prefers-reduced-motion: reduce) {
+                sac-launcher[edit] .sac-launcher-cell:not(.sac-launcher-add-cell) {
+                    animation: none;
+                    outline: 1px dashed var(--border-strong);
+                    outline-offset: 3px;
                 }
-            }
-            @media (pointer: coarse) {
-                /* sac-menu's touch rule makes every slotted button a 44px
-                   row — the trigger keeps its 36px look (the ::after halo
-                   makes the 44px target). */
-                sac-launcher .sac-launcher-menu-btn { min-height: 0; }
-            }
-            /* Narrow phones: tiles are rows (ui.css) — the menu sits centred
-               on the row's right edge. */
-            @media (max-width: 480px) {
-                sac-launcher .sac-launcher-menu {
-                    top: 50%;
-                    margin-top: -14px;
-                }
-            }
-            @media (max-width: 480px) and (pointer: coarse) {
-                sac-launcher .sac-launcher-menu { margin-top: -18px; }
-            }
-            @media (max-width: 480px) {
-                sac-launcher .size-small > .sac-launcher-menu { top: 4px; right: 4px; margin-top: 0; }
             }
             /* Touch: a small tile keeps the 28px controls (two per row fit);
                the halo shrinks so neighbours never overlap. */
             @media (pointer: coarse) {
                 sac-launcher .size-small > .sac-launcher-controls { gap: 4px; }
-                sac-launcher .size-small .sac-launcher-ctrl,
-                sac-launcher .size-small .sac-launcher-menu-btn { width: 28px; height: 28px; }
+                sac-launcher .size-small .sac-launcher-ctrl { width: 28px; height: 28px; }
                 sac-launcher .size-small .sac-launcher-ctrl::after { inset: -2px; }
             }
 
@@ -1618,7 +1559,6 @@ class SacLauncher extends HTMLElement {
                 sac-launcher .sac-launcher-ctrl,
                 sac-launcher .sac-launcher-edit,
                 sac-launcher .sac-launcher-add,
-                sac-launcher .sac-launcher-menu,
                 sac-launcher .sac-launcher-drop.placed { transition: none; }
             }
         `;

@@ -61,6 +61,12 @@ class FbNotesView extends HTMLElement {
         // goes there, even when the hash has already moved on.
         this.api = fb.api.notes.in(fb.api.workspace());
         this.render();
+        // A note's own menu (kit 2.29): a right-click or a long press — the
+        // row's actions, plus Open.
+        this._rowMenu = sac.contextMenu(this.querySelector("#note-list"), {
+            targets: ".nv-item",
+            items: (row) => this._rowItems(row),
+        });
         window.addEventListener("fb-tags-invalidated", this._onTagsInvalidated);
         window.addEventListener("fb:vault-changed", this._onVaultChanged);
         // Save pending edits while the key still exists; after the lock a
@@ -146,6 +152,7 @@ class FbNotesView extends HTMLElement {
 
     disconnectedCallback() {
         if (this._onIntent) window.removeEventListener("fb:intent", this._onIntent);
+        this._rowMenu?.destroy();
         // Router already clears on swap, but guard against any other unmount.
         // Fire-and-forget any pending autosave so a quick view-switch mid-typing
         // doesn't drop edits.
@@ -1289,6 +1296,26 @@ class FbNotesView extends HTMLElement {
     }
 
     /** Toolbar-triggered delegates that just dispatch to the id-based methods. */
+    /** A note row's context menu: Open, then what the row's buttons do. */
+    _rowItems(row) {
+        const n = this.notes.find((x) => x.id === row.dataset.id);
+        if (!n) return null;
+        const items = [{ id: "open", label: fb.t("fb.common.open", "Open"), icon: "document", onClick: () => this.select(n.id) }];
+        if (this.writable === false) return items;
+        items.push("-");
+        if ((n.tags || []).includes("review:pending"))
+            items.push({ id: "approve", label: fb.t("fb.notes.approve", "Approve"), icon: "check", onClick: () => this.approveById(n.id) });
+        items.push(
+            { id: "pin", label: n.pinned ? fb.t("fb.notes.unpin", "Unpin") : fb.t("fb.notes.pin", "Pin to top"), icon: "pin",
+              onClick: () => this.togglePinnedById(n.id) },
+            { id: "archive", label: n.archived ? fb.t("fb.notes.unarchive", "Unarchive") : fb.t("fb.notes.archive", "Archive"), icon: "archive",
+              onClick: () => this.toggleArchivedById(n.id) },
+            "-",
+            { id: "delete", label: fb.t("fb.common.delete", "Delete"), icon: "trash", danger: true, onClick: () => this.deleteById(n.id) },
+        );
+        return items;
+    }
+
     togglePinned()    { if (this.selectedId) this.togglePinnedById(this.selectedId); }
     deleteSelected()  { if (this.selectedId) this.deleteById(this.selectedId); }
 

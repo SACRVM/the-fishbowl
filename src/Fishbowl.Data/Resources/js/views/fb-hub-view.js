@@ -5,7 +5,7 @@
  * recipe (.orb, .hub-container, .grid of <a class="tile">), one tile per app
  * from fb.desktop's registry (js/lib/desktop.js), space-aware hrefs included
  * — never a tile for something that doesn't work. The rules here are SACRVM
- * Desktop's own (the tile menu, the wide / large footprints) plus a layer
+ * Desktop's own (the wide / large footprints) plus a layer
  * that is Fishbowl's, tried here first and then handed to the kit as "how we
  * do it": the live content of medium / wide / large tiles (.tile-live,
  * below), the small tiles' names under their icons, and a hover that grows
@@ -17,7 +17,7 @@
  * --field wash) with the icon, the app's name as the heading (the link's
  * name) and the status under it (the Calendar's icon shows today's day, its
  * status the live time), "+" for a new item (Notes, Todos, Calendar,
- * Contacts — for whoever may write) and "⋯" on the right; below it, on the
+ * Contacts — for whoever may write) on the right; below it, on the
  * tile's own lighter ground, the list running down to the tile's bottom edge
  * and fading out there. No big numbers. A one-column card shows one row
  * (`_fit`, re-marked on resize). The rest (and every small tile) stay as
@@ -27,12 +27,12 @@
  * yet, so no tile flashes its description), on a workspace switch, every 5 minutes and when the page becomes
  * visible again (Messages also on fb:messages-changed) — and the Calendar's
  * clock repaints at every minute boundary without a request. A provider that
- * fails leaves its tile plain. The tile's "⋯" menu has a per-browser "Show
+ * fails leaves its tile plain. The tile's context menu has a per-browser "Show
  * content" switch (localStorage, fb.desk.quiet); off, the provider isn't asked.
  *
  * The cover: instead of a page heading, the grid's FIRST tile is a wide cover
  * (.fb-cover) — the kit's tile footprint, hover lift and accent border, but
- * not an app: no "⋯" menu, can't be hidden, not in fb.desktop's registry.
+ * not an app: no context menu, can't be hidden, not in fb.desktop's registry.
  * Like a record sleeve: "THE FISHBOWL" top left, the version as a catalogue
  * number ("FB · 0.5.0", once /version has answered) top right, the active
  * workspace's name (Personal or the space's) big at the bottom; behind it a
@@ -43,15 +43,18 @@
  * opens the About window (js/lib/about.js, fb.about) — name, version,
  * tagline, the project's licence and the bundled parts'.
  *
- * Each tile has SACRVM Desktop's "⋯" menu: Medium / Wide / Large tile (✓ on
- * the current one) and Hide — no colour row: a space's colour is the one
- * colour of its workspace, a colour per tile would fight it. The arrangement is the SERVER's, per workspace (fb.api.desktop):
- * a menu pick writes that one tile. A tile is dragged to a new place (the
- * kit's sac.tiles.sortable — small tiles re-pack as they go, the cover stays
- * first) and takes the midpoint between its new neighbours' positions; tiles
- * never moved sort by registry index. Hidden
+ * Each tile has a context menu (the kit's sac.contextMenu, 2.29 — a
+ * right-click, a long press, Shift+F10; never a "⋯" or the browser's menu):
+ * Small / Medium / Wide / Large tile (a check on the current one), Hide and
+ * the kit's Arrange — no colour row: a space's colour is the one colour of
+ * its workspace, a colour per tile would fight it. The arrangement is the
+ * SERVER's, per workspace (fb.api.desktop): a menu pick writes that one
+ * tile. A tile is dragged to a new place (the kit's sac.tiles.sortable — a
+ * mouse any time, a finger in arrange mode; small tiles re-pack as they go,
+ * the cover stays first) and takes the midpoint between its new neighbours'
+ * positions; tiles never moved sort by registry index. Hidden
  * tiles come back from the toolbar ("Show hidden tiles"). A space member
- * who may not arrange gets no menus and no toolbar item.
+ * who may not arrange gets no menu and no toolbar item.
  *
  * Installed apps (fb.desktopApps) are tiles like the built-ins, with
  * SACRVM Desktop's origin line under the description and three more menu
@@ -162,6 +165,7 @@ class FbHubView extends HTMLElement {
         cancelAnimationFrame(this._fitFrame);
         this._ro?.disconnect();
         this._sortable?.destroy();
+        this._tileMenu?.destroy();
     }
 
     async _loadVersion() {
@@ -179,43 +183,8 @@ class FbHubView extends HTMLElement {
     render() {
         this.innerHTML = `
             <style>
-                /* SACRVM Desktop's tile menu (desktop.css): hidden until the
-                   tile is hovered or has focus, always keyboard-reachable. */
-                fb-hub-view .tile-menu {
-                    position: absolute;
-                    top: 8px;
-                    right: 10px;
-                }
-                fb-hub-view .tile-menu-btn {
-                    width: 28px;
-                    height: 28px;
-                    padding: 0;
-                    display: flex;
-                    align-items: center;
-                    justify-content: center;
-                    --icon-size: 18px;
-                    color: var(--text-dim);
-                    background: none;
-                    border: none;
-                    border-radius: var(--radius-m);
-                    opacity: 0;
-                    cursor: pointer;
-                    transition: opacity 0.15s var(--ease-smooth),
-                                color 0.15s var(--ease-smooth),
-                                background 0.15s var(--ease-smooth);
-                }
-                fb-hub-view .tile:hover .tile-menu-btn,
-                fb-hub-view .tile:focus-within .tile-menu-btn,
-                fb-hub-view .tile-menu[open] .tile-menu-btn { opacity: 1; }
-                fb-hub-view .tile-menu-btn:hover { color: var(--text); background: var(--hover); }
-                fb-hub-view .tile-menu-btn:focus-visible {
-                    opacity: 1;
-                    outline: 2px solid var(--accent);
-                    outline-offset: 1px;
-                }
-                /* No hover on touch: the buttons that wait for one stay shown. */
+                /* No hover on touch: the "+" that waits for one stays shown. */
                 @media (hover: none) {
-                    fb-hub-view .tile-menu-btn,
                     fb-hub-view .tile.has-live > .tl-new { opacity: 1; }
                 }
 
@@ -272,7 +241,7 @@ class FbHubView extends HTMLElement {
                    a candidate for the kit. Two zones, like a widget: a header
                    band, darker (the kit's sunken --field wash), with the icon,
                    the app's name as the heading (still the link's name), the
-                   status under it and, on the right, "+" (new item) and "⋯";
+                   status under it and, on the right, "+" (new item);
                    below it, on the tile's own lighter ground, the list running
                    down to the bottom edge and fading out there. Kit tokens and
                    radii only. */
@@ -336,15 +305,15 @@ class FbHubView extends HTMLElement {
                 fb-hub-view .tl-empty { color: var(--text-muted); font-size: 0.9rem; line-height: 1.4; padding: 0.2rem 0; }
 
                 /* Every footprint from 481px: a grid — the header (the icon over
-                   rows 1–3; name, "+" and "⋯" on row 1; the status lines on
-                   rows 2–3, under the buttons too), then the list.
+                   rows 1–3; name and "+" on row 1; the status lines on rows
+                   2–3, under the "+" too), then the list.
                    The wrappers vanish so every part is a grid item of the tile;
                    the band is the tile's ::before behind rows 1–3, out to the
                    tile's edges. */
                 @media (min-width: 481px) {
                     fb-hub-view .tile.has-live {
                         display: grid;
-                        grid-template-columns: auto minmax(0, 1fr) auto auto;
+                        grid-template-columns: auto minmax(0, 1fr) auto;
                         /* The name and the two status lines are exactly the icon's
                            48px, so the band's content is one square-cornered block:
                            the band's edge as far below it as the tile's top is
@@ -379,28 +348,20 @@ class FbHubView extends HTMLElement {
                     fb-hub-view .tile.has-live .tl-status > h2 { grid-column: 2; grid-row: 1; align-self: center; margin: 0; line-height: 20px; }
                     fb-hub-view .tile.has-live .tl-main { grid-column: 2 / -1; grid-row: 2; line-height: 14px; }
                     fb-hub-view .tile.has-live .tl-sub { grid-column: 2 / -1; grid-row: 3; line-height: 14px; }
-                    /* "+" and "⋯" are one pair in the band's top-right corner: the
-                       same 28px box side by side, pulled out by their own empty
-                       space — 8px up (the button's 5 + the "+" glyph's 3), 7px
-                       right (5 + the dots' 2) — so what you see starts on the
-                       inset line, like the icon in the other corner. The dots
-                       sit on the "+"'s centre line in EVERY tile, with a "+" or
-                       without one, so the corner looks the same everywhere. Like
-                       the menu, the "+" waits for the tile's hover. */
+                    /* The "+" in the band's top-right corner, pulled out by its
+                       own empty space — 8px up and 8px right (the button's 5 +
+                       the glyph's 3) — so the cross starts on the top inset line
+                       and ends on the right one, like the icon in the other
+                       corner. It waits for the tile's hover. (The tile's other
+                       actions are its context menu — kit 2.29.) */
                     fb-hub-view .tile.has-live > .tl-new {
-                        grid-column: 3; grid-row: 1; align-self: start; margin: -8px 0 0 0.5rem;
+                        grid-column: 3; grid-row: 1; align-self: start; margin: -8px -8px 0 0.5rem;
                         width: 28px; height: 28px; min-width: 0; min-height: 0; padding: 0;
                         --icon-size: 18px; color: var(--accent);
                         opacity: 0; transition: opacity 0.15s var(--ease-smooth), background 0.15s var(--ease-smooth);
                     }
                     fb-hub-view .tile.has-live:hover > .tl-new,
                     fb-hub-view .tile.has-live:focus-within > .tl-new { opacity: 1; }
-                    /* SACRVM Desktop's menu is placed with top/right; in the band
-                       it is a grid cell — no offsets. */
-                    fb-hub-view .tile.has-live > .tile-menu {
-                        position: static; top: auto; right: auto;
-                        grid-column: 4; grid-row: 1; align-self: start; margin: -8px -7px 0 2px;
-                    }
                     /* One status line: the text (name + one line, 34px) sits on
                        the icon's centre line — half a status row down — inside the
                        same 48px block, so the band itself doesn't move. */
@@ -581,6 +542,14 @@ class FbHubView extends HTMLElement {
             items: ".tile:not(.fb-cover)",
             disabled: () => !this._canArrange,
             onReorder: (from, to, tile) => this._moved(tile),
+        });
+        // A tile's own menu (kit 2.29): a right-click, a long press or
+        // Shift+F10 — its size, content, Hide, an installed app's entries and
+        // the kit's Arrange (the tiles wiggle; a finger drags only then).
+        // Nothing for whoever may not arrange; never the browser's menu.
+        this._tileMenu = sac.contextMenu(this._grid, {
+            targets: ".tile[data-key]:not(.fb-cover)",
+            items: (tile) => (this._canArrange ? this._menuItems(tile) : null),
         });
     }
 
@@ -810,7 +779,6 @@ class FbHubView extends HTMLElement {
                 tile.classList.add("has-live", `live-${e.size}`);
                 if (!Array.isArray(live.items)) tile.classList.add("no-items");
             }
-            if (this._canArrange) tile.appendChild(this._menu(e));
             if (e.size === "wide" || e.size === "large") tile.classList.add("size-" + e.size);
             if (e.size === "small") {
                 tile.classList.add("small");   // the kit's .small: icon only
@@ -903,75 +871,44 @@ class FbHubView extends HTMLElement {
         setTimeout(() => dlg.open(), 0);
     }
 
-    /** SACRVM Desktop's tile menu: size and the way out (Hide) — no colour row. */
-    _menu(e) {
-        const menu = document.createElement("sac-menu");
-        menu.className = "tile-menu";
-
-        const trigger = document.createElement("button");
-        trigger.slot = "trigger";
-        trigger.type = "button";
-        trigger.className = "tile-menu-btn";
-        trigger.title = fb.t("fb.desk.options", "{name} options", { name: e.name });
-        trigger.setAttribute("aria-label", trigger.title);
-        // The kit's icon, not a text "⋯": a glyph sits wherever the font puts it.
-        trigger.innerHTML = '<sac-icon name="more"></sac-icon>';
-        menu.appendChild(trigger);
-
-        const item = (action, label) => {
-            const b = document.createElement("button");
-            b.dataset.action = action;
-            b.textContent = label;
-            if (action.startsWith("size:") && (e.size || "medium") === action.slice(5)) {
-                b.textContent = "✓ " + label;   // the current size, marked
-            }
-            return b;
-        };
-
-        // The per-browser privacy switch of a tile that can show content
-        // (medium and up): ✓ while it does.
-        const content = [];
-        if (e.size !== "small" && fb.desktopLive.has(e.key, e)) {
-            const b = document.createElement("button");
-            b.dataset.action = "live:toggle";
-            const on = !fb.desktopLive.isQuiet(fb.api.workspace(), e.key);
-            b.textContent = (on ? "✓ " : "") + fb.t("fb.desk.live.show-content", "Show content");
-            content.push(document.createElement("hr"), b);
-        }
-
-        menu.append(
-            item("size:small", fb.t("fb.desk.size-small", "Small tile")),
-            item("size:medium", fb.t("fb.desk.size-medium", "Medium tile")),
-            item("size:wide", fb.t("fb.desk.size-wide", "Wide tile")),
-            item("size:large", fb.t("fb.desk.size-large", "Large tile")),
-            ...content,
-            document.createElement("hr"),
-            item("hide", fb.t("fb.desk.hide", "Hide from this desktop")),
-        );
-        if (e.app && e.app.mode !== "space") {
-            // Items are added only when they apply — no dead entries.
-            const fresh = fb.desktopApps.updateFor(e.app.id);
-            const extra = [];
-            if (fresh) extra.push(item("app:update", fb.t("fb.desk.update-to", "Update to v{version}…", { version: fresh.version || "?" })));
-            if (e.app.mode === "sandboxed") extra.push(item("app:perms", fb.t("fb.desk.permissions", "Permissions…")));
-            const remove = item("app:remove", fb.t("fb.desk.remove", "Remove from this desktop"));
-            remove.dataset.danger = "";
-            menu.append(document.createElement("hr"), ...extra, remove);
-        }
-
-        menu.addEventListener("sac:select", (ev) => {
-            const action = ev.detail.action;
-            if (action === "hide") this._update(e, { hidden: true });
-            else if (action?.startsWith("size:")) this._update(e, { size: action.slice(5) });
-            else if (action === "live:toggle") this._toggleContent(e);
-            else if (action === "app:update") fb.desktopApps.update(e.app.id);
-            else if (action === "app:perms") fb.desktopApps.permissions(e.app.id);
-            else if (action === "app:remove") fb.desktopApps.remove(e.app.id);
+    /** A tile's context menu: its size and the way out (Hide) — no colour
+     *  row —, "Show content" for a tile that can show some, an installed app's
+     *  own entries (only those that apply — no dead entries), and Arrange. */
+    _menuItems(tile) {
+        const e = this._entries.find((x) => x.key === tile.dataset.key);
+        if (!e) return null;
+        const current = e.size || "medium";
+        const size = (s, key, label) => ({
+            id: "size:" + s, label: fb.t(key, label),
+            icon: current === s ? "check" : undefined,   // the current size, marked
+            onClick: () => this._update(e, { size: s }),
         });
-
-        // The tile is a link: a click inside its menu must not follow it.
-        menu.addEventListener("click", (ev) => { ev.preventDefault(); ev.stopPropagation(); });
-        return menu;
+        const items = [
+            size("small", "fb.desk.size-small", "Small tile"),
+            size("medium", "fb.desk.size-medium", "Medium tile"),
+            size("wide", "fb.desk.size-wide", "Wide tile"),
+            size("large", "fb.desk.size-large", "Large tile"),
+        ];
+        // The per-browser privacy switch of a tile that can show content
+        // (medium and up): checked while it does.
+        if (e.size !== "small" && fb.desktopLive.has(e.key, e)) {
+            const on = !fb.desktopLive.isQuiet(fb.api.workspace(), e.key);
+            items.push("-", { id: "live:toggle", label: fb.t("fb.desk.live.show-content", "Show content"),
+                icon: on ? "check" : undefined, onClick: () => this._toggleContent(e) });
+        }
+        items.push("-", { id: "hide", label: fb.t("fb.desk.hide", "Hide from this desktop"), onClick: () => this._update(e, { hidden: true }) });
+        if (e.app && e.app.mode !== "space") {
+            const fresh = fb.desktopApps.updateFor(e.app.id);
+            items.push("-");
+            if (fresh) items.push({ id: "app:update", label: fb.t("fb.desk.update-to", "Update to v{version}…", { version: fresh.version || "?" }),
+                onClick: () => fb.desktopApps.update(e.app.id) });
+            if (e.app.mode === "sandboxed") items.push({ id: "app:perms", label: fb.t("fb.desk.permissions", "Permissions…"),
+                onClick: () => fb.desktopApps.permissions(e.app.id) });
+            items.push({ id: "app:remove", label: fb.t("fb.desk.remove", "Remove from this desktop"), danger: true,
+                onClick: () => fb.desktopApps.remove(e.app.id) });
+        }
+        if (this._sortable) items.push("-", this._sortable.arrangeItem());
+        return items;
     }
 
     /** "Show content" — this browser's switch for one tile in this workspace. */

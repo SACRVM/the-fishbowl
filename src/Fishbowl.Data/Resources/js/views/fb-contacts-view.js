@@ -32,6 +32,14 @@ class FbContactsView extends HTMLElement {
         this.render();
         this.writable = await fb.access.canWrite();
         this.toggleAttribute("readonly", !this.writable);
+        // A contact's own menu (kit 2.29): a right-click or a long press;
+        // for a writer "Select" comes first and starts marking (how marking
+        // starts on touch) — made once it is known who may write.
+        this._rowMenu = sac.contextMenu(this.querySelector("#cv-items"), {
+            targets: ".cv-item",
+            selection: this.writable ? this.sel : undefined,
+            items: (row) => this._rowItems(row),
+        });
         this.paintHead();
         await this.load();
         if (!this.isConnected) return;
@@ -50,6 +58,7 @@ class FbContactsView extends HTMLElement {
     disconnectedCallback() {
         if (this._onIntent) window.removeEventListener("fb:intent", this._onIntent);
         this.sel?.destroy();
+        this._rowMenu?.destroy();
         this.flush();
         if (window.fb?.toolbar) fb.toolbar.clear();
     }
@@ -319,6 +328,21 @@ class FbContactsView extends HTMLElement {
         } catch (err) {
             sac.toast?.(fb.errors.text(err, this.t("create-failed", "Couldn't create the contact.")), { kind: "error" });
         }
+    }
+
+    /** A contact row's context menu: Open and Delete — the marked ones when
+     *  the row is one of several marked. */
+    _rowItems(row) {
+        const c = this.contacts.find((x) => x.id === row.dataset.id);
+        if (!c) return null;
+        const items = [{ id: "open", label: fb.t("fb.common.open", "Open"), icon: c.kind === "organisation" ? "users" : "user", onClick: () => this.open(c.id) }];
+        if (!this.writable) return items;
+        const marked = this.sel?.marked || [];
+        const many = marked.length > 1 && marked.includes(c.id);
+        items.push("-", many
+            ? { id: "delete", label: this.t("delete-marked", "Delete selected"), icon: "trash", danger: true, onClick: () => this.removeMany(marked) }
+            : { id: "delete", label: this.t("delete", "Delete contact"), icon: "trash", danger: true, onClick: () => this.removeMany([c.id]) });
+        return items;
     }
 
     open(id) {

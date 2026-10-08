@@ -53,12 +53,18 @@ class FbMailView extends HTMLElement {
         this._onIntent();
         this._onVisible = () => { if (document.visibilityState === "visible") this.reload({ keep: true }); };
         document.addEventListener("visibilitychange", this._onVisible);
+        // A conversation's own menu (kit 2.29): a right-click or a long press.
+        this._rowMenu = sac.contextMenu(this.querySelector("#mv-items"), {
+            targets: ".mv-item",
+            items: (row) => this.rowItems(row),
+        });
         this._schedule();
     }
 
     disconnectedCallback() {
         if (this._onIntent) window.removeEventListener("fb:intent", this._onIntent);
         if (this._onVisible) document.removeEventListener("visibilitychange", this._onVisible);
+        this._rowMenu?.destroy();
         clearTimeout(this._poll);
         clearTimeout(this._searchTimer);
         if (window.fb?.toolbar) fb.toolbar.clear();
@@ -632,6 +638,28 @@ class FbMailView extends HTMLElement {
         });
         if (open) this.paintBody(el, m);
         return el;
+    }
+
+    /** A conversation row's context menu: open it, read / unread, delete. */
+    rowItems(row) {
+        const th = this.threads.find((x) => x.threadId === row.dataset.id);
+        if (!th) return null;
+        const items = [{ id: "open", label: fb.t("fb.common.open", "Open"), icon: "mail", onClick: () => this.open(th.threadId) }];
+        if (!this.writable) return items;
+        items.push(th.unread
+            ? { id: "read", label: this.t("mark-read", "Mark read"), icon: "eye", onClick: () => this.markSeen(th, true) }
+            : { id: "unread", label: this.t("mark-unread", "Mark unread"), icon: "eye-off", onClick: () => this.markSeen(th, false) });
+        items.push("-", { id: "delete", label: this.t("delete-more", "Delete…"), icon: "trash", danger: true,
+            onClick: () => this.deleteMail(th.threadId, null) });
+        return items;
+    }
+
+    async markSeen(th, seen) {
+        try {
+            await this.api.setSeen(th.threadId, seen);
+            th.unread = seen ? 0 : Math.max(1, th.unread);
+            this.renderList();
+        } catch (err) { sac.toast?.(fb.errors.text(err, this.t("failed", "That didn't work.")), { kind: "error" }); }
     }
 
     /**

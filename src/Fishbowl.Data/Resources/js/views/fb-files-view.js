@@ -395,6 +395,9 @@
                     e.preventDefault();
                     this._rename(pane, e.detail.from, e.detail.to);
                 });
+                // The browser's own menu (kit 2.29: Select / Open / Rename /
+                // Delete) gets what crosses panes.
+                b.addEventListener("sac:context", (e) => this._contextItems(pane, e.detail));
                 b.addEventListener("sac:drop", (e) => this._dropped(pane, e.detail));
                 pane.menu.addEventListener("sac:select", (e) => this._pickWorkspace(pane, e.detail.action));
                 pane.drop.addEventListener("sac:files", (e) =>
@@ -1101,21 +1104,39 @@
             this._focusPane(source?.side || "left");
         }
 
+        /** A row's context menu, the browser's own plus Copy / Move: to the
+         *  other pane, or on a phone to a place picked — after Open and
+         *  Rename, before Delete. */
+        _contextItems(pane, detail) {
+            const other = pane === this._panes.left ? this._panes.right : this._panes.left;
+            const paths = detail.paths;
+            const extra = [];
+            if (this._phone.matches) {
+                extra.push({ id: "copy-to", label: t("fb.files.copy-to", "Copy to…"), icon: "copy", onClick: () => this._pickAndTransfer("copy", pane, paths) });
+                if (this._writable(pane)) extra.push({ id: "move-to", label: t("fb.files.move-to", "Move to…"), icon: "move", onClick: () => this._pickAndTransfer("move", pane, paths) });
+            } else if (!this._preview && this._writable(other)) {
+                extra.push({ id: "copy-across", label: t("fb.files.copy-across", "Copy →"), icon: "copy", onClick: () => this._transferTo(other, "copy", pane, paths) });
+                if (this._writable(pane)) extra.push({ id: "move-across", label: t("fb.files.move-across", "Move →"), icon: "move", onClick: () => this._transferTo(other, "move", pane, paths) });
+            }
+            if (!extra.length) return;
+            const del = detail.items.findIndex((x) => x !== "-" && x.id === "delete");
+            const at = del > 0 && detail.items[del - 1] === "-" ? del - 1 : detail.items.length;
+            detail.items.splice(at, 0, "-", ...extra);
+        }
+
         /** Alt+C / Alt+M: the selection → the other pane's folder. */
-        async _transferTo(target, op) {
-            const pane = this._activePane;
+        async _transferTo(target, op, pane = this._activePane, given = null) {
             if (target === pane) return;
             if (op === "move" && !this._writable(pane)) return;
             if (!this._writable(target)) return;
-            const paths = this._targets(pane);
+            const paths = given ?? this._targets(pane);
             const n = await this._transfer({ op, from: pane.workspace, paths, to: target.workspace, folder: target.browser.path || "" });
             await this._afterTransfer(op, pane, target, n);
         }
 
         /** Phone: Copy to… / Move to… — pick a workspace and a folder. */
-        async _pickAndTransfer(op) {
-            const pane = this._activePane;
-            const paths = this._targets(pane);
+        async _pickAndTransfer(op, pane = this._activePane, given = null) {
+            const paths = given ?? this._targets(pane);
             if (!paths.length) return;
             const dest = await this._pickDestination(op, pane.workspace);
             if (!dest) return;

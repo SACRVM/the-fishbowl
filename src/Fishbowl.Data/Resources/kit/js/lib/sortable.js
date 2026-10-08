@@ -90,9 +90,17 @@
      *   move(s)        → put s.item into the slot under s.x / s.y
      *   finish(s, ok)  → ok = dropped; else put everything back
      * Options: scale — the lifted item's size (1 = none); settle — animate
-     * the item from the pointer into its slot on drop / Escape.
+     * the item from the pointer into its slot on drop / Escape; touch(item)
+     * — how a finger may drag this item: "hold" (a 250ms long-press, the
+     * default; with a handle it drags at once), "move" (at once — the
+     * surface claims the gesture, e.g. tiles being arranged) or "off".
+     *
+     * A context menu wins over a held press: when one opens (a right-click
+     * or the kit's long-press = right-click, see context-menu.js) while a
+     * finger is down and has not moved since the lift, the drag lets go.
+     * Moving first makes it a drag, and no menu comes.
      */
-    function engine(container, { axis, handle, ignore, disabled, pick, start, move, finish, scale = 1, settle = false }) {
+    function engine(container, { axis, handle, ignore, disabled, pick, start, move, finish, scale = 1, settle = false, touch = null }) {
         const isDisabled = () => (typeof disabled === "function" ? disabled() : !!disabled);
         let state = null;         // the press/drag in progress, or null
 
@@ -124,13 +132,17 @@
                 : false;
             if (handle && !viaHandle) return;
 
+            const finger = e.pointerType === "touch";
+            const how = finger ? (handle ? "move" : (typeof touch === "function" ? touch(item) : "hold")) : "move";
+            if (how === "off") return;
+
             state = {
                 item, id: e.pointerId, type: e.pointerType,
                 x0: e.clientX, y0: e.clientY, x: e.clientX, y: e.clientY,
                 dragging: false, timer: null,
                 memo: start(item),
             };
-            if (e.pointerType === "touch" && !handle) {
+            if (finger && how === "hold") {
                 state.timer = setTimeout(() => { if (state && !state.dragging) lift(); }, LONG_PRESS_MS);
             }
             window.addEventListener("pointermove", onMove, true);
@@ -142,6 +154,7 @@
         function lift() {
             const s = state;
             s.dragging = true;
+            s.liftX = s.x; s.liftY = s.y;
             const it = s.item;
             // Grabbed where it SHOWS (mid-slide, mid-settle, hover-lifted);
             // then any animation of its own ends, and follow() keeps it there.
@@ -293,6 +306,14 @@
             it._sacSettle = done;
         }
 
+        // A context menu opening on a held, unmoved press: the menu wins.
+        const onMenu = () => {
+            const s = state;
+            if (!s || container.closest("[data-arranging]")) return;
+            if (s.dragging && Math.hypot(s.x - s.liftX, s.y - s.liftY) > TOUCH_SLOP) return;
+            end(false);
+        };
+
         // While a finger drag is live the page must not scroll under it.
         // Touch-action cannot change mid-gesture, so touchmove says no instead.
         const onTouchMove = (e) => { if (state && state.dragging) e.preventDefault(); };
@@ -301,6 +322,8 @@
 
         container.addEventListener("pointerdown", onDown);
         container.addEventListener("dragstart", noNativeDrag);
+        container.addEventListener("sac:context-open", onMenu);
+        container.addEventListener("contextmenu", onMenu);
         container.addEventListener("touchmove", onTouchMove, { passive: false });
         container.addEventListener("contextmenu", onContext);
 
@@ -309,6 +332,8 @@
                 if (state) end(false);
                 container.removeEventListener("pointerdown", onDown);
                 container.removeEventListener("dragstart", noNativeDrag);
+                container.removeEventListener("sac:context-open", onMenu);
+                container.removeEventListener("contextmenu", onMenu);
                 container.removeEventListener("touchmove", onTouchMove);
                 container.removeEventListener("contextmenu", onContext);
                 if (mo) mo.disconnect();
@@ -391,7 +416,19 @@
      *       ignore: "…",                       // presses that never drag
      *   });
      *   s.repack();   // after the host added / removed tiles itself
+     *   s.arrange(true);  s.arranging;   // the arrange mode, see below
+     *   s.arrangeItem();  // → the "Arrange" entry for a tile's context menu
      *   s.destroy();
+     *
+     * Arrange mode (the iPhone's): moving tiles is an entry in the tile's
+     * context menu — `arrangeItem()` returns it ready-made (`sac.contextMenu`
+     * items). Arranging, the grid carries data-arranging: the tiles wiggle
+     * (ui.css; under reduced motion a dashed hairline instead), a floating
+     * "Arrange · Done" pill shows, a tap opens nothing, a finger drags at
+     * once, and no context menu opens. Done, Escape or a tap on a free spot
+     * ends it. sac:arrange { arranging } fires on the grid either way.
+     * A mouse drags tiles any time (the desktop convention); a finger only
+     * while arranging.
      *
      * Feel (the home-screen kind):
      *   lift    — the tile follows the pointer 1:1 at its grab offset, a
@@ -414,10 +451,10 @@
      *
      * Grid children that are neither an item nor a .tile-pack (a cover tile)
      * keep their place among the grid's children, and nothing moves past
-     * them. Presses on a button, a <sac-menu> (a tile's "⋯") or a text field
-     * never drag; a tile link's native drag is off while a press is live.
-     * Input is sac.sortable's: 4px to lift with mouse / pen, a 250ms
-     * long-press on touch, the click after a drop is eaten.
+     * them. Presses on a button, a <sac-menu> or a text field never drag; a
+     * tile link's native drag is off while a press is live. Input is
+     * sac.sortable's: 4px to lift with mouse / pen, the click after a drop
+     * is eaten.
      */
     function tilesSortable(grid, opts = {}) {
         const {
@@ -555,9 +592,73 @@
             return gy >= r.bottom || (gy >= r.top && gx >= r.right);
         }
 
+        /* ---- arrange mode ---- */
+
+        let arranging = false;
+        let pill = null;
+        let offLang = null;
+        const t = (k, fb) => (sac.t ? sac.t(k, fb) : fb);
+        // A tap on a tile opens nothing while arranging.
+        const noOpen = (e) => {
+            const tile = e.composedPath().find((n) => n.nodeType === 1 && isItem(n));
+            if (tile) { e.preventDefault(); e.stopPropagation(); }
+        };
+        // Done: a tap on a free spot (not a tile, not the pill), or Escape.
+        const freeTap = (e) => {
+            const path = e.composedPath();
+            if (pill && path.includes(pill)) return;
+            if (path.some((n) => n.nodeType === 1 && isItem(n) && grid.contains(n))) return;
+            arrange(false);
+        };
+        const onEsc = (e) => { if (e.key === "Escape" && !grid.hasAttribute("data-sortable-active")) arrange(false); };
+
+        /** The tiles that move wiggle (ui.css) — not a fixed cover tile. */
+        function markArrangeable() {
+            grid.querySelectorAll("[data-arrangeable]").forEach((n) => n.removeAttribute("data-arrangeable"));
+            if (arranging) flat().forEach((tile) => tile.setAttribute("data-arrangeable", ""));
+        }
+
+        function labelPill() {
+            if (!pill) return;
+            pill.querySelector(".sac-arrange-label").textContent = t("tiles.arranging", "Arrange");
+            pill.querySelector("button").textContent = t("tiles.done", "Done");
+        }
+
+        function arrange(on) {
+            on = !!on;
+            if (on === arranging) return;
+            arranging = on;
+            grid.toggleAttribute("data-arranging", on);
+            markArrangeable();
+            if (on) {
+                pill = document.createElement("div");
+                pill.className = "sac-arrange-pill";
+                pill.setAttribute("role", "status");
+                pill.innerHTML = `<span class="sac-arrange-label"></span><button type="button" class="btn primary"></button>`;
+                pill.querySelector("button").addEventListener("click", () => arrange(false));
+                labelPill();
+                document.body.appendChild(pill);
+                if (sac.lang) offLang = sac.lang.onChange(labelPill);
+                grid.addEventListener("click", noOpen, true);
+                document.addEventListener("keydown", onEsc);
+                // Not the click that chose "Arrange": from the next one on.
+                setTimeout(() => { if (arranging) document.addEventListener("click", freeTap, true); }, 0);
+            } else {
+                if (pill) { pill.remove(); pill = null; }
+                if (offLang) { offLang(); offLang = null; }
+                grid.removeEventListener("click", noOpen, true);
+                document.removeEventListener("keydown", onEsc);
+                document.removeEventListener("click", freeTap, true);
+            }
+            grid.dispatchEvent(new CustomEvent("sac:arrange", { detail: { arranging: on }, bubbles: true, composed: true }));
+        }
+
         const eng = engine(grid, {
             axis: "grid", handle: null, ignore, disabled,
             scale: 1.03, settle: true,
+            // A mouse drags any time; a finger only while arranging — then
+            // at once (the tiles claim the gesture, ui.css touch-action).
+            touch: () => (arranging ? "move" : "off"),
             pick: (path) => {
                 for (const n of path) {
                     if (n === grid) return null;
@@ -623,8 +724,12 @@
         });
 
         return {
-            destroy: eng.destroy,
-            repack() { pack(flat(), fixed()); },
+            destroy() { arrange(false); eng.destroy(); },
+            repack() { pack(flat(), fixed()); markArrangeable(); },
+            arrange,
+            get arranging() { return arranging; },
+            arrangeItem: () => ({ id: "arrange", label: "Arrange", labelKey: "tiles.arrange", icon: "move",
+                                  onClick: () => arrange(true) }),
         };
     }
 

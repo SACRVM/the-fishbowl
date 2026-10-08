@@ -104,14 +104,21 @@
  * Plain arrows move the cursor and keep the marks; a plain click clears them.
  * Changing folders clears them.
  *
- * Mark mode (`multiple`, for touch): a long-press on a row (touch or pen,
- * held still for 450ms — a swipe still scrolls) marks it and turns mark
- * mode on: a check box shows on every row, a tap toggles a row's mark
+ * Mark mode (`multiple`, for touch): the context menu's "Select" (a
+ * long-press on touch opens it — see Context menu) marks the row and turns
+ * mark mode on: a check box shows on every row, a tap toggles a row's mark
  * (folders too — nothing opens), Space toggles without a modifier, and the
  * bar trades Up / breadcrumb / New folder for "{n} selected" and Done. It
  * ends with Done, Esc, unmarking the last row, a folder change, or the
- * `selecting` property. Ending clears the marks. A long-press marks instead
- * of starting a row drag. Mouse and keyboard gestures above are unchanged.
+ * `selecting` property. Ending clears the marks. Mouse and keyboard
+ * gestures above are unchanged.
+ *
+ * Context menu (sac.contextMenu): right-click a row, long-press it on
+ * touch, or Shift+F10 / the Menu key on the cursor row. The cursor moves
+ * onto that row. Built in: "Select" first (`multiple`, an unmarked row),
+ * Open, and — not `readonly` — Rename and Delete (Delete acts on the marks
+ * when the row is one of several marked). The browser's own menu never
+ * shows on the list. Add or change entries with sac:context (below).
  *
  * Properties:
  *   store    — the sac.fs handle to browse. Setting it resets to the root
@@ -177,6 +184,12 @@
  *                        preventDefault() and the host renames (then
  *                        refresh(), cursor = to).
  *   sac:rename         — { from, to, folder }: the built-in rename landed.
+ *   sac:context        — CANCELABLE, before a row's context menu opens:
+ *                        { path, kind, paths, items } — `paths` = what it
+ *                        acts on (the marks, or the row); `items` is the
+ *                        built-in list (sac.contextMenu items, each with
+ *                        its onClick) — push, splice or replace entries in
+ *                        place. preventDefault() = no menu.
  *   sac:drop           — { paths, target, copy, source } rows dragged from a
  *                        sac-file-browser (this one or another; `source` =
  *                        that element, null across documents), or { files,
@@ -234,7 +247,6 @@
     const PAD = 4;          // the list's own padding
     const OVERSCAN = 8;     // rows rendered beyond the viewport, each side
     const THUMB_JOBS = 4;   // thumbnails fetched at once
-    const LONG_PRESS_MS = 450;  // touch hold that starts mark mode
     const PRESS_SLOP = 10;      // px a held finger may drift before it is a scroll
 
     const ICON_ATTRS = 'viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"';
@@ -372,6 +384,7 @@
 
         connectedCallback() {
             if (!this.shadowRoot.firstChild) this._render();
+            this._wireContext();
             if (this._store) this.refresh();
             if (window.sac && sac.lang && !this._offLang) this._offLang = sac.lang.onChange(() => this._relabel());
             // Page-wide date / time format switch: the date column repaints in place.
@@ -383,6 +396,7 @@
             }
         }
         disconnectedCallback() {
+            if (this._ctx) { this._ctx.destroy(); this._ctx = null; }
             this._revoke();
             if (this._offLang) { this._offLang(); this._offLang = null; }
             if (this._offRegional) { this._offRegional(); this._offRegional = null; }
@@ -1225,8 +1239,9 @@
             sr.querySelector(".head").addEventListener("click", (e) => this._onHead(e));
             const list = sr.querySelector(".list");
             list.addEventListener("click", (e) => this._onClick(e));
-            // Touch long-press → mark mode. A move past the slop (a scroll) or
-            // a lift before the hold ends it; pointercancel is the scroll taking over.
+            // A held finger: the row must not turn into a native drag while
+            // the long-press opens its context menu. A move past the slop (a
+            // scroll) or a lift ends it; pointercancel is the scroll taking over.
             list.addEventListener("pointerdown", (e) => this._pressStart(e));
             list.addEventListener("pointermove", (e) => {
                 const p = this._press;
@@ -1234,8 +1249,7 @@
             });
             list.addEventListener("pointerup", () => this._pressEnd());
             list.addEventListener("pointercancel", () => this._pressEnd());
-            // A held finger would otherwise open the context menu / callout.
-            list.addEventListener("contextmenu", (e) => { if (this._press || this._eatClick) e.preventDefault(); });
+            this._wireContext();
             list.addEventListener("dblclick", (e) => {
                 if (this._selecting) return;
                 if (e.target.closest(".rename, .del")) return;
@@ -1649,49 +1663,88 @@
             this._userMode(false);
         }
 
-        /* Touch long-press: a finger held still on a row. */
+        /* A finger held on a row: no native drag while it is down (Chrome's
+           touch drag-and-drop would take the long-press from the menu). */
         _pressStart(e) {
             this._eatClick = false;
             this._pressEnd();
             if (e.pointerType !== "touch" && e.pointerType !== "pen") return;
-            if (!this.hasAttribute("multiple") || e.button > 0 || this._renaming) return;
-            if (e.target.closest(".rename, .del")) return;
+            if (e.button > 0 || this._renaming || e.target.closest(".rename, .del")) return;
             const el = e.target.closest(".canvas > .row");
-            const r = el ? this._rows[+el.dataset.i] : null;
-            if (!r || r.kind === "parent") return;
-            // A held row must not turn into a drag (Chrome's touch drag-and-drop).
+            if (!el) return;
             el.draggable = false;
-            this._press = {
-                id: e.pointerId, x0: e.clientX, y0: e.clientY, path: r.path, el,
-                timer: setTimeout(() => this._longPress(), LONG_PRESS_MS),
-            };
+            this._press = { id: e.pointerId, x0: e.clientX, y0: e.clientY, el };
         }
 
         _pressEnd() {
             const p = this._press;
             if (!p) return;
             this._press = null;
-            clearTimeout(p.timer);
-            if (!p.el.classList.contains("renaming")) p.el.draggable = true;
+            if (!p.el.classList.contains("renaming") && p.el.dataset.kind !== "parent") p.el.draggable = true;
         }
 
-        _longPress() {
-            const p = this._press;
-            if (!p) return;
-            clearTimeout(p.timer);
-            const i = this._index.get(p.path);
-            if (i == null) { this._pressEnd(); return; }
-            this._eatClick = true;       // the lift's click is not a tap
+        /** "Select" (the context menu): mark row i and turn mark mode on —
+         *  in mark mode already, toggle it like a tap. */
+        _startMarking(i) {
+            const r = this._rows[i];
+            if (!r || r.kind === "parent" || !this.hasAttribute("multiple")) return;
             if (this._selecting) { this._tapMark(i); return; }
             const snap = this._snapshot();
             // Mark mode's selection is its marks: leaving it leaves nothing selected.
             this._sel.clear();
-            this._marks.add(p.path);
+            this._marks.add(r.path);
             this._focus = this._anchor = i;
             this._base = new Set(this._marks);
             this._userMode(true);
             this._renderWindow(false);
             this._after(snap, false);
+        }
+
+        /** The context menu (right-click, long-press, Shift+F10 / Menu key)
+         *  — while connected: its <sac-menu> lives in <body>. */
+        _wireContext() {
+            if (this._ctx || !window.sac || !sac.contextMenu || !this.shadowRoot.firstChild) return;
+            this._ctx = sac.contextMenu(this.shadowRoot.querySelector(".list"), {
+                targets: ".canvas > .row",
+                items: (row) => this._contextItems(row),
+                keyTarget: () => { const r = this._rows[this._focus]; return r ? this._els.get(r.path) || null : null; },
+            });
+        }
+
+        /** A row's context menu: the cursor moves onto it, then the built-in
+         *  entries — which the host may change through sac:context. */
+        _contextItems(rowEl) {
+            const i = +rowEl.dataset.i;
+            const r = this._rows[i];
+            if (!r || r.kind === "parent" || this._renaming) return null;
+            const snap = this._snapshot();
+            this._focus = i;
+            if (!this._marks.has(r.path)) {
+                this._anchor = i;
+                if (r.kind === "file" && !this._marks.size) this._sel = new Set([r.path]);
+            }
+            this._renderWindow(false);
+            this.shadowRoot.querySelector(".list").focus({ preventScroll: true });
+            this._after(snap, false);
+
+            const many = this._marks.has(r.path) && this._marks.size > 1;
+            const targets = many ? this._rows.filter((x) => this._marks.has(x.path)) : [r];
+            const items = [];
+            if (this.hasAttribute("multiple") && !this._marks.has(r.path)) {
+                items.push({ id: "select", label: t("contextmenu.select", "Select"), icon: "check",
+                             onClick: () => this._startMarking(this._index.get(r.path)) }, "-");
+            }
+            items.push({ id: "open", label: t("files.open", "Open"), icon: r.kind === "folder" ? "folder" : "document",
+                         disabled: many, onClick: () => this._activate(this._index.get(r.path)) });
+            if (!this.hasAttribute("readonly")) {
+                items.push({ id: "rename", label: t("files.rename", "Rename"), icon: "pencil",
+                             disabled: many, onClick: () => this.rename(r.path) });
+                items.push("-", { id: "delete", label: t("files.delete", "Delete"), icon: "trash", danger: true,
+                                  onClick: () => this._remove(targets, false) });
+            }
+            const detail = { path: r.path, kind: r.kind, paths: targets.map((x) => x.path), items };
+            if (!this._emit("sac:context", detail, true)) return null;
+            return detail.items;
         }
 
         _activate(i) {

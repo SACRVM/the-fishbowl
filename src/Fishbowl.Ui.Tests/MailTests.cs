@@ -293,6 +293,14 @@ public class MailTests
             Assert.Equal("8px", await news.EvaluateAsync<string>("el => getComputedStyle(el, '::before').width"));
             Assert.Equal("none", await rows.Filter(new() { HasText = "Your invoice" }).EvaluateAsync<string>("el => getComputedStyle(el, '::before').content"));
 
+            // A row's own menu (kit 2.29): marked read from there, the dot goes.
+            var menu = page.Locator("sac-menu.sac-context-menu[open]");
+            await news.ClickAsync(new() { Button = MouseButton.Right });
+            await Assertions.Expect(menu.Locator("button[data-action]", new() { HasText = "Delete…" })).ToBeVisibleAsync();
+            await page.WaitForTimeoutAsync(250);
+            await menu.Locator("button[data-action]", new() { HasText = "Mark read" }).ClickAsync();
+            await Assertions.Expect(news).Not.ToHaveClassAsync(new System.Text.RegularExpressions.Regex(@"unread"));
+
             await rows.Filter(new() { HasText = "Your invoice" }).ClickAsync();
             await page.Locator("fb-mail-view #mv-delete").ClickAsync();
             var dialog = page.Locator("sac-dialog[title='Delete this conversation?']");

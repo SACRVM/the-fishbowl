@@ -15,6 +15,11 @@
 (function () {
     sac.scope.configure({ prefix: "space" });
 
+    // An app, not a website: the browser's own context menu never shows
+    // (text fields keep theirs — paste, spelling). Lists and tiles open
+    // their own with sac.contextMenu — a right-click or a long press.
+    sac.contextMenu.suppress();
+
     // The nav's brand mark; the kit ships no fish. Registered before any
     // component renders so the nav's first paint already finds it.
     if (!sac.icons.has("fish")) {

@@ -10,7 +10,8 @@
  *       onChange(ids) { paintHead(ids); }, // the marks changed
  *   });
  *   sel.marked;        // [ids] in row order
- *   sel.clear();  sel.set(ids);  sel.toggle(id);  sel.has(id);
+ *   sel.clear();  sel.set(ids);  sel.toggle(id|row);  sel.has(id|row);
+ *   sel.longPress = false;   // done for you by sac.contextMenu({ selection })
  *   sel.destroy();
  *
  * The gestures of <sac-file-browser>, for any list an app renders itself
@@ -68,6 +69,7 @@
         let eatClick = false;       // the click after a long-press
         let pointer = "mouse";      // the last pointer type
         let syncing = false;
+        let longPress = true;       // off while a context menu owns the long-press
 
         list.setAttribute("data-sac-selection", "");
 
@@ -173,7 +175,7 @@
             pointer = e.pointerType || "mouse";
             eatClick = false;
             endPress();
-            if (off() || (e.pointerType !== "touch" && e.pointerType !== "pen")) return;
+            if (!longPress || off() || (e.pointerType !== "touch" && e.pointerType !== "pen")) return;
             const row = rowOf(e.target);
             if (!row || e.target.closest(PASS)) return;
             const k = key(row);
@@ -230,9 +232,12 @@
         list.addEventListener("keydown", onKey);
         paint();
 
+        // A row element or an id, wherever an id is taken.
+        const keyOfArg = (k) => (k && k.nodeType === 1 ? key(k) : String(k));
+
         return {
             get marked() { return ordered(); },
-            has: (k) => marks.has(String(k)),
+            has: (k) => marks.has(keyOfArg(k)),
             /** Replace the marks (rows not shown are skipped); fires nothing. */
             set(ids) {
                 const visible = new Set(shown().map(key));
@@ -240,7 +245,11 @@
                 paint();
             },
             clear() { if (marks.size) { marks.clear(); changed(); } },
-            toggle(k) { toggle(String(k)); changed(); },
+            toggle(k) { const id = keyOfArg(k); if (id == null) return; anchor = id; toggle(id); changed(); },
+            /** The long-press that marks — sac.contextMenu turns it off: a
+             *  long-press is the menu there, whose "Select" marks. */
+            get longPress() { return longPress; },
+            set longPress(v) { longPress = !!v; if (!longPress) endPress(); },
             /** Re-check after the app changed what is shown without touching the DOM tree. */
             sync: prune,
             destroy() {

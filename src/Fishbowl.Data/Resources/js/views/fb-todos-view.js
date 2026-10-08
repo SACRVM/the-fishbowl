@@ -44,6 +44,11 @@ class FbTodosView extends HTMLElement {
             items: ".tv-item:not(.completed)",
             onReorder: (from, to) => this._moveTodo(from, to),
         });
+        // A todo's own menu (kit 2.29): a right-click or a long press.
+        this._rowMenu = sac.contextMenu(this.querySelector("#todo-list"), {
+            targets: ".tv-item",
+            items: (row) => this._rowItems(row),
+        });
         await this.loadTodos();
         if (!this.isConnected) return;   // left during the load — don't hook a dead view
         // "New todo" from the Ctrl-K palette (fb.desktop.go).
@@ -57,6 +62,7 @@ class FbTodosView extends HTMLElement {
         this._leaving?.clear();
         if (this._onIntent) window.removeEventListener("fb:intent", this._onIntent);
         this._sortable?.destroy();
+        this._rowMenu?.destroy();
         this.flushSave();
         if (window.fb?.toolbar) fb.toolbar.clear();
     }
@@ -819,6 +825,21 @@ class FbTodosView extends HTMLElement {
     }
 
     /** Toolbar-triggered delegates. */
+    /** A todo row's context menu: Open, done / not done, delete. */
+    _rowItems(row) {
+        const todo = this.todos.find((x) => x.id === row.dataset.id);
+        if (!todo) return null;
+        const items = [{ id: "open", label: fb.t("fb.common.open", "Open"), icon: "document", onClick: () => this.select(todo.id) }];
+        if (this.writable === false) return items;
+        items.push(
+            { id: "done", label: todo.completedAt ? fb.t("fb.todos.mark-undone", "Mark as not done") : fb.t("fb.todos.mark-done", "Mark as done"),
+              icon: "check", onClick: () => this.toggleCompletedById(todo.id) },
+            "-",
+            { id: "delete", label: fb.t("fb.todos.delete", "Delete todo"), icon: "trash", danger: true, onClick: () => this.deleteById(todo.id) },
+        );
+        return items;
+    }
+
     toggleCompleted() { if (this.selectedId) this.toggleCompletedById(this.selectedId); }
     deleteSelected()  { if (this.selectedId) this.deleteById(this.selectedId); }
 

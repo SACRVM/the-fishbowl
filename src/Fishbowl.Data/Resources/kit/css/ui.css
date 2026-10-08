@@ -1269,13 +1269,65 @@ a.nav-icon-btn { text-decoration: none; }
    are the helper's inline transform. */
 [data-sortable-active],
 [data-sortable-active] * { cursor: grabbing !important; }
-[data-sortable-active] .tile:not([data-sortable-dragging]):hover {
+[data-sortable-active] .tile:not([data-sortable-dragging]):hover,
+[data-arranging] .tile:not([data-sortable-dragging]):hover {
     transform: translateZ(0);
     border-color: var(--border-strong);
     box-shadow: none;
     background: var(--tile);
 }
-[data-sortable-active] .tile:hover > sac-icon { transform: none; }
+[data-sortable-active] .tile:hover > sac-icon,
+[data-arranging] .tile:hover > sac-icon { transform: none; }
+
+/* Arrange mode (sac.tiles.sortable arrange(), the iPhone's): the movable
+   tiles wiggle — on the `rotate` property, so the helper's slide and lift
+   transforms stay untouched — staggered so the wall doesn't swing in step.
+   A finger drags at once (touch-action none); a tap opens nothing. Under
+   reduced motion a dashed hairline says the same without moving. */
+@keyframes sac-wiggle { from { rotate: -1deg; } to { rotate: 1deg; } }
+@keyframes sac-wiggle-small { from { rotate: -1.6deg; } to { rotate: 1.6deg; } }
+[data-arranging] [data-arrangeable] {
+    animation: sac-wiggle 0.26s ease-in-out infinite alternate;
+    touch-action: none;
+    cursor: grab;
+}
+[data-arranging] [data-arrangeable].small { animation-name: sac-wiggle-small; }
+[data-arranging] [data-arrangeable]:nth-child(2n) { animation-delay: -0.13s; animation-duration: 0.3s; }
+[data-arranging] [data-arrangeable]:nth-child(3n) { animation-delay: -0.07s; animation-duration: 0.28s; }
+[data-arranging] [data-arrangeable][data-sortable-dragging] { animation: none; }
+@media (prefers-reduced-motion: reduce) {
+    [data-arranging] [data-arrangeable] {
+        animation: none;
+        outline: 1px dashed var(--border-strong);
+        outline-offset: 3px;
+    }
+}
+/* The floating "Arrange · Done" pill, under the nav ribbon. */
+.sac-arrange-pill {
+    position: fixed;
+    top: calc(50px + 12px);
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 18900;          /* over windows (10000–18999's top), under the nav drawer and dialogs */
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 6px 6px 6px 18px;
+    background: var(--glass-strong);
+    -webkit-backdrop-filter: blur(12px);
+    backdrop-filter: blur(12px);
+    border: 1px solid var(--border-strong);
+    border-radius: 999px;
+    box-shadow: var(--shadow-2);
+    color: var(--text);
+    font-weight: 600;
+    font-size: 0.9rem;
+    white-space: nowrap;
+    animation: sac-pill-in 0.2s ease-out;
+}
+.sac-arrange-pill .btn { width: auto; border-radius: 999px; padding: 6px 16px; }
+@keyframes sac-pill-in { from { opacity: 0; translate: 0 -8px; } to { opacity: 1; translate: 0 0; } }
+@media (prefers-reduced-motion: reduce) { .sac-arrange-pill { animation: none; } }
 .tile[data-sortable-dragging] {
     border-color: var(--accent);
     background: var(--tile-hover);
@@ -1335,6 +1387,7 @@ a.nav-icon-btn { text-decoration: none; }
 }
 .tile.small p,
 .tile.small .tile-meta { display: none; }
+
 .tile.disabled {
     opacity: 0.5;
     cursor: not-allowed;

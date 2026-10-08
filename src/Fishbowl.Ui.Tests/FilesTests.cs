@@ -650,7 +650,7 @@ public class FilesTests
     }
 
     [Fact]
-    public async Task Files_Phone_LongPressMarksRows_AndTrashRemovesAll_Test()
+    public async Task Files_Phone_LongPressSelect_MarksRows_AndTrashRemovesAll_Test()
     {
         var (context, page, errors) = await OpenAsync(new BrowserNewContextOptions
         {
@@ -669,7 +669,8 @@ public class FilesTests
             await page.GotoAsync($"{_fixture.BaseUrl}/#/files/{folder}");
             await Assertions.Expect(Row(page, "left", "x2.txt")).ToHaveCountAsync(1, new() { Timeout = 10000 });
 
-            // A finger held still on x1 enters mark mode; a tap marks x2 too.
+            // A finger held still on x1 opens its menu (kit 2.29: a long press is
+            // the context menu); "Select" enters mark mode; a tap marks x2 too.
             const string press = @"(el, type) => {
                 const r = el.getBoundingClientRect();
                 el.dispatchEvent(new PointerEvent(type, { pointerType: 'touch', pointerId: 7, isPrimary: true,
@@ -680,6 +681,10 @@ public class FilesTests
             await x1.EvaluateAsync(press, "pointerdown");
             await page.WaitForTimeoutAsync(700);
             await x1.EvaluateAsync(press, "pointerup");
+            var select = page.Locator("sac-menu.sac-context-menu[open] button[data-action]", new() { HasText = "Select" });
+            await Assertions.Expect(select).ToBeVisibleAsync();
+            await page.WaitForTimeoutAsync(250);
+            await select.TapAsync();
             await page.WaitForFunctionAsync($"() => {browserOf}.selecting === true");
             await Row(page, "left", "x2.txt").TapAsync();
             await page.WaitForFunctionAsync($"() => {browserOf}.marked.length === 2");

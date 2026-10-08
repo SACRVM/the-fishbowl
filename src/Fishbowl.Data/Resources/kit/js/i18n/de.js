@@ -60,6 +60,7 @@
         "color-picker.saturation-value-text": "Sättigung {s} %, Helligkeit {v} %",
         "color-picker.title": "Farbwähler",
 
+        "contextmenu.select": "Auswählen",
         "copy-button.copy": "Kopieren",
 
         "date-field.calendar": "Kalender",
@@ -103,6 +104,7 @@
         "files.open": "Öffnen",
         "files.open-title": "Öffnen",
         "files.parent": "Übergeordneter Ordner",
+        "files.rename": "Umbenennen",
         "files.rename-dot": "Ein Name darf nicht mit einem Punkt beginnen.",
         "files.rename-label": "Neuer Name",
         "files.rename-taken": "Dieser Name ist hier schon vergeben.",
@@ -154,6 +156,7 @@
         "launcher.add": "Hinzufügen",
         "launcher.add-app": "App hinzufügen",
         "launcher.add-hint": "Das Skript wird beim ersten Öffnen geladen und muss das Tag definieren. Jede URL funktioniert – auch andere Websites.",
+        "launcher.arrange": "Anordnen",
         "launcher.cancel": "Abbrechen",
         "launcher.done": "Fertig",
         "launcher.edit": "Bearbeiten",
@@ -279,6 +282,9 @@
         "theme-toggle.label": "Design",
         "theme-toggle.light": "Hell",
 
+        "tiles.arrange": "Anordnen",
+        "tiles.arranging": "Anordnen",
+        "tiles.done": "Fertig",
         "time-field.am": "AM",
         "time-field.empty": "leer",
         "time-field.hours": "Stunden",

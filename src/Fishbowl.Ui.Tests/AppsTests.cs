@@ -49,12 +49,21 @@ public class AppsTests : IAsyncLifetime
 
     private static ILocator Tile(IPage page) => page.Locator($"fb-hub-view a.tile[data-key='app:{FixtureAppServer.AppId}']");
 
+    // A tile's context menu (kit 2.29): a right-click opens the kit's menu in the top layer.
+    private static ILocator ContextMenu(IPage page) => page.Locator("sac-menu.sac-context-menu[open]");
+    private static ILocator MenuItem(IPage page, string label) =>
+        ContextMenu(page).Locator("button[data-action]", new() { HasText = label });
+
     private static async Task MenuAsync(IPage page, string label)
     {
-        var tile = Tile(page);
-        await tile.HoverAsync();
-        await tile.Locator(".tile-menu-btn").ClickAsync();
-        await tile.Locator(".tile-menu button[data-action]", new() { HasText = label }).ClickAsync();
+        await Assertions.Expect(ContextMenu(page)).ToHaveCountAsync(0);   // the last one closed first
+        // A scroll closes a context menu (the kit's rule): the tile is in view first.
+        await Tile(page).ScrollIntoViewIfNeededAsync();
+        await page.WaitForTimeoutAsync(200);
+        await Tile(page).ClickAsync(new() { Button = MouseButton.Right });
+        await Assertions.Expect(MenuItem(page, label)).ToBeVisibleAsync();
+        await page.WaitForTimeoutAsync(250);   // its fade-in, before an entry is clicked
+        await MenuItem(page, label).ClickAsync();
     }
 
     private async Task CleanAsync(IPage page, string? space = null)
@@ -144,10 +153,21 @@ public class AppsTests : IAsyncLifetime
             _app.Version = "2.0.0";
             await page.ReloadAsync();
             await Assertions.Expect(Tile(page)).ToBeVisibleAsync();
-            var tile = Tile(page);
-            await tile.HoverAsync();
-            await tile.Locator(".tile-menu-btn").ClickAsync();
-            var updateItem = tile.Locator(".tile-menu button[data-action='app:update']");
+            // The update is found once the desktop has re-read the manifest, and
+            // the menu is built when it opens: open it until the entry is there.
+            var updateItem = MenuItem(page, "Update to v");
+            for (var i = 0; i < 30 && await updateItem.CountAsync() == 0; i++)
+            {
+                if (await ContextMenu(page).CountAsync() > 0)
+                {
+                    await page.Keyboard.PressAsync("Escape");
+                    await Assertions.Expect(ContextMenu(page)).ToHaveCountAsync(0);
+                }
+                await page.WaitForTimeoutAsync(300);
+                await Tile(page).DispatchEventAsync("contextmenu",
+                    new { bubbles = true, cancelable = true, composed = true, clientX = 300, clientY = 300 });
+                await page.WaitForTimeoutAsync(300);
+            }
             await Assertions.Expect(updateItem).ToHaveTextAsync("Update to v2.0.0…", new() { Timeout = 10000 });
             await page.WaitForTimeoutAsync(400);   // the dialog's fade-in, for the picture
             await page.ScreenshotAsync(new() { Path = Path.Combine(Shots, "desk-4-app-menu.png") });

@@ -44,6 +44,7 @@
         "lib/hotkeys.js",
         "lib/sortable.js", // drag-reorder (sac.sortable, sac.tiles.sortable) — filmstrip, layer list, launcher
         "lib/selection.js", // sac.selection — mark several rows of a plain list
+        "lib/context-menu.js", // sac.contextMenu + long-press = right-click, kit-wide
         "lib/color.js",
         "lib/fs.js",      // storage capability — apps.js hands it to apps
         "lib/identity.js",// who is at this desktop (rides on the fs backend)

@@ -232,8 +232,14 @@ class SacChipInput extends HTMLElement {
                     background: transparent;
                     color: var(--text-muted);
                     font: inherit;
+                    /* sac-chip's type, line by line — after the font reset
+                       (which brought back a normal line-height), so the
+                       ghost and the chips beside it share one height. */
+                    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
                     font-size: 11px;
                     font-weight: 600;
+                    letter-spacing: 0.01em;
+                    line-height: 1;
                     cursor: pointer;
                     transition: color 100ms, border-color 100ms, background 100ms;
                 }

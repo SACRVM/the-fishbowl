@@ -8,6 +8,7 @@
 window.sac?.i18n?.add?.("de", {
     // --- Shared -------------------------------------------------------------
     "fb.common.delete": "Löschen",
+    "fb.common.open": "Öffnen",
     "fb.common.tomorrow": "Morgen",
     "fb.common.yesterday": "Gestern",
 
@@ -465,6 +466,8 @@ window.sac?.i18n?.add?.("de", {
     "fb.mail.marked-unread": "Als ungelesen markiert.",
     "fb.mail.delete": "Löschen",
     "fb.mail.delete-message": "Diese Nachricht löschen",
+    "fb.mail.delete-more": "Löschen …",
+    "fb.mail.mark-read": "Als gelesen markieren",
     "fb.mail.delete-title": "Diese Unterhaltung löschen?",
     "fb.mail.delete-message-title": "Diese Nachricht löschen?",
     "fb.mail.delete-how": "Nur in Fishbowl: Dein Mailserver behält sie. Überall: Sie wandert auch in den Papierkorb des Servers. So oder so liegt sie danach im Papierkorb von Fishbowl.",

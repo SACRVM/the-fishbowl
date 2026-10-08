@@ -43,11 +43,20 @@ public class DesktopTests
 
     private static ILocator ShowHiddenButton(IPage page) => page.Locator("#fb-view-toolbar button[title^='Show hidden tiles']");
 
+    // A tile's context menu (kit 2.29): a right-click opens the kit's menu in the top layer.
+    private static ILocator ContextMenu(IPage page) => page.Locator("sac-menu.sac-context-menu[open]");
+    private static ILocator MenuItem(IPage page, string label) =>
+        ContextMenu(page).Locator("button[data-action]", new() { HasText = label });
+
     private static async Task OpenMenuAsync(IPage page, string key)
     {
-        var cell = Cell(page, key);
-        await cell.HoverAsync();
-        await cell.Locator(".tile-menu-btn").ClickAsync();
+        await Assertions.Expect(ContextMenu(page)).ToHaveCountAsync(0);   // the last one closed first
+        // A scroll closes a context menu (the kit's rule): the tile is in view first.
+        await Cell(page, key).ScrollIntoViewIfNeededAsync();
+        await page.WaitForTimeoutAsync(200);
+        await Cell(page, key).ClickAsync(new() { Button = MouseButton.Right });
+        await Assertions.Expect(ContextMenu(page).Locator("button[data-action]").First).ToBeVisibleAsync();
+        await page.WaitForTimeoutAsync(250);   // its fade-in, before an entry is clicked
     }
 
     private async Task ResetAsync(IPage page, string? space = null)
@@ -120,8 +129,12 @@ public class DesktopTests
             await page.GotoAsync($"{_fixture.BaseUrl}/#/space/{slug}/");
             await Assertions.Expect(page.Locator($"fb-hub-view a.tile[href='#/space/{slug}/notes']")).ToBeVisibleAsync(new() { Timeout = 15000 });
             await Assertions.Expect(page.Locator("fb-hub-view a.tile[href*='admin']")).ToHaveCountAsync(0);
-            // The owner arranges a space's desktop.
-            await Assertions.Expect(page.Locator("fb-hub-view .tile-menu").First).ToBeAttachedAsync();
+            // The owner arranges a space's desktop: the tile's menu, with Arrange.
+            // (an open window may cover the tile: the event goes to the tile itself)
+            await page.Locator($"fb-hub-view a.tile[href='#/space/{slug}/notes']").DispatchEventAsync("contextmenu",
+                new { bubbles = true, cancelable = true, composed = true, clientX = 200, clientY = 200 });
+            await Assertions.Expect(MenuItem(page, "Arrange")).ToBeVisibleAsync();
+            await page.Keyboard.PressAsync("Escape");
             Assert.Empty(errors);
         }
         finally
@@ -144,8 +157,11 @@ public class DesktopTests
 
             // Size: the menu marks the current one, wide spans two columns.
             await OpenMenuAsync(page, "builtin:todos");
-            await Assertions.Expect(Cell(page, "builtin:todos").Locator(".tile-menu button[data-action='size:medium']")).ToHaveTextAsync("✓ Medium tile");
-            await Cell(page, "builtin:todos").Locator(".tile-menu button[data-action='size:wide']").ClickAsync();
+            await Assertions.Expect(MenuItem(page, "Medium tile").Locator("sac-icon[name='check']")).ToHaveCountAsync(1);
+            await Assertions.Expect(MenuItem(page, "Wide tile").Locator("sac-icon")).ToHaveCountAsync(0);
+            await page.WaitForTimeoutAsync(300);   // the menu's fade-in, for the picture
+            await page.ScreenshotAsync(new PageScreenshotOptions { Path = Path.Combine(Path.GetTempPath(), "fishbowl_ui_desktop_menu.png") });
+            await MenuItem(page, "Wide tile").ClickAsync();
             await Assertions.Expect(Cell(page, "builtin:todos")).ToHaveClassAsync(new System.Text.RegularExpressions.Regex("size-wide"));
             var medium = (await Cell(page, "builtin:calendar").BoundingBoxAsync())!;
             var wide = (await Cell(page, "builtin:todos").BoundingBoxAsync())!;
@@ -156,7 +172,7 @@ public class DesktopTests
             await Assertions.Expect(page.Locator(".tile-pack > a.tile.small[data-key='builtin:messages']")).ToHaveCountAsync(1);
             await Assertions.Expect(page.Locator(".tile-pack > a.tile.small[data-key='builtin:trash']")).ToHaveCountAsync(1);
             await OpenMenuAsync(page, "builtin:messages");
-            await Assertions.Expect(Cell(page, "builtin:messages").Locator(".tile-menu button[data-action='size:small']")).ToHaveTextAsync("✓ Small tile");
+            await Assertions.Expect(MenuItem(page, "Small tile").Locator("sac-icon[name='check']")).ToHaveCountAsync(1);
             await page.Keyboard.PressAsync("Escape");
             var small = (await Cell(page, "builtin:messages").BoundingBoxAsync())!;
             Assert.True(small.Width < medium.Width / 3 && small.Width > medium.Width / 4, $"small {small.Width} vs medium {medium.Width}");
@@ -179,12 +195,12 @@ public class DesktopTests
 
             // No colour row: a space's colour is the workspace's one colour.
             await OpenMenuAsync(page, "builtin:calendar");
-            await Assertions.Expect(Cell(page, "builtin:calendar").Locator(".tile-menu sac-swatch-grid")).ToHaveCountAsync(0);
+            await Assertions.Expect(ContextMenu(page).Locator("sac-swatch-grid")).ToHaveCountAsync(0);
             await page.Keyboard.PressAsync("Escape");
 
             // Hide: gone from the desktop, offered back in the toolbar.
             await OpenMenuAsync(page, "builtin:notes");
-            await Cell(page, "builtin:notes").Locator(".tile-menu button[data-action='hide']").ClickAsync();
+            await MenuItem(page, "Hide from this desktop").ClickAsync();
             await Assertions.Expect(Cell(page, "builtin:notes")).ToHaveCountAsync(0);
             await Assertions.Expect(ShowHiddenButton(page)).ToHaveAttributeAsync("title", "Show hidden tiles (1)");
 
@@ -237,8 +253,10 @@ public class DesktopTests
         {
             await page.GotoAsync($"{_fixture.BaseUrl}/#/space/{space.Slug}/");
             await Assertions.Expect(page.Locator($"fb-hub-view a.tile[href='#/space/{space.Slug}/notes']")).ToBeVisibleAsync(new() { Timeout = 15000 });
-            // Readonly: the same arrangement, no tile menus.
-            await Assertions.Expect(page.Locator("fb-hub-view .tile-menu")).ToHaveCountAsync(0);
+            // Readonly: the same arrangement, no tile menu (and never the browser's).
+            await page.Locator($"fb-hub-view a.tile[href='#/space/{space.Slug}/notes']").ClickAsync(new() { Button = MouseButton.Right });
+            await page.WaitForTimeoutAsync(300);
+            await Assertions.Expect(ContextMenu(page)).ToHaveCountAsync(0);
             // The server agrees: a member's PUT is refused.
             var res = await page.APIRequest.PutAsync($"{_fixture.BaseUrl}/api/v1/spaces/{space.Slug}/desktop/tiles/builtin:notes",
                 new APIRequestContextOptions { DataObject = new { hidden = true } });

@@ -44,7 +44,12 @@ public class DesktopCoverTests
             Assert.True(await page.Locator("fb-hub-view #fb-tiles").EvaluateAsync<bool>(
                 "g => g.firstElementChild.classList.contains('fb-cover') && g.firstElementChild.classList.contains('tile')"));
             Assert.Equal(0, await page.Locator("fb-hub-view header, fb-hub-view h1").CountAsync());
-            Assert.Equal(0, await Cover(page).Locator(".tile-menu").CountAsync());
+            // Not an app: no context menu.
+            await Cover(page).ClickAsync(new() { Button = MouseButton.Right });
+            await page.WaitForTimeoutAsync(300);
+            Assert.Equal(0, await page.Locator("sac-menu.sac-context-menu[open]").CountAsync());
+            await page.Mouse.MoveAsync(0, 0);           // off the cover: no hover lift in what's measured next
+            await page.WaitForTimeoutAsync(400);
 
             // Two columns × one row: twice a medium tile plus the gap, as tall as one column is wide.
             Assert.Equal("span 2", await Cover(page).EvaluateAsync<string>("c => getComputedStyle(c).gridColumnStart"));

@@ -436,19 +436,31 @@ public class DesktopLiveTilesTests
             await page.GotoAsync($"{_fixture.BaseUrl}/#/space/{seed.Slug}/");
             await Assertions.Expect(Live(page, "builtin:todos").Locator(".tl-main")).ToBeVisibleAsync(new() { Timeout = 10000 });
 
+            // The tile's context menu (kit 2.29), in the top layer.
+            var menu = page.Locator("sac-menu.sac-context-menu[open]");
+            var showContent = menu.Locator("button[data-action]", new() { HasText = "Show content" });
+            // One menu at a time: the last one closed first (a right-click on an
+            // open one closes it), then the tile's, its entries shown.
+            async Task OpenAsync(ILocator tile)
+            {
+                await Assertions.Expect(menu).ToHaveCountAsync(0);
+                // A scroll closes a context menu (the kit's rule): the tile is in view first.
+                await tile.ScrollIntoViewIfNeededAsync();
+                await page.WaitForTimeoutAsync(200);
+                await tile.ClickAsync(new() { Button = MouseButton.Right });
+                await Assertions.Expect(menu.Locator("button[data-action]").First).ToBeVisibleAsync();
+                await page.WaitForTimeoutAsync(250);   // its fade-in, before an entry is clicked
+            }
             async Task ToggleAsync(string key)
             {
-                var tile = Tile(page, key);
-                await tile.HoverAsync();
-                await tile.Locator(".tile-menu-btn").ClickAsync();
-                await tile.Locator(".tile-menu button[data-action='live:toggle']").ClickAsync();
+                await OpenAsync(Tile(page, key));
+                await showContent.ClickAsync();
             }
 
             // On by default: the menu says so.
             var todos = Tile(page, "builtin:todos");
-            await todos.HoverAsync();
-            await todos.Locator(".tile-menu-btn").ClickAsync();
-            await Assertions.Expect(todos.Locator(".tile-menu button[data-action='live:toggle']")).ToHaveTextAsync("✓ Show content");
+            await OpenAsync(todos);
+            await Assertions.Expect(showContent.Locator("sac-icon[name='check']")).ToHaveCountAsync(1);
             await page.Keyboard.PressAsync("Escape");
 
             // Off: the plain tile, with its description back — and it stays so.
@@ -465,9 +477,9 @@ public class DesktopLiveTilesTests
             await Assertions.Expect(Live(page, "builtin:notes").Locator(".tl-main")).ToBeVisibleAsync(new() { Timeout = 10000 });
             await Assertions.Expect(Live(page, "builtin:todos")).ToHaveCountAsync(0);
             await Assertions.Expect(todos.Locator("p")).ToHaveTextAsync("Fast to-dos, always at hand.");
-            await todos.HoverAsync();
-            await todos.Locator(".tile-menu-btn").ClickAsync();
-            await Assertions.Expect(todos.Locator(".tile-menu button[data-action='live:toggle']")).ToHaveTextAsync("Show content");
+            await OpenAsync(todos);
+            await Assertions.Expect(showContent).ToBeVisibleAsync();
+            await Assertions.Expect(showContent.Locator("sac-icon")).ToHaveCountAsync(0);
             await page.Keyboard.PressAsync("Escape");
 
             // Per workspace: the personal Todos tile is a medium live tile still.
@@ -487,10 +499,10 @@ public class DesktopLiveTilesTests
             await page.ReloadAsync();
             var small = Tile(page, "builtin:contacts");
             await Assertions.Expect(small).ToBeVisibleAsync(new() { Timeout = 10000 });
-            await small.HoverAsync();
-            await small.Locator(".tile-menu-btn").ClickAsync();
-            await Assertions.Expect(small.Locator(".tile-menu button[data-action='size:small']")).ToBeVisibleAsync();
-            await Assertions.Expect(small.Locator(".tile-menu button[data-action='live:toggle']")).ToHaveCountAsync(0);
+            await OpenAsync(small);
+            await Assertions.Expect(menu.Locator("button[data-action]", new() { HasText = "Small tile" })).ToBeVisibleAsync();
+            await Assertions.Expect(showContent).ToHaveCountAsync(0);
+            await page.Keyboard.PressAsync("Escape");
             await Assertions.Expect(Live(page, "builtin:contacts")).ToHaveCountAsync(0);
             Assert.Empty(errors);
         }
@@ -547,18 +559,17 @@ public class DesktopLiveTilesTests
                 // list that far below the band's edge.
                 var m = await Tile(page, key).EvaluateAsync<JsonElement>(@"el => {
                     const t = el.getBoundingClientRect(), i = el.querySelector(':scope > sac-icon').getBoundingClientRect();
-                    // The corner's pair: the visible top of the '+' and the visible
-                    // right end of the dots (the 18px glyphs' empty space taken off).
+                    // The corner's '+': its visible top and right end (the 18px
+                    // glyph's empty space taken off).
                     const k = 18 / 24, plus = el.querySelector('.tl-new sac-icon').getBoundingClientRect();
-                    const dots = el.querySelector('.tile-menu-btn sac-icon').getBoundingClientRect();
                     return { left: i.left - t.left, top: i.top - t.top, gap: el.querySelector('.tl-items').getBoundingClientRect().top - i.bottom,
-                             plusTop: plus.top + 4 * k - t.top, dotsRight: t.right - (dots.right - 3 * k) };
+                             plusTop: plus.top + 4 * k - t.top, plusRight: t.right - (plus.right - 4 * k) };
                 }");
                 var inset = m.GetProperty("left").GetDouble();
                 Assert.True(Math.Abs(m.GetProperty("top").GetDouble() - inset) < 1.5, $"{key}: icon {m.GetProperty("top").GetDouble()}px from the top, {inset}px from the side");
                 Assert.True(Math.Abs(m.GetProperty("gap").GetDouble() - 2 * (inset - 1)) < 3, $"{key}: the list starts {m.GetProperty("gap").GetDouble()}px under the icon, not two insets ({inset})");
                 Assert.True(Math.Abs(m.GetProperty("plusTop").GetDouble() - inset) < 1.5, $"{key}: the '+' starts {m.GetProperty("plusTop").GetDouble()}px from the top, not {inset}");
-                Assert.True(Math.Abs(m.GetProperty("dotsRight").GetDouble() - inset) < 1.5, $"{key}: the dots end {m.GetProperty("dotsRight").GetDouble()}px from the right, not {inset}");
+                Assert.True(Math.Abs(m.GetProperty("plusRight").GetDouble() - inset) < 1.5, $"{key}: the '+' ends {m.GetProperty("plusRight").GetDouble()}px from the right, not {inset}");
             }
 
             // The window changes: still filled and faded at every width...
