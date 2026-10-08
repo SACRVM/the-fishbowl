@@ -552,8 +552,18 @@ public sealed class MailboxSession : IAsyncDisposable
             }
         }, ct);
 
-    public Task<IReadOnlyList<uint>> MoveAsync(string folderName, IReadOnlyList<uint> uids, string targetFolder, CancellationToken ct)
-        => RunAsync<IReadOnlyList<uint>>(async (c, t) =>
+    /// <summary>Moves messages to another folder; returns the UID each got there,
+    /// by its old one — empty when the server doesn't say (no UIDPLUS).</summary>
+    public Task<IReadOnlyDictionary<uint, uint>> MoveAsync(string folderName, IReadOnlyList<uint> uids, string targetFolder, CancellationToken ct)
+        => TransferAsync(folderName, uids, targetFolder, move: true, ct);
+
+    /// <summary>Copies messages to another folder (Gmail: adds a label); returns
+    /// the UID each got there, by its old one, as <see cref="MoveAsync"/>.</summary>
+    public Task<IReadOnlyDictionary<uint, uint>> CopyAsync(string folderName, IReadOnlyList<uint> uids, string targetFolder, CancellationToken ct)
+        => TransferAsync(folderName, uids, targetFolder, move: false, ct);
+
+    private Task<IReadOnlyDictionary<uint, uint>> TransferAsync(string folderName, IReadOnlyList<uint> uids, string targetFolder, bool move, CancellationToken ct)
+        => RunAsync<IReadOnlyDictionary<uint, uint>>(async (c, t) =>
         {
             var source = await ResolveFolderAsync(c, folderName, t).ConfigureAwait(false);
             var target = await ResolveFolderAsync(c, targetFolder, t).ConfigureAwait(false);
@@ -561,8 +571,13 @@ public sealed class MailboxSession : IAsyncDisposable
             try
             {
                 var ids = uids.Select(u => new UniqueId(u)).ToList();
-                var map = await source.MoveToAsync(ids, target, t).ConfigureAwait(false);
-                return map.Destination.Select(u => u.Id).ToList();
+                var map = move
+                    ? await source.MoveToAsync(ids, target, t).ConfigureAwait(false)
+                    : await source.CopyToAsync(ids, target, t).ConfigureAwait(false);
+                var result = new Dictionary<uint, uint>();
+                for (var i = 0; i < Math.Min(map.Source.Count, map.Destination.Count); i++)
+                    result[map.Source[i].Id] = map.Destination[i].Id;
+                return result;
             }
             finally
             {
@@ -577,6 +592,33 @@ public sealed class MailboxSession : IAsyncDisposable
             var folder = await ResolveFolderAsync(c, special.ToString(), t).ConfigureAwait(false);
             var uid = await folder.AppendAsync(message, flags, t).ConfigureAwait(false);
             return uid?.Id;
+        }, ct);
+
+    /// <summary>Appends a message to a folder named as the server names it.
+    /// Returns the new UID when the server reports it (UIDPLUS).</summary>
+    public Task<uint?> AppendAsync(string folderName, MimeMessage message, MessageFlags flags, CancellationToken ct)
+        => RunAsync<uint?>(async (c, t) =>
+        {
+            var folder = await ResolveFolderAsync(c, folderName, t).ConfigureAwait(false);
+            var uid = await folder.AppendAsync(message, flags, t).ConfigureAwait(false);
+            return uid?.Id;
+        }, ct);
+
+    /// <summary>The UID of the message with this Message-ID in a folder, or null.</summary>
+    public Task<uint?> FindByMessageIdAsync(string folderName, string messageId, CancellationToken ct)
+        => RunAsync<uint?>(async (c, t) =>
+        {
+            var folder = await ResolveFolderAsync(c, folderName, t).ConfigureAwait(false);
+            await folder.OpenAsync(FolderAccess.ReadOnly, t).ConfigureAwait(false);
+            try
+            {
+                var hits = await folder.SearchAsync(SearchQuery.HeaderContains("Message-ID", messageId), t).ConfigureAwait(false);
+                return hits.Count > 0 ? hits[^1].Id : null;
+            }
+            finally
+            {
+                if (folder.IsOpen) await folder.CloseAsync(false, t).ConfigureAwait(false);
+            }
         }, ct);
 
     public async Task<AccountStatus> ProbeAsync(CancellationToken ct)

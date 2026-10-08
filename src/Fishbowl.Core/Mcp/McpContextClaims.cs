@@ -17,6 +17,9 @@ public static class McpContextClaims
     public const string SpaceId = "fishbowl_space_id";
     // A cookie session's copy of users.session_stamp (see AccountStateMiddleware).
     public const string SessionStamp = "fishbowl_session";
+    // The API key's own id (Bearer only): what an agent's act names, like the
+    // mail it sent (mail_messages.sent_by).
+    public const string KeyId = "fishbowl_key_id";
     public const string Scope = "scope";
 
     // Name of the authentication scheme used for Bearer tokens. Duplicated

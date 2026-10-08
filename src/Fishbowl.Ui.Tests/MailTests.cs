@@ -322,6 +322,129 @@ public class MailTests
         }
     }
 
+    // Phase 2: a conversation is flagged from its head (the star stays on) and
+    // archived from its row's menu — it leaves the list, waits under Archived,
+    // and the toast's Undo brings it back.
+    [Fact]
+    public async Task Mail_Flag_Archive_AndUndo_Test()
+    {
+        var (context, page, slug, _) = await SpaceWithMailAsync();
+        try
+        {
+            await page.GotoAsync($"{_fixture.BaseUrl}/#/space/{slug}/mail");
+            var rows = page.Locator("fb-mail-view .mv-item");
+            await Assertions.Expect(rows).ToHaveCountAsync(3, new() { Timeout = 15000 });
+            var engine = rows.Filter(new() { HasText = "Analytical engine notes" });
+
+            await engine.ClickAsync();
+            var flag = page.Locator("fb-mail-view #mv-flag");
+            await Assertions.Expect(flag).ToHaveAttributeAsync("aria-pressed", "false");
+            await flag.ClickAsync();
+            await Assertions.Expect(page.Locator("fb-mail-view #mv-flag")).ToHaveAttributeAsync("aria-pressed", "true");
+            await Assertions.Expect(engine.Locator("sac-icon[name='star']")).ToHaveCountAsync(1);
+            await Assertions.Expect(page.Locator("fb-mail-view #mv-archive")).ToHaveAttributeAsync("title", "Archive");
+            await page.ScreenshotAsync(new() { Path = Shot("flagged") });
+
+            var menu = page.Locator("sac-menu.sac-context-menu[open]");
+            await engine.ClickAsync(new() { Button = MouseButton.Right });
+            await Assertions.Expect(menu.Locator("button[data-action]", new() { HasText = "Remove flag" })).ToBeVisibleAsync();
+            await page.WaitForTimeoutAsync(250);
+            await menu.Locator("button[data-action]", new() { HasText = "Archive" }).ClickAsync();
+            await Assertions.Expect(rows).ToHaveCountAsync(2);
+            await Assertions.Expect(page.Locator("fb-mail-view .mv-empty")).ToBeVisibleAsync();
+
+            // Under Archived, with "Move to inbox" in its head.
+            var archivedView = page.Locator("fb-mail-view [data-view='archived']");
+            await archivedView.ClickAsync();
+            await Assertions.Expect(engine).ToBeVisibleAsync();
+            await engine.ClickAsync();
+            await Assertions.Expect(page.Locator("fb-mail-view #mv-archive")).ToHaveAttributeAsync("title", "Move to inbox");
+
+            // Moved back from its menu; the toast's Undo archives it again.
+            await engine.ClickAsync(new() { Button = MouseButton.Right });
+            var back = menu.Locator("button[data-action]", new() { HasText = "Move to inbox" });
+            await Assertions.Expect(back).ToBeVisibleAsync();
+            await page.WaitForTimeoutAsync(250);
+            await back.ClickAsync();
+            await Assertions.Expect(engine).ToHaveCountAsync(0);
+            await page.Locator("#sac-toast-stack .toast").Filter(new() { HasText = "Moved to the inbox." }).Locator("button.action").ClickAsync();
+            await Assertions.Expect(engine).ToBeVisibleAsync();
+            await archivedView.ClickAsync();   // the list again: not in it
+            await Assertions.Expect(rows).ToHaveCountAsync(2);
+            await page.ScreenshotAsync(new() { Path = Shot("archived") });
+        }
+        finally
+        {
+            await page.APIRequest.DeleteAsync($"{_fixture.BaseUrl}/api/v1/spaces/{slug}?archive=false");
+            await context.CloseAsync();
+        }
+    }
+
+    // Phase 2, writing: a reply is filled from its message and shows the
+    // original under the text; sent, it stands in its conversation. A new mail
+    // left half-written waits under Drafts, opens again and can be discarded.
+    [Fact]
+    public async Task Mail_Reply_Send_AndADraftWaits_Test()
+    {
+        var (context, page, slug, _) = await SpaceWithMailAsync();
+        try
+        {
+            await page.GotoAsync($"{_fixture.BaseUrl}/#/space/{slug}/mail");
+            var rows = page.Locator("fb-mail-view .mv-item");
+            await Assertions.Expect(rows).ToHaveCountAsync(3, new() { Timeout = 15000 });
+            await rows.Filter(new() { HasText = "Analytical engine notes" }).ClickAsync();
+            await Assertions.Expect(page.Locator("fb-mail-view .mv-msg")).ToHaveCountAsync(3);
+
+            // Reply: to Ada, "Re:", the original quoted under the text.
+            await page.Locator("fb-mail-view #mv-reply").ClickAsync();
+            var compose = page.Locator("fb-mail-view .mc");
+            await Assertions.Expect(compose.Locator("h2")).ToHaveTextAsync("Reply");
+            await Assertions.Expect(compose.Locator("#mc-to")).ToHaveValueAsync(new System.Text.RegularExpressions.Regex("ada@example\\.org"));
+            await Assertions.Expect(compose.Locator("#mc-subject")).ToHaveValueAsync("Re: Analytical engine notes");
+            await Assertions.Expect(compose.Locator("#mc-quote")).ToContainTextAsync("The variables live in the store");
+            await compose.Locator("#mc-text").ClickAsync();
+            await page.Keyboard.TypeAsync("Thanks, Ada.");
+            await Assertions.Expect(compose.Locator("#mc-state")).ToHaveTextAsync("Draft saved", new() { Timeout = 5000 });
+            await page.ScreenshotAsync(new() { Path = Shot("compose") });
+
+            await compose.Locator("#mc-send").ClickAsync();
+            await Assertions.Expect(page.Locator("#sac-toast-stack .toast").Filter(new() { HasText = "Sent." })).ToBeVisibleAsync();
+            await Assertions.Expect(page.Locator("fb-mail-view .mv-msg")).ToHaveCountAsync(4);
+            await Assertions.Expect(page.Locator("fb-mail-view .mv-msg").Last.Locator(".mv-dir")).ToHaveAttributeAsync("name", "fb-mail-out");
+
+            // A new mail, half-written, left for another conversation: it waits under Drafts.
+            await page.Locator("fb-mail-view #mv-new").ClickAsync();
+            await Assertions.Expect(compose.Locator("h2")).ToHaveTextAsync("New mail");
+            await compose.Locator("#mc-to").FillAsync("Grace <grace@example.org>");
+            await compose.Locator("#mc-subject").FillAsync("Hello Grace");
+            await Assertions.Expect(compose.Locator("#mc-state")).ToHaveTextAsync("Draft saved", new() { Timeout = 5000 });
+            await rows.Filter(new() { HasText = "Your invoice" }).ClickAsync();
+            await Assertions.Expect(compose).ToHaveCountAsync(0);
+
+            var drafts = page.Locator("fb-mail-view [data-view='drafts']");
+            await drafts.ClickAsync();
+            var draft = rows.Filter(new() { HasText = "Hello Grace" });
+            await Assertions.Expect(draft).ToContainTextAsync("Grace");
+            await Assertions.Expect(rows).ToHaveCountAsync(1);   // the sent reply's draft is gone
+            await draft.ClickAsync();
+            await Assertions.Expect(compose.Locator("#mc-subject")).ToHaveValueAsync("Hello Grace");
+
+            // Discarded from its menu: gone.
+            await draft.ClickAsync(new() { Button = MouseButton.Right });
+            var menu = page.Locator("sac-menu.sac-context-menu[open]");
+            await Assertions.Expect(menu.Locator("button[data-action]", new() { HasText = "Discard" })).ToBeVisibleAsync();
+            await page.WaitForTimeoutAsync(250);
+            await menu.Locator("button[data-action]", new() { HasText = "Discard" }).ClickAsync();
+            await Assertions.Expect(page.Locator("fb-mail-view .mv-none")).ToHaveTextAsync("No drafts");
+            await Assertions.Expect(compose).ToHaveCountAsync(0);
+        }
+        finally
+        {
+            await page.APIRequest.DeleteAsync($"{_fixture.BaseUrl}/api/v1/spaces/{slug}?archive=false");
+            await context.CloseAsync();
+        }
+    }
+
     // A phone: one pane at a time — the list, then the conversation with the split's back bar.
     [Fact]
     public async Task Mail_Phone_ListThenThread_Test()

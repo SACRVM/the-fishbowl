@@ -20,7 +20,15 @@ public sealed class ImapMailbox : IMailbox
 {
     private readonly MailboxSession _session;
 
-    public ImapMailbox(MailboxSession session) => _session = session;
+    private readonly ResolvedAccount? _account;
+    private readonly IAuthenticator? _auth;
+
+    public ImapMailbox(MailboxSession session, ResolvedAccount? account = null, IAuthenticator? auth = null)
+    {
+        _session = session;
+        _account = account;
+        _auth = auth;
+    }
 
     public ValueTask DisposeAsync() => _session.DisposeAsync();
 
@@ -178,6 +186,41 @@ public sealed class ImapMailbox : IMailbox
     public Task TrashAsync(string folder, IReadOnlyList<uint> uids, CancellationToken ct) =>
         uids.Count == 0 ? Task.CompletedTask : _session.MoveAsync(folder, uids, "trash", ct);
 
+    // Gmail archives by taking the Inbox label off: a move from INBOX to All
+    // Mail does exactly that. Back is a copy — it puts the label on; a move
+    // out of All Mail would put the message in the bin.
+    public async Task<MailTransfer> ArchiveAsync(string inbox, IReadOnlyList<uint> uids, string archive, CancellationToken ct) =>
+        uids.Count == 0 ? new MailTransfer(new Dictionary<uint, uint>(), false)
+            : new MailTransfer(await _session.MoveAsync(inbox, uids, archive, ct), false);
+
+    public async Task<uint?> SendAsync(MimeMessage message, string? sent, CancellationToken ct)
+    {
+        if (_account is null || _auth is null) throw new NotSupportedException("This mailbox was opened without its account.");
+        await new Smtp.MailSender(_account, _auth, _session).SmtpSendAsync(message, ct);
+        if (sent is null || string.IsNullOrEmpty(message.MessageId)) return null;
+        // A failed copy doesn't undo the send: the mail is out.
+        try
+        {
+            if (!_account.IsGmail
+                && await _session.AppendAsync(sent, message, MessageFlags.Seen, ct) is { } appended)
+                return appended;
+            return await _session.FindByMessageIdAsync(sent, message.MessageId, ct);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            return null;
+        }
+    }
+
+    public async Task<MailTransfer> UnarchiveAsync(string archive, IReadOnlyList<uint> uids, string inbox, CancellationToken ct)
+    {
+        if (uids.Count == 0) return new MailTransfer(new Dictionary<uint, uint>(), false);
+        var gmail = await _session.RunAsync((c, _) => Task.FromResult(c.Capabilities.HasFlag(ImapCapabilities.GMailExt1)), ct);
+        return gmail
+            ? new MailTransfer(await _session.CopyAsync(archive, uids, inbox, ct), true)
+            : new MailTransfer(await _session.MoveAsync(archive, uids, inbox, ct), false);
+    }
+
     /// <summary>Runs <paramref name="op"/> with the folder opened read-only, closed after.</summary>
     private Task<T> InFolder<T>(string folder, Func<IMailFolder, ImapClient, CancellationToken, Task<T>> op, CancellationToken ct) =>
         _session.RunAsync(async (c, t) =>
@@ -192,7 +235,10 @@ public sealed class ImapMailbox : IMailbox
 /// <summary>Opens <see cref="ImapMailbox"/>es with a password the caller holds.</summary>
 public sealed class ImapMailboxConnector(ILoggerFactory? loggers = null) : IMailboxConnector
 {
-    public IMailbox Open(ResolvedAccount account, string password) =>
-        new ImapMailbox(new MailboxSession(account, new PasswordAuthenticator(_ => password), new MailLimits(),
-            (loggers ?? NullLoggerFactory.Instance).CreateLogger<MailboxSession>()));
+    public IMailbox Open(ResolvedAccount account, string password)
+    {
+        var auth = new PasswordAuthenticator(_ => password);
+        return new ImapMailbox(new MailboxSession(account, auth, new MailLimits(),
+            (loggers ?? NullLoggerFactory.Instance).CreateLogger<MailboxSession>()), account, auth);
+    }
 }

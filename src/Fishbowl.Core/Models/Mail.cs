@@ -108,6 +108,7 @@ public class MailMessage
     public bool Flagged { get; set; }
     public List<string> Tags { get; set; } = new();
     public string? ListId { get; set; }
+    public string? SentBy { get; set; }                       // the API key that sent it from here
     public DateTime CreatedAt { get; set; }
     public DateTime UpdatedAt { get; set; }
 }
@@ -147,6 +148,13 @@ public class MailListQuery
 // archive, delete) acts on.
 public record MailLocationRef(string AccountId, string Role, uint Uid);
 
+// A place with the message it holds.
+public record MailPlace(string MessageId, string AccountId, string Role, uint Uid);
+
+// A message moved between folders on the server (archive): the UID it got
+// there when the server said, and whether the old place stays (a Gmail label).
+public record MailMove(string MessageId, string AccountId, string FromRole, uint FromUid, string ToRole, uint? ToUid, bool SourceKept);
+
 // A partial account update: null leaves a field as it is.
 public class MailAccountUpdate
 {
@@ -154,4 +162,48 @@ public class MailAccountUpdate
     public string? DisplayName { get; set; }
     public List<string>? Aliases { get; set; }
     public string? Password { get; set; }
+}
+
+// A mail being written (decision 12): kept here, saved as it is typed, the
+// text markdown. A reply or forward names the message it answers.
+public static class MailDraftKinds
+{
+    public const string New = "new";
+    public const string Reply = "reply";
+    public const string ReplyAll = "reply-all";
+    public const string Forward = "forward";
+    public static readonly IReadOnlyList<string> All = new[] { New, Reply, ReplyAll, Forward };
+}
+
+// A file that goes with a draft: uploaded or taken from Files (its bytes are
+// kept), or a forwarded original's attachment (fetched when the mail goes).
+public record MailDraftFile(int Index, string Name, string Type, long Size, bool Forwarded);
+
+public class MailDraft
+{
+    public string Id { get; set; } = string.Empty;
+    public string? AccountId { get; set; }                    // From: one of the workspace's accounts
+    public string Kind { get; set; } = MailDraftKinds.New;
+    public string? RefMessageId { get; set; }                 // the message answered or forwarded
+    public string? ThreadId { get; set; }                     // the conversation it belongs to (reply or forward)
+    public List<string> To { get; set; } = new();             // "Name <address>" or an address
+    public List<string> Cc { get; set; } = new();
+    public List<string> Bcc { get; set; } = new();
+    public string Subject { get; set; } = string.Empty;
+    public string Body { get; set; } = string.Empty;          // markdown
+    public List<MailDraftFile> Files { get; set; } = new();
+    public string? CreatedBy { get; set; }
+    public DateTime CreatedAt { get; set; }
+    public DateTime UpdatedAt { get; set; }
+}
+
+// A partial draft update: null leaves a field as it is.
+public class MailDraftUpdate
+{
+    public string? AccountId { get; set; }
+    public List<string>? To { get; set; }
+    public List<string>? Cc { get; set; }
+    public List<string>? Bcc { get; set; }
+    public string? Subject { get; set; }
+    public string? Body { get; set; }
 }

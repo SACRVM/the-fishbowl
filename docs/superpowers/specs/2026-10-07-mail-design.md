@@ -1,6 +1,6 @@
 # Mail
 
-Status: **direction decided (2026-10-07), not yet built.**
+Status: **phases 1 and 2 built (2026-10-08); phases 3 and 4 not yet.**
 Fishbowl gets a mail app: the mailboxes of a workspace in one list, threads
 across what came in and what went out, tags like notes, two kinds of delete,
 mail that expires, and an agent that can do everything a person can. IMAP and
@@ -294,3 +294,22 @@ User/space schema **v22**:
   trash is for").
 - **Mail is written in markdown and goes out as HTML.**
 
+## Decided on 2026-10-08 (phase 2)
+
+- **Archive moves on the server first**, then here. Gmail archives by a move
+  from INBOX to All Mail (the Inbox label comes off) and brings back by a copy
+  (a move out of All Mail would delete). The sent mail of an archived
+  conversation stays in Sent and is marked archived here, so the conversation
+  leaves the list.
+- **A flag sits on a message.** Flagging a conversation flags its latest
+  message; taking the flag off clears every one.
+- **Writing happens in the right pane**, where the conversation was — like the
+  notes editor. A reply shows the quoted mail under the editor.
+- **Attachments from the start:** uploaded or picked from Files; a forward
+  takes the original's attachments along (fetched from the server when it
+  goes).
+- **Send goes at once**, without a delay to undo it.
+- **Each draft is its writer's own**, in a space too; an agent's draft is its key owner's, so the person finds it under Drafts.
+- **A forward joins its original's conversation**, like Gmail: same subject, a shared address.
+- **Recipients are plain text fields** (comma-separated), never chips: an address stays text you can correct in place.
+- **`send:mail` is a tick of its own** in Connect an agent and on the OAuth consent page, only with write.

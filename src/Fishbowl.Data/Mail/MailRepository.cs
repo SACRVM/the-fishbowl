@@ -190,7 +190,7 @@ public class MailRepository : IMailRepository
     // Everything but the bodies: what a list and a thread header need.
     private const string LightColumns = @"id, account_id, message_key, thread_id, in_reply_to, refs, direction, state,
         from_name, from_address, to_list, cc_list, bcc_list, reply_to, subject, sent_at, snippet,
-        attachments, size, seen, flagged, tags, list_id, created_at, updated_at";
+        attachments, size, seen, flagged, tags, list_id, sent_by, created_at, updated_at";
 
     private static MailMessage Fix(MailMessage m)
     {
@@ -563,97 +563,109 @@ public class MailRepository : IMailRepository
     /// reply's subject and a shared participant within 30 days find it.
     /// </summary>
     public Task<string> InsertAsync(ContextRef ctx, MailMessage m, string role, uint uid, CancellationToken ct) =>
-        _db.WithContextTransactionAsync(ctx, async (db, tx, token) =>
-        {
-            var now = DateTime.UtcNow;
-            m.Id = Ulid.NewUlid().ToString();
-            m.CreatedAt = m.UpdatedAt = now;
-            var subjectKey = MailThreading.SubjectKey(m.Subject);
-            var parents = MailThreading.Parents(m.MessageKey, m.InReplyTo, m.Refs);
-            var addresses = Addresses(m).ToList();
+        _db.WithContextTransactionAsync(ctx, (db, tx, token) => InsertCoreAsync(db, tx, m, role, uid, null, token), ct);
 
-            var threads = (await db.QueryAsync<string>(new CommandDefinition(@"
+    /// <summary>A message just sent from here, at once in its conversation —
+    /// in Sent where the server said its UID; without one it stands as sent
+    /// until the sync finds it there (by its Message-ID). <paramref name="sentBy"/>
+    /// is the API key that sent it, null for a person.</summary>
+    public Task<string> InsertSentAsync(ContextRef ctx, MailMessage m, uint? sentUid, string? sentBy, CancellationToken ct) =>
+        _db.WithContextTransactionAsync(ctx, (db, tx, token) =>
+            InsertCoreAsync(db, tx, m, sentUid is null ? null : MailRoles.Sent, sentUid, sentBy, token), ct);
+
+    private static async Task<string> InsertCoreAsync(IDbConnection db, IDbTransaction tx, MailMessage m, string? role, uint? uid, string? sentBy, CancellationToken token)
+    {
+        var now = DateTime.UtcNow;
+        m.Id = Ulid.NewUlid().ToString();
+        m.CreatedAt = m.UpdatedAt = now;
+        var subjectKey = MailThreading.SubjectKey(m.Subject);
+        var parents = MailThreading.Parents(m.MessageKey, m.InReplyTo, m.Refs);
+        var addresses = Addresses(m).ToList();
+
+        var threads = (await db.QueryAsync<string>(new CommandDefinition(@"
                 SELECT thread_id FROM mail_messages WHERE message_key IN @keys
                 UNION
                 SELECT t.thread_id FROM mail_refs r JOIN mail_messages t ON t.id = r.message_id WHERE r.ref = @key",
-                new { keys = parents.Append(m.MessageKey).ToArray(), key = m.MessageKey }, tx, cancellationToken: token)))
-                .Distinct().OrderBy(t => t, StringComparer.Ordinal).ToList();
+            new { keys = parents.Append(m.MessageKey).ToArray(), key = m.MessageKey }, tx, cancellationToken: token)))
+            .Distinct().OrderBy(t => t, StringComparer.Ordinal).ToList();
 
-            if (threads.Count == 0 && subjectKey is not null && (parents.Count > 0 || MailThreading.IsReplySubject(m.Subject)))
-            {
-                var people = addresses.Select(a => a.Address).Distinct().ToArray();
-                var byTopic = await db.ExecuteScalarAsync<string?>(new CommandDefinition(@"
+        if (threads.Count == 0 && subjectKey is not null && (parents.Count > 0 || MailThreading.IsReplySubject(m.Subject)))
+        {
+            var people = addresses.Select(a => a.Address).Distinct().ToArray();
+            var byTopic = await db.ExecuteScalarAsync<string?>(new CommandDefinition(@"
                     SELECT t.thread_id FROM mail_messages t
                     WHERE t.subject_key = @subjectKey AND t.sent_at >= @from AND t.sent_at <= @to
                       AND EXISTS (SELECT 1 FROM mail_addresses a WHERE a.message_id = t.id AND a.address IN @people)
                     ORDER BY t.sent_at DESC LIMIT 1",
-                    new
-                    {
-                        subjectKey,
-                        people,
-                        from = Iso(m.SentAt - MailThreading.SubjectWindow),
-                        to = Iso(m.SentAt + MailThreading.SubjectWindow),
-                    }, tx, cancellationToken: token));
-                if (byTopic is not null) threads.Add(byTopic);
-            }
-
-            m.ThreadId = threads.Count > 0 ? threads[0] : m.Id;
-            if (threads.Count > 1)
-                await db.ExecuteAsync(new CommandDefinition(
-                    "UPDATE mail_messages SET thread_id = @into WHERE thread_id IN @others",
-                    new { into = m.ThreadId, others = threads.Skip(1).ToArray() }, tx, cancellationToken: token));
-
-            await db.ExecuteAsync(new CommandDefinition(@"
-                INSERT INTO mail_messages (id, account_id, message_key, thread_id, in_reply_to, refs, direction, state,
-                    from_name, from_address, to_list, cc_list, bcc_list, reply_to, subject, subject_key, sent_at, snippet,
-                    body_text, body_html, attachments, size, seen, flagged, tags, list_id, created_at, updated_at)
-                VALUES (@Id, @AccountId, @MessageKey, @ThreadId, @InReplyTo, @Refs, @Direction, @State,
-                    @FromName, @FromAddress, @ToList, @CcList, @BccList, @ReplyTo, @Subject, @SubjectKey, @SentAtIso, @Snippet,
-                    @BodyText, @BodyHtml, @Attachments, @Size, @Seen, @Flagged, @Tags, @ListId, @Now, @Now)",
                 new
                 {
-                    m.Id,
-                    m.AccountId,
-                    m.MessageKey,
-                    m.ThreadId,
-                    m.InReplyTo,
-                    m.Refs,
-                    m.Direction,
-                    State = MailStates.Archived,
-                    m.FromName,
-                    m.FromAddress,
-                    m.ToList,
-                    m.CcList,
-                    m.BccList,
-                    m.ReplyTo,
-                    m.Subject,
-                    SubjectKey = subjectKey,
-                    SentAtIso = Iso(m.SentAt),
-                    m.Snippet,
-                    m.BodyText,
-                    m.BodyHtml,
-                    m.Attachments,
-                    m.Size,
-                    m.Seen,
-                    m.Flagged,
-                    m.Tags,
-                    m.ListId,
-                    Now = Iso(now),
+                    subjectKey,
+                    people,
+                    from = Iso(m.SentAt - MailThreading.SubjectWindow),
+                    to = Iso(m.SentAt + MailThreading.SubjectWindow),
                 }, tx, cancellationToken: token));
+            if (byTopic is not null) threads.Add(byTopic);
+        }
+
+        m.ThreadId = threads.Count > 0 ? threads[0] : m.Id;
+        if (threads.Count > 1)
+            await db.ExecuteAsync(new CommandDefinition(
+                "UPDATE mail_messages SET thread_id = @into WHERE thread_id IN @others",
+                new { into = m.ThreadId, others = threads.Skip(1).ToArray() }, tx, cancellationToken: token));
+
+        await db.ExecuteAsync(new CommandDefinition(@"
+                INSERT INTO mail_messages (id, account_id, message_key, thread_id, in_reply_to, refs, direction, state,
+                    from_name, from_address, to_list, cc_list, bcc_list, reply_to, subject, subject_key, sent_at, snippet,
+                    body_text, body_html, attachments, size, seen, flagged, tags, list_id, sent_by, created_at, updated_at)
+                VALUES (@Id, @AccountId, @MessageKey, @ThreadId, @InReplyTo, @Refs, @Direction, @State,
+                    @FromName, @FromAddress, @ToList, @CcList, @BccList, @ReplyTo, @Subject, @SubjectKey, @SentAtIso, @Snippet,
+                    @BodyText, @BodyHtml, @Attachments, @Size, @Seen, @Flagged, @Tags, @ListId, @sentBy, @Now, @Now)",
+            new
+            {
+                m.Id,
+                m.AccountId,
+                m.MessageKey,
+                m.ThreadId,
+                m.InReplyTo,
+                m.Refs,
+                m.Direction,
+                State = role is null && m.Direction == MailDirections.Out ? MailStates.Sent : MailStates.Archived,
+                m.FromName,
+                m.FromAddress,
+                m.ToList,
+                m.CcList,
+                m.BccList,
+                m.ReplyTo,
+                m.Subject,
+                SubjectKey = subjectKey,
+                SentAtIso = Iso(m.SentAt),
+                m.Snippet,
+                m.BodyText,
+                m.BodyHtml,
+                m.Attachments,
+                m.Size,
+                m.Seen,
+                m.Flagged,
+                m.Tags,
+                m.ListId,
+                sentBy,
+                Now = Iso(now),
+            }, tx, cancellationToken: token));
+        if (role is not null && uid is { } at)
             await db.ExecuteAsync(new CommandDefinition(
                 "INSERT OR REPLACE INTO mail_locations (message_id, account_id, role, uid) VALUES (@Id, @AccountId, @role, @uid)",
-                new { m.Id, m.AccountId, role, uid = (long)uid }, tx, cancellationToken: token));
-            foreach (var r in parents)
-                await db.ExecuteAsync(new CommandDefinition(
-                    "INSERT OR IGNORE INTO mail_refs (message_id, ref) VALUES (@Id, @r)", new { m.Id, r }, tx, cancellationToken: token));
-            foreach (var a in addresses)
-                await db.ExecuteAsync(new CommandDefinition(
-                    "INSERT OR IGNORE INTO mail_addresses (message_id, address, field) VALUES (@Id, @Address, @Field)",
-                    new { m.Id, a.Address, a.Field }, tx, cancellationToken: token));
-            await IndexAsync(db, tx, m, token);
-            await RestateAsync(db, tx, [m.Id], token);
-            return m.Id;
-        }, ct);
+                new { m.Id, m.AccountId, role, uid = (long)at }, tx, cancellationToken: token));
+        foreach (var r in parents)
+            await db.ExecuteAsync(new CommandDefinition(
+                "INSERT OR IGNORE INTO mail_refs (message_id, ref) VALUES (@Id, @r)", new { m.Id, r }, tx, cancellationToken: token));
+        foreach (var a in addresses)
+            await db.ExecuteAsync(new CommandDefinition(
+                "INSERT OR IGNORE INTO mail_addresses (message_id, address, field) VALUES (@Id, @Address, @Field)",
+                new { m.Id, a.Address, a.Field }, tx, cancellationToken: token));
+        await IndexAsync(db, tx, m, token);
+        if (role is not null) await RestateAsync(db, tx, [m.Id], token);
+        return m.Id;
+    }
 
     private static IEnumerable<(string Address, string Field)> Addresses(MailMessage m)
     {
@@ -675,13 +687,13 @@ public class MailRepository : IMailRepository
     }
 
     /// <summary>A message's state from its places: inbox → inbox, else sent →
-    /// sent, else archived (a message with no place left stays archived until
-    /// the sync hands it to the trash).</summary>
+    /// sent unless it was archived here, else archived (a message with no place
+    /// left stays archived until the sync hands it to the trash).</summary>
     private static Task RestateAsync(IDbConnection db, IDbTransaction tx, IReadOnlyList<string> ids, CancellationToken ct) =>
         ids.Count == 0 ? Task.CompletedTask : db.ExecuteAsync(new CommandDefinition(@"
             UPDATE mail_messages SET state = CASE
                 WHEN EXISTS (SELECT 1 FROM mail_locations l WHERE l.message_id = mail_messages.id AND l.role = 'inbox') THEN 'inbox'
-                WHEN EXISTS (SELECT 1 FROM mail_locations l WHERE l.message_id = mail_messages.id AND l.role = 'sent') THEN 'sent'
+                WHEN archived = 0 AND EXISTS (SELECT 1 FROM mail_locations l WHERE l.message_id = mail_messages.id AND l.role = 'sent') THEN 'sent'
                 ELSE 'archived' END
             WHERE id IN @ids", new { ids = ids.ToArray() }, tx, cancellationToken: ct));
 
@@ -691,6 +703,67 @@ public class MailRepository : IMailRepository
         return (await db.QueryAsync<string>(new CommandDefinition(
             "SELECT id FROM mail_messages WHERE thread_id = @threadId", new { threadId }, cancellationToken: ct))).ToList();
     }
+
+    /// <summary>Where these messages lie, each place with its message.</summary>
+    public async Task<IReadOnlyList<MailPlace>> PlacesOfAsync(ContextRef ctx, IReadOnlyList<string> ids, CancellationToken ct = default)
+    {
+        if (ids.Count == 0) return [];
+        using var db = _db.CreateContextConnection(ctx);
+        return (await db.QueryAsync<(string MessageId, string AccountId, string Role, long Uid)>(new CommandDefinition(
+            "SELECT message_id, account_id, role, uid FROM mail_locations WHERE message_id IN @ids",
+            new { ids = ids.ToArray() }, cancellationToken: ct)))
+            .Select(l => new MailPlace(l.MessageId, l.AccountId, l.Role, (uint)l.Uid)).ToList();
+    }
+
+    /// <summary>
+    /// Archives messages here, or brings them back, after the server moved
+    /// what lay in its folders: each move's old place goes (unless the server
+    /// kept it — a Gmail label), its new one comes where the server said it.
+    /// <paramref name="archived"/> marks <paramref name="ids"/> for what has no
+    /// place to move from (sent mail stays in Sent; its conversation leaves the
+    /// list). Every message touched gets its state anew.
+    /// </summary>
+    public Task ApplyArchiveAsync(ContextRef ctx, IReadOnlyList<string> ids, bool archived, IReadOnlyList<MailMove> moves, CancellationToken ct = default) =>
+        _db.WithContextTransactionAsync(ctx, async (db, tx, token) =>
+        {
+            foreach (var m in moves)
+            {
+                if (!m.SourceKept)
+                    await db.ExecuteAsync(new CommandDefinition(
+                        "DELETE FROM mail_locations WHERE message_id = @MessageId AND account_id = @AccountId AND role = @FromRole AND uid = @FromUid",
+                        new { m.MessageId, m.AccountId, m.FromRole, FromUid = (long)m.FromUid }, tx, cancellationToken: token));
+                if (m.ToUid is { } uid)
+                    await db.ExecuteAsync(new CommandDefinition(
+                        "INSERT OR REPLACE INTO mail_locations (message_id, account_id, role, uid) VALUES (@MessageId, @AccountId, @ToRole, @uid)",
+                        new { m.MessageId, m.AccountId, m.ToRole, uid = (long)uid }, tx, cancellationToken: token));
+            }
+            if (ids.Count > 0)
+                await db.ExecuteAsync(new CommandDefinition(
+                    "UPDATE mail_messages SET archived = @archived, updated_at = @now WHERE id IN @ids",
+                    new { archived, now = Iso(DateTime.UtcNow), ids = ids.ToArray() }, tx, cancellationToken: token));
+            await RestateAsync(db, tx, ids.Concat(moves.Select(m => m.MessageId)).Distinct().ToList(), token);
+        }, ct);
+
+    /// <summary>Sets seen and / or flagged on these messages here (null leaves
+    /// it) and returns where the changed ones lie, for the write-back.</summary>
+    public Task<IReadOnlyList<MailLocationRef>> SetFlagsAsync(ContextRef ctx, IReadOnlyList<string> ids, bool? seen, bool? flagged, CancellationToken ct = default) =>
+        _db.WithContextTransactionAsync<IReadOnlyList<MailLocationRef>>(ctx, async (db, tx, token) =>
+        {
+            if (ids.Count == 0 || (seen is null && flagged is null)) return [];
+            var changed = (await db.QueryAsync<string>(new CommandDefinition(@"
+                SELECT id FROM mail_messages WHERE id IN @ids
+                  AND ((@seen IS NOT NULL AND seen <> @seen) OR (@flagged IS NOT NULL AND flagged <> @flagged))",
+                new { ids = ids.ToArray(), seen, flagged }, tx, cancellationToken: token))).ToArray();
+            if (changed.Length == 0) return [];
+            await db.ExecuteAsync(new CommandDefinition(@"
+                UPDATE mail_messages SET seen = COALESCE(@seen, seen), flagged = COALESCE(@flagged, flagged), updated_at = @now
+                WHERE id IN @changed",
+                new { seen, flagged, now = Iso(DateTime.UtcNow), changed }, tx, cancellationToken: token));
+            return (await db.QueryAsync<(string AccountId, string Role, long Uid)>(new CommandDefinition(
+                "SELECT account_id, role, uid FROM mail_locations WHERE message_id IN @changed",
+                new { changed }, tx, cancellationToken: token)))
+                .Select(l => new MailLocationRef(l.AccountId, l.Role, (uint)l.Uid)).ToList();
+        }, ct);
 
     public async Task<IReadOnlyList<MailLocationRef>> LocationsOfAsync(ContextRef ctx, IReadOnlyList<string> ids, CancellationToken ct = default)
     {

@@ -68,7 +68,26 @@ public interface IMailbox : IAsyncDisposable
     /// there — the provider's own retention applies.</summary>
     Task TrashAsync(string folder, IReadOnlyList<uint> uids, CancellationToken ct) =>
         throw new NotSupportedException("This mailbox can't delete.");
+    /// <summary>Archives messages that lie in the inbox: moved to the archive
+    /// folder (Gmail: the Inbox label comes off, All Mail keeps them).</summary>
+    Task<MailTransfer> ArchiveAsync(string inbox, IReadOnlyList<uint> uids, string archive, CancellationToken ct) =>
+        throw new NotSupportedException("This mailbox can't archive.");
+    /// <summary>Brings archived messages back to the inbox: moved there (Gmail:
+    /// copied — the Inbox label goes on; a move out of All Mail would delete).</summary>
+    Task<MailTransfer> UnarchiveAsync(string archive, IReadOnlyList<uint> uids, string inbox, CancellationToken ct) =>
+        throw new NotSupportedException("This mailbox can't archive.");
+    /// <summary>Sends a message over the account's SMTP server and files a
+    /// copy in <paramref name="sent"/> (the server's Sent folder) unless the
+    /// provider does that itself (Gmail). Returns the copy's UID there when it
+    /// can be told — the APPEND's answer, else found by its Message-ID.</summary>
+    Task<uint?> SendAsync(MimeKit.MimeMessage message, string? sent, CancellationToken ct) =>
+        throw new NotSupportedException("This mailbox can't send.");
 }
+
+/// <summary>Messages moved or copied between folders: the UID each got in the
+/// target by its old one (only where the server says — UIDPLUS), and whether
+/// they still lie in the source folder too (a Gmail label added).</summary>
+public sealed record MailTransfer(IReadOnlyDictionary<uint, uint> Uids, bool SourceKept);
 
 /// <summary>Opens a mailbox for an account; the password comes from the caller.</summary>
 public interface IMailboxConnector

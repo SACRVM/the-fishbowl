@@ -71,6 +71,8 @@ class FbKeysSettingsView extends HTMLElement {
                     <option value="build">${t("guide-build", "read, write and build tables and apps")}</option>
                 </select></span>
             </div>
+            <label class="fb-check guide-key guide-send"><input type="checkbox" id="guide-send"> <span>${t("guide-send", "and send mail")}</span></label>
+            <p class="muted guide-key guide-send">${t("guide-send-note", "Only for an agent you watch: one that reads mail and sends it can be steered by what a mail says.")}</p>
             <div id="guide-steps"></div>`;
         const client = mount.querySelector("#guide-client");
         const ws = mount.querySelector("#guide-workspace");
@@ -81,6 +83,9 @@ class FbKeysSettingsView extends HTMLElement {
             access.querySelector("option[value=build]").disabled = !canBuild;
             if (!canBuild && access.value === "build") access.value = "write";
             for (const f of mount.querySelectorAll(".guide-key")) f.hidden = client.value === "connector";
+            // Sending mail: its own tick, only with write (drafts are writing).
+            for (const f of mount.querySelectorAll(".guide-send")) f.hidden ||= access.value === "read";
+            if (access.value === "read") mount.querySelector("#guide-send").checked = false;
             this._paintSteps(client.value, access.value);
         };
         for (const el of [client, ws, access]) el.addEventListener("change", paint);
@@ -117,12 +122,14 @@ class FbKeysSettingsView extends HTMLElement {
         steps.querySelector(".guide-try").textContent = tryLine;
     }
 
-    // Scopes per access level — the server's OAuthApi.ScopesFor.
-    static scopesFor(access, space) {
-        const read = ["read:notes", "read:tags", "read:tasks", "read:contacts", "read:events", "read:files", ...(space ? ["read:tables"] : [])];
+    // Scopes per access level — the server's OAuthApi.ScopesFor; sending mail
+    // is no level's, its own tick (only with write).
+    static scopesFor(access, space, sendMail = false) {
+        const read = ["read:notes", "read:tags", "read:tasks", "read:contacts", "read:events", "read:files", "read:mail", ...(space ? ["read:tables"] : [])];
         if (access === "read") return read;
-        const write = [...read, "write:notes", "write:tags", "write:tasks", "write:contacts", "write:events", "write:files", ...(space ? ["write:tables"] : [])];
-        return access === "build" && space ? [...write, "design:tables", "design:apps"] : write;
+        const write = [...read, "write:notes", "write:tags", "write:tasks", "write:contacts", "write:events", "write:files", "write:mail", ...(space ? ["write:tables"] : [])];
+        const level = access === "build" && space ? [...write, "design:tables", "design:apps"] : write;
+        return sendMail ? [...level, "send:mail"] : level;
     }
 
     async _guideCreate(client, access) {
@@ -133,7 +140,7 @@ class FbKeysSettingsView extends HTMLElement {
                 name: client === "code" ? "Claude Code" : fb.t("fb.keys.guide-key-name", "MCP client"),
                 contextType,
                 contextId: space ? contextId : null,
-                scopes: FbKeysSettingsView.scopesFor(access, space),
+                scopes: FbKeysSettingsView.scopesFor(access, space, this.querySelector("#guide-send")?.checked),
             });
             const mcp = `${location.origin}/mcp`;
             const text = client === "code"

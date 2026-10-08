@@ -40,11 +40,20 @@ public static class OAuthApi
         [property: JsonPropertyName("redirect_uris")] string[]? RedirectUris);
 
     public sealed record AuthorizeRequest(string? ClientId, string? RedirectUri, string? CodeChallenge, string? State,
-        string? Workspace, string? Access);
+        string? Workspace, string? Access, bool? SendMail = null);
 
     public static string Origin(HttpContext http) => $"{http.Request.Scheme}://{http.Request.Host}";
 
     // What each access level grants (the key owner's role still trims it).
+    // Sending mail is no level's (mail spec, decision 18): a key that reads
+    // mail and sends it can be steered by a crafted mail, so the person ticks
+    // it on its own — and only with write, which drafts need.
+    public static IReadOnlyList<string> ScopesFor(string access, bool space, bool sendMail)
+    {
+        var scopes = ScopesFor(access, space);
+        return sendMail && access != "read" ? scopes.Append(ScopeCatalog.SendMail).ToList() : scopes;
+    }
+
     public static IReadOnlyList<string> ScopesFor(string access, bool space)
     {
         var read = new List<string> { ScopeCatalog.ReadNotes, ScopeCatalog.ReadTags, ScopeCatalog.ReadTasks, ScopeCatalog.ReadContacts, ScopeCatalog.ReadEvents, ScopeCatalog.ReadFiles, ScopeCatalog.ReadMail };
@@ -156,7 +165,7 @@ public static class OAuthApi
 
             var code = Convert.ToHexString(RandomNumberGenerator.GetBytes(32)).ToLowerInvariant();
             await repo.SaveCodeAsync(new OAuthCode(Hash(code), client.ClientId, me, space ? "space" : "user", ctx.Id,
-                ScopesFor(body.Access, space), body.RedirectUri, body.CodeChallenge, DateTime.UtcNow + CodeLifetime), ct);
+                ScopesFor(body.Access, space, body.SendMail == true), body.RedirectUri, body.CodeChallenge, DateTime.UtcNow + CodeLifetime), ct);
             var sep = body.RedirectUri.Contains('?') ? '&' : '?';
             var redirect = $"{body.RedirectUri}{sep}code={code}" + (string.IsNullOrEmpty(body.State) ? "" : $"&state={Uri.EscapeDataString(body.State)}");
             return Results.Ok(new { redirect });

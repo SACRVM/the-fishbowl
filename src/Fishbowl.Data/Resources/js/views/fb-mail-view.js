@@ -13,6 +13,13 @@
  * workspace's, given in its tag bar. The nav toolbar opens the Mail accounts
  * window. Opening an unread one marks it read here and on the server.
  *
+ * Writing (decision 12, fb.mailCompose) takes the right pane: "+" in the
+ * list head (and the desktop tile's, the palette's) starts a new mail, the
+ * open conversation's head replies, replies to all or forwards its latest
+ * message; drafts are saved as they are typed and listed under Drafts in the
+ * list head. Archive and the flag (phase 2) sit in the conversation's head
+ * and in a row's context menu.
+ *
  * Reading is safe by default (decision 7): a message's HTML is its own
  * page at …/messages/{id}/html, framed with a sandbox and a policy that runs
  * no script and fetches nothing remote — remote images (tracking pixels)
@@ -28,7 +35,9 @@ class FbMailView extends HTMLElement {
         this.threads = [];
         this.accounts = [];
         this.selectedId = null;
-        this.view = "list";        // list | unread | archived
+        this.view = "list";        // list | unread | archived | drafts
+        this.drafts = [];          // the Drafts view: the caller's own
+        this._compose = null;      // the mail being written in the right pane
         this.tags = [];            // the filter strip's picks (all of them)
         this.query = "";
         this.more = false;         // the last page was full: there may be older ones
@@ -48,6 +57,7 @@ class FbMailView extends HTMLElement {
         this._onIntent = () => {
             const it = fb.desktop?.takeIntent("mail");
             if (it?.action === "open" && it.id) this.open(it.id);
+            if (it?.action === "create") this.compose("new");
         };
         window.addEventListener("fb:intent", this._onIntent);
         this._onIntent();
@@ -65,6 +75,7 @@ class FbMailView extends HTMLElement {
         if (this._onIntent) window.removeEventListener("fb:intent", this._onIntent);
         if (this._onVisible) document.removeEventListener("visibilitychange", this._onVisible);
         this._rowMenu?.destroy();
+        this._compose?.leave();
         clearTimeout(this._poll);
         clearTimeout(this._searchTimer);
         if (window.fb?.toolbar) fb.toolbar.clear();
@@ -118,6 +129,15 @@ class FbMailView extends HTMLElement {
     }
 
     async loadThreads({ keep = false } = {}) {
+        if (this.view === "drafts") {
+            try { this.drafts = await this.api.drafts(); }
+            catch (err) { console.warn("[fb-mail-view] drafts failed:", err?.status); this.drafts = []; }
+            this.threads = [];
+            this.more = false;
+            this.renderList();
+            this.renderTagFilter();
+            return;
+        }
         let page = [];
         try { page = this.accounts.length ? await this.api.threads(this.query_()) : []; }
         catch (err) { console.warn("[fb-mail-view] threads failed:", err?.status); }
@@ -235,12 +255,14 @@ class FbMailView extends HTMLElement {
                 fb-mail-view .mv-none { padding: 8px 12px; color: var(--text-muted); }
                 fb-mail-view .mv-item {
                     position: relative;
-                    display: flex; gap: 10px; padding: 9px 12px 9px 20px; margin-bottom: 2px; cursor: pointer;
+                    display: flex; gap: 10px; padding: 9px 12px; margin-bottom: 2px; cursor: pointer;
                     border-radius: var(--radius-m); border: 1px solid transparent;
                 }
-                /* New and unread: a round dot in the accent, left of the entry. */
+                /* New and unread: a round dot in the accent under the direction
+                   arrow, on the subject's line — the row keeps its edge. The
+                   arrow is 16px from the 12px padding; a line is 1.5em. */
                 fb-mail-view .mv-item.unread::before {
-                    content: ""; position: absolute; left: 6px; top: 15px;
+                    content: ""; position: absolute; left: calc(12px + 8px - 4px); top: calc(9px + 2.25em - 4px);
                     width: 8px; height: 8px; border-radius: 50%; background: var(--accent);
                 }
                 fb-mail-view .mv-item:hover { background: var(--hover); }
@@ -262,6 +284,8 @@ class FbMailView extends HTMLElement {
                 fb-mail-view .mv-empty { min-height: 60%; justify-content: center; }
                 fb-mail-view .mv-thread { padding: 24px 24px 40px; }
                 fb-mail-view .mv-thread-head { display: flex; align-items: flex-start; gap: 10px; }
+                /* A flagged conversation: the star on, like a pinned note's. */
+                fb-mail-view .mv-thread-head .icon-btn.active { color: var(--accent-warm); }
                 fb-mail-view .mv-thread-head h2 { flex: 1; min-width: 0; margin: 0; overflow-wrap: anywhere; }
                 fb-mail-view .mv-msg { border-top: 1px solid var(--border); }
                 fb-mail-view .mv-msg:last-child { border-bottom: 1px solid var(--border); }
@@ -313,6 +337,42 @@ class FbMailView extends HTMLElement {
                 fb-mail-view .mv-att:hover { background: var(--hover); }
                 fb-mail-view .mv-att span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
                 fb-mail-view .mv-att .muted { flex: none; }
+                /* Writing (fb.mailCompose): the fields on one grid, the text
+                   below growing with the pane, the actions held at the bottom. */
+                fb-mail-view .mc { display: flex; flex-direction: column; min-height: 100%; padding: 24px 24px 0; box-sizing: border-box; }
+                fb-mail-view .mc-head h2 { margin: 0 0 16px; }
+                fb-mail-view .mc-fields { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 8px 12px; align-items: center; }
+                fb-mail-view .mc-fields > label { color: var(--text-muted); font-size: 0.8125rem; }
+                fb-mail-view .mc-fields input, fb-mail-view .mc-fields sac-select { width: 100%; box-sizing: border-box; }
+                fb-mail-view .mc-to { display: flex; align-items: center; gap: 10px; min-width: 0; }
+                fb-mail-view .mc-to input { flex: 1; min-width: 0; }
+                fb-mail-view .mc-more {
+                    flex: none; padding: 0; border: 0; background: none; font: inherit; font-size: 0.8125rem;
+                    color: var(--accent); cursor: pointer;
+                }
+                fb-mail-view .mc-more:hover { text-decoration: underline; }
+                fb-mail-view .mc-body { position: relative; margin-top: 16px; }
+                fb-mail-view .mc-body sac-md-editor { display: block; width: 100%; }
+                /* The editor's own surface is 60vh tall (a note fills a page);
+                   a mail's text starts smaller and grows as it is written. */
+                fb-mail-view .mc-body sac-md-editor::part(editor) { min-height: 220px; }
+                fb-mail-view .mc-files { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px; }
+                fb-mail-view .mc-files[hidden] { display: none; }
+                fb-mail-view .mc-file {
+                    display: inline-flex; align-items: center; gap: 6px; max-width: 100%; padding: 2px 2px 2px 10px;
+                    border: 1px solid var(--border); border-radius: var(--radius-m); font-size: 0.8125rem;
+                }
+                fb-mail-view .mc-file .mc-file-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+                fb-mail-view .mc-file .muted { flex: none; }
+                fb-mail-view .mc-file .icon-btn { --icon-btn-size: 24px; --icon-btn-icon: 13px; }
+                fb-mail-view .mc-quote { margin: 16px 0; padding-left: 12px; border-left: 2px solid var(--border); color: var(--text-muted); font-size: 0.8125rem; }
+                fb-mail-view .mc-quote-text { margin-top: 4px; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 40vh; overflow: auto; }
+                fb-mail-view .mc-actions {
+                    position: sticky; bottom: 0; flex-wrap: wrap; justify-content: flex-end;
+                    margin-top: auto; padding: 12px 0 16px; background: var(--bg); border-top: 1px solid var(--border);
+                }
+                fb-mail-view .mc-state { flex: 1; min-width: 0; color: var(--text-muted); font-size: 0.8125rem; }
+                fb-mail-view .mc-state.is-error { color: var(--danger); }
             </style>
             <sac-split id="split" collapse show="start" position="${this._splitPosition()}" min-start="300px" min-end="380px"
                        aria-label="${t("resize", "Resize the mail list")}">
@@ -327,7 +387,9 @@ class FbMailView extends HTMLElement {
                         <span class="mv-head-title" id="mv-head-title"></span>
                         <button type="button" class="icon-btn" data-view="unread" title="${t("only-unread", "Only unread")}" aria-label="${t("only-unread", "Only unread")}"><sac-icon name="eye"></sac-icon></button>
                         <button type="button" class="icon-btn" data-view="archived" title="${t("archived", "Archived")}" aria-label="${t("archived", "Archived")}"><sac-icon name="archive"></sac-icon></button>
+                        <button type="button" class="icon-btn mv-write" data-view="drafts" title="${t("drafts", "Drafts")}" aria-label="${t("drafts", "Drafts")}"><sac-icon name="pencil"></sac-icon></button>
                         <button type="button" class="icon-btn mv-write" id="mv-refresh" title="${t("refresh", "Fetch new mail")}" aria-label="${t("refresh", "Fetch new mail")}"><sac-icon name="sync"></sac-icon></button>
+                        <button type="button" class="icon-btn mv-write" id="mv-new" title="${t("new", "New mail")}" aria-label="${t("new", "New mail")}"><sac-icon name="plus"></sac-icon></button>
                     </div>
                     <button type="button" class="mv-status" id="mv-status" hidden></button>
                     <div class="mv-items fb-scroll-fade" id="mv-items" tabindex="-1"></div>
@@ -347,6 +409,7 @@ class FbMailView extends HTMLElement {
             sac.toast?.(this.t("fetching", "Fetching new mail…"));
             setTimeout(() => this.reload({ keep: true }), 4000);
         });
+        this.querySelector("#mv-new").addEventListener("click", () => this.compose("new"));
         this.querySelector("#mv-status").addEventListener("click", () => this.openAccounts());
         this.querySelector("#split").addEventListener("sac:resize", (e) => {
             try { localStorage.setItem("fb.mail.split", e.detail.position); } catch { /* storage off */ }
@@ -365,6 +428,7 @@ class FbMailView extends HTMLElement {
     paintHead() {
         const title = this.view === "unread" ? this.t("head-unread", "Unread")
             : this.view === "archived" ? this.t("head-archived", "Archived")
+            : this.view === "drafts" ? this.t("head-drafts", "Drafts")
             : this.t("head-all", "Mail");
         this.querySelector("#mv-head-title").textContent = title;
         for (const btn of this.querySelectorAll(".mv-head [data-view]")) {
@@ -372,6 +436,8 @@ class FbMailView extends HTMLElement {
             btn.setAttribute("aria-pressed", String(btn.dataset.view === this.view));
         }
         this.querySelector("#mv-refresh").hidden = !this.writable || !this.accounts.length;
+        this.querySelector("#mv-new").hidden = !this.writable || !this.accounts.length;
+        this.querySelector(".mv-head [data-view='drafts']").hidden = !this.writable || !this.accounts.length;
     }
 
     /** One line about the accounts: one that fails, else one that fetches. */
@@ -413,6 +479,7 @@ class FbMailView extends HTMLElement {
     renderList() {
         const box = this.querySelector("#mv-items");
         if (!box) return;
+        if (this.view === "drafts") { this.renderDrafts(box); return; }
         if (!this.threads.length) {
             const text = !this.accounts.length ? this.t("no-mail", "No mail")
                 : this.query ? this.t("no-match", "Nothing matches")
@@ -483,6 +550,7 @@ class FbMailView extends HTMLElement {
     }
 
     async open(threadId) {
+        await this.leaveCompose();
         this.selectedId = threadId;
         for (const row of this.querySelectorAll(".mv-item")) row.classList.toggle("selected", row.dataset.id === threadId);
         const split = this.querySelector("#split");
@@ -516,6 +584,11 @@ class FbMailView extends HTMLElement {
             <div class="mv-thread">
                 <div class="mv-thread-head">
                     <h2></h2>
+                    <button type="button" class="icon-btn mv-write" id="mv-reply"><sac-icon name="fb-reply"></sac-icon></button>
+                    <button type="button" class="icon-btn mv-write" id="mv-reply-all"><sac-icon name="fb-reply-all"></sac-icon></button>
+                    <button type="button" class="icon-btn mv-write" id="mv-forward"><sac-icon name="fb-forward"></sac-icon></button>
+                    <button type="button" class="icon-btn mv-write" id="mv-flag"><sac-icon name="star"></sac-icon></button>
+                    <button type="button" class="icon-btn mv-write" id="mv-archive"><sac-icon></sac-icon></button>
                     <button type="button" class="icon-btn mv-write" id="mv-unread" title="${this.t("mark-unread", "Mark unread")}" aria-label="${this.t("mark-unread", "Mark unread")}"><sac-icon name="eye-off"></sac-icon></button>
                     <button type="button" class="icon-btn mv-write" id="mv-delete" title="${this.t("delete", "Delete")}" aria-label="${this.t("delete", "Delete")}"><sac-icon name="trash"></sac-icon></button>
                 </div>
@@ -525,6 +598,37 @@ class FbMailView extends HTMLElement {
                 <div class="mv-msgs"></div>
             </div>`;
         pane.querySelector("h2").textContent = subject;
+        // A flag sits on a message; the conversation shows one when any has it.
+        const flagged = messages.some((m) => m.flagged);
+        const flag = pane.querySelector("#mv-flag");
+        flag.classList.toggle("active", flagged);
+        flag.setAttribute("aria-pressed", String(flagged));
+        flag.title = flagged ? this.t("unflag", "Remove flag") : this.t("flag", "Flag");
+        flag.setAttribute("aria-label", flag.title);
+        flag.addEventListener("click", () => this.flag(threadId, !flagged));
+        // Archived: nothing of it in an inbox, nothing in Sent left in the list.
+        const archived = !messages.some((m) => m.state === "inbox" || m.state === "sent");
+        const arch = pane.querySelector("#mv-archive");
+        arch.querySelector("sac-icon").setAttribute("name", archived ? "fb-inbox" : "archive");
+        arch.title = archived ? this.t("unarchive", "Move to inbox") : this.t("archive", "Archive");
+        arch.setAttribute("aria-label", arch.title);
+        arch.addEventListener("click", () => this.archive(threadId, !archived));
+        // Reply, reply to all, forward: the latest message (reply to all only
+        // when it went to more than one).
+        const latest = messages[messages.length - 1];
+        const buttons = [
+            ["#mv-reply", "reply", this.t("reply", "Reply")],
+            ["#mv-reply-all", "reply-all", this.t("reply-all", "Reply all")],
+            ["#mv-forward", "forward", this.t("forward", "Forward")],
+        ].map(([sel, kind, label]) => {
+            const b = pane.querySelector(sel);
+            b.title = label;
+            b.setAttribute("aria-label", label);
+            b.addEventListener("click", () => this.compose(kind, latest));
+            return b;
+        });
+        for (const b of [...buttons, flag, arch]) b.hidden = !this.writable;
+        if ((latest.toList?.length || 0) + (latest.ccList?.length || 0) < 2) buttons[1].hidden = true;
         pane.querySelector("#mv-unread").hidden = !this.writable;
         pane.querySelector("#mv-delete").hidden = !this.writable;
         pane.querySelector("#mv-delete").addEventListener("click", () => this.deleteMail(threadId, null));
@@ -642,6 +746,14 @@ class FbMailView extends HTMLElement {
 
     /** A conversation row's context menu: open it, read / unread, delete. */
     rowItems(row) {
+        if (row.dataset.draft) {
+            const id = row.dataset.draft;
+            return [
+                { id: "open", label: fb.t("fb.common.open", "Open"), icon: "pencil", onClick: () => this.openDraft(id) },
+                "-",
+                { id: "discard", label: this.t("discard", "Discard"), icon: "trash", danger: true, onClick: () => this.discardDraft(id) },
+            ];
+        }
         const th = this.threads.find((x) => x.threadId === row.dataset.id);
         if (!th) return null;
         const items = [{ id: "open", label: fb.t("fb.common.open", "Open"), icon: "mail", onClick: () => this.open(th.threadId) }];
@@ -649,6 +761,12 @@ class FbMailView extends HTMLElement {
         items.push(th.unread
             ? { id: "read", label: this.t("mark-read", "Mark read"), icon: "eye", onClick: () => this.markSeen(th, true) }
             : { id: "unread", label: this.t("mark-unread", "Mark unread"), icon: "eye-off", onClick: () => this.markSeen(th, false) });
+        items.push(th.flagged
+            ? { id: "unflag", label: this.t("unflag", "Remove flag"), icon: "star", onClick: () => this.flag(th.threadId, false) }
+            : { id: "flag", label: this.t("flag", "Flag"), icon: "star", onClick: () => this.flag(th.threadId, true) });
+        items.push(th.archived
+            ? { id: "unarchive", label: this.t("unarchive", "Move to inbox"), icon: "fb-inbox", onClick: () => this.archive(th.threadId, false) }
+            : { id: "archive", label: this.t("archive", "Archive"), icon: "archive", onClick: () => this.archive(th.threadId, true) });
         items.push("-", { id: "delete", label: this.t("delete-more", "Delete…"), icon: "trash", danger: true,
             onClick: () => this.deleteMail(th.threadId, null) });
         return items;
@@ -660,6 +778,130 @@ class FbMailView extends HTMLElement {
             th.unread = seen ? 0 : Math.max(1, th.unread);
             this.renderList();
         } catch (err) { sac.toast?.(fb.errors.text(err, this.t("failed", "That didn't work.")), { kind: "error" }); }
+    }
+
+    // ---------------------------------------------------------- writing --
+
+    renderDrafts(box) {
+        if (!this.drafts.length) {
+            box.innerHTML = `<div class="mv-none"></div>`;
+            box.firstElementChild.textContent = this.t("no-drafts", "No drafts");
+            return;
+        }
+        const open = this._compose?.id;
+        box.replaceChildren(...this.drafts.map((d) => {
+            const row = document.createElement("div");
+            row.className = "mv-item" + (d.id === open ? " selected" : "");
+            row.dataset.draft = d.id;
+            row.innerHTML = `
+                <sac-icon class="mv-dir" name="pencil"></sac-icon>
+                <div class="mv-item-text">
+                    <div class="mv-line"><span class="mv-who"></span><span class="mv-when"></span></div>
+                    <div class="mv-line"><span class="mv-subject"></span></div>
+                    <div class="mv-snippet"></div>
+                </div>`;
+            const names = (d.to || []).map((x) => x.replace(/\s*<[^>]*>\s*$/, "").replace(/^"|"$/g, "") || x);
+            row.querySelector(".mv-who").textContent = names.join(", ") || this.t("no-recipients", "(no recipients)");
+            row.querySelector(".mv-when").textContent = this.when(d.updatedAt);
+            row.querySelector(".mv-subject").textContent = d.subject || this.t("no-subject", "(no subject)");
+            row.querySelector(".mv-snippet").textContent = (d.body || "").split("\n").find((l) => l.trim()) || "";
+            row.addEventListener("click", () => this.openDraft(d.id));
+            return row;
+        }));
+    }
+
+    /** A new mail, or a reply / reply to all / forward of `message`. */
+    async compose(kind, message = null) {
+        if (!this.writable) return;
+        if (!this.accounts.length) { this.showEmpty(); return; }
+        await this.leaveCompose();
+        let draft;
+        try { draft = await this.api.createDraft({ kind, messageId: message?.id }); }
+        catch (err) { sac.toast?.(fb.errors.text(err, this.t("failed", "That didn't work.")), { kind: "error" }); return; }
+        this.mountCompose(draft, message);
+    }
+
+    async openDraft(id) {
+        await this.leaveCompose();
+        let draft;
+        try { draft = await this.api.draft(id); }
+        catch (err) { sac.toast?.(fb.errors.text(err, this.t("failed", "That didn't work.")), { kind: "error" }); this.loadThreads(); return; }
+        let original = null;
+        if (draft.refMessageId && draft.threadId) {
+            try { original = (await this.api.thread(draft.threadId)).find((m) => m.id === draft.refMessageId) || null; }
+            catch { /* the original is gone: no quote shown, the server says so on send */ }
+        }
+        this.mountCompose(draft, original);
+    }
+
+    mountCompose(draft, original) {
+        this.selectedId = draft.threadId || null;
+        for (const row of this.querySelectorAll(".mv-item"))
+            row.classList.toggle("selected", row.dataset.draft ? row.dataset.draft === draft.id : row.dataset.id === this.selectedId);
+        const split = this.querySelector("#split");
+        if (split) split.show = "end";
+        this._compose = fb.mailCompose.mount(this.querySelector("#mv-pane"), {
+            api: this.api,
+            ws: this.ws,
+            draft,
+            accounts: this.accounts,
+            original,
+            onClose: (result) => this.composeClosed(draft, result),
+        });
+    }
+
+    /** Leaves the mail being written: saved, or gone when nothing was written. */
+    async leaveCompose() {
+        const c = this._compose;
+        this._compose = null;
+        if (!c) return;
+        await c.leave();
+        if (this.view === "drafts") this.loadThreads();
+    }
+
+    async composeClosed(draft, result) {
+        this._compose = null;
+        if (result?.sent) {
+            sac.toast?.(this.t("sent-done", "Sent."));
+            if (this.view === "drafts" || this.view === "archived") { this.view = "list"; this.paintHead(); }
+            await this.loadThreads();
+            this.open(result.sent.threadId);
+            return;
+        }
+        await this.loadThreads();
+        if (draft.threadId && this.threads.some((x) => x.threadId === draft.threadId)) this.open(draft.threadId);
+        else { this.selectedId = null; this.showNone(); }
+    }
+
+    async discardDraft(id) {
+        if (this._compose?.id === id) { this._compose = null; this.selectedId = null; this.showNone(); }
+        try { await this.api.deleteDraft(id); }
+        catch (err) { sac.toast?.(fb.errors.text(err, this.t("failed", "That didn't work.")), { kind: "error" }); }
+        this.loadThreads();
+    }
+
+    async flag(threadId, flagged) {
+        try { await this.api.setFlagged(threadId, flagged); }
+        catch (err) { sac.toast?.(fb.errors.text(err, this.t("failed", "That didn't work.")), { kind: "error" }); return; }
+        const th = this.threads.find((x) => x.threadId === threadId);
+        if (th) { th.flagged = flagged; this.renderList(); }
+        if (this.selectedId === threadId) this.open(threadId);
+    }
+
+    /**
+     * Decision 3: archived on the mail server too (the inbox's copy moves to
+     * the archive folder), or back to the inbox. The conversation leaves the
+     * list it was in; the toast can take it back.
+     */
+    async archive(threadId, archived, undo = true) {
+        try { await this.api.archive(threadId, archived); }
+        catch (err) { sac.toast?.(fb.errors.text(err, this.t("archive-failed", "That couldn't be moved on the mail server.")), { kind: "error" }); return; }
+        const text = archived ? this.t("archived-done", "Archived.") : this.t("unarchived-done", "Moved to the inbox.");
+        sac.toast?.(text, undo ? { action: { label: "Undo", labelKey: "fb.common.undo", onClick: () => this.archive(threadId, !archived, false) } } : undefined);
+        await this.loadThreads();
+        if (this.selectedId !== threadId) return;
+        if (this.threads.some((x) => x.threadId === threadId)) this.open(threadId);
+        else { this.selectedId = null; this.showNone(); }
     }
 
     /**

@@ -42,6 +42,9 @@
         ["ONNX Runtime",        "MIT", "Microsoft"],
         ["Microsoft.ML.Tokenizers", "MIT", "Microsoft"],
         ["all-MiniLM-L6-v2",    "Apache-2.0", "sentence-transformers"],
+        ["MailKit",             "MIT", ".NET Foundation and Contributors"],
+        ["MimeKit",             "MIT", ".NET Foundation and Contributors"],
+        ["Markdig",             "BSD-2-Clause", "Alexandre Mutel"],
         ["Discord.Net",         "MIT", "Discord.Net Contributors"],
         ["Serilog",             "Apache-2.0", "Serilog Contributors"],
     ];

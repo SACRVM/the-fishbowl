@@ -149,6 +149,7 @@ window.sac?.i18n?.add?.("de", {
     "fb.palette.new-todo": "Neue Aufgabe",
     "fb.palette.new-event": "Neuer Termin",
     "fb.palette.new-contact": "Neuer Kontakt",
+    "fb.palette.new-mail": "Neue Mail",
     "fb.palette.go": "Gehe zu",
     "fb.palette.workspace": "Arbeitsbereich",
     "fb.palette.switch-personal": "Zu Persönlich wechseln",

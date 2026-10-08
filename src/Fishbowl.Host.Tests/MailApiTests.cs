@@ -428,6 +428,201 @@ public class MailApiTests : IClassFixture<WebApplicationFactory<Program>>, IDisp
         Assert.Equal(HttpStatusCode.NotFound, (await c.DeleteAsync($"{P}/messages/nope?mode=everywhere", Ct)).StatusCode);
     }
 
+    // ---- 3b. archive and flags (phase 2) ----
+
+    private static string ThreadState(IEnumerable<JsonElement> messages) =>
+        string.Join(",", messages.Select(m => m.GetProperty("state").GetString()));
+
+    [Fact]
+    public async Task Archive_MovesOnTheServer_LeavesTheList_AndComesBack()
+    {
+        var c = Fresh();
+        var accountId = await SyncedAccountAsync(c, P);
+        var engine = ThreadIdOf(await Threads(c, P), "Analytical engine notes");
+
+        var r = await c.PostAsJsonAsync($"{P}/threads/{engine}/archive", new { archived = true }, Ct);
+        Assert.Equal(HttpStatusCode.OK, r.StatusCode);
+        // Moved on the server: the next pass reads it from the archive folder. The
+        // reply in Sent stays there and leaves the list with its conversation.
+        await SyncNowAsync(c, accountId);
+        Assert.DoesNotContain(await Threads(c, P), t => t.GetProperty("threadId").GetString() == engine);
+        var archived = (await Threads(c, P, "?archived=true")).Single(t => t.GetProperty("threadId").GetString() == engine);
+        Assert.True(archived.GetProperty("archived").GetBoolean());
+        Assert.Equal("archived,archived,archived", ThreadState(await Messages(c, P, engine)));
+
+        r = await c.PostAsJsonAsync($"{P}/threads/{engine}/archive", new { archived = false }, Ct);
+        Assert.Equal(HttpStatusCode.OK, r.StatusCode);
+        await SyncNowAsync(c, accountId);
+        Assert.Contains(await Threads(c, P), t => t.GetProperty("threadId").GetString() == engine);
+        Assert.Equal("inbox,sent,inbox", ThreadState(await Messages(c, P, engine)));
+
+        Assert.Equal(HttpStatusCode.NotFound, (await c.PostAsJsonAsync($"{P}/threads/nope/archive", new { archived = true }, Ct)).StatusCode);
+    }
+
+    [Fact]
+    public async Task Flag_OnTheLatestMessage_ReachesTheServer_UnflagTakesEveryFlagOff()
+    {
+        var c = Fresh();
+        var accountId = await SyncedAccountAsync(c, P);
+        var engine = ThreadIdOf(await Threads(c, P), "Analytical engine notes");
+        string Flags(List<JsonElement> ms) => string.Join(",", ms.Select(m => m.GetProperty("flagged").GetBoolean() ? "1" : "0"));
+
+        // Written back in the background: a pass before it lands reads the old
+        // flag, the next one the new — what the server holds wins.
+        async Task<string> SettledAsync(string want)
+        {
+            var now = "";
+            for (var i = 0; i < 20 && now != want; i++)
+            {
+                await SyncNowAsync(c, accountId);
+                now = Flags(await Messages(c, P, engine));
+            }
+            return now;
+        }
+
+        Assert.Equal(HttpStatusCode.OK, (await c.PostAsJsonAsync($"{P}/threads/{engine}/flagged", new { flagged = true }, Ct)).StatusCode);
+        Assert.Equal("0,0,1", Flags(await Messages(c, P, engine)));
+        Assert.True((await Threads(c, P)).Single(t => t.GetProperty("threadId").GetString() == engine).GetProperty("flagged").GetBoolean());
+        Assert.Equal("0,0,1", await SettledAsync("0,0,1"));
+
+        Assert.Equal(HttpStatusCode.OK, (await c.PostAsJsonAsync($"{P}/threads/{engine}/flagged", new { flagged = false }, Ct)).StatusCode);
+        Assert.Equal("0,0,0", await SettledAsync("0,0,0"));
+    }
+
+    // ---- 3c. writing and sending (phase 2) ----
+
+    private static async Task<JsonElement> DraftAsync(HttpClient c, object body)
+    {
+        var r = await c.PostAsJsonAsync($"{P}/drafts", body, Ct);
+        Assert.Equal(HttpStatusCode.Created, r.StatusCode);
+        return (await Json(r)).Clone();
+    }
+
+    [Fact]
+    public async Task Reply_IsFilledFromItsMessage_GoesOutWithQuoteAndThreading_AndStandsInItsConversation()
+    {
+        var c = Fresh();
+        var address = NewAddress();
+        var accountId = await SyncedAccountAsync(c, P, address);
+        var engine = ThreadIdOf(await Threads(c, P), "Analytical engine notes");
+        var latest = (await Messages(c, P, engine))[^1].GetProperty("id").GetString()!;
+
+        var d = await DraftAsync(c, new { kind = "reply", messageId = latest });
+        var id = d.GetProperty("id").GetString();
+        Assert.Equal(accountId, d.GetProperty("accountId").GetString());
+        Assert.Equal(engine, d.GetProperty("threadId").GetString());
+        Assert.Equal("Re: Analytical engine notes", d.GetProperty("subject").GetString());
+        Assert.Contains("ada@example.org", d.GetProperty("to")[0].GetString());
+
+        var r = await c.PatchAsJsonAsync($"{P}/drafts/{id}", new { body = "Thanks, **Ada**.\nSee you." }, Ct);
+        Assert.Equal(HttpStatusCode.OK, r.StatusCode);
+        Assert.Single((await Json(await c.GetAsync($"{P}/drafts", Ct))).EnumerateArray());
+
+        r = await c.PostAsJsonAsync($"{P}/drafts/{id}/send", new { timeZone = "Europe/Berlin", language = "de" }, Ct);
+        Assert.Equal(HttpStatusCode.OK, r.StatusCode);
+        Assert.Equal(engine, (await Json(r)).GetProperty("threadId").GetString());
+        Assert.Empty((await Json(await c.GetAsync($"{P}/drafts", Ct))).EnumerateArray());
+
+        var sent = Fishbowl.Host.Testing.SampleMailboxConnector.Outbox(address).Last();
+        Assert.Equal("engine-3@example.org", sent.InReplyTo);
+        Assert.Equal(new[] { "engine-1@example.org", "engine-2@fishbowl.test", "engine-3@example.org" }, sent.References.ToArray());
+        Assert.Contains("Thanks, **Ada**.", sent.TextBody);
+        Assert.True(sent.TextBody.Contains("schrieb Ada Lovelace <ada@example.org>:"), sent.TextBody);
+        Assert.Contains("> The variables live in the store, column by column.", sent.TextBody);
+        Assert.Contains("<strong>Ada</strong>", sent.HtmlBody);
+        Assert.Contains("<br", sent.HtmlBody);   // a line break is a line break
+        Assert.Contains("<blockquote", sent.HtmlBody);
+
+        // At once in its conversation, read and outgoing; the next pass finds its
+        // copy in Sent and adds no second one.
+        var msgs = await Messages(c, P, engine);
+        Assert.Equal(4, msgs.Count);
+        Assert.Equal("out", msgs[^1].GetProperty("direction").GetString());
+        Assert.Equal("sent", msgs[^1].GetProperty("state").GetString());
+        Assert.Equal(JsonValueKind.Null, msgs[^1].GetProperty("sentBy").ValueKind);
+        await SyncNowAsync(c, accountId);
+        Assert.Equal(4, (await Messages(c, P, engine)).Count);
+    }
+
+    [Fact]
+    public async Task Forward_CarriesTheOriginalsAttachment_AndAnUploadedFile_InItsConversation()
+    {
+        var c = Fresh();
+        var address = NewAddress();
+        await SyncedAccountAsync(c, P, address);
+        var invoice = ThreadIdOf(await Threads(c, P), "Your invoice");
+        var original = (await Messages(c, P, invoice))[0].GetProperty("id").GetString()!;
+
+        var d = await DraftAsync(c, new { kind = "forward", messageId = original });
+        var id = d.GetProperty("id").GetString();
+        Assert.Equal("Fwd: Your invoice", d.GetProperty("subject").GetString());
+        Assert.Equal(0, d.GetProperty("to").GetArrayLength());
+        var files = d.GetProperty("files");
+        Assert.Equal("invoice.pdf", files[0].GetProperty("name").GetString());
+        Assert.True(files[0].GetProperty("forwarded").GetBoolean());
+
+        var upload = new ByteArrayContent(Encoding.UTF8.GetBytes("hello"));
+        upload.Headers.ContentType = new MediaTypeHeaderValue("text/plain");
+        var r = await c.PostAsync($"{P}/drafts/{id}/files?name=notes.txt", upload, Ct);
+        Assert.Equal(HttpStatusCode.OK, r.StatusCode);
+        Assert.Equal(1, (await Json(r)).GetProperty("index").GetInt32());
+
+        // No one to send it to yet: refused, nothing goes out.
+        r = await c.PostAsJsonAsync($"{P}/drafts/{id}/send", new { }, Ct);
+        Assert.Equal(HttpStatusCode.BadRequest, r.StatusCode);
+        Assert.Equal("no_recipients", (await Json(r)).GetProperty("error").GetString());
+        await c.PatchAsJsonAsync($"{P}/drafts/{id}", new { to = new[] { "not an address" } }, Ct);
+        r = await c.PostAsJsonAsync($"{P}/drafts/{id}/send", new { }, Ct);
+        Assert.Equal("invalid_address", (await Json(r)).GetProperty("error").GetString());
+        Assert.Empty(Fishbowl.Host.Testing.SampleMailboxConnector.Outbox(address));
+
+        await c.PatchAsJsonAsync($"{P}/drafts/{id}", new { to = new[] { "Grace <grace@example.org>" }, body = "For you." }, Ct);
+        r = await c.PostAsJsonAsync($"{P}/drafts/{id}/send", new { }, Ct);
+        Assert.Equal(HttpStatusCode.OK, r.StatusCode);
+        // Like Gmail: the forward joins its original's conversation (same subject, a shared address).
+        Assert.Equal(invoice, (await Json(r)).GetProperty("threadId").GetString());
+
+        var sent = Fishbowl.Host.Testing.SampleMailboxConnector.Outbox(address).Single();
+        Assert.Null(sent.InReplyTo);
+        Assert.Contains("---------- Forwarded message ----------", sent.TextBody);
+        Assert.Contains("Your invoice is attached.", sent.TextBody);
+        var parts = sent.Attachments.OfType<MimeKit.MimePart>().ToList();
+        Assert.Equal(new[] { "invoice.pdf", "notes.txt" }, parts.Select(p => p.FileName).ToArray());
+        using var pdf = new MemoryStream();
+        await parts[0].Content.DecodeToAsync(pdf, Ct);
+        Assert.StartsWith("%PDF", Encoding.ASCII.GetString(pdf.ToArray()));
+    }
+
+    [Fact]
+    public async Task Send_NeedsItsOwnScope_AndADraftIsItsWritersOwn()
+    {
+        const string user = "mail_sender";
+        using (var db = _db.CreateSystemConnection())
+            db.Execute("INSERT OR IGNORE INTO users(id, name, email, created_at) VALUES (@id, 'S', 's@example.com', @now)",
+                new { id = user, now = DateTime.UtcNow.ToString("o") });
+        var cookie = As(user);
+        var address = NewAddress();
+        await SyncedAccountAsync(cookie, P, address);
+
+        // Read and write may draft, not send.
+        var write = await KeyAsync(user, ContextRef.User(user), "read:mail", "write:mail");
+        var d = await DraftAsync(write, new { kind = "new" });
+        var id = d.GetProperty("id").GetString();
+        await write.PatchAsJsonAsync($"{P}/drafts/{id}", new { to = new[] { "ada@example.org" }, subject = "Hello", body = "Hi." }, Ct);
+        Assert.Equal(HttpStatusCode.Forbidden, (await write.PostAsJsonAsync($"{P}/drafts/{id}/send", new { }, Ct)).StatusCode);
+
+        // Another person never sees it.
+        Assert.Equal(HttpStatusCode.NotFound, (await Fresh().GetAsync($"{P}/drafts/{id}", Ct)).StatusCode);
+
+        var send = await KeyAsync(user, ContextRef.User(user), "read:mail", "write:mail", "send:mail");
+        var r = await send.PostAsJsonAsync($"{P}/drafts/{id}/send", new { }, Ct);
+        Assert.Equal(HttpStatusCode.OK, r.StatusCode);
+        var threadId = (await Json(r)).GetProperty("threadId").GetString()!;
+        var mine = (await Messages(cookie, P, threadId)).Single();
+        Assert.False(string.IsNullOrEmpty(mine.GetProperty("sentBy").GetString()));
+        Assert.Equal("Hello", Fishbowl.Host.Testing.SampleMailboxConnector.Outbox(address).Single().Subject);
+    }
+
     // ---- 4. attachment ----
 
     [Fact]
@@ -646,6 +841,65 @@ public class MailApiTests : IClassFixture<WebApplicationFactory<Program>>, IDisp
             Assert.Equal(-32602, err.GetProperty("code").GetInt32());
             Assert.Contains("Scope denied", err.GetProperty("message").GetString() ?? "");
         }
+    }
+
+    // Phase 2 for agents: organise, draft and — only with send:mail — send.
+    [Fact]
+    public async Task Mcp_MailWriteTools_Organise_Draft_AndSendOnlyWithItsScope()
+    {
+        const string user = "mail_mcp_write";
+        using (var db = _db.CreateSystemConnection())
+            db.Execute("INSERT OR IGNORE INTO users(id, name, email, created_at) VALUES (@id, 'W', 'w@example.com', @now)",
+                new { id = user, now = DateTime.UtcNow.ToString("o") });
+        var cookie = As(user);
+        var address = NewAddress();
+        await SyncedAccountAsync(cookie, P, address);
+        var engine = ThreadIdOf(await Threads(cookie, P), "Analytical engine notes");
+        var latest = (await Messages(cookie, P, engine))[^1].GetProperty("id").GetString();
+
+        var key = await KeyAsync(user, ContextRef.User(user), "read:mail", "write:mail", "write:contacts");
+        var names = (await RpcAsync(key, "tools/list")).GetProperty("result").GetProperty("tools").EnumerateArray()
+            .Select(t => t.GetProperty("name").GetString()).ToHashSet();
+        foreach (var tool in new[] { "mail_tag", "mail_mark", "mail_archive", "mail_delete", "mail_draft", "mail_send", "mail_assign_contact" })
+            Assert.Contains(tool, names);
+
+        var tagged = ToolPayload(await RpcAsync(key, "tools/call", new { threadId = engine, add = new[] { "project" } }, "mail_tag"));
+        Assert.Contains("project", tagged.GetProperty("tags").EnumerateArray().Select(x => x.GetString()));
+        ToolPayload(await RpcAsync(key, "tools/call", new { threadId = engine, seen = true, flagged = true }, "mail_mark"));
+        Assert.True((await Threads(cookie, P)).Single(t => t.GetProperty("threadId").GetString() == engine).GetProperty("flagged").GetBoolean());
+
+        // A reply drafted for the person: theirs in Drafts; sending needs send:mail.
+        var draft = ToolPayload(await RpcAsync(key, "tools/call", new { kind = "reply", messageId = latest, body = "On it." }, "mail_draft"));
+        var draftId = draft.GetProperty("draftId").GetString();
+        Assert.Contains("ada@example.org", draft.GetProperty("to")[0].GetString());
+        Assert.Single((await Json(await cookie.GetAsync($"{P}/drafts", Ct))).EnumerateArray());
+        var denied = (await RpcAsync(key, "tools/call", new { draftId }, "mail_send")).GetProperty("error");
+        Assert.Contains("Scope denied", denied.GetProperty("message").GetString() ?? "");
+
+        var sender = await KeyAsync(user, ContextRef.User(user), "read:mail", "write:mail", "send:mail");
+        var sent = ToolPayload(await RpcAsync(sender, "tools/call", new { draftId }, "mail_send"));
+        Assert.True(sent.GetProperty("sent").GetBoolean());
+        Assert.Equal(engine, sent.GetProperty("threadId").GetString());
+        // …and one written in the call itself.
+        sent = ToolPayload(await RpcAsync(sender, "tools/call", new { to = new[] { "grace@example.org" }, subject = "Agenda", body = "- one\n- two" }, "mail_send"));
+        Assert.True(sent.GetProperty("sent").GetBoolean());
+        var outbox = Fishbowl.Host.Testing.SampleMailboxConnector.Outbox(address);
+        Assert.Equal(new[] { "Re: Analytical engine notes", "Agenda" }, outbox.Select(m => m.Subject).ToArray());
+        Assert.Contains("<li>two</li>", outbox[1].HtmlBody);
+
+        // Archived on the server, then deleted here only.
+        ToolPayload(await RpcAsync(key, "tools/call", new { threadId = engine }, "mail_archive"));
+        Assert.Contains(await Threads(cookie, P, "?archived=true"), t => t.GetProperty("threadId").GetString() == engine);
+        var deleted = ToolPayload(await RpcAsync(key, "tools/call", new { threadId = engine }, "mail_delete"));
+        Assert.Equal(4, deleted.GetProperty("deleted").GetInt32());
+
+        // An address for a contact, once.
+        var contact = await Json(await cookie.PostAsJsonAsync("/api/v1/contacts", new { kind = "person", firstName = "Grace", lastName = "Hopper" }, Ct));
+        var contactId = contact.GetProperty("id").GetString();
+        var assigned = ToolPayload(await RpcAsync(key, "tools/call", new { contactId, address = "grace@example.org" }, "mail_assign_contact"));
+        Assert.True(assigned.GetProperty("added").GetBoolean());
+        assigned = ToolPayload(await RpcAsync(key, "tools/call", new { contactId, address = "GRACE@example.org" }, "mail_assign_contact"));
+        Assert.False(assigned.GetProperty("added").GetBoolean());
     }
 
     // ---- 10. delete ----

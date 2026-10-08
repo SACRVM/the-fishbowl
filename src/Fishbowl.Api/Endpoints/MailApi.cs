@@ -1,4 +1,5 @@
 using Fishbowl.Core;
+using Fishbowl.Core.Files;
 using Fishbowl.Core.Mcp;
 using Fishbowl.Core.Models;
 using Fishbowl.Core.Repositories;
@@ -15,7 +16,7 @@ using Microsoft.Net.Http.Headers;
 
 namespace Fishbowl.Api.Endpoints;
 
-// Mail (spec 2026-10-07-mail-design, phase 1), both workspaces — personal
+// Mail (spec 2026-10-07-mail-design, phases 1 and 2), both workspaces — personal
 // /api/v1/mail/…, space /api/v1/spaces/<slug>/mail/…:
 //   GET    …/accounts                      the workspace's accounts (never a password) + message counts
 //   POST   …/accounts                      { provider, address, password, … } — tried first, then stored; cookie, space Admin+
@@ -28,6 +29,13 @@ namespace Fishbowl.Api.Endpoints;
 //                                          form, nothing remote; remote images only with images=1
 //   PUT    …/threads/{threadId}/tags       { tags }
 //   POST   …/threads/{threadId}/seen       { seen } — here at once, on the server in the background
+//   POST   …/threads/{threadId}/flagged    { flagged } — its latest message; off = every flag
+//   POST   …/threads/{threadId}/archive    { archived } — on the server first, then here
+//   GET    …/drafts                        the caller's drafts (each draft is its writer's own)
+//   POST   …/drafts                        { kind?, messageId?, accountId? } — a reply / forward filled from its message
+//   GET|PATCH|DELETE …/drafts/{id}         { accountId?, to?, cc?, bcc?, subject?, body? } (markdown)
+//   POST   …/drafts/{id}/files?name=       the body is the file; …/files/from-files { path }; DELETE …/files/{index}
+//   POST   …/drafts/{id}/send              { timeZone?, language? } — a key needs send:mail
 //   GET    …/messages/{id}/attachments/{index}   fetched from the server on demand
 //   GET    …/tags                          the tags mail carries, each account's source tag (system-given) first
 //   GET    …/unread-count
@@ -115,8 +123,15 @@ public static partial class MailApi
     public sealed record AccountPatch(string? Name, string? DisplayName, List<string>? Aliases, string? Password);
     public sealed record TagsRequest(List<string>? Tags);
     public sealed record SeenRequest(bool Seen);
+    public sealed record FlaggedRequest(bool Flagged);
+    public sealed record ArchiveRequest(bool Archived);
+    public sealed record DraftRequest(string? Kind, string? MessageId, string? AccountId);
+    public sealed record DraftFromFilesRequest(string? Path);
+    public sealed record SendDraftRequest(string? TimeZone, string? Language);
 
-    private enum Need { Read, Write, Manage }
+    // Send needs its own scope (decision 18): a key that reads mail and sends
+    // it can be steered by a crafted mail — a deliberate grant, never implied.
+    private enum Need { Read, Write, Send, Manage }
 
     public static IEndpointRouteBuilder MapMailApi(this IEndpointRouteBuilder routes)
     {
@@ -131,20 +146,17 @@ public static partial class MailApi
     /// deletes nothing —, then here; otherwise only here, marked so the sync
     /// leaves it out. Both into Fishbowl's trash.</summary>
     private static async Task<IResult> DeleteMailAsync(Target t, IReadOnlyList<string> ids, string? mode,
-        IMailRepository repo, MailServer server, CancellationToken ct)
+        MailServer server, CancellationToken ct)
     {
         var everywhere = mode == "everywhere";
-        if (everywhere)
+        int deleted;
+        try { deleted = await server.DeleteAsync(t.Ctx, ids, everywhere, t.UserId, ct); }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
+        catch (Exception ex)
         {
-            try { await server.TrashAsync(t.Ctx, await repo.LocationsOfAsync(t.Ctx, ids, ct), ct); }
-            catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
-            catch (Exception ex)
-            {
-                var (code, why) = ServerError(ex);
-                return ApiErrors.Json(StatusCodes.Status502BadGateway, code, why);
-            }
+            var (code, why) = ServerError(ex);
+            return ApiErrors.Json(StatusCodes.Status502BadGateway, code, why);
         }
-        var deleted = await repo.DeleteMessagesAsync(t.Ctx, ids, tombstone: !everywhere, t.UserId, ct);
         return Results.Ok(new { deleted, mode = everywhere ? "everywhere" : "fishbowl" });
     }
 
@@ -155,7 +167,12 @@ public static partial class MailApi
         if (string.IsNullOrEmpty(userId)) return (null, Results.Unauthorized());
         var bearer = user.Identity?.AuthenticationType == McpContextClaims.BearerScheme;
         if (bearer && (need == Need.Manage
-            || !user.HasClaim(McpContextClaims.Scope, need == Need.Write ? ScopeCatalog.WriteMail : ScopeCatalog.ReadMail)))
+            || !user.HasClaim(McpContextClaims.Scope, need switch
+            {
+                Need.Write => ScopeCatalog.WriteMail,
+                Need.Send => ScopeCatalog.SendMail,
+                _ => ScopeCatalog.ReadMail,
+            })))
             return (null, Results.Forbid());
         if (!space)
         {
@@ -166,7 +183,7 @@ public static partial class MailApi
         var resolved = await SpacesApi.ResolveSpaceAsync((string)http.Request.RouteValues["slug"]!, user, spaces, ct);
         if (resolved.Error is not null) return (null, resolved.Error);
         var role = resolved.Role!.Value;
-        if (need == Need.Write && !role.CanWrite()) return (null, Results.Forbid());
+        if (need is Need.Write or Need.Send && !role.CanWrite()) return (null, Results.Forbid());
         if (need == Need.Manage && !role.CanInvite()) return (null, Results.Forbid());
         return (new Target(ContextRef.Space(resolved.Space!.Id), userId), null);
     }
@@ -357,6 +374,7 @@ public static partial class MailApi
                 m.Flagged,
                 m.Tags,
                 m.ListId,
+                m.SentBy,
                 hasHtml = !string.IsNullOrEmpty(m.BodyHtml),
                 remoteImages = m.BodyHtml is { } h && RemoteImage().IsMatch(h),
                 // plain (no backgrounds of its own — Outlook, Apple Mail: the
@@ -447,11 +465,60 @@ public static partial class MailApi
                 _ = Task.Run(async () =>
                 {
                     using var scope = scopes.CreateScope();
-                    await scope.ServiceProvider.GetRequiredService<MailServer>().MarkSeenAsync(ctx, places, body.Seen, CancellationToken.None);
+                    await scope.ServiceProvider.GetRequiredService<MailServer>().MarkAsync(ctx, places, body.Seen, null, CancellationToken.None);
                 });
             }
             return Results.Ok(new { changed = places.Count });
         }).WithName($"Mark{tag}MailThreadSeen").WithSummary("Marks the conversation read or unread — here at once, on the server in the background.");
+
+        // A flag sits on a message: flagging a conversation flags its latest,
+        // unflagging takes every flag off — here at once, on the server in the
+        // background, like seen.
+        g.MapPost("/threads/{threadId}/flagged", async (string threadId, FlaggedRequest body, HttpContext http, IMailRepository repo,
+            IServiceScopeFactory scopes, CancellationToken ct) =>
+        {
+            var (t, err) = await ResolveAsync(http, space, Need.Write, ct);
+            if (err is not null) return err;
+            var messages = await repo.GetThreadAsync(t!.Ctx, threadId, ct);
+            if (messages.Count == 0) return Results.NotFound();
+            var ids = body.Flagged ? [messages[^1].Id] : messages.Where(m => m.Flagged).Select(m => m.Id).ToList();
+            var places = await repo.SetFlagsAsync(t.Ctx, ids, null, body.Flagged, ct);
+            if (places.Count > 0)
+            {
+                var ctx = t.Ctx;
+                _ = Task.Run(async () =>
+                {
+                    using var scope = scopes.CreateScope();
+                    await scope.ServiceProvider.GetRequiredService<MailServer>().MarkAsync(ctx, places, null, body.Flagged, CancellationToken.None);
+                });
+            }
+            return Results.Ok(new { changed = ids.Count });
+        }).WithName($"Flag{tag}MailThread").WithSummary("Flags the conversation's latest message, or takes every flag off.");
+
+        // Decision 3: archived on the server first — what lies in an inbox
+        // moves to the archive folder (Gmail: the Inbox label comes off) —
+        // then here; back to the inbox the same way.
+        g.MapPost("/threads/{threadId}/archive", async (string threadId, ArchiveRequest body, HttpContext http, IMailRepository repo,
+            MailServer server, CancellationToken ct) =>
+        {
+            var (t, err) = await ResolveAsync(http, space, Need.Write, ct);
+            if (err is not null) return err;
+            var ids = await repo.ThreadMessageIdsAsync(t!.Ctx, threadId, ct);
+            if (ids.Count == 0) return Results.NotFound();
+            try
+            {
+                if (!await server.ArchiveAsync(t.Ctx, ids, body.Archived, ct))
+                    return ApiErrors.Json(StatusCodes.Status409Conflict, "archive_folder_missing",
+                        "The mail account has no archive folder.");
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
+            catch (Exception ex)
+            {
+                var (code, why) = ServerError(ex);
+                return ApiErrors.Json(StatusCodes.Status502BadGateway, code, why);
+            }
+            return Results.Ok(new { archived = body.Archived, messages = ids.Count });
+        }).WithName($"Archive{tag}MailThread").WithSummary("Archives the conversation, or brings it back to the inbox — on the server first.");
 
         // Decision 8: ?mode=everywhere also moves it to the server's Trash;
         // anything else deletes it only here. Either way into the trash.
@@ -461,7 +528,7 @@ public static partial class MailApi
             var (t, err) = await ResolveAsync(http, space, Need.Write, ct);
             if (err is not null) return err;
             var ids = await repo.ThreadMessageIdsAsync(t!.Ctx, threadId, ct);
-            return ids.Count == 0 ? Results.NotFound() : await DeleteMailAsync(t, ids, mode, repo, server, ct);
+            return ids.Count == 0 ? Results.NotFound() : await DeleteMailAsync(t, ids, mode, server, ct);
         }).WithName($"Delete{tag}MailThread").WithSummary("Deletes the conversation — only here (the server keeps it) or everywhere (also to the server's Trash).");
 
         g.MapDelete("/messages/{id}", async (string id, string? mode, HttpContext http, IMailRepository repo,
@@ -470,7 +537,7 @@ public static partial class MailApi
             var (t, err) = await ResolveAsync(http, space, Need.Write, ct);
             if (err is not null) return err;
             return await repo.GetMessageAsync(t!.Ctx, id, ct) is null ? Results.NotFound()
-                : await DeleteMailAsync(t, [id], mode, repo, server, ct);
+                : await DeleteMailAsync(t, [id], mode, server, ct);
         }).WithName($"Delete{tag}MailMessage").WithSummary("Deletes one message — only here or everywhere.");
 
         g.MapGet("/messages/{id}/attachments/{index:int}", async (string id, int index, HttpContext http, IMailRepository repo,
@@ -505,6 +572,129 @@ public static partial class MailApi
             http.Response.Headers[HeaderNames.ContentSecurityPolicy] = "sandbox";
             return Results.Stream(buffer, "application/octet-stream");
         }).WithName($"Get{tag}MailAttachment").WithSummary("One attachment, fetched from the mail server.");
+
+        // ---- writing (decision 12): drafts here, each its writer's own ----
+
+        async Task<(Target? T, MailDraft? Draft, IResult? Error)> OwnDraftAsync(HttpContext http, Need need, string id, MailDraftRepository drafts, CancellationToken ct)
+        {
+            var (t, err) = await ResolveAsync(http, space, need, ct);
+            if (err is not null) return (null, null, err);
+            var d = await drafts.GetAsync(t!.Ctx, id, ct);
+            return d is null || d.CreatedBy != t.UserId ? (t, null, Results.NotFound()) : (t, d, null);
+        }
+
+        g.MapGet("/drafts", async (HttpContext http, MailDraftRepository drafts, CancellationToken ct) =>
+        {
+            var (t, err) = await ResolveAsync(http, space, Need.Write, ct);
+            if (err is not null) return err;
+            return Results.Ok(await drafts.ListAsync(t!.Ctx, t.UserId, ct));
+        }).WithName($"List{tag}MailDrafts").WithSummary("The caller's drafts, newest first.");
+
+        g.MapPost("/drafts", async (DraftRequest body, HttpContext http, MailWriter writer, CancellationToken ct) =>
+        {
+            var (t, err) = await ResolveAsync(http, space, Need.Write, ct);
+            if (err is not null) return err;
+            try
+            {
+                var d = await writer.CreateAsync(t!.Ctx, t.UserId, body.Kind, body.MessageId, body.AccountId, ct);
+                return Results.Created($"{http.Request.Path}/{d.Id}", d);
+            }
+            catch (MailWriteException e) { return ApiErrors.Json(e.Status, e.Code, e.Message); }
+        }).WithName($"Create{tag}MailDraft").WithSummary("A new draft — a reply or forward filled from the message it answers.");
+
+        g.MapGet("/drafts/{id}", async (string id, HttpContext http, MailDraftRepository drafts, CancellationToken ct) =>
+        {
+            var (_, d, err) = await OwnDraftAsync(http, Need.Write, id, drafts, ct);
+            return err ?? Results.Ok(d);
+        }).WithName($"Get{tag}MailDraft").WithSummary("One draft with its files.");
+
+        g.MapPatch("/drafts/{id}", async (string id, MailDraftUpdate body, HttpContext http, MailDraftRepository drafts,
+            MailWriter writer, CancellationToken ct) =>
+        {
+            var (t, _, err) = await OwnDraftAsync(http, Need.Write, id, drafts, ct);
+            if (err is not null) return err;
+            try { await writer.UpdateAsync(t!.Ctx, id, body, ct); }
+            catch (MailWriteException e) { return ApiErrors.Json(e.Status, e.Code, e.Message); }
+            return Results.Ok(await drafts.GetAsync(t.Ctx, id, ct));
+        }).WithName($"Update{tag}MailDraft").WithSummary("Changes what is named — saved as it is typed.");
+
+        g.MapDelete("/drafts/{id}", async (string id, HttpContext http, MailDraftRepository drafts, CancellationToken ct) =>
+        {
+            var (t, _, err) = await OwnDraftAsync(http, Need.Write, id, drafts, ct);
+            if (err is not null) return err;
+            await drafts.DeleteAsync(t!.Ctx, id, ct);
+            return Results.NoContent();
+        }).WithName($"Delete{tag}MailDraft").WithSummary("Discards the draft.");
+
+        g.MapPost("/drafts/{id}/files", async (string id, string? name, HttpContext http, MailDraftRepository drafts,
+            MailWriter writer, CancellationToken ct) =>
+        {
+            var (t, _, err) = await OwnDraftAsync(http, Need.Write, id, drafts, ct);
+            if (err is not null) return err;
+            if (http.Request.ContentLength > MailWriter.MaxBytes)
+                return ApiErrors.Json(StatusCodes.Status413PayloadTooLarge, "mail_too_large", "A mail's files may be 25 MB together.");
+            using var buffer = new MemoryStream();
+            var chunk = new byte[81920];
+            int read;
+            while ((read = await http.Request.Body.ReadAsync(chunk, ct)) > 0)
+            {
+                if (buffer.Length + read > MailWriter.MaxBytes)
+                    return ApiErrors.Json(StatusCodes.Status413PayloadTooLarge, "mail_too_large", "A mail's files may be 25 MB together.");
+                buffer.Write(chunk, 0, read);
+            }
+            try
+            {
+                var file = await writer.AddFileAsync(t!.Ctx, id, name, http.Request.ContentType, buffer.ToArray(), ct);
+                return file is null ? Results.NotFound() : Results.Ok(file);
+            }
+            catch (MailWriteException e) { return ApiErrors.Json(e.Status, e.Code, e.Message); }
+        }).WithName($"Add{tag}MailDraftFile").WithSummary("A file for the draft — the body is the file, ?name= its name.");
+
+        g.MapPost("/drafts/{id}/files/from-files", async (string id, DraftFromFilesRequest body, HttpContext http,
+            MailDraftRepository drafts, MailWriter writer, CancellationToken ct) =>
+        {
+            var (t, _, err) = await OwnDraftAsync(http, Need.Write, id, drafts, ct);
+            if (err is not null) return err;
+            if (string.IsNullOrWhiteSpace(body.Path)) return ApiErrors.Json(StatusCodes.Status400BadRequest, "path_required", "Name the file to take.");
+            // Reading the workspace's Files: a key needs that scope too.
+            if (http.User.Identity?.AuthenticationType == McpContextClaims.BearerScheme
+                && !http.User.HasClaim(McpContextClaims.Scope, ScopeCatalog.ReadFiles))
+                return Results.Forbid();
+            try
+            {
+                var file = await writer.AddFromFilesAsync(t!.Ctx, id, body.Path, ct);
+                return file is null ? Results.NotFound() : Results.Ok(file);
+            }
+            catch (MailWriteException e) { return ApiErrors.Json(e.Status, e.Code, e.Message); }
+            catch (FileStoreException e) { return ApiErrors.Json(e.Status, e.Code, e.Message); }
+        }).WithName($"Add{tag}MailDraftFileFromFiles").WithSummary("A file of the workspace's Files for the draft.");
+
+        g.MapDelete("/drafts/{id}/files/{index:int}", async (string id, int index, HttpContext http, MailDraftRepository drafts, CancellationToken ct) =>
+        {
+            var (t, _, err) = await OwnDraftAsync(http, Need.Write, id, drafts, ct);
+            if (err is not null) return err;
+            return await drafts.RemoveFileAsync(t!.Ctx, id, index, ct) ? Results.NoContent() : Results.NotFound();
+        }).WithName($"Remove{tag}MailDraftFile").WithSummary("Takes a file off the draft.");
+
+        g.MapPost("/drafts/{id}/send", async (string id, SendDraftRequest? body, HttpContext http, MailDraftRepository drafts,
+            MailWriter writer, CancellationToken ct) =>
+        {
+            var (t, _, err) = await OwnDraftAsync(http, Need.Send, id, drafts, ct);
+            if (err is not null) return err;
+            try
+            {
+                var sent = await writer.SendAsync(t!.Ctx, t.UserId, id, http.User.FindFirst(McpContextClaims.KeyId)?.Value,
+                    body?.TimeZone, body?.Language, ct);
+                return Results.Ok(new { id = sent.MessageId, threadId = sent.ThreadId });
+            }
+            catch (MailWriteException e) { return ApiErrors.Json(e.Status, e.Code, e.Message); }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
+            catch (Exception ex)
+            {
+                var (code, why) = ServerError(ex);
+                return ApiErrors.Json(StatusCodes.Status502BadGateway, code, why);
+            }
+        }).WithName($"Send{tag}MailDraft").WithSummary("Sends the draft from its account — the copy in Sent, at once in its conversation here.");
 
         g.MapGet("/tags", async (HttpContext http, MailRepository repo, CancellationToken ct) =>
         {

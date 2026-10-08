@@ -30,6 +30,13 @@ public sealed class SampleMailboxConnector : IMailboxConnector
         if (password != Password) return new SampleMailbox(null);
         return new SampleMailbox(Stores.GetOrAdd(account.Address, a => SampleMailbox.Store.Seed(a)));
     }
+
+    /// <summary>What an account sent through its (sample) SMTP server, oldest first — for tests.</summary>
+    public static IReadOnlyList<MimeKit.MimeMessage> Outbox(string address)
+    {
+        if (!Stores.TryGetValue(address, out var store)) return [];
+        lock (store.Gate) return store.Outbox.ToList();
+    }
 }
 
 internal sealed class SampleMailbox : IMailbox
@@ -37,6 +44,7 @@ internal sealed class SampleMailbox : IMailbox
     internal sealed record Message(uint Uid, SyncHeader Header, SyncBody Body, byte[]? Attachment)
     {
         public bool Seen { get; set; } = Header.Seen;
+        public bool Flagged { get; set; } = Header.Flagged;
     }
 
     internal sealed class Store
@@ -49,6 +57,8 @@ internal sealed class SampleMailbox : IMailbox
         };
         public readonly object Gate = new();
         public readonly List<Message> Trashed = new();   // the server's Trash (not synced)
+        public uint NextUid = 1;                          // one counter over every folder, like a fresh UIDVALIDITY
+        public readonly List<MimeKit.MimeMessage> Outbox = new();   // what went out over "SMTP"
 
         public static Store Seed(string me)
         {
@@ -96,6 +106,7 @@ internal sealed class SampleMailbox : IMailbox
             for (var i = 1; i <= 30; i++)
                 Add("Archive", $"digest-{i}@example.com", null, [], new MailAddress("Digest", "digest@example.com"), self, $"Digest #{i}",
                     TimeSpan.FromDays(60 + i), true, $"Digest number {i}.");
+            s.NextUid = uid;
             return s;
         }
     }
@@ -149,7 +160,7 @@ internal sealed class SampleMailbox : IMailbox
     public Task<IReadOnlyList<SyncFlags>> FlagsAsync(string folder, ulong? changedSince, CancellationToken ct)
     {
         lock (Data.Gate)
-            return Task.FromResult<IReadOnlyList<SyncFlags>>(Folder(folder).Select(m => new SyncFlags(m.Uid, m.Seen, false)).ToList());
+            return Task.FromResult<IReadOnlyList<SyncFlags>>(Folder(folder).Select(m => new SyncFlags(m.Uid, m.Seen, m.Flagged)).ToList());
     }
 
     public async Task AttachmentAsync(string folder, uint uid, string part, Stream target, CancellationToken ct)
@@ -176,7 +187,10 @@ internal sealed class SampleMailbox : IMailbox
     {
         lock (Data.Gate)
             foreach (var m in Folder(folder).Where(m => uids.Contains(m.Uid)))
+            {
                 if (seen is { } s) m.Seen = s;
+                if (flagged is { } f) m.Flagged = f;
+            }
         return Task.CompletedTask;
     }
 
@@ -189,5 +203,51 @@ internal sealed class SampleMailbox : IMailbox
             f.RemoveAll(m => uids.Contains(m.Uid));
         }
         return Task.CompletedTask;
+    }
+
+    // SMTP as a server that files the copy itself would: out, and into Sent.
+    public Task<uint?> SendAsync(MimeKit.MimeMessage message, string? sent, CancellationToken ct)
+    {
+        lock (Data.Gate)
+        {
+            Data.Outbox.Add(message);
+            if (sent is null) return Task.FromResult<uint?>(null);
+            static MailAddress Person(MimeKit.MailboxAddress m) => new(string.IsNullOrEmpty(m.Name) ? null : m.Name, m.Address);
+            static List<MailAddress> People(MimeKit.InternetAddressList l) => l.Mailboxes.Select(Person).ToList();
+            var uid = Data.NextUid++;
+            var header = new SyncHeader(uid, message.MessageId, message.InReplyTo, message.References.ToList(), message.Date, message.Date,
+                message.From.Mailboxes.Select(Person).FirstOrDefault(), People(message.To), People(message.Cc), People(message.Bcc), [],
+                message.Subject, true, false, 1000, null);
+            var attachments = message.Attachments.OfType<MimeKit.MimePart>()
+                .Select((a, i) => new SyncAttachment(i, (i + 2).ToString(), a.FileName, a.ContentType.MimeType, null)).ToList();
+            Folder(sent).Add(new Message(uid, header, new SyncBody(message.TextBody, message.HtmlBody, attachments), null));
+            return Task.FromResult<uint?>(uid);
+        }
+    }
+
+    public Task<MailTransfer> ArchiveAsync(string inbox, IReadOnlyList<uint> uids, string archive, CancellationToken ct) =>
+        Task.FromResult(Move(inbox, uids, archive));
+
+    public Task<MailTransfer> UnarchiveAsync(string archive, IReadOnlyList<uint> uids, string inbox, CancellationToken ct) =>
+        Task.FromResult(Move(archive, uids, inbox));
+
+    // A move as a UIDPLUS server makes it: a new UID in the target, reported.
+    private MailTransfer Move(string from, IReadOnlyList<uint> uids, string to)
+    {
+        lock (Data.Gate)
+        {
+            var source = Folder(from);
+            var target = Folder(to);
+            var map = new Dictionary<uint, uint>();
+            foreach (var m in source.Where(m => uids.Contains(m.Uid)).ToList())
+            {
+                var uid = Data.NextUid++;
+                var moved = new Message(uid, m.Header with { Uid = uid }, m.Body, m.Attachment) { Seen = m.Seen, Flagged = m.Flagged };
+                target.Add(moved);
+                map[m.Uid] = moved.Uid;
+                source.Remove(m);
+            }
+            return new MailTransfer(map, false);
+        }
     }
 }

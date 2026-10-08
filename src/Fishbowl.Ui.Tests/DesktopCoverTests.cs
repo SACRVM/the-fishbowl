@@ -142,6 +142,8 @@ public class DesktopCoverTests
                 // The bundled parts, each with its licence.
                 await Assertions.Expect(about).ToContainTextAsync("SACRVM APPKIT");
                 await Assertions.Expect(about).ToContainTextAsync("Jint");
+                await Assertions.Expect(about).ToContainTextAsync("MailKit");
+                await Assertions.Expect(about).ToContainTextAsync("Markdig");
                 await Assertions.Expect(about).ToContainTextAsync("BSD-2-Clause");
                 // The hash didn't move: the cover is not a link anywhere.
                 Assert.EndsWith("#/", page.Url);

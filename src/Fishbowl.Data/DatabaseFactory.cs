@@ -526,7 +526,56 @@ public class DatabaseFactory
             ApplyUserV23(connection);
             connection.Execute("PRAGMA user_version = 23");
             _logger.LogInformation("Applied user schema v23 to {DbPath}", ((SqliteConnection)connection).DataSource);
+            version = 23;
         }
+
+        if (version < 24)
+        {
+            ApplyUserV24(connection);
+            connection.Execute("PRAGMA user_version = 24");
+            _logger.LogInformation("Applied user schema v24 to {DbPath}", ((SqliteConnection)connection).DataSource);
+        }
+    }
+
+    // Mail phase 2 (mail spec, decisions 3, 12, 18): `archived` — a message
+    // archived here that has no place to move from on the server (what was
+    // sent: it stays in Sent, the conversation leaves the list); `sent_by` —
+    // the API key that sent it; drafts, written in markdown, with their files
+    // (uploaded or taken from Files: the bytes; a forwarded original: where it
+    // is, fetched when the mail goes).
+    private static void ApplyUserV24(IDbConnection connection)
+    {
+        var cols = connection.Query<string>("SELECT name FROM pragma_table_info('mail_messages')").ToList();
+        if (!cols.Contains("archived")) connection.Execute("ALTER TABLE mail_messages ADD COLUMN archived INTEGER NOT NULL DEFAULT 0;");
+        if (!cols.Contains("sent_by")) connection.Execute("ALTER TABLE mail_messages ADD COLUMN sent_by TEXT;");
+        connection.Execute(@"
+            CREATE TABLE IF NOT EXISTS mail_drafts (
+                id TEXT PRIMARY KEY,
+                account_id TEXT,
+                kind TEXT NOT NULL DEFAULT 'new',
+                ref_message_id TEXT,
+                thread_id TEXT,
+                to_list TEXT NOT NULL DEFAULT '[]',
+                cc_list TEXT NOT NULL DEFAULT '[]',
+                bcc_list TEXT NOT NULL DEFAULT '[]',
+                subject TEXT NOT NULL DEFAULT '',
+                body TEXT NOT NULL DEFAULT '',
+                created_by TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS ix_mail_drafts_thread ON mail_drafts (thread_id);
+            CREATE TABLE IF NOT EXISTS mail_draft_files (
+                draft_id TEXT NOT NULL,
+                idx INTEGER NOT NULL,
+                name TEXT NOT NULL,
+                mime TEXT NOT NULL,
+                size INTEGER NOT NULL,
+                data BLOB,
+                source_message_id TEXT,
+                source_index INTEGER,
+                PRIMARY KEY (draft_id, idx)
+            );");
     }
 
     // Mail deleted only in Fishbowl (mail spec, decision 8): the sync never

@@ -349,10 +349,25 @@
             thread:  (tid)         => request(p(`/mail/threads/${id(tid)}`)),
             setTags: (tid, tags)   => request(p(`/mail/threads/${id(tid)}/tags`), { method: "PUT", body: JSON.stringify({ tags }) }),
             setSeen: (tid, seen)   => request(p(`/mail/threads/${id(tid)}/seen`), { method: "POST", body: JSON.stringify({ seen }) }),
+            setFlagged: (tid, flagged) => request(p(`/mail/threads/${id(tid)}/flagged`), { method: "POST", body: JSON.stringify({ flagged }) }),
+            archive: (tid, archived)   => request(p(`/mail/threads/${id(tid)}/archive`), { method: "POST", body: JSON.stringify({ archived }) }),
             // mode "fishbowl" (only here — the server keeps it) or "everywhere"
             // (also to the server's Trash); either way into the trash here.
             deleteThread:  (tid, mode) => request(p(`/mail/threads/${id(tid)}?mode=${mode}`), { method: "DELETE" }),
             deleteMessage: (mid, mode) => request(p(`/mail/messages/${id(mid)}?mode=${mode}`), { method: "DELETE" }),
+            // Writing (decision 12): drafts here, each its writer's own.
+            drafts:      ()          => request(p("/mail/drafts")),
+            draft:       (did)       => request(p(`/mail/drafts/${id(did)}`)),
+            // { kind: "new" | "reply" | "reply-all" | "forward", messageId?, accountId? }
+            createDraft: (body)      => request(p("/mail/drafts"), { method: "POST", body: JSON.stringify(body) }),
+            // { accountId?, to?, cc?, bcc?, subject?, body? } — what is named changes
+            updateDraft: (did, body) => request(p(`/mail/drafts/${id(did)}`), { method: "PATCH", body: JSON.stringify(body) }),
+            deleteDraft: (did)       => request(p(`/mail/drafts/${id(did)}`), { method: "DELETE" }),
+            addDraftFile: (did, file, name) => request(p(`/mail/drafts/${id(did)}/files?name=${encodeURIComponent(name || file.name || "attachment")}`),
+                { method: "POST", body: file, headers: { "Content-Type": file.type || "application/octet-stream" } }),
+            removeDraftFile: (did, index) => request(p(`/mail/drafts/${id(did)}/files/${index}`), { method: "DELETE" }),
+            // { timeZone, language } — the quote's time and words → { id, threadId }
+            send: (did, body)        => request(p(`/mail/drafts/${id(did)}/send`), { method: "POST", body: JSON.stringify(body || {}) }),
             unreadCount: ()        => request(p("/mail/unread-count")),
             // The tags mail carries: [{ name, count, source }] — each account's
             // source tag (system-given) first.

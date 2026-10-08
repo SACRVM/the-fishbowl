@@ -17,6 +17,8 @@ const DE = {
     "read": "lesen",
     "write": "lesen und schreiben",
     "build": "lesen, schreiben und Tabellen und Apps bauen",
+    "send": "und Mails senden",
+    "send-note": "Nur für einen Agenten, den du im Blick hast: Wer Mails liest und sendet, lässt sich von dem lenken, was in einer Mail steht.",
     "back": "Danach geht es zurück zu {host}. Den Zugang findest du unter API-Schlüssel und kannst ihn dort widerrufen.",
     "allow": "Erlauben",
     "deny": "Abbrechen",
@@ -81,6 +83,16 @@ if (LANG === "de") {
     };
     select.addEventListener("change", paint);
     paint();
+    // Sending mail: its own tick, only with write (drafts are writing).
+    const sendRow = document.getElementById("oauth-send-row");
+    const sendNote = document.getElementById("oauth-send-note");
+    const paintSend = () => {
+        const reading = document.querySelector("input[name=access]:checked")?.value === "read";
+        sendRow.hidden = sendNote.hidden = reading;
+        if (reading) document.getElementById("oauth-send").checked = false;
+    };
+    for (const r of document.querySelectorAll("input[name=access]")) r.addEventListener("change", paintSend);
+    paintSend();
     const form = document.getElementById("oauth-form");
     form.hidden = false;
 
@@ -97,7 +109,7 @@ if (LANG === "de") {
             const res = await fetch("/api/v1/oauth/authorize", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ ...p, workspace: select.value, access }),
+                body: JSON.stringify({ ...p, workspace: select.value, access, sendMail: document.getElementById("oauth-send").checked }),
             });
             if (!res.ok) throw new Error(String(res.status));
             window.location.href = (await res.json()).redirect;

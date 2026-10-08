@@ -28,6 +28,8 @@
                     <label><input type="radio" name="access" value="write" checked> <span data-t="write">read and write</span></label>
                     <label id="oauth-build"><input type="radio" name="access" value="build"> <span data-t="build">read, write and build tables and apps</span></label>
                 </fieldset>
+                <label class="fb-check" id="oauth-send-row"><input type="checkbox" id="oauth-send"> <span data-t="send">and send mail</span></label>
+                <p class="auth-note" id="oauth-send-note" data-t="send-note">Only for an agent you watch: one that reads mail and sends it can be steered by what a mail says.</p>
                 <p class="auth-note" id="oauth-back"></p>
                 <div class="auth-actions">
                     <button type="submit" class="btn primary" id="oauth-allow" data-t="allow">Allow</button>

@@ -33,20 +33,7 @@ public sealed class MailSender(ResolvedAccount account, IAuthenticator auth, Mai
 
     private async Task<SendResult> TransmitAsync(MimeMessage msg, CancellationToken ct)
     {
-        using var smtp = new SmtpClient();
-        _log.LogInformation("[{Account}] SMTP connect {Host}:{Port}", account.Id, account.SmtpHost, account.SmtpPort);
-        await smtp.ConnectAsync(account.SmtpHost, account.SmtpPort, MailboxSession.ToSocketOptions(account.SmtpSecurity), ct).ConfigureAwait(false);
-        try
-        {
-            await auth.AuthenticateAsync(smtp, account, ct).ConfigureAwait(false);
-        }
-        catch (AuthenticationException ex)
-        {
-            throw new MailException($"Account '{account.Id}': SMTP authentication failed ({ex.Message}).", ex);
-        }
-
-        await smtp.SendAsync(msg, ct).ConfigureAwait(false);
-        await smtp.DisconnectAsync(true, ct).ConfigureAwait(false);
+        await SmtpSendAsync(msg, ct).ConfigureAwait(false);
 
         // Gmail files sent mail itself; other providers need a copy in Sent.
         var note = "Transmitted.";
@@ -64,6 +51,26 @@ public sealed class MailSender(ResolvedAccount account, IAuthenticator auth, Mai
             }
         }
         return Result(account, msg, note);
+    }
+
+    /// <summary>Hands the message to the account's SMTP server — nothing more
+    /// (no copy in Sent).</summary>
+    public async Task SmtpSendAsync(MimeMessage msg, CancellationToken ct)
+    {
+        using var smtp = new SmtpClient();
+        _log.LogInformation("[{Account}] SMTP connect {Host}:{Port}", account.Id, account.SmtpHost, account.SmtpPort);
+        await smtp.ConnectAsync(account.SmtpHost, account.SmtpPort, MailboxSession.ToSocketOptions(account.SmtpSecurity), ct).ConfigureAwait(false);
+        try
+        {
+            await auth.AuthenticateAsync(smtp, account, ct).ConfigureAwait(false);
+        }
+        catch (AuthenticationException ex)
+        {
+            throw new MailException($"Account '{account.Id}': SMTP authentication failed ({ex.Message}).", ex);
+        }
+
+        await smtp.SendAsync(msg, ct).ConfigureAwait(false);
+        await smtp.DisconnectAsync(true, ct).ConfigureAwait(false);
     }
 
     // ---------- message building ----------

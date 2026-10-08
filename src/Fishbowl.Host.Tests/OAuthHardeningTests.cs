@@ -148,6 +148,17 @@ public class OAuthHardeningTests : IClassFixture<WebApplicationFactory<Program>>
             ["code_verifier"] = grant.Verifier,
         }), Ct);
 
+    // Sending mail is no level's: its own tick, and only with write (mail spec, decision 18).
+    [Fact]
+    public void SendingMail_IsItsOwnTick_OnlyWithWrite()
+    {
+        Assert.Contains("read:mail", Fishbowl.Api.Endpoints.OAuthApi.ScopesFor("read", false));
+        Assert.Contains("write:mail", Fishbowl.Api.Endpoints.OAuthApi.ScopesFor("write", true));
+        Assert.DoesNotContain("send:mail", Fishbowl.Api.Endpoints.OAuthApi.ScopesFor("build", true));
+        Assert.Contains("send:mail", Fishbowl.Api.Endpoints.OAuthApi.ScopesFor("write", false, sendMail: true));
+        Assert.DoesNotContain("send:mail", Fishbowl.Api.Endpoints.OAuthApi.ScopesFor("read", false, sendMail: true));
+    }
+
     [Fact]
     public async Task Token_ForAnActiveAccount_IsAKey()
     {

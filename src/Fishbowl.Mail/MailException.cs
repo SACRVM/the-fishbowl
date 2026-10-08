@@ -4,4 +4,8 @@ namespace Fishbowl.Mail;
 public class MailException(string message, Exception? inner = null) : Exception(message, inner);
 
 /// <summary>A message could not be built or was refused before transmission (bad address, missing attachment, ...).</summary>
-public sealed class SendBlockedException(string reason) : MailException(reason);
+public sealed class SendBlockedException(string reason, string code = "send_blocked") : MailException(reason)
+{
+    /// <summary>What was wrong, as a code a client can translate: no_recipients, invalid_address, …</summary>
+    public string Code { get; } = code;
+}

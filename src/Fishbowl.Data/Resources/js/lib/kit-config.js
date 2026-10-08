@@ -40,6 +40,20 @@
     if (!sac.icons.has("fb-mail-out")) {
         sac.icons.register("fb-mail-out", '<path d="M7 7h10v10"/><path d="M7 17 17 7"/>');
     }
+    // Writing mail: reply, reply all, forward, send — the kit ships none.
+    const mailIcons = {
+        "fb-reply": '<path d="M9 17 4 12l5-5"/><path d="M20 18v-2a4 4 0 0 0-4-4H4"/>',
+        "fb-reply-all": '<path d="m7 17-5-5 5-5"/><path d="m12 17-5-5 5-5"/><path d="M22 18v-2a4 4 0 0 0-4-4H7"/>',
+        "fb-forward": '<path d="m15 17 5-5-5-5"/><path d="M4 18v-2a4 4 0 0 1 4-4h12"/>',
+        "fb-send": '<path d="M14.536 21.686a.5.5 0 0 0 .937-.024l6.5-19a.496.496 0 0 0-.635-.635l-19 6.5a.5.5 0 0 0-.024.937l7.93 3.18a2 2 0 0 1 1.112 1.11z"/><path d="m21.854 2.147-10.94 10.939"/>',
+    };
+    for (const [name, path] of Object.entries(mailIcons)) if (!sac.icons.has(name)) sac.icons.register(name, path);
+    // Back to the inbox (an archived conversation); the kit ships no inbox tray.
+    if (!sac.icons.has("fb-inbox")) {
+        sac.icons.register("fb-inbox",
+            '<path d="M22 12h-6l-2 3h-4l-2-3H2"/>' +
+            '<path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/>');
+    }
     // An envelope is mail; the kit ships no mail icon yet.
     if (!sac.icons.has("mail")) {
         sac.icons.register("mail",

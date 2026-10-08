@@ -71,6 +71,7 @@ const CREATE = {
     "builtin:todos":    ["todos",    "fb.palette.new-todo",    "New todo"],
     "builtin:calendar": ["calendar", "fb.palette.new-event",   "New event"],
     "builtin:contacts": ["contacts", "fb.palette.new-contact", "New contact"],
+    "builtin:mail":     ["mail",     "fb.palette.new-mail",    "New mail"],
 };
 
 // The cover's scene (static markup; the text comes from _paintCover). The

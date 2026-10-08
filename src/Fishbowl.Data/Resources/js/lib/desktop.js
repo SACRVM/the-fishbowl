@@ -212,6 +212,9 @@
         if (writable && entries.some((e) => e.key === "builtin:contacts")) {
             register("create:contact", { label: fb.t("fb.palette.new-contact", "New contact"), icon: "plus", group: fb.t("fb.palette.create", "Create"), run: () => go("contacts", "create") });
         }
+        if (writable && entries.some((e) => e.key === "builtin:mail")) {
+            register("create:mail", { label: fb.t("fb.palette.new-mail", "New mail"), icon: "plus", group: fb.t("fb.palette.create", "Create"), run: () => go("mail", "create") });
+        }
         for (const s of SETTINGS.filter((x) => !x.personal || !space)) {
             register(`go:${s.hash}`, {
                 label: goLabel(s), icon: s.icon, group: fb.t("fb.palette.go", "Go"),

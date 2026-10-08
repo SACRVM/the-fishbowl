@@ -65,6 +65,7 @@ public class ApiKeyAuthenticationHandler : AuthenticationHandler<ApiKeyAuthentic
             new(McpContextClaims.UserId, key.UserId),
             new(McpContextClaims.ContextType, key.ContextType),
             new(McpContextClaims.ContextId, key.ContextId),
+            new(McpContextClaims.KeyId, key.Id),
         };
         // Space keys: the space's DB folder is keyed by id, the key by slug.
         // Resolve it here, once, for every consumer (REST and MCP alike) —
@@ -77,8 +78,8 @@ public class ApiKeyAuthenticationHandler : AuthenticationHandler<ApiKeyAuthentic
                 return AuthenticateResult.Fail("This key's space is gone, or its owner is no longer a member.");
             claims.Add(new Claim(McpContextClaims.SpaceId, space.Id));
             // A key can't do more than its owner may in the space today: a
-            // Reader's key loses write:*, a key below Designer design:*.
-            scopes = scopes.Where(s => (!s.StartsWith("write:", StringComparison.Ordinal) || role.CanWrite())
+            // Reader's key loses write:* and send:*, a key below Designer design:*.
+            scopes = scopes.Where(s => (!(s.StartsWith("write:", StringComparison.Ordinal) || s.StartsWith("send:", StringComparison.Ordinal)) || role.CanWrite())
                 && (!s.StartsWith("design:", StringComparison.Ordinal) || role.CanDesign())).ToList();
         }
         foreach (var scope in scopes)
