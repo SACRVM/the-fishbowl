@@ -109,6 +109,7 @@ public class TagRepository : ITagRepository
             }
 
             await RewriteNoteTagsAsync(db, tx, oldN, newN, token);
+            await RewriteMailTagsAsync(db, tx, oldN, newN, token);
             return true;
         }, ct);
     }
@@ -131,6 +132,7 @@ public class TagRepository : ITagRepository
             if (affected == 0) return false;
 
             await RewriteNoteTagsAsync(db, tx, normalized, newName: null, token);
+            await RewriteMailTagsAsync(db, tx, normalized, newName: null, token);
             return true;
         }, ct);
     }
@@ -178,6 +180,25 @@ public class TagRepository : ITagRepository
     // Rewrites every note's `tags` JSON array + notes_fts.tags for a single
     // tag name. If newName is null, strips oldName; otherwise replaces it.
     // Runs inside the caller's transaction.
+    // The same for mail (user/space schema v22): a tag is the workspace's,
+    // whatever carries it.
+    private static async Task RewriteMailTagsAsync(
+        IDbConnection db, IDbTransaction tx, string oldName, string? newName, CancellationToken ct)
+    {
+        var rows = (await db.QueryAsync<(string Id, string Tags)>(new CommandDefinition(@"
+            SELECT id, tags FROM mail_messages
+            WHERE EXISTS (SELECT 1 FROM json_each(mail_messages.tags) je WHERE je.value = @oldName)",
+            new { oldName }, transaction: tx, cancellationToken: ct))).ToList();
+        foreach (var (id, json) in rows)
+        {
+            var next = (System.Text.Json.JsonSerializer.Deserialize<List<string>>(json) ?? new()).Where(t => t != oldName).ToList();
+            if (newName is not null && !next.Contains(newName)) next.Add(newName);
+            await db.ExecuteAsync(new CommandDefinition(
+                "UPDATE mail_messages SET tags = @next WHERE id = @id",
+                new { next, id }, transaction: tx, cancellationToken: ct));
+        }
+    }
+
     private static async Task RewriteNoteTagsAsync(
         IDbConnection db, IDbTransaction tx, string oldName, string? newName, CancellationToken ct)
     {

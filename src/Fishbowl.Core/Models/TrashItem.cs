@@ -19,6 +19,7 @@ public static class TrashKinds
     public const string Todo = "todo";
     public const string Event = "event";
     public const string Contact = "contact";
+    public const string Mail = "mail";     // a mail message the server no longer has (mail spec, decision 9)
     public const string Row = "row";       // a space table's row; the title is the row's
     public const string Table = "table";   // a whole space table with its rows
 }

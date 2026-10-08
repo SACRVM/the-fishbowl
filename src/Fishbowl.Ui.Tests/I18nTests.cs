@@ -70,7 +70,7 @@ public class I18nTests
 
             // The burger: route labels, Home is "Start".
             await WindowApp.OpenAsync(page, _fixture.BaseUrl, "messages");
-            await Assertions.Expect(page.Locator("#fb-win-messages")).ToHaveAttributeAsync("title", "Nachrichten", new() { Timeout = 5000 });
+            await Assertions.Expect(page.Locator("#fb-win-messages")).ToHaveAttributeAsync("title", "Benachrichtigungen", new() { Timeout = 5000 });
             var navText = await page.Locator("#fb-nav").EvaluateAsync<string>("n => n.shadowRoot.textContent");
             Assert.Contains("Notizen", navText);
             Assert.Contains("Kalender", navText);
@@ -79,7 +79,7 @@ public class I18nTests
             // A reload keeps it (the server's setting).
             await page.ReloadAsync();
             await WindowApp.OpenAsync(page, _fixture.BaseUrl, "messages");
-            await Assertions.Expect(page.Locator("#fb-win-messages")).ToHaveAttributeAsync("title", "Nachrichten", new() { Timeout = 5000 });
+            await Assertions.Expect(page.Locator("#fb-win-messages")).ToHaveAttributeAsync("title", "Benachrichtigungen", new() { Timeout = 5000 });
 
             // Another browser of the same user: German from the server, not
             // from this browser's localStorage.

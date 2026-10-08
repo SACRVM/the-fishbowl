@@ -408,3 +408,21 @@ label.fb-quota-field input { width: 6em; }
         animation-range: 0 24px;
     }
 }
+
+/* ── Mail accounts window (fb.mailAccounts, the Mail app): .fb-row rows ── */
+.fb-mail-account > sac-icon { color: var(--ok); }
+.fb-mail-account.is-busy > sac-icon { color: var(--text-muted); }
+.fb-mail-account.is-failed > sac-icon,
+.fb-mail-account.is-failed .fb-mail-account-state { color: var(--danger); }
+/* Add / edit / password dialogs. */
+.fb-mail-form { display: grid; gap: 12px; }
+.fb-mail-form label { display: grid; gap: 4px; font-size: 0.8125rem; color: var(--text-muted); min-width: 0; }
+.fb-mail-form input,
+.fb-mail-form sac-select { display: block; width: 100%; min-width: 0; box-sizing: border-box; color: var(--text); }
+.fb-mail-form-hint { margin: -4px 0 0; font-size: 0.8125rem; color: var(--text-muted); }
+.fb-mail-servers { border: 0; padding: 0; margin: 0; display: grid; gap: 12px; min-width: 0; }
+.fb-mail-servers[hidden] { display: none; }
+.fb-mail-server-row { display: grid; grid-template-columns: minmax(0, 1fr) 84px 136px; gap: 8px; }
+.fb-mail-form-note { display: flex; gap: 8px; margin: 0; font-size: 0.8125rem; color: var(--text-muted); }
+.fb-mail-form-note sac-icon { flex: none; --icon-size: 16px; margin-top: 2px; }
+.fb-mail-form-error { color: var(--danger); margin: 12px 0 0; }

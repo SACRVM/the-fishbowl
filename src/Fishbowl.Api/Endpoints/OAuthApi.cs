@@ -47,10 +47,10 @@ public static class OAuthApi
     // What each access level grants (the key owner's role still trims it).
     public static IReadOnlyList<string> ScopesFor(string access, bool space)
     {
-        var read = new List<string> { ScopeCatalog.ReadNotes, ScopeCatalog.ReadTags, ScopeCatalog.ReadTasks, ScopeCatalog.ReadContacts, ScopeCatalog.ReadEvents, ScopeCatalog.ReadFiles };
+        var read = new List<string> { ScopeCatalog.ReadNotes, ScopeCatalog.ReadTags, ScopeCatalog.ReadTasks, ScopeCatalog.ReadContacts, ScopeCatalog.ReadEvents, ScopeCatalog.ReadFiles, ScopeCatalog.ReadMail };
         if (space) read.Add(ScopeCatalog.ReadTables);
         if (access == "read") return read;
-        var write = read.Concat(new[] { ScopeCatalog.WriteNotes, ScopeCatalog.WriteTags, ScopeCatalog.WriteTasks, ScopeCatalog.WriteContacts, ScopeCatalog.WriteEvents, ScopeCatalog.WriteFiles }).ToList();
+        var write = read.Concat(new[] { ScopeCatalog.WriteNotes, ScopeCatalog.WriteTags, ScopeCatalog.WriteTasks, ScopeCatalog.WriteContacts, ScopeCatalog.WriteEvents, ScopeCatalog.WriteFiles, ScopeCatalog.WriteMail }).ToList();
         if (space) write.Add(ScopeCatalog.WriteTables);
         if (access == "write" || !space) return write;
         return write.Concat(new[] { ScopeCatalog.DesignTables, ScopeCatalog.DesignApps }).ToList();   // "build"

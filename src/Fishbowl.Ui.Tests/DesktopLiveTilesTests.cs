@@ -324,12 +324,12 @@ public class DesktopLiveTilesTests
             await Assertions.Expect(files.Locator(".tl-main")).ToHaveTextAsync(new Regex(@"^[\d.,]+ (B|KB|MB|GB) of [\d.,]+ (GB|TB)$"));
             await Assertions.Expect(Tile(page, "builtin:files").Locator("sac-progress")).ToHaveCountAsync(0);
             var messages = Live(page, "builtin:messages");
-            await Assertions.Expect(messages.Locator(".tl-main")).ToHaveTextAsync(new Regex(@"^(\d+ unread|No new messages)$"));
+            await Assertions.Expect(messages.Locator(".tl-main")).ToHaveTextAsync(new Regex(@"^(\d+ unread|No new notifications)$"));
 
             // No big numbers; every tile has the header — the name beside the icon, the status under it.
             await Assertions.Expect(page.Locator("fb-hub-view .tl-big")).ToHaveCountAsync(0);
             foreach (var (key, name) in new[] { ("builtin:notes", "Notes"), ("builtin:todos", "Todos"), ("builtin:calendar", "Calendar"),
-                ("builtin:contacts", "Contacts"), ("builtin:files", "Files"), ("builtin:messages", "Messages") })
+                ("builtin:contacts", "Contacts"), ("builtin:files", "Files"), ("builtin:messages", "Notifications") })
                 await AssertHeaderAsync(Tile(page, key), name);
             // Every band is as tall, with one status line or two: the lists start at one height.
             var starts = new List<double>();
@@ -542,9 +542,23 @@ public class DesktopLiveTilesTests
             foreach (var (key, name) in new[] { ("builtin:notes", "Notes"), ("builtin:todos", "Todos"), ("builtin:calendar", "Calendar") })
             {
                 await AssertHeaderAsync(Tile(page, key), name);
-                var gap = await Tile(page, key).EvaluateAsync<double>(
-                    "el => el.querySelector('.tl-items').getBoundingClientRect().top - el.querySelector(':scope > sac-icon').getBoundingClientRect().bottom");
-                Assert.InRange(gap, 16, 48);
+                // One inset on every side: the icon as far from the top as from
+                // the side, the band's edge that far below the 48px block, the
+                // list that far below the band's edge.
+                var m = await Tile(page, key).EvaluateAsync<JsonElement>(@"el => {
+                    const t = el.getBoundingClientRect(), i = el.querySelector(':scope > sac-icon').getBoundingClientRect();
+                    // The corner's pair: the visible top of the '+' and the visible
+                    // right end of the dots (the 18px glyphs' empty space taken off).
+                    const k = 18 / 24, plus = el.querySelector('.tl-new sac-icon').getBoundingClientRect();
+                    const dots = el.querySelector('.tile-menu-btn sac-icon').getBoundingClientRect();
+                    return { left: i.left - t.left, top: i.top - t.top, gap: el.querySelector('.tl-items').getBoundingClientRect().top - i.bottom,
+                             plusTop: plus.top + 4 * k - t.top, dotsRight: t.right - (dots.right - 3 * k) };
+                }");
+                var inset = m.GetProperty("left").GetDouble();
+                Assert.True(Math.Abs(m.GetProperty("top").GetDouble() - inset) < 1.5, $"{key}: icon {m.GetProperty("top").GetDouble()}px from the top, {inset}px from the side");
+                Assert.True(Math.Abs(m.GetProperty("gap").GetDouble() - 2 * (inset - 1)) < 3, $"{key}: the list starts {m.GetProperty("gap").GetDouble()}px under the icon, not two insets ({inset})");
+                Assert.True(Math.Abs(m.GetProperty("plusTop").GetDouble() - inset) < 1.5, $"{key}: the '+' starts {m.GetProperty("plusTop").GetDouble()}px from the top, not {inset}");
+                Assert.True(Math.Abs(m.GetProperty("dotsRight").GetDouble() - inset) < 1.5, $"{key}: the dots end {m.GetProperty("dotsRight").GetDouble()}px from the right, not {inset}");
             }
 
             // The window changes: still filled and faded at every width...

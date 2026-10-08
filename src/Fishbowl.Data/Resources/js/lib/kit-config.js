@@ -22,7 +22,20 @@
             '<ellipse cx="10" cy="12" rx="7" ry="4"/><path d="M17 12l4-3v6z"/>' +
             '<circle cx="6" cy="11" r="1" fill="currentColor"/><path d="M7 14q1 0.6 2 0"/>');
     }
-    // The system inbox's envelope; the kit ships no mail icon yet.
+    // Notifications (the system inbox) ring a bell; the kit ships none.
+    if (!sac.icons.has("fb-bell")) {
+        sac.icons.register("fb-bell",
+            '<path d="M10.268 21a2 2 0 0 0 3.464 0"/>' +
+            '<path d="M3.262 15.326A1 1 0 0 0 4 17h16a1 1 0 0 0 .74-1.673C19.41 13.956 18 12.499 18 8A6 6 0 0 0 6 8c0 4.499-1.411 5.956-2.738 7.326"/>');
+    }
+    // A mail's direction (the Mail app): in comes down-left, out goes up-right.
+    if (!sac.icons.has("fb-mail-in")) {
+        sac.icons.register("fb-mail-in", '<path d="M17 7 7 17"/><path d="M17 17H7V7"/>');
+    }
+    if (!sac.icons.has("fb-mail-out")) {
+        sac.icons.register("fb-mail-out", '<path d="M7 7h10v10"/><path d="M7 17 17 7"/>');
+    }
+    // An envelope is mail; the kit ships no mail icon yet.
     if (!sac.icons.has("mail")) {
         sac.icons.register("mail",
             '<rect x="2" y="4" width="20" height="16" rx="2"/><path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"/>');

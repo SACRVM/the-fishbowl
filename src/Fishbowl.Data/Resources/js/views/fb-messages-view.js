@@ -1,5 +1,6 @@
 /**
- * Messages (a window app, fb.windowApps "messages"): the system inbox.
+ * Notifications (a window app, fb.windowApps "messages" — the system inbox;
+ * its code and API keep the name messages).
  *
  * What the system tells you — not chat. Today: "someone wants to join"
  * (admins, with Approve / Reject / Block right in the row) and "your
@@ -36,7 +37,7 @@ class FbMessagesView extends HTMLElement {
                 fb-messages-view .msg-actions { flex-wrap: wrap; margin-top: 10px; }
             </style>
             <header><div>
-                <h1>${fb.t("fb.messages.title", "Messages")}</h1>
+                <h1>${fb.t("fb.messages.title", "Notifications")}</h1>
                 <p class="subtitle">${fb.t("fb.messages.subtitle", "What this Fishbowl has to tell you.")}</p>
             </div></header>
             <div class="fb-block" id="messages-body"><p class="muted">${fb.t("fb.common.loading", "Loading…")}</p></div>
@@ -51,7 +52,7 @@ class FbMessagesView extends HTMLElement {
             data = await fb.api.messages.list();
         } catch (err) {
             console.warn("[fb-messages-view] load failed:", err?.status);
-            mount.innerHTML = `<p class="muted">${fb.t("fb.messages.load-failed", "Messages can't be loaded right now.")}</p>`;
+            mount.innerHTML = `<p class="muted">${fb.t("fb.messages.load-failed", "Notifications can't be loaded right now.")}</p>`;
             return;
         }
         const items = data?.items || [];
@@ -59,8 +60,8 @@ class FbMessagesView extends HTMLElement {
         if (!items.length) {
             mount.innerHTML = `
                 <div class="empty-state">
-                    <sac-icon name="mail"></sac-icon>
-                    <h3>${fb.t("fb.messages.empty", "No messages")}</h3>
+                    <sac-icon name="fb-bell"></sac-icon>
+                    <h3>${fb.t("fb.messages.empty", "No notifications")}</h3>
                 </div>`;
             return;
         }

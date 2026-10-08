@@ -193,8 +193,7 @@ class FbHubView extends HTMLElement {
                     display: flex;
                     align-items: center;
                     justify-content: center;
-                    font-size: 1.1rem;
-                    line-height: 1;
+                    --icon-size: 18px;
                     color: var(--text-dim);
                     background: none;
                     border: none;
@@ -213,6 +212,11 @@ class FbHubView extends HTMLElement {
                     opacity: 1;
                     outline: 2px solid var(--accent);
                     outline-offset: 1px;
+                }
+                /* No hover on touch: the buttons that wait for one stay shown. */
+                @media (hover: none) {
+                    fb-hub-view .tile-menu-btn,
+                    fb-hub-view .tile.has-live > .tl-new { opacity: 1; }
                 }
 
                 /* SACRVM Desktop's origin line (.tile-meta), desktop.css. */
@@ -341,12 +345,18 @@ class FbHubView extends HTMLElement {
                     fb-hub-view .tile.has-live {
                         display: grid;
                         grid-template-columns: auto minmax(0, 1fr) auto auto;
-                        /* Row 3 is kept with one status line or two, so neighbouring
-                           bands end on one line. */
-                        grid-template-rows: auto auto minmax(calc(0.85rem * 1.35), auto) minmax(0, 1fr);
-                        --tl-pad: 2rem;               /* the kit's tile padding */
-                        --tl-head: 1.1rem;            /* the band's inset above and below */
-                        padding-top: var(--tl-head);
+                        /* The name and the two status lines are exactly the icon's
+                           48px, so the band's content is one square-cornered block:
+                           the band's edge as far below it as the tile's top is
+                           above it. Row 3 is kept with one status line or two, so
+                           neighbouring bands end on one line. */
+                        grid-template-rows: 20px 14px 14px minmax(0, 1fr);
+                        /* ONE inset, every side: the tile is square, so its content
+                           sits as far from the top as from the sides — the grid's
+                           own gap (1.5rem, 21px). The band's lower edge and the
+                           list below keep the same distance. */
+                        --tl-pad: 1.5rem;
+                        padding: var(--tl-pad);
                         justify-content: stretch;
                         align-content: stretch;
                     }
@@ -354,7 +364,7 @@ class FbHubView extends HTMLElement {
                         content: "";
                         grid-column: 1 / -1;
                         grid-row: 1 / 4;
-                        margin: calc(-1 * var(--tl-head)) calc(-1 * var(--tl-pad));
+                        margin: calc(-1 * var(--tl-pad));
                         background: var(--field);
                         border-bottom: 1px solid var(--border);
                         z-index: -1;
@@ -363,28 +373,45 @@ class FbHubView extends HTMLElement {
                     fb-hub-view .tile.has-live .tile-body.is-live,
                     fb-hub-view .tile.has-live .tile-live,
                     fb-hub-view .tile.has-live .tl-status { display: contents; }
-                    fb-hub-view .tile.has-live > sac-icon { grid-column: 1; grid-row: 1 / 4; margin: 0 1rem 0 0; align-self: center; }
-                    fb-hub-view .tile.has-live .tl-status > h2 { grid-column: 2; grid-row: 1; align-self: center; }
-                    fb-hub-view .tile.has-live .tl-main { grid-column: 2 / -1; grid-row: 2; }
-                    fb-hub-view .tile.has-live .tl-sub { grid-column: 2 / -1; grid-row: 3; }
-                    fb-hub-view .tile.has-live > .tl-new { grid-column: 3; grid-row: 1; align-self: center; margin-left: 0.5rem; color: var(--accent); }
-                    fb-hub-view .tile.has-live > .tile-menu { position: static; grid-column: 4; grid-row: 1; align-self: center; margin-left: 0.15rem; }
-                    fb-hub-view .tile.has-live .tl-items,
-                    fb-hub-view .tile.has-live .tl-empty { grid-column: 1 / -1; grid-row: 4; margin-top: calc(var(--tl-head) + 0.9rem); min-height: 0; overflow: hidden; }
-                    fb-hub-view .tile.has-live .tl-empty { align-self: start; }
-                    /* One status line: the band keeps its three-line height (row 3
-                       stays), so the name, the line and the buttons move down half
-                       a line — the text sits on the icon's centre line too. */
-                    fb-hub-view .tile.has-live:not(:has(.tl-sub)) .tl-status > h2,
-                    fb-hub-view .tile.has-live:not(:has(.tl-sub)) .tl-main,
-                    fb-hub-view .tile.has-live:not(:has(.tl-sub)) > .tl-new,
-                    fb-hub-view .tile.has-live:not(:has(.tl-sub)) > .tile-menu {
-                        position: relative;
-                        top: calc(0.85rem * 1.35 / 2);
+                    /* Top-aligned, the name beside it: the icon's top is as far
+                       from the tile's top as its left is from the side. */
+                    fb-hub-view .tile.has-live > sac-icon { grid-column: 1; grid-row: 1 / 4; margin: 0 1rem 0 0; align-self: start; }
+                    fb-hub-view .tile.has-live .tl-status > h2 { grid-column: 2; grid-row: 1; align-self: center; margin: 0; line-height: 20px; }
+                    fb-hub-view .tile.has-live .tl-main { grid-column: 2 / -1; grid-row: 2; line-height: 14px; }
+                    fb-hub-view .tile.has-live .tl-sub { grid-column: 2 / -1; grid-row: 3; line-height: 14px; }
+                    /* "+" and "⋯" are one pair in the band's top-right corner: the
+                       same 28px box side by side, pulled out by their own empty
+                       space — 8px up (the button's 5 + the "+" glyph's 3), 7px
+                       right (5 + the dots' 2) — so what you see starts on the
+                       inset line, like the icon in the other corner. The dots
+                       sit on the "+"'s centre line in EVERY tile, with a "+" or
+                       without one, so the corner looks the same everywhere. Like
+                       the menu, the "+" waits for the tile's hover. */
+                    fb-hub-view .tile.has-live > .tl-new {
+                        grid-column: 3; grid-row: 1; align-self: start; margin: -8px 0 0 0.5rem;
+                        width: 28px; height: 28px; min-width: 0; min-height: 0; padding: 0;
+                        --icon-size: 18px; color: var(--accent);
+                        opacity: 0; transition: opacity 0.15s var(--ease-smooth), background 0.15s var(--ease-smooth);
                     }
-                }
-                @media (max-width: 768px) {
-                    fb-hub-view .tile.has-live { --tl-pad: 1.5rem; }
+                    fb-hub-view .tile.has-live:hover > .tl-new,
+                    fb-hub-view .tile.has-live:focus-within > .tl-new { opacity: 1; }
+                    /* SACRVM Desktop's menu is placed with top/right; in the band
+                       it is a grid cell — no offsets. */
+                    fb-hub-view .tile.has-live > .tile-menu {
+                        position: static; top: auto; right: auto;
+                        grid-column: 4; grid-row: 1; align-self: start; margin: -8px -7px 0 2px;
+                    }
+                    /* One status line: the text (name + one line, 34px) sits on
+                       the icon's centre line — half a status row down — inside the
+                       same 48px block, so the band itself doesn't move. */
+                    fb-hub-view .tile.has-live:not(:has(.tl-sub)) .tl-status > h2,
+                    fb-hub-view .tile.has-live:not(:has(.tl-sub)) .tl-main {
+                        position: relative;
+                        top: 7px;
+                    }
+                    fb-hub-view .tile.has-live .tl-items,
+                    fb-hub-view .tile.has-live .tl-empty { grid-column: 1 / -1; grid-row: 4; margin-top: calc(2 * var(--tl-pad)); min-height: 0; overflow: hidden; }
+                    fb-hub-view .tile.has-live .tl-empty { align-self: start; }
                 }
                 /* A tile with a height to fill (the kit's square tiles — fb-hub-view
                    marks them [data-fill]): the list runs on into the bottom
@@ -887,7 +914,8 @@ class FbHubView extends HTMLElement {
         trigger.className = "tile-menu-btn";
         trigger.title = fb.t("fb.desk.options", "{name} options", { name: e.name });
         trigger.setAttribute("aria-label", trigger.title);
-        trigger.textContent = "⋯";          // midline horizontal ellipsis
+        // The kit's icon, not a text "⋯": a glyph sits wherever the font puts it.
+        trigger.innerHTML = '<sac-icon name="more"></sac-icon>';
         menu.appendChild(trigger);
 
         const item = (action, label) => {

@@ -20,7 +20,7 @@
 (function () {
     // width/height in px, capped to the viewport.
     const APPS = {
-        messages: { tag: "fb-messages-view",        key: "fb.messages.title",    title: "Messages", w: 720,  h: 640 },
+        messages: { tag: "fb-messages-view",        key: "fb.messages.title",    title: "Notifications", w: 720,  h: 640 },
         trash:    { tag: "fb-trash-view",           key: "fb.trash.title",       title: "Trash",    w: 820,  h: 680 },
         spaces:   { tag: "fb-spaces-settings-view", key: "fb.spaces.title",      title: "Spaces",   w: 860,  h: 720 },
         apps:     { tag: "fb-apps-settings-view",   key: "fb.apps.page-title",   title: "Apps",     w: 820,  h: 680 },

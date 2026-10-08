@@ -466,9 +466,10 @@ class FbContactsView extends HTMLElement {
         const id = this.selectedId;
         let data;
         try { data = await this.api.links(id); } catch { return; }
+        const threads = await this.mailWith(this.byId(id));
         if (id !== this.selectedId) return;
         const box = this.querySelector("#cv-links");
-        if (!box || (!data.people?.length && !data.links?.length)) { if (box) box.replaceChildren(); return; }
+        if (!box || (!data.people?.length && !data.links?.length && !threads.length)) { if (box) box.replaceChildren(); return; }
         const t = (k, f) => this.t(k, f);
         // One row: an icon, a name, a muted line, and the chevron that says "opens".
         const row = (tag, icon, name, sub) => {
@@ -509,6 +510,34 @@ class FbContactsView extends HTMLElement {
             }
             box.append(head, list);
         }
+        // The latest conversations with this person: a click opens it in Mail.
+        if (threads.length) {
+            const head = document.createElement("sac-section");
+            head.setAttribute("title", t("mail", "Mail"));
+            const list = document.createElement("div");
+            list.className = "cv-link-list";
+            for (const th of threads) {
+                const el = row("button", th.latestDirection === "out" ? "fb-mail-out" : "fb-mail-in",
+                    th.subject || fb.t("fb.mail.no-subject", "(no subject)"),
+                    [fb.format.date(new Date(th.latestAt)), th.count > 1 ? this.t("mail-count", "{n} messages", { n: th.count }) : null].filter(Boolean).join(" · "));
+                el.addEventListener("click", () => fb.desktop.go("mail", "open", th.threadId));
+                list.appendChild(el);
+            }
+            box.append(head, list);
+        }
+    }
+
+    /** The five latest conversations with any of the contact's addresses. */
+    async mailWith(c) {
+        const addresses = (c?.emails || []).map((e) => e.value).filter(Boolean).slice(0, 5);
+        if (!addresses.length) return [];
+        try {
+            const mail = fb.api.mail.in(fb.api.workspace());
+            const lists = await Promise.all(addresses.map((address) => mail.threads({ address, limit: 5 }).catch(() => [])));
+            const seen = new Set();
+            return lists.flat().filter((th) => !seen.has(th.threadId) && seen.add(th.threadId))
+                .sort((a, b) => new Date(b.latestAt) - new Date(a.latestAt)).slice(0, 5);
+        } catch { return []; }
     }
 
     // ------------------------------------------------------------ save --

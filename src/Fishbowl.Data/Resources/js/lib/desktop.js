@@ -40,10 +40,11 @@
         { key: "builtin:todos",    hash: "#/todos",       name: "Todos",    icon: "check",    desc: "Fast to-dos, always at hand.", size: "medium" },
         { key: "builtin:calendar", hash: "#/calendar",    name: "Calendar", icon: "calendar", desc: "Events and reminders, yours.", size: "medium" },
         { key: "builtin:contacts", hash: "#/contacts",    name: "Contacts", icon: "contacts", desc: "People and organisations.", size: "medium" },
+        { key: "builtin:mail",     hash: "#/mail",        name: "Mail",     icon: "mail",     desc: "Every mailbox in one list.", size: "medium" },
         { key: "builtin:files",    hash: "#/files",       name: "Files",    icon: "folder",   desc: "Real files, two panes, any workspace." },
         { key: "builtin:tables",   hash: "#/tables",      name: "Tables",   icon: "grid",     desc: "This space's own tables, like a spreadsheet.", space: true },
         // Window apps (fb.windowApps): `open`, no address.
-        { key: "builtin:messages", route: "messages", open: () => fb.windowApps.open("messages"), name: "Messages", icon: "mail",  desc: "What Fishbowl has to tell you." },
+        { key: "builtin:messages", route: "messages", open: () => fb.windowApps.open("messages"), name: "Notifications", icon: "fb-bell",  desc: "What Fishbowl has to tell you." },
         { key: "builtin:trash",    route: "trash", open: () => fb.windowApps.open("trash"),    name: "Trash",    icon: "trash", desc: "Deleted things, back with one click." },
         { key: "builtin:apps",     route: "apps", open: () => fb.windowApps.open("apps"),     name: "Apps",     icon: "cube",  desc: "The apps installed on this desktop." },
         { key: "builtin:spaces",   route: "spaces", open: () => fb.windowApps.open("spaces"),   name: "Spaces",   icon: "layers", desc: "Shared workspaces and who is in them.", personal: true },

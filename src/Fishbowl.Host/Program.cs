@@ -172,6 +172,25 @@ builder.Services.AddScoped<ITagRepository, TagRepository>();
 builder.Services.AddScoped<INoteRepository, NoteRepository>();
 builder.Services.AddScoped<ITodoRepository, TodoRepository>();
 builder.Services.AddScoped<IContactRepository, ContactRepository>();
+// Mail (spec 2026-10-07-mail-design): the password key, the "sync now"
+// requests and the IMAP connector are one per host; the repository, the
+// syncer and the server helper per scope.
+// One key cache per host: its own system repository (stateless over the
+// singleton DatabaseFactory) — ISystemRepository is scoped.
+builder.Services.AddSingleton(sp => new Fishbowl.Data.Mail.MailCredentials(new SystemRepository(sp.GetRequiredService<DatabaseFactory>())));
+builder.Services.AddSingleton<Fishbowl.Data.Mail.MailSyncQueue>();
+builder.Services.AddSingleton<Fishbowl.Mail.Sync.ImapMailboxConnector>();
+// The UI tests' sample mail server for "*.test" hosts — behind the same double
+// gate as the test sign-in below; never anywhere else.
+if (builder.Environment.IsEnvironment("Testing")
+    && !string.IsNullOrEmpty(Environment.GetEnvironmentVariable("FISHBOWL_PLAYWRIGHT_TEST")))
+    builder.Services.AddSingleton<Fishbowl.Mail.Sync.IMailboxConnector, Fishbowl.Host.Testing.SampleMailboxConnector>();
+else
+    builder.Services.AddSingleton<Fishbowl.Mail.Sync.IMailboxConnector>(sp => sp.GetRequiredService<Fishbowl.Mail.Sync.ImapMailboxConnector>());
+builder.Services.AddScoped<Fishbowl.Data.Mail.MailRepository>();
+builder.Services.AddScoped<IMailRepository>(sp => sp.GetRequiredService<Fishbowl.Data.Mail.MailRepository>());
+builder.Services.AddScoped<Fishbowl.Data.Mail.MailSyncer>();
+builder.Services.AddScoped<Fishbowl.Data.Mail.MailServer>();
 builder.Services.AddScoped<IEventRepository, EventRepository>();
 builder.Services.AddScoped<ISpaceRepository, SpaceRepository>();
 builder.Services.AddScoped<ISpaceInviteRepository, SpaceInviteRepository>();
@@ -234,6 +253,8 @@ builder.Services.AddScoped<IMcpTool, ListPendingTool>();
 builder.Services.AddScoped<IMcpTool, ListContactsTool>();
 builder.Services.AddScoped<IMcpTool, FindContactTool>();
 builder.Services.AddScoped<IMcpTool, ListEventsTool>();
+builder.Services.AddScoped<IMcpTool, Fishbowl.Mcp.Tools.Mail.MailSearchTool>();
+builder.Services.AddScoped<IMcpTool, Fishbowl.Mcp.Tools.Mail.MailThreadTool>();
 // Space tables (space-apps spec, phase 3).
 builder.Services.AddScoped<IMcpTool, Fishbowl.Mcp.Tools.Tables.TableListTool>();
 builder.Services.AddScoped<IMcpTool, Fishbowl.Mcp.Tools.Apps.AppErrorsTool>();
@@ -914,6 +935,7 @@ app.MapTagsApi();
 app.MapTodoApi();
 app.MapContactsApi();
 app.MapContactToolsApi();
+app.MapMailApi();
 app.MapEventToolsApi();
 app.MapEventsApi();
 app.MapSpacesApi();

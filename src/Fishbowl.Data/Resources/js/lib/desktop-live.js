@@ -336,6 +336,27 @@
             },
         },
 
+        "builtin:mail": {
+            async load(ws) {
+                const api = fb.api.mail.in(ws);
+                const [count, threads] = await Promise.all([api.unreadCount(), api.threads({ limit: 30 })]);
+                return { unread: Number(count?.unread) || 0, threads: Array.isArray(threads) ? threads : [] };
+            },
+            present({ unread, threads }, now) {
+                // Unread first, then newest.
+                const sorted = [...threads].sort((a, b) => (b.unread > 0) - (a.unread > 0) || new Date(b.latestAt) - new Date(a.latestAt));
+                const who = (th) => th.participants.map((p) => p.name || p.address.split("@")[0]).slice(0, 2).join(", ");
+                return {
+                    main: unread > 0 ? t("fb.desk.live.n-unread", "{n} unread", { n: unread }) : t("fb.desk.live.no-mail", "No new mail"),
+                    items: sorted.slice(0, MAX_ITEMS).map((th) => ({
+                        text: [who(th), th.subject || t("fb.mail.no-subject", "(no subject)")].filter(Boolean).join(" — "),
+                        tail: ago(th.latestAt, now),
+                    })),
+                    empty: t("fb.desk.live.no-mail-list", "Nothing here"),
+                };
+            },
+        },
+
         "builtin:messages": {
             async load() {
                 const [count, list] = await Promise.all([fb.api.messages.unreadCount(), fb.api.messages.list()]);
@@ -346,7 +367,7 @@
                 const sorted = [...messages].sort((a, b) => (a.readAt ? 1 : 0) - (b.readAt ? 1 : 0)
                     || new Date(b.createdAt) - new Date(a.createdAt));
                 return {
-                    main: unread > 0 ? t("fb.desk.live.n-unread", "{n} unread", { n: unread }) : t("fb.desk.live.no-messages", "No new messages"),
+                    main: unread > 0 ? t("fb.desk.live.n-unread", "{n} unread", { n: unread }) : t("fb.desk.live.no-messages", "No new notifications"),
                     items: sorted.map((m) => ({ text: fb.accounts.messageText(m).text, tail: ago(m.createdAt, now) }))
                         .filter((row) => row.text).slice(0, MAX_ITEMS),
                 };

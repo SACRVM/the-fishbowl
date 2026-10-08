@@ -22,6 +22,8 @@ public static class ServiceCollectionExtensions
         services.AddHostedService<DailyDigestDispatcher>();
         // Needs IFileService (registered by the host).
         services.AddHostedService<FilesMaintenanceService>();
+        // Needs the mail services (registered by the host).
+        services.AddHostedService<MailSyncService>();
         return services;
     }
 }

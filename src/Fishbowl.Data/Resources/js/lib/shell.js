@@ -61,6 +61,7 @@
                 const btn = document.createElement("button");
                 btn.type = "button";
                 btn.className = "nav-icon-btn" + (item.active ? " active" : "");
+                if (item.id) btn.id = item.id;
                 btn.title = item.title || "";
                 btn.setAttribute("aria-label", item.title || item.icon || "");
                 btn.disabled = !!item.disabled;
@@ -303,8 +304,8 @@
     labelSearch();
     searchBtn.addEventListener("click", () => sac.palette?.open());
 
-    // --- Messages ----------------------------------------------------------
-    // The envelope opens the Messages window; its badge is the unread count, kept fresh
+    // --- Notifications (internally: messages) -------------------------------
+    // The bell opens the Notifications window; its badge is the unread count, kept fresh
     // on every change (fb.api fires fb:messages-changed), on navigation and
     // once a minute (an admin sees a new request without reloading).
     const messagesBtn = document.getElementById("fb-messages-btn");
@@ -322,10 +323,10 @@
                 messagesBtn.appendChild(badge);
             }
             badge.textContent = n > 99 ? "99+" : String(n);
-            messagesBtn.title = fb.t("fb.shell.messages-unread", "Messages — {n} unread", { n });
+            messagesBtn.title = fb.t("fb.shell.messages-unread", "Notifications — {n} unread", { n });
         } else {
             badge?.remove();
-            messagesBtn.title = fb.t("fb.shell.messages", "Messages");
+            messagesBtn.title = fb.t("fb.shell.messages", "Notifications");
         }
         messagesBtn.setAttribute("aria-label", messagesBtn.title);
     }

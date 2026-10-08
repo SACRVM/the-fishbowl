@@ -39,6 +39,16 @@ public static class ScopeCatalog
     // over the Files API. Space keys only; needs the owner's Designer role.
     public const string DesignApps = "design:apps";
 
+    // Mail (mail spec, decision 18). read: threads, messages, attachments;
+    // write: organise — tags, read/unread, archive, delete, expiry, rules,
+    // drafts. Sending is its own scope, never part of an access level: a key
+    // that reads mail and sends it can be steered by a crafted mail into
+    // forwarding data, so the person ticks it on purpose. Adding accounts
+    // stays cookie-only.
+    public const string ReadMail = "read:mail";
+    public const string WriteMail = "write:mail";
+    public const string SendMail = "send:mail";
+
     private static readonly HashSet<string> _all = new(StringComparer.Ordinal)
     {
         ReadNotes, WriteNotes,
@@ -49,6 +59,7 @@ public static class ScopeCatalog
         ReadFiles, WriteFiles,
         ReadTables, WriteTables, DesignTables,
         DesignApps,
+        ReadMail, WriteMail, SendMail,
     };
 
     public static IReadOnlyCollection<string> All => _all;

@@ -50,6 +50,7 @@
     <script defer src="/js/lib/format.js"></script>
     <script defer src="/js/lib/files-store.js"></script>
     <script defer src="/js/lib/accounts.js"></script>
+    <script defer src="/js/lib/mail-accounts.js"></script>
     <script defer src="/js/lib/desktop.js"></script>
     <script defer src="/js/lib/desktop-live.js"></script>
     <script defer src="/js/lib/desktop-apps.js"></script>
@@ -122,6 +123,7 @@
     <script defer src="/js/views/fb-notes-view.js"></script>
     <script defer src="/js/views/fb-todos-view.js"></script>
     <script defer src="/js/views/fb-contacts-view.js"></script>
+    <script defer src="/js/views/fb-mail-view.js"></script>
     <script defer src="/js/views/fb-calendar-view.js"></script>
     <script defer src="/js/views/fb-files-view.js"></script>
     <script defer src="/js/views/fb-spaces-settings-view.js"></script>
@@ -159,8 +161,8 @@
         <!-- System messages: the envelope + unread count, shown once /me
              loaded. Outside fb.toolbar, so per-view repaints never drop it. -->
         <button slot="toolbar" class="nav-icon-btn has-badge" id="fb-messages-btn"
-                aria-label="Messages" title="Messages" hidden>
-            <sac-icon name="mail"></sac-icon>
+                aria-label="Notifications" title="Notifications" hidden>
+            <sac-icon name="fb-bell"></sac-icon>
         </button>
         <!-- Account menu. When the ribbon runs out of room (a phone), the kit
              folds it into the "…" menu as a group; sac:select still fires here. -->

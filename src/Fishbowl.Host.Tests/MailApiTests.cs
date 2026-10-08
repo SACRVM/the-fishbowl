@@ -1,0 +1,580 @@
+using System.Net;
+using System.Net.Http.Headers;
+using System.Net.Http.Json;
+using System.Text;
+using System.Text.Json;
+using Dapper;
+using Fishbowl.Core;
+using Fishbowl.Core.Models;
+using Fishbowl.Data;
+using Fishbowl.Data.Repositories;
+using Fishbowl.Host.Testing;
+using Fishbowl.Mail.Sync;
+using Fishbowl.Scheduler;
+using Microsoft.AspNetCore.Authentication;
+using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.AspNetCore.TestHost;
+using Microsoft.Data.Sqlite;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
+using Xunit;
+
+namespace Fishbowl.Host.Tests;
+
+// The mail HTTP API (both workspaces, the three access levels) and the MCP
+// mail tools, against the in-memory sample mail server. Two hosts share one
+// data dir: one with the test sign-in (cookie users), one with the real
+// Bearer pipeline.
+public class MailApiTests : IClassFixture<WebApplicationFactory<Program>>, IDisposable
+{
+    private readonly WebApplicationFactory<Program> _cookie;
+    private readonly WebApplicationFactory<Program> _bearer;
+    private readonly DatabaseFactory _db;
+    private readonly ApiKeyRepository _keys;
+    private readonly string _dataDir;
+
+    private const string Owner = "mail_owner";
+    private const string Reader = "mail_reader";
+    private const string Member = "mail_member";
+    private const string Admin = "mail_admin";
+    private const string Outsider = "mail_outsider";
+    private const string Pw = SampleMailboxConnector.Password;
+
+    private static CancellationToken Ct => TestContext.Current.CancellationToken;
+
+    public MailApiTests(WebApplicationFactory<Program> factory)
+    {
+        _dataDir = Path.Combine(Path.GetTempPath(), "fishbowl_mail_api_" + Path.GetRandomFileName());
+        Directory.CreateDirectory(_dataDir);
+        _db = new DatabaseFactory(_dataDir);
+        _keys = new ApiKeyRepository(_db);
+        using (var db = _db.CreateSystemConnection())
+        {
+            var now = DateTime.UtcNow.ToString("o");
+            db.Execute("INSERT OR IGNORE INTO users(id, name, email, created_at) VALUES (@id, @n, @e, @now)",
+                new[] { Owner, Reader, Member, Admin, Outsider }.Select(id => new { id, n = "Name " + id, e = id + "@example.com", now }));
+        }
+        var testDb = _db;
+        void Common(IWebHostBuilder builder, bool testAuth)
+        {
+            builder.UseEnvironment("Testing");
+            builder.ConfigureTestServices(services =>
+            {
+                var d = services.SingleOrDefault(x => x.ServiceType == typeof(DatabaseFactory));
+                if (d != null) services.Remove(d);
+                services.AddSingleton<DatabaseFactory>(testDb);
+                foreach (var c in services.Where(x => x.ServiceType == typeof(IMailboxConnector)).ToList()) services.Remove(c);
+                services.AddSingleton<IMailboxConnector>(new SampleMailboxConnector(new ImapMailboxConnector()));
+                if (testAuth)
+                    services.AddAuthentication(o =>
+                    {
+                        o.DefaultAuthenticateScheme = TestAuthHandler.AuthenticationScheme;
+                        o.DefaultChallengeScheme = TestAuthHandler.AuthenticationScheme;
+                        o.DefaultScheme = TestAuthHandler.AuthenticationScheme;
+                    })
+                    .AddScheme<AuthenticationSchemeOptions, TestAuthHandler>(TestAuthHandler.AuthenticationScheme, _ => { });
+            });
+        }
+        _cookie = factory.WithWebHostBuilder(b => Common(b, true));
+        _bearer = factory.WithWebHostBuilder(b => Common(b, false));
+        _ = SyncService; // stops the background loop before any test adds an account
+    }
+
+    public void Dispose()
+    {
+        SqliteConnection.ClearAllPools();
+        try { Directory.Delete(_dataDir, true); } catch { }
+    }
+
+    // ---- helpers ----
+
+    private HttpClient As(string user)
+    {
+        var c = _cookie.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false, HandleCookies = false });
+        c.DefaultRequestHeaders.Add(TestAuthHandler.UserIdHeader, user);
+        return c;
+    }
+
+    private async Task<HttpClient> KeyAsync(string userId, ContextRef ctx, params string[] scopes)
+    {
+        var issued = await _keys.IssueAsync(userId, ctx, "mail-test", scopes, Ct);
+        var c = _bearer.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false, HandleCookies = false });
+        c.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", issued.RawToken);
+        return c;
+    }
+
+    private HttpClient Fresh()
+    {
+        var id = "mail_u" + Guid.NewGuid().ToString("N")[..10];
+        using (var db = _db.CreateSystemConnection())
+            db.Execute("INSERT INTO users(id, name, email, created_at) VALUES (@id, 'F', @e, @now)",
+                new { id, e = id + "@example.com", now = DateTime.UtcNow.ToString("o") });
+        return As(id);
+    }
+
+    private static string NewAddress() => $"pw-{Guid.NewGuid():N}@fishbowl.test";
+
+    private static async Task<JsonElement> Json(HttpResponseMessage r) =>
+        JsonDocument.Parse(await r.Content.ReadAsStringAsync(Ct)).RootElement;
+
+    private static async Task<string?> ErrorOf(HttpResponseMessage r) =>
+        (await Json(r)).TryGetProperty("error", out var e) ? e.GetString() : null;
+
+    private static object AccountBody(string address, string password = Pw, string? provider = "custom") => new
+    {
+        provider,
+        address,
+        password,
+        imapHost = "imap.fishbowl.test",
+        smtpHost = "smtp.fishbowl.test",
+    };
+
+    private async Task<string> AddAccountAsync(HttpClient c, string basePath, string? address = null)
+    {
+        var r = await c.PostAsJsonAsync(basePath + "/accounts", AccountBody(address ?? NewAddress()), Ct);
+        Assert.Equal(HttpStatusCode.Created, r.StatusCode);
+        return (await Json(r)).GetProperty("id").GetString()!;
+    }
+
+    // The background loop is stopped: a "sync now" request would wake it to run beside the
+    // passes this class drives itself (two passes on one account race on the message keys).
+    private MailSyncService SyncService
+    {
+        get
+        {
+            var service = _cookie.Services.GetServices<IHostedService>().OfType<MailSyncService>().Single();
+            if (!_stopped)
+            {
+                _stopped = true;
+                service.StopAsync(CancellationToken.None).GetAwaiter().GetResult();
+            }
+            return service;
+        }
+    }
+    private bool _stopped;
+
+    /// <summary>Runs sync passes until the account is ok with its history read.</summary>
+    private async Task SyncUntilDoneAsync(HttpClient c, string basePath, string accountId)
+    {
+        var last = "";
+        for (var i = 0; i < 25; i++)
+        {
+            await SyncService.RunOnceAsync(Ct);
+            var accounts = await Json(await c.GetAsync(basePath + "/accounts", Ct));
+            var a = accounts.EnumerateArray().Single(x => x.GetProperty("id").GetString() == accountId);
+            last = a.ToString();
+            if (a.GetProperty("state").GetString() == "ok" && a.GetProperty("backfillDone").GetBoolean()) return;
+        }
+        Assert.Fail("account never finished syncing: " + last);
+    }
+
+    private async Task<string> SyncedAccountAsync(HttpClient c, string basePath, string? address = null)
+    {
+        var id = await AddAccountAsync(c, basePath, address);
+        await SyncUntilDoneAsync(c, basePath, id);
+        return id;
+    }
+
+    private static async Task<List<JsonElement>> Threads(HttpClient c, string basePath, string query = "")
+    {
+        var r = await c.GetAsync(basePath + "/threads" + query, Ct);
+        Assert.Equal(HttpStatusCode.OK, r.StatusCode);
+        return (await Json(r)).EnumerateArray().Select(e => e.Clone()).ToList();
+    }
+
+    private static string ThreadIdOf(IEnumerable<JsonElement> threads, string subject) =>
+        threads.Single(t => t.GetProperty("subject").GetString() == subject).GetProperty("threadId").GetString()!;
+
+    private static async Task<List<JsonElement>> Messages(HttpClient c, string basePath, string threadId)
+    {
+        var r = await c.GetAsync($"{basePath}/threads/{threadId}", Ct);
+        Assert.Equal(HttpStatusCode.OK, r.StatusCode);
+        return (await Json(r)).EnumerateArray().Select(e => e.Clone()).ToList();
+    }
+
+    private const string P = "/api/v1/mail";
+
+    // ---- 1. accounts and threads ----
+
+    [Fact]
+    public async Task Account_Add_ReturnsNoSecret_AndSyncFillsTheList()
+    {
+        var c = Fresh();
+        var address = NewAddress();
+        var add = await c.PostAsJsonAsync(P + "/accounts", AccountBody(address), Ct);
+        Assert.Equal(HttpStatusCode.Created, add.StatusCode);
+        var raw = await add.Content.ReadAsStringAsync(Ct);
+        Assert.DoesNotContain(Pw, raw);
+        Assert.DoesNotContain("secret", raw, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("password", raw, StringComparison.OrdinalIgnoreCase);
+        var id = JsonDocument.Parse(raw).RootElement.GetProperty("id").GetString()!;
+
+        await SyncUntilDoneAsync(c, P, id);
+
+        var listRaw = await (await c.GetAsync(P + "/accounts", Ct)).Content.ReadAsStringAsync(Ct);
+        Assert.DoesNotContain(Pw, listRaw);
+        Assert.DoesNotContain("secret", listRaw, StringComparison.OrdinalIgnoreCase);
+
+        var threads = await Threads(c, P);
+        Assert.Equal(3, threads.Count);
+        Assert.Contains(threads, t => t.GetProperty("subject").GetString() == "Analytical engine notes");
+
+        var archived = await Threads(c, P, "?archived=true");
+        Assert.Contains(archived, t => t.GetProperty("subject").GetString() == "Old project");
+        Assert.True(archived.Count >= 31);
+        Assert.DoesNotContain(archived, t => t.GetProperty("subject").GetString() == "Analytical engine notes");
+
+        var found = await Threads(c, P, "?q=variables");
+        Assert.Single(found);
+        Assert.Equal("Analytical engine notes", found[0].GetProperty("subject").GetString());
+
+        var unread = await Threads(c, P, "?unread=true");
+        Assert.Equal(2, unread.Count);
+        Assert.Contains(unread, t => t.GetProperty("subject").GetString() == "Analytical engine notes");
+        Assert.Contains(unread, t => t.GetProperty("subject").GetString() == "This week in engines");
+    }
+
+    [Fact]
+    public async Task Thread_ReturnsMessagesOldestFirst_WithHtmlFlags_ButNoHtmlBody()
+    {
+        var c = Fresh();
+        await SyncedAccountAsync(c, P);
+        var threads = await Threads(c, P);
+
+        var msgs = await Messages(c, P, ThreadIdOf(threads, "Analytical engine notes"));
+        Assert.Equal(3, msgs.Count);
+        Assert.Equal(new[] { "in", "out", "in" }, msgs.Select(m => m.GetProperty("direction").GetString()));
+        Assert.Equal(msgs.OrderBy(m => m.GetProperty("sentAt").GetDateTime()).Select(m => m.GetProperty("id").GetString()),
+            msgs.Select(m => m.GetProperty("id").GetString()));
+        Assert.Contains("operations cards", msgs[0].GetProperty("bodyText").GetString());
+        Assert.All(msgs, m => Assert.False(m.TryGetProperty("bodyHtml", out _)));
+        Assert.All(msgs, m => Assert.False(m.GetProperty("hasHtml").GetBoolean()));
+
+        var news = await Messages(c, P, ThreadIdOf(threads, "This week in engines"));
+        Assert.True(news[0].GetProperty("hasHtml").GetBoolean());
+        Assert.True(news[0].GetProperty("remoteImages").GetBoolean());
+        Assert.False(news[0].TryGetProperty("bodyHtml", out _));
+    }
+
+    // ---- 2. errors ----
+
+    [Fact]
+    public async Task AddAccount_Errors()
+    {
+        var c = As(Owner);
+
+        var wrongPw = await c.PostAsJsonAsync(P + "/accounts", AccountBody(NewAddress(), "nope"), Ct);
+        Assert.Equal(HttpStatusCode.BadRequest, wrongPw.StatusCode);
+        Assert.Equal("mail_auth_failed", await ErrorOf(wrongPw));
+
+        var badAddress = await c.PostAsJsonAsync(P + "/accounts", AccountBody("not-an-address"), Ct);
+        Assert.Equal(HttpStatusCode.BadRequest, badAddress.StatusCode);
+        Assert.Equal("invalid_address", await ErrorOf(badAddress));
+
+        var badProvider = await c.PostAsJsonAsync(P + "/accounts", AccountBody(NewAddress(), Pw, "aol"), Ct);
+        Assert.Equal(HttpStatusCode.BadRequest, badProvider.StatusCode);
+        Assert.Equal("invalid_provider", await ErrorOf(badProvider));
+    }
+
+    [Fact]
+    public async Task AddAccount_EleventhIsRefused()
+    {
+        const string user = "mail_many";
+        using (var db = _db.CreateSystemConnection())
+            db.Execute("INSERT OR IGNORE INTO users(id, name, email, created_at) VALUES (@id, 'Many', 'many@example.com', @now)",
+                new { id = user, now = DateTime.UtcNow.ToString("o") });
+        var c = As(user);
+        for (var i = 0; i < 10; i++) await AddAccountAsync(c, P);
+        var eleventh = await c.PostAsJsonAsync(P + "/accounts", AccountBody(NewAddress()), Ct);
+        Assert.Equal(HttpStatusCode.BadRequest, eleventh.StatusCode);
+        Assert.Equal("too_many_accounts", await ErrorOf(eleventh));
+    }
+
+    [Fact]
+    public async Task Tags_Invalid_IsRefused()
+    {
+        var c = Fresh();
+        await SyncedAccountAsync(c, P);
+        var id = ThreadIdOf(await Threads(c, P), "Your invoice");
+        var r = await c.PutAsJsonAsync($"{P}/threads/{id}/tags", new { tags = new[] { "has space" } }, Ct);
+        Assert.Equal(HttpStatusCode.BadRequest, r.StatusCode);
+        Assert.Equal("invalid_tag", await ErrorOf(r));
+    }
+
+    // ---- 3. HTML page ----
+
+    [Fact]
+    public async Task Html_IsSandboxed_ImagesOnlyOnRequest()
+    {
+        var c = Fresh();
+        await SyncedAccountAsync(c, P);
+        var threads = await Threads(c, P);
+        var msgId = (await Messages(c, P, ThreadIdOf(threads, "This week in engines")))[0].GetProperty("id").GetString();
+
+        var plain = await c.GetAsync($"{P}/messages/{msgId}/html", Ct);
+        Assert.Equal(HttpStatusCode.OK, plain.StatusCode);
+        var csp = string.Join(";", plain.Headers.GetValues("Content-Security-Policy"));
+        Assert.Contains("sandbox", csp);
+        Assert.DoesNotContain("allow-scripts", csp);
+        Assert.Contains("img-src data:", csp);
+        Assert.DoesNotContain("https:", csp);
+        Assert.Equal("nosniff", plain.Headers.GetValues("X-Content-Type-Options").Single());
+        Assert.Contains("Engines everywhere", await plain.Content.ReadAsStringAsync(Ct));
+
+        var withImages = await c.GetAsync($"{P}/messages/{msgId}/html?images=true", Ct);
+        var csp2 = string.Join(";", withImages.Headers.GetValues("Content-Security-Policy"));
+        Assert.Contains("img-src data: https:", csp2);
+        Assert.DoesNotContain("allow-scripts", csp2);
+        Assert.Equal("nosniff", withImages.Headers.GetValues("X-Content-Type-Options").Single());
+    }
+
+    [Fact]
+    public async Task Html_OfATextOnlyMessage_Is404()
+    {
+        var c = Fresh();
+        await SyncedAccountAsync(c, P);
+        var msgId = (await Messages(c, P, ThreadIdOf(await Threads(c, P), "Your invoice")))[0].GetProperty("id").GetString();
+        Assert.Equal(HttpStatusCode.NotFound, (await c.GetAsync($"{P}/messages/{msgId}/html", Ct)).StatusCode);
+    }
+
+    // ---- 4. attachment ----
+
+    [Fact]
+    public async Task Attachment_IsDownloadedAsAttachment_WithItsName()
+    {
+        var c = Fresh();
+        await SyncedAccountAsync(c, P);
+        var msgId = (await Messages(c, P, ThreadIdOf(await Threads(c, P), "Your invoice")))[0].GetProperty("id").GetString();
+
+        var r = await c.GetAsync($"{P}/messages/{msgId}/attachments/0", Ct);
+        Assert.Equal(HttpStatusCode.OK, r.StatusCode);
+        var bytes = await r.Content.ReadAsByteArrayAsync(Ct);
+        Assert.StartsWith("%PDF", Encoding.ASCII.GetString(bytes));
+        Assert.Equal("attachment", r.Content.Headers.ContentDisposition?.DispositionType);
+        Assert.Equal("invoice.pdf", r.Content.Headers.ContentDisposition?.FileName?.Trim('"'));
+        Assert.Equal("nosniff", r.Headers.GetValues("X-Content-Type-Options").Single());
+
+        Assert.Equal(HttpStatusCode.NotFound, (await c.GetAsync($"{P}/messages/{msgId}/attachments/5", Ct)).StatusCode);
+    }
+
+    // ---- 5. tags ----
+
+    [Fact]
+    public async Task Tags_AreNormalised_ListedInTheWorkspace_AndFilter()
+    {
+        var c = Fresh();
+        await SyncedAccountAsync(c, P);
+        var threads = await Threads(c, P);
+        var id = ThreadIdOf(threads, "Your invoice");
+
+        var r = await c.PutAsJsonAsync($"{P}/threads/{id}/tags", new { tags = new[] { "Bills" } }, Ct);
+        Assert.Equal(HttpStatusCode.OK, r.StatusCode);
+        Assert.Equal(new[] { "bills" }, (await Json(r)).GetProperty("tags").EnumerateArray().Select(x => x.GetString()));
+
+        var tags = await (await c.GetAsync("/api/v1/tags", Ct)).Content.ReadAsStringAsync(Ct);
+        Assert.Contains("bills", tags);
+
+        var filtered = await Threads(c, P, "?tag=bills");
+        Assert.Single(filtered);
+        Assert.Equal(id, filtered[0].GetProperty("threadId").GetString());
+        Assert.Equal("bills", filtered[0].GetProperty("tags")[0].GetString());
+    }
+
+    // ---- 6. seen ----
+
+    [Fact]
+    public async Task Seen_DropsUnreadCount_AndTheServerKeepsIt()
+    {
+        var c = Fresh();
+        var accountId = await SyncedAccountAsync(c, P);
+        var id = ThreadIdOf(await Threads(c, P), "Analytical engine notes");
+        var before = (await Json(await c.GetAsync(P + "/unread-count", Ct))).GetProperty("unread").GetInt32();
+        Assert.Equal(2, before);
+
+        var r = await c.PostAsJsonAsync($"{P}/threads/{id}/seen", new { seen = true }, Ct);
+        Assert.Equal(HttpStatusCode.OK, r.StatusCode);
+        Assert.Equal(1, (await Json(await c.GetAsync(P + "/unread-count", Ct))).GetProperty("unread").GetInt32());
+
+        // The write-back to the server runs in the background; a later sync reads the server's flags.
+        await Task.Delay(1500, Ct);
+        Assert.Equal(HttpStatusCode.Accepted, (await c.PostAsync($"{P}/accounts/{accountId}/sync", null, Ct)).StatusCode);
+        await SyncService.RunOnceAsync(Ct);
+        Assert.Equal(1, (await Json(await c.GetAsync(P + "/unread-count", Ct))).GetProperty("unread").GetInt32());
+        var thread = (await Threads(c, P)).Single(t => t.GetProperty("threadId").GetString() == id);
+        Assert.Equal(0, thread.GetProperty("unread").GetInt32());
+    }
+
+    // ---- 7. space roles ----
+
+    private async Task<(Space Space, string Base)> SpaceAsync()
+    {
+        var repo = new SpaceRepository(_db);
+        var space = await repo.CreateAsync(Owner, "Mail " + Guid.NewGuid().ToString("N")[..6], Ct);
+        await repo.AddMemberAsync(space.Id, Admin, SpaceRole.Admin, Ct);
+        await repo.AddMemberAsync(space.Id, Member, SpaceRole.Member, Ct);
+        await repo.AddMemberAsync(space.Id, Reader, SpaceRole.Reader, Ct);
+        return (space, $"/api/v1/spaces/{space.Slug}/mail");
+    }
+
+    [Fact]
+    public async Task Space_Roles_ReaderReads_MemberOrganises_AdminManages()
+    {
+        var (space, sp) = await SpaceAsync();
+        var owner = As(Owner);
+        var accountId = await SyncedAccountAsync(owner, sp);
+        var threads = await Threads(owner, sp);
+        Assert.Equal(3, threads.Count);
+        var id = ThreadIdOf(threads, "Your invoice");
+
+        // Reader: reads, nothing else.
+        var reader = As(Reader);
+        Assert.Equal(3, (await Threads(reader, sp)).Count);
+        Assert.Equal(HttpStatusCode.OK, (await reader.GetAsync(sp + "/accounts", Ct)).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await reader.GetAsync(sp + "/unread-count", Ct)).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await reader.PutAsJsonAsync($"{sp}/threads/{id}/tags", new { tags = new[] { "x" } }, Ct)).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await reader.PostAsJsonAsync($"{sp}/threads/{id}/seen", new { seen = true }, Ct)).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await reader.PostAsync($"{sp}/accounts/{accountId}/sync", null, Ct)).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await reader.PostAsJsonAsync(sp + "/accounts", AccountBody(NewAddress()), Ct)).StatusCode);
+
+        // Member: organises, doesn't manage.
+        var member = As(Member);
+        Assert.Equal(HttpStatusCode.OK, (await member.PutAsJsonAsync($"{sp}/threads/{id}/tags", new { tags = new[] { "shared" } }, Ct)).StatusCode);
+        Assert.Equal(HttpStatusCode.Accepted, (await member.PostAsync($"{sp}/accounts/{accountId}/sync", null, Ct)).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await member.PostAsJsonAsync(sp + "/accounts", AccountBody(NewAddress()), Ct)).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await member.DeleteAsync($"{sp}/accounts/{accountId}", Ct)).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await member.PatchAsJsonAsync($"{sp}/accounts/{accountId}", new { name = "x" }, Ct)).StatusCode);
+
+        // Admin manages.
+        var admin = As(Admin);
+        Assert.Equal(HttpStatusCode.Created, (await admin.PostAsJsonAsync(sp + "/accounts", AccountBody(NewAddress()), Ct)).StatusCode);
+
+        // The personal workspace stays out of it.
+        Assert.Empty(await Threads(As(Owner), P));
+
+        // Not a member.
+        var outsider = As(Outsider);
+        var denied = (await outsider.GetAsync(sp + "/threads", Ct)).StatusCode;
+        Assert.True(denied is HttpStatusCode.Forbidden or HttpStatusCode.NotFound, $"got {denied}");
+        denied = (await outsider.PostAsJsonAsync(sp + "/accounts", AccountBody(NewAddress()), Ct)).StatusCode;
+        Assert.True(denied is HttpStatusCode.Forbidden or HttpStatusCode.NotFound, $"got {denied}");
+    }
+
+    // ---- 8. Bearer keys ----
+
+    [Fact]
+    public async Task Bearer_ReadScope_Reads_ButNothingElse()
+    {
+        const string user = "mail_bearer";
+        using (var db = _db.CreateSystemConnection())
+            db.Execute("INSERT OR IGNORE INTO users(id, name, email, created_at) VALUES (@id, 'B', 'b@example.com', @now)",
+                new { id = user, now = DateTime.UtcNow.ToString("o") });
+        var cookie = As(user);
+        var accountId = await SyncedAccountAsync(cookie, P);
+        var id = ThreadIdOf(await Threads(cookie, P), "Your invoice");
+
+        var read = await KeyAsync(user, ContextRef.User(user), "read:mail");
+        Assert.Equal(3, (await Threads(read, P)).Count);
+        Assert.Equal(HttpStatusCode.OK, (await read.GetAsync(P + "/accounts", Ct)).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await read.PutAsJsonAsync($"{P}/threads/{id}/tags", new { tags = new[] { "x" } }, Ct)).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await read.PostAsJsonAsync($"{P}/threads/{id}/seen", new { seen = true }, Ct)).StatusCode);
+
+        var noMail = await KeyAsync(user, ContextRef.User(user), "read:notes");
+        Assert.Equal(HttpStatusCode.Forbidden, (await noMail.GetAsync(P + "/threads", Ct)).StatusCode);
+
+        // Writing scope organises, but accounts are cookie-only for any Bearer.
+        var write = await KeyAsync(user, ContextRef.User(user), "read:mail", "write:mail");
+        Assert.Equal(HttpStatusCode.OK, (await write.PutAsJsonAsync($"{P}/threads/{id}/tags", new { tags = new[] { "x" } }, Ct)).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await write.PostAsJsonAsync(P + "/accounts", AccountBody(NewAddress()), Ct)).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await write.PatchAsJsonAsync($"{P}/accounts/{accountId}", new { name = "x" }, Ct)).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await write.DeleteAsync($"{P}/accounts/{accountId}", Ct)).StatusCode);
+    }
+
+    [Fact]
+    public async Task Bearer_SpaceKey_OnPersonalRoute_Is403()
+    {
+        var (space, _) = await SpaceAsync();
+        var spaceKey = await KeyAsync(Owner, ContextRef.Space(space.Slug), "read:mail", "write:mail");
+        Assert.Equal(HttpStatusCode.Forbidden, (await spaceKey.GetAsync(P + "/threads", Ct)).StatusCode);
+    }
+
+    // ---- 9. MCP ----
+
+    private static async Task<JsonElement> RpcAsync(HttpClient c, string method, object? args = null, string? tool = null)
+    {
+        var body = tool is null
+            ? (object)new { jsonrpc = "2.0", id = 1, method }
+            : new { jsonrpc = "2.0", id = 1, method, @params = new { name = tool, arguments = args ?? new { } } };
+        var r = await c.PostAsync("/mcp", new StringContent(JsonSerializer.Serialize(body), Encoding.UTF8, "application/json"), Ct);
+        r.EnsureSuccessStatusCode();
+        return await Json(r);
+    }
+
+    private static JsonElement ToolPayload(JsonElement rpc)
+    {
+        var text = rpc.GetProperty("result").GetProperty("content")[0].GetProperty("text").GetString()!;
+        return JsonDocument.Parse(text).RootElement;
+    }
+
+    [Fact]
+    public async Task Mcp_MailTools_AreListed_Untrusted_AndScoped()
+    {
+        const string user = "mail_mcp";
+        using (var db = _db.CreateSystemConnection())
+            db.Execute("INSERT OR IGNORE INTO users(id, name, email, created_at) VALUES (@id, 'M', 'm@example.com', @now)",
+                new { id = user, now = DateTime.UtcNow.ToString("o") });
+        await SyncedAccountAsync(As(user), P);
+
+        var key = await KeyAsync(user, ContextRef.User(user), "read:mail");
+        var list = await RpcAsync(key, "tools/list");
+        var names = list.GetProperty("result").GetProperty("tools").EnumerateArray().Select(t => t.GetProperty("name").GetString()).ToHashSet();
+        Assert.Contains("mail_search", names);
+        Assert.Contains("mail_thread", names);
+
+        var search = ToolPayload(await RpcAsync(key, "tools/call", new { query = "engine" }, "mail_search"));
+        Assert.True(search.GetProperty("untrusted").GetBoolean());
+        var conversations = search.GetProperty("conversations").EnumerateArray().ToList();
+        Assert.Contains(conversations, c => c.GetProperty("subject").GetString() == "Analytical engine notes");
+        var threadId = conversations.Single(c => c.GetProperty("subject").GetString() == "Analytical engine notes").GetProperty("threadId").GetString();
+
+        var thread = ToolPayload(await RpcAsync(key, "tools/call", new { threadId }, "mail_thread"));
+        Assert.True(thread.GetProperty("untrusted").GetBoolean());
+        var messages = thread.GetProperty("messages").EnumerateArray().ToList();
+        Assert.Equal(3, messages.Count);
+        Assert.Contains("operations cards", messages[0].GetProperty("text").GetString());
+        Assert.Equal("in", messages[0].GetProperty("direction").GetString());
+
+        // Without read:mail the tools are refused like any scope-less tool.
+        var noMail = await KeyAsync(user, ContextRef.User(user), "read:notes");
+        foreach (var (tool, args) in new (string, object)[] { ("mail_search", new { }), ("mail_thread", new { threadId }) })
+        {
+            var err = (await RpcAsync(noMail, "tools/call", args, tool)).GetProperty("error");
+            Assert.Equal(-32602, err.GetProperty("code").GetInt32());
+            Assert.Contains("Scope denied", err.GetProperty("message").GetString() ?? "");
+        }
+    }
+
+    // ---- 10. delete ----
+
+    [Fact]
+    public async Task Account_Delete_RemovesItsThreads_NotTheOthers()
+    {
+        var c = Fresh();
+        var first = await SyncedAccountAsync(c, P);
+        var second = await SyncedAccountAsync(c, P);
+        // The sample accounts carry the same Message-Ids, so the conversations are shared.
+        Assert.Equal(3, (await Threads(c, P)).Count);
+
+        Assert.Equal(HttpStatusCode.NoContent, (await c.DeleteAsync($"{P}/accounts/{first}", Ct)).StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, (await c.DeleteAsync($"{P}/accounts/{first}", Ct)).StatusCode);
+        var accounts = (await Json(await c.GetAsync(P + "/accounts", Ct))).EnumerateArray().ToList();
+        Assert.Single(accounts);
+        Assert.Equal(second, accounts[0].GetProperty("id").GetString());
+        Assert.True(accounts[0].GetProperty("messageCount").GetInt32() > 0);
+        Assert.Equal(3, (await Threads(c, P)).Count);
+
+        Assert.Equal(HttpStatusCode.NoContent, (await c.DeleteAsync($"{P}/accounts/{second}", Ct)).StatusCode);
+        Assert.Empty(await Threads(c, P));
+        Assert.Empty(await Threads(c, P, "?archived=true"));
+    }
+}

@@ -510,7 +510,115 @@ public class DatabaseFactory
             ApplyUserV21(connection);
             connection.Execute("PRAGMA user_version = 21");
             _logger.LogInformation("Applied user schema v21 to {DbPath}", ((SqliteConnection)connection).DataSource);
+            version = 21;
         }
+
+        if (version < 22)
+        {
+            ApplyUserV22(connection);
+            connection.Execute("PRAGMA user_version = 22");
+            _logger.LogInformation("Applied user schema v22 to {DbPath}", ((SqliteConnection)connection).DataSource);
+        }
+    }
+
+    // Mail (spec 2026-10-07-mail-design): a workspace's accounts — the
+    // password encrypted with the instance's Mail:CredentialKey — each synced
+    // folder's state, one message per account and Message-ID with the places
+    // it lies on the server (mail_locations), the references and addresses
+    // threads and contacts are found by, and mail_fts (rowid = the message's).
+    private static void ApplyUserV22(IDbConnection connection)
+    {
+        connection.Execute(@"
+            CREATE TABLE IF NOT EXISTS mail_accounts (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                address TEXT NOT NULL,
+                display_name TEXT,
+                aliases TEXT,
+                provider TEXT NOT NULL,
+                username TEXT NOT NULL,
+                secret BLOB NOT NULL,
+                imap_host TEXT NOT NULL,
+                imap_port INTEGER NOT NULL,
+                imap_security TEXT NOT NULL,
+                smtp_host TEXT NOT NULL,
+                smtp_port INTEGER NOT NULL,
+                smtp_security TEXT NOT NULL,
+                state TEXT NOT NULL DEFAULT 'new',
+                last_error TEXT,
+                last_sync_at TEXT,
+                backfill_done INTEGER NOT NULL DEFAULT 0,
+                created_by TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS mail_folders (
+                account_id TEXT NOT NULL,
+                role TEXT NOT NULL,
+                name TEXT NOT NULL,
+                uid_validity INTEGER NOT NULL,
+                uid_next INTEGER NOT NULL,
+                highest_modseq INTEGER,
+                backfill_below INTEGER NOT NULL,
+                PRIMARY KEY (account_id, role)
+            );
+            CREATE TABLE IF NOT EXISTS mail_messages (
+                id TEXT PRIMARY KEY,
+                account_id TEXT NOT NULL,
+                message_key TEXT NOT NULL,
+                thread_id TEXT NOT NULL,
+                in_reply_to TEXT,
+                refs TEXT,
+                direction TEXT NOT NULL,
+                state TEXT NOT NULL,
+                from_name TEXT,
+                from_address TEXT,
+                to_list TEXT,
+                cc_list TEXT,
+                bcc_list TEXT,
+                reply_to TEXT,
+                subject TEXT,
+                subject_key TEXT,
+                sent_at TEXT NOT NULL,
+                snippet TEXT,
+                body_text TEXT,
+                body_html TEXT,
+                attachments TEXT,
+                size INTEGER,
+                seen INTEGER NOT NULL DEFAULT 0,
+                flagged INTEGER NOT NULL DEFAULT 0,
+                tags TEXT,
+                list_id TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                UNIQUE (account_id, message_key)
+            );
+            CREATE INDEX IF NOT EXISTS ix_mail_messages_thread ON mail_messages(thread_id, sent_at);
+            CREATE INDEX IF NOT EXISTS ix_mail_messages_sent ON mail_messages(sent_at DESC);
+            CREATE INDEX IF NOT EXISTS ix_mail_messages_key ON mail_messages(message_key);
+            CREATE INDEX IF NOT EXISTS ix_mail_messages_subject ON mail_messages(subject_key, sent_at);
+            CREATE TABLE IF NOT EXISTS mail_locations (
+                message_id TEXT NOT NULL,
+                account_id TEXT NOT NULL,
+                role TEXT NOT NULL,
+                uid INTEGER NOT NULL,
+                PRIMARY KEY (account_id, role, uid)
+            );
+            CREATE INDEX IF NOT EXISTS ix_mail_locations_message ON mail_locations(message_id);
+            CREATE TABLE IF NOT EXISTS mail_refs (
+                message_id TEXT NOT NULL,
+                ref TEXT NOT NULL,
+                PRIMARY KEY (message_id, ref)
+            );
+            CREATE INDEX IF NOT EXISTS ix_mail_refs_ref ON mail_refs(ref);
+            CREATE TABLE IF NOT EXISTS mail_addresses (
+                message_id TEXT NOT NULL,
+                address TEXT NOT NULL,
+                field TEXT NOT NULL,
+                PRIMARY KEY (message_id, address, field)
+            );
+            CREATE INDEX IF NOT EXISTS ix_mail_addresses_address ON mail_addresses(address);
+            CREATE VIRTUAL TABLE IF NOT EXISTS mail_fts USING fts5(subject, people, body);");
     }
 
     // Every event, todo and contact gets an iCalendar / vCard UID (sync spec,

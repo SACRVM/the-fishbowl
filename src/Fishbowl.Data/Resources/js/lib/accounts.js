@@ -438,8 +438,14 @@
                     text: fb.t("fb.messages.quota", "Your storage is almost full: {used} of {quota}.", { used: gb(d.usedBytes), quota: gb(d.quotaBytes) }),
                 };
             }
+            case "mail.account-failed":
+                return {
+                    icon: "warn",
+                    text: fb.t("fb.messages.mail-failed", "The mail account “{name}” stopped syncing: {why}",
+                        { name: d.name || "", why: fb.mailAccounts?.errorText(d.error) || "" }),
+                };
             default:
-                return { icon: "info", text: fb.t("fb.messages.unknown", "A message this version can't show yet.") };
+                return { icon: "info", text: fb.t("fb.messages.unknown", "A notification this version can't show yet.") };
         }
     }
 

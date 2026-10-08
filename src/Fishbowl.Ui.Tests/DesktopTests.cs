@@ -163,7 +163,7 @@ public class DesktopTests
             await Assertions.Expect(Cell(page, "builtin:messages").Locator("p").First).ToBeHiddenAsync();
             // Its name under the icon (the kit's small tile hides it).
             var label = Cell(page, "builtin:messages").Locator("h2");
-            await Assertions.Expect(label).ToHaveTextAsync("Messages");
+            await Assertions.Expect(label).ToHaveTextAsync("Notifications");
             await Assertions.Expect(label).ToBeVisibleAsync();
             var labelBox = (await label.BoundingBoxAsync())!;
             var iconBox = (await Cell(page, "builtin:messages").Locator(":scope > sac-icon").BoundingBoxAsync())!;

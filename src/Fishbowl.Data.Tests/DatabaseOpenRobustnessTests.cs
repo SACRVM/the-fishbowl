@@ -31,7 +31,7 @@ public class DatabaseOpenRobustnessTests : IDisposable
 
         var watch = Stopwatch.StartNew();
         using (var reader = factory.CreateContextConnection(ctx))
-            Assert.Equal(21, reader.ExecuteScalar<long>("PRAGMA user_version"));
+            Assert.Equal(22, reader.ExecuteScalar<long>("PRAGMA user_version"));
         // A write on open would wait for the lock (30 s) and then fail.
         Assert.True(watch.Elapsed < TimeSpan.FromSeconds(5), $"open took {watch.Elapsed}");
         tx.Rollback();
@@ -74,7 +74,7 @@ public class DatabaseOpenRobustnessTests : IDisposable
         SqliteConnection.ClearAllPools();
 
         using var reopened = new DatabaseFactory(_dataDir).CreateContextConnection(ctx);
-        Assert.Equal(21, reopened.ExecuteScalar<long>("PRAGMA user_version"));
+        Assert.Equal(22, reopened.ExecuteScalar<long>("PRAGMA user_version"));
         Assert.Equal(42.5, reopened.ExecuteScalar<double>("SELECT position FROM todos WHERE id = 't1'"));
     }
 

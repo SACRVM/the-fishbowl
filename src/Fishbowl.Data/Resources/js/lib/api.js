@@ -324,6 +324,37 @@
     const contacts = contactsIn(null);
     contacts.in = contactsIn;
 
+    // Mail (MailApi): the workspace's accounts and the synced conversations.
+    // Adding / changing / removing an account is cookie-only and, in a
+    // space, for its Admins.
+    function mailIn(ws) {
+        const p = (path) => wsPath(ws, path);
+        const id = encodeURIComponent;
+        return {
+            accounts:      ()          => request(p("/mail/accounts")),
+            addAccount:    (body)      => request(p("/mail/accounts"), { method: "POST", body: JSON.stringify(body) }),
+            updateAccount: (aid, body) => request(p(`/mail/accounts/${id(aid)}`), { method: "PATCH", body: JSON.stringify(body) }),
+            removeAccount: (aid)       => request(p(`/mail/accounts/${id(aid)}`), { method: "DELETE" }),
+            sync:          (aid)       => request(p(`/mail/accounts/${id(aid)}/sync`), { method: "POST" }),
+            // { q, account, tag, unread, archived, address, before, limit }
+            threads: (opts = {}) => {
+                const qs = new URLSearchParams();
+                for (const [k, v] of Object.entries(opts)) if (v != null && v !== "" && v !== false) qs.set(k, String(v));
+                const s = qs.toString();
+                return request(p("/mail/threads") + (s ? `?${s}` : ""));
+            },
+            thread:  (tid)         => request(p(`/mail/threads/${id(tid)}`)),
+            setTags: (tid, tags)   => request(p(`/mail/threads/${id(tid)}/tags`), { method: "PUT", body: JSON.stringify({ tags }) }),
+            setSeen: (tid, seen)   => request(p(`/mail/threads/${id(tid)}/seen`), { method: "POST", body: JSON.stringify({ seen }) }),
+            unreadCount: ()        => request(p("/mail/unread-count")),
+            attachmentUrl: (mid, index) => `${base}${p(`/mail/messages/${id(mid)}/attachments/${index}`)}`,
+            // The HTML body as a sandboxed page of its own (MailApi): no script,
+            // nothing remote unless `images`.
+            htmlUrl: (mid, images) => `${base}${p(`/mail/messages/${id(mid)}/html`)}${images ? "?images=true" : ""}`,
+        };
+    }
+    const mail = { ...mailIn(null), in: mailIn };
+
     // Events list accepts { from, to } as a chronological range — maps to
     // the server's half-open [from, to) query. Both must be Date-ish
     // (Date or ISO-8601 string).
@@ -593,6 +624,7 @@
         appTiles,
         appMessage,
         contacts,
+        mail,
         events,
         // The active workspace as the .in() calls name it: "personal" | "space:<slug>".
         workspace: currentWorkspace,

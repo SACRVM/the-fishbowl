@@ -27,6 +27,7 @@ public static class TrashSnapshots
             [TrashKinds.Todo] = ("todos", "title"),
             [TrashKinds.Event] = ("events", "title"),
             [TrashKinds.Contact] = ("contacts", "name"),
+            [TrashKinds.Mail] = ("mail_messages", "subject"),
         };
 
     public static async Task TakeAsync(
@@ -188,6 +189,10 @@ public class TrashRepository : ITrashRepository
                     // emails and phones, the organisation's name, the rest).
                     await ContactRepository.ReindexAsync(db, tx, item.ItemId, token);
                 }
+
+                // A mail message: its references, addresses and full-text row.
+                if (item.Kind == TrashKinds.Mail)
+                    await Fishbowl.Data.Mail.MailRepository.ReindexRestoredAsync(db, tx, item.ItemId, token);
 
                 await db.ExecuteAsync(new CommandDefinition(
                     "DELETE FROM trash WHERE id = @id", new { id }, transaction: tx, cancellationToken: token));

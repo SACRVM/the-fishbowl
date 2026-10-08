@@ -11,8 +11,9 @@ window.sac?.i18n?.add?.("de", {
     "fb.route.notes": "Notizen",
     "fb.route.todos": "Aufgaben",
     "fb.route.contacts": "Kontakte",
+    "fb.route.mail": "Mail",
     "fb.route.tables": "Tabellen",
-    "fb.route.messages": "Nachrichten",
+    "fb.route.messages": "Benachrichtigungen",
     "fb.route.trash": "Papierkorb",
     "fb.route.apps": "Apps",
     "fb.route.spaces": "Spaces",
@@ -41,8 +42,8 @@ window.sac?.i18n?.add?.("de", {
     "fb.shell.no-spaces": "Noch keine Spaces",
     "fb.shell.manage-spaces": "Spaces verwalten…",
     "fb.shell.search": "Suche und Befehle ({key})",
-    "fb.shell.messages": "Nachrichten",
-    "fb.shell.messages-unread": "Nachrichten — {n} ungelesen",
+    "fb.shell.messages": "Benachrichtigungen",
+    "fb.shell.messages-unread": "Benachrichtigungen — {n} ungelesen",
 
     // --- Profile window -----------------------------------------------------
     "fb.profile.title": "Profil",
@@ -72,6 +73,8 @@ window.sac?.i18n?.add?.("de", {
     "fb.app.calendar.desc": "Termine und Erinnerungen, ganz deine.",
     "fb.app.contacts.name": "Kontakte",
     "fb.app.contacts.desc": "Personen und Organisationen.",
+    "fb.app.mail.name": "Mail",
+    "fb.app.mail.desc": "Alle Postfächer in einer Liste.",
     "fb.app.files.name": "Dateien",
     "fb.app.files.desc": "Echte Dateien, zwei Spalten, jeder Arbeitsbereich.",
     "fb.app.trash.name": "Papierkorb",
@@ -86,7 +89,7 @@ window.sac?.i18n?.add?.("de", {
     "fb.app.tables.name": "Tabellen",
     "fb.app.tables.desc": "Die eigenen Tabellen dieses Space, wie eine Tabellenkalkulation.",
     "fb.app.trash.desc": "Gelöschtes, mit einem Klick zurück.",
-    "fb.app.messages.name": "Nachrichten",
+    "fb.app.messages.name": "Benachrichtigungen",
     "fb.app.messages.desc": "Was Fishbowl dir zu sagen hat.",
     "fb.app.users.name": "Benutzer",
     "fb.app.users.desc": "Konten freigeben und verwalten.",
@@ -136,7 +139,9 @@ window.sac?.i18n?.add?.("de", {
     "fb.desk.live.n-birthdays-1": "1 Geburtstag in 30 Tagen",
     "fb.desk.live.n-birthdays": "{n} Geburtstage in 30 Tagen",
     "fb.desk.live.n-unread": "{n} ungelesen",
-    "fb.desk.live.no-messages": "Keine neuen Nachrichten",
+    "fb.desk.live.no-messages": "Keine neuen Benachrichtigungen",
+    "fb.desk.live.no-mail": "Keine neue Mail",
+    "fb.desk.live.no-mail-list": "Nichts da",
 
     // --- Command palette ------------------------------------------------------
     "fb.palette.apps": "Apps",
@@ -202,10 +207,10 @@ window.sac?.i18n?.add?.("de", {
     "fb.apps.remove-failed": "{name} konnte nicht entfernt werden",
 
     // --- Messages -------------------------------------------------------------
-    "fb.messages.title": "Nachrichten",
+    "fb.messages.title": "Benachrichtigungen",
     "fb.messages.subtitle": "Was dieses Fishbowl dir zu sagen hat.",
-    "fb.messages.load-failed": "Die Nachrichten können gerade nicht geladen werden.",
-    "fb.messages.empty": "Keine Nachrichten",
+    "fb.messages.load-failed": "Die Benachrichtigungen können gerade nicht geladen werden.",
+    "fb.messages.empty": "Keine Benachrichtigungen",
     "fb.messages.someone": "Jemand",
     "fb.messages.wants-to-join": "{who} möchte diesem Fishbowl beitreten.",
     "fb.messages.approved": "freigegeben",
@@ -230,7 +235,8 @@ window.sac?.i18n?.add?.("de", {
     "fb.messages.joined-by-invite": "{who} ist über eine Space-Einladung zu diesem Fishbowl dazugekommen.",
     "fb.messages.quota": "Dein Speicher ist fast voll: {used} von {quota}.",
     "fb.messages.see-data": "Deine Daten ansehen",
-    "fb.messages.unknown": "Eine Nachricht, die diese Version noch nicht anzeigen kann.",
+    "fb.messages.unknown": "Eine Benachrichtigung, die diese Version noch nicht anzeigen kann.",
+    "fb.messages.mail-failed": "Das Mail-Konto „{name}“ wird nicht mehr abgeglichen: {why}",
     "fb.messages.mark-read": "Als gelesen markieren",
 
     // --- Accounts: the request actions (Messages, Users) ----------------------

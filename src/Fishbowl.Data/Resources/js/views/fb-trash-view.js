@@ -85,10 +85,11 @@ class FbTrashView extends HTMLElement {
     }
 
     row(item) {
-        const icons = { note: "note", todo: "check", event: "calendar", contact: "user", row: "grid", table: "grid", file: "document", folder: "folder" };
+        const icons = { note: "note", todo: "check", event: "calendar", contact: "user", mail: "mail", row: "grid", table: "grid", file: "document", folder: "folder" };
         const kinds = {
             note: fb.t("fb.trash.kind-note", "Note"), todo: fb.t("fb.trash.kind-todo", "Todo"),
             event: fb.t("fb.trash.kind-event", "Event"), contact: fb.t("fb.trash.kind-contact", "Contact"),
+            mail: fb.t("fb.trash.kind-mail", "Mail"),
             row: fb.t("fb.trash.kind-row", "Row"), table: fb.t("fb.trash.kind-table", "Table"),
             file: fb.t("fb.trash.kind-file", "File"), folder: fb.t("fb.trash.kind-folder", "Folder"),
         };

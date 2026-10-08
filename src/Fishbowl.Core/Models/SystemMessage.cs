@@ -47,4 +47,10 @@ public static class MessageKinds
     // text, from (the user whose session sent it) } — the app's text is the
     // one thing here that isn't an id; the server sets everything else.
     public const string AppMessage = "app.message";
+
+    // To whoever added a mail account: its sync stopped working (sign-in
+    // refused, server unreachable, …). Once per failure, not per poll.
+    // Subject: the account. Data: { name (the account's label), error (a
+    // code), space (the space's id, when it is a space's account) }.
+    public const string MailAccountFailed = "mail.account-failed";
 }
