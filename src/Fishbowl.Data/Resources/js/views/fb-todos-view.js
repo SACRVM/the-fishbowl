@@ -303,7 +303,7 @@ class FbTodosView extends HTMLElement {
                     flex-direction: column;
                     align-items: center;
                 }
-                fb-todos-view .tv-editor-body > * { width: 100%; max-width: 760px; }
+                fb-todos-view .tv-editor-body > * { width: 100%; }
                 fb-todos-view .tv-title-input {
                     width: 100%;
                     font-family: 'Outfit', sans-serif;

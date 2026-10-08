@@ -9,6 +9,7 @@ using Fishbowl.Mail.Sync;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
+using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Net.Http.Headers;
 
@@ -28,6 +29,7 @@ namespace Fishbowl.Api.Endpoints;
 //   PUT    …/threads/{threadId}/tags       { tags }
 //   POST   …/threads/{threadId}/seen       { seen } — here at once, on the server in the background
 //   GET    …/messages/{id}/attachments/{index}   fetched from the server on demand
+//   GET    …/tags                          the tags mail carries, each account's source tag (system-given) first
 //   GET    …/unread-count
 // Scopes read:mail / write:mail; adding, changing and removing accounts is
 // cookie-only. A space Reader reads; a Member organises; an Admin manages
@@ -37,6 +39,62 @@ public static partial class MailApi
     // An <img src> or CSS url() that leaves this page: what "Show images" is for.
     [System.Text.RegularExpressions.GeneratedRegex(@"(?:src|background)\s*=\s*[""']?\s*https?:|url\(\s*[""']?\s*https?:", System.Text.RegularExpressions.RegexOptions.IgnoreCase)]
     private static partial System.Text.RegularExpressions.Regex RemoteImage();
+
+    // src="cid:…" — a part of the message itself.
+    [System.Text.RegularExpressions.GeneratedRegex(@"(\bsrc\s*=\s*[""']?\s*)cid:([^""'\s>]+)", System.Text.RegularExpressions.RegexOptions.IgnoreCase)]
+    private static partial System.Text.RegularExpressions.Regex Cid();
+
+    // A background of its own anywhere: a designed mail (a newsletter) keeps
+    // its paper; without one it is a plain mail and takes the app's colours.
+    [System.Text.RegularExpressions.GeneratedRegex(@"\bbgcolor\s*=|\bbackground(-color)?\s*:|\bbackground\s*=", System.Text.RegularExpressions.RegexOptions.IgnoreCase)]
+    private static partial System.Text.RegularExpressions.Regex OwnBackground();
+
+    // A mail that says it is made for dark too — <meta name="color-scheme"
+    // content="light dark"> or color-scheme: … dark in its CSS (not the
+    // prefers-color-scheme query) — brings its own dark design.
+    [System.Text.RegularExpressions.GeneratedRegex(@"<meta\b(?=[^>]*color-scheme)(?=[^>]*\bdark\b)|(?<![-\w])color-scheme\s*:[^;}<]*\bdark\b", System.Text.RegularExpressions.RegexOptions.IgnoreCase)]
+    private static partial System.Text.RegularExpressions.Regex DarkReady();
+
+    // A mail's own light/dark rules: @media (prefers-color-scheme: dark).
+    [System.Text.RegularExpressions.GeneratedRegex(@"prefers-color-scheme\s*:\s*(dark|light)", System.Text.RegularExpressions.RegexOptions.IgnoreCase)]
+    private static partial System.Text.RegularExpressions.Regex SchemeQuery();
+
+    /// <summary>How a message's HTML is shown: <c>plain</c> (no backgrounds of
+    /// its own — in the app's colours), <c>adaptive</c> (designed, for light and
+    /// dark — in the dark theme its own dark design on the app's ground) or
+    /// <c>paper</c> (designed for white — on white, whatever the theme).</summary>
+    internal static string Look(string html) =>
+        !OwnBackground().IsMatch(html) ? "plain" : DarkReady().IsMatch(html) ? "adaptive" : "paper";
+
+    // Embedded parts served as what they are: raster images only.
+    private static readonly HashSet<string> InlineTypes = new(StringComparer.Ordinal)
+        { "image/png", "image/jpeg", "image/jpg", "image/gif", "image/webp", "image/bmp" };
+
+    /// <summary>
+    /// What goes before the sender's HTML. As mail clients do: a plain margin on
+    /// &lt;body&gt; for mail that brings none — a mail that sets its own (margin: 0
+    /// and 100vw layouts are common) is laid out edge to edge, as it was made —
+    /// and no vertical scrolling inside: the app sizes the frame to the page. A
+    /// designed mail sits on white paper, set light — its own dark rules never
+    /// fire on white —, unless it is made for dark too: then, in the dark theme,
+    /// it is set dark on the app's ground and its dark design applies. A plain
+    /// one is transparent, in the app's colours: dark is the light page
+    /// inverted with its hues kept, and images inverted back.
+    /// </summary>
+    private static string Head(string look, bool dark)
+    {
+        var css = "html{overflow-y:hidden}body{margin:16px;font:14px/1.5 system-ui,sans-serif;overflow-wrap:break-word}" +
+            "img{max-width:100%;height:auto}";
+        css += (look, dark) switch
+        {
+            ("plain", false) => "html{background:transparent;color:#1a1a1a;color-scheme:light}",
+            ("plain", true) => "html{background:transparent;color:#1a1a1a;color-scheme:light}body{filter:invert(1) hue-rotate(180deg)}" +
+                "img,picture,video,svg,[style*=\"background-image\"]{filter:invert(1) hue-rotate(180deg)}",
+            ("adaptive", true) => "html{background:transparent;color-scheme:dark}",
+            _ => "html{background:#fff;color:#1a1a1a;color-scheme:light}",
+        };
+        return "<!doctype html><meta charset=\"utf-8\"><base target=\"_blank\"><style>" + css + "</style>";
+    }
 
     public const int MaxAccounts = 10;
 
@@ -57,6 +115,27 @@ public static partial class MailApi
     }
 
     private sealed record Target(ContextRef Ctx, string UserId);
+
+    /// <summary>Everywhere: to the server's Trash first — a refusal there
+    /// deletes nothing —, then here; otherwise only here, marked so the sync
+    /// leaves it out. Both into Fishbowl's trash.</summary>
+    private static async Task<IResult> DeleteMailAsync(Target t, IReadOnlyList<string> ids, string? mode,
+        IMailRepository repo, MailServer server, CancellationToken ct)
+    {
+        var everywhere = mode == "everywhere";
+        if (everywhere)
+        {
+            try { await server.TrashAsync(t.Ctx, await repo.LocationsOfAsync(t.Ctx, ids, ct), ct); }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
+            catch (Exception ex)
+            {
+                var (code, why) = ServerError(ex);
+                return ApiErrors.Json(StatusCodes.Status502BadGateway, code, why);
+            }
+        }
+        var deleted = await repo.DeleteMessagesAsync(t.Ctx, ids, tombstone: !everywhere, t.UserId, ct);
+        return Results.Ok(new { deleted, mode = everywhere ? "everywhere" : "fishbowl" });
+    }
 
     private static async Task<(Target? T, IResult? Error)> ResolveAsync(HttpContext http, bool space, Need need, CancellationToken ct)
     {
@@ -85,6 +164,7 @@ public static partial class MailApi
     {
         a.Id,
         a.Name,
+        a.SourceTag,
         a.Address,
         a.DisplayName,
         a.Aliases,
@@ -219,7 +299,7 @@ public static partial class MailApi
             return Results.Accepted();
         }).WithName($"Sync{tag}MailAccount").WithSummary("Syncs the account now.");
 
-        g.MapGet("/threads", async (HttpContext http, IMailRepository repo, string? q, string? account, string? tag,
+        g.MapGet("/threads", async (HttpContext http, IMailRepository repo, string? q, string? account, string[]? tag,
             bool? unread, bool? archived, string? address, DateTime? before, int? limit, CancellationToken ct) =>
         {
             var (t, err) = await ResolveAsync(http, space, Need.Read, ct);
@@ -228,7 +308,7 @@ public static partial class MailApi
             {
                 Text = q,
                 AccountId = account,
-                Tag = tag,
+                Tags = (tag ?? []).ToList(),
                 UnreadOnly = unread == true,
                 Archived = archived == true,
                 Address = address,
@@ -268,10 +348,14 @@ public static partial class MailApi
                 m.ListId,
                 hasHtml = !string.IsNullOrEmpty(m.BodyHtml),
                 remoteImages = m.BodyHtml is { } h && RemoteImage().IsMatch(h),
+                // plain (no backgrounds of its own — Outlook, Apple Mail: the
+                // app's colours), adaptive (designed for light and dark) or
+                // paper (designed for white).
+                htmlLook = m.BodyHtml is { Length: > 0 } p ? Look(p) : null,
             }));
         }).WithName($"Get{tag}MailThread").WithSummary("A conversation's messages, oldest first, with their text.");
 
-        g.MapGet("/messages/{id}/html", async (string id, bool? images, HttpContext http, IMailRepository repo, CancellationToken ct) =>
+        g.MapGet("/messages/{id}/html", async (string id, bool? images, string? theme, HttpContext http, IMailRepository repo, CancellationToken ct) =>
         {
             var (t, err) = await ResolveAsync(http, space, Need.Read, ct);
             if (err is not null) return err;
@@ -279,19 +363,55 @@ public static partial class MailApi
             if (message?.BodyHtml is not { Length: > 0 } html) return Results.NotFound();
             // The sender's HTML as it came — the policy is what makes it safe:
             // a sandbox without scripts, forms or plugins, nothing fetched but
-            // inline styles and data: images (remote images on request),
-            // links open a new tab.
+            // inline styles, data: images and this message's own embedded parts
+            // (cid:, rewritten to …/cid/<id> — 'self'); remote images on
+            // request; links open a new tab.
             http.Response.Headers[HeaderNames.ContentSecurityPolicy] =
                 "sandbox allow-same-origin allow-popups allow-popups-to-escape-sandbox; default-src 'none'; " +
-                "style-src 'unsafe-inline'; img-src data:" + (images == true ? " https: http:" : "") + "; frame-ancestors 'self'";
+                "style-src 'unsafe-inline'; img-src data: 'self'" + (images == true ? " https: http:" : "") + "; frame-ancestors 'self'";
             http.Response.Headers["X-Content-Type-Options"] = "nosniff";
             http.Response.Headers["Referrer-Policy"] = "no-referrer";
             http.Response.Headers[HeaderNames.CacheControl] = "private, no-store";
-            const string head = "<!doctype html><meta charset=\"utf-8\"><base target=\"_blank\">" +
-                "<style>html{background:#fff;color:#1a1a1a}body{margin:0;padding:16px;font:14px/1.5 system-ui,sans-serif;" +
-                "overflow-wrap:anywhere}img{max-width:100%;height:auto}</style>";
-            return Results.Content(head + html, "text/html; charset=utf-8");
+            html = Cid().Replace(html, m => m.Groups[1].Value + "cid/" + Uri.EscapeDataString(m.Groups[2].Value));
+            // Its own light/dark rules follow how it is shown here, not the
+            // browser's preference (the system's, in a frame too): set dark,
+            // its dark rules hold; on paper or inverted, its light ones.
+            var look = Look(html);
+            var setDark = look == "adaptive" && theme == "dark";
+            html = SchemeQuery().Replace(html, m =>
+                m.Groups[1].Value.Equals("dark", StringComparison.OrdinalIgnoreCase) == setDark ? "min-width:0px" : "max-width:0px");
+            return Results.Content(Head(look, theme == "dark") + html, "text/html; charset=utf-8");
         }).WithName($"Get{tag}MailHtml").WithSummary("A message's HTML as a sandboxed page.");
+
+        g.MapGet("/messages/{id}/cid/{contentId}", async (string id, string contentId, HttpContext http, IMailRepository repo,
+            MailServer server, IMemoryCache cache, CancellationToken ct) =>
+        {
+            var (t, err) = await ResolveAsync(http, space, Need.Read, ct);
+            if (err is not null) return err;
+            if (await repo.GetMessageAsync(t!.Ctx, id, ct) is null) return Results.NotFound();
+            var cid = Uri.UnescapeDataString(contentId).Trim('<', '>', ' ');
+            var key = $"mail-cid:{t.Ctx.Type}:{t.Ctx.Id}:{id}:{cid}";
+            if (!cache.TryGetValue(key, out (byte[] Bytes, string Type) part))
+            {
+                var place = (await repo.LocationsAsync(t.Ctx, id, ct)).FirstOrDefault();
+                var folder = place is null ? null : await server.FolderAsync(t.Ctx, place.AccountId, place.Role, ct);
+                if (place is null || folder is null) return Results.NotFound();
+                await using var box = await server.OpenAsync(t.Ctx, place.AccountId, ct);
+                if (box is null) return Results.NotFound();
+                var buffer = new MemoryStream();
+                string? type;
+                try { type = await box.InlineAsync(folder, place.Uid, cid, buffer, ct); }
+                catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
+                catch (Exception) { return Results.NotFound(); }
+                if (type is null || !InlineTypes.Contains(type.ToLowerInvariant())) return Results.NotFound();
+                part = (buffer.ToArray(), type.ToLowerInvariant());
+                cache.Set(key, part, TimeSpan.FromMinutes(10));
+            }
+            http.Response.Headers["X-Content-Type-Options"] = "nosniff";
+            http.Response.Headers[HeaderNames.ContentSecurityPolicy] = "sandbox";
+            http.Response.Headers[HeaderNames.CacheControl] = "private, max-age=600";
+            return Results.Bytes(part.Bytes, part.Type);
+        }).WithName($"Get{tag}MailEmbedded").WithSummary("An image the message's HTML embeds (cid:), from the mail server.");
 
         g.MapPut("/threads/{threadId}/tags", async (string threadId, TagsRequest body, HttpContext http, IMailRepository repo, CancellationToken ct) =>
         {
@@ -321,6 +441,26 @@ public static partial class MailApi
             }
             return Results.Ok(new { changed = places.Count });
         }).WithName($"Mark{tag}MailThreadSeen").WithSummary("Marks the conversation read or unread — here at once, on the server in the background.");
+
+        // Decision 8: ?mode=everywhere also moves it to the server's Trash;
+        // anything else deletes it only here. Either way into the trash.
+        g.MapDelete("/threads/{threadId}", async (string threadId, string? mode, HttpContext http, IMailRepository repo,
+            MailServer server, CancellationToken ct) =>
+        {
+            var (t, err) = await ResolveAsync(http, space, Need.Write, ct);
+            if (err is not null) return err;
+            var ids = await repo.ThreadMessageIdsAsync(t!.Ctx, threadId, ct);
+            return ids.Count == 0 ? Results.NotFound() : await DeleteMailAsync(t, ids, mode, repo, server, ct);
+        }).WithName($"Delete{tag}MailThread").WithSummary("Deletes the conversation — only here (the server keeps it) or everywhere (also to the server's Trash).");
+
+        g.MapDelete("/messages/{id}", async (string id, string? mode, HttpContext http, IMailRepository repo,
+            MailServer server, CancellationToken ct) =>
+        {
+            var (t, err) = await ResolveAsync(http, space, Need.Write, ct);
+            if (err is not null) return err;
+            return await repo.GetMessageAsync(t!.Ctx, id, ct) is null ? Results.NotFound()
+                : await DeleteMailAsync(t, [id], mode, repo, server, ct);
+        }).WithName($"Delete{tag}MailMessage").WithSummary("Deletes one message — only here or everywhere.");
 
         g.MapGet("/messages/{id}/attachments/{index:int}", async (string id, int index, HttpContext http, IMailRepository repo,
             MailServer server, CancellationToken ct) =>
@@ -354,6 +494,13 @@ public static partial class MailApi
             http.Response.Headers[HeaderNames.ContentSecurityPolicy] = "sandbox";
             return Results.Stream(buffer, "application/octet-stream");
         }).WithName($"Get{tag}MailAttachment").WithSummary("One attachment, fetched from the mail server.");
+
+        g.MapGet("/tags", async (HttpContext http, MailRepository repo, CancellationToken ct) =>
+        {
+            var (t, err) = await ResolveAsync(http, space, Need.Read, ct);
+            if (err is not null) return err;
+            return Results.Ok((await repo.TagCountsAsync(t!.Ctx, ct)).Select(x => new { name = x.Name, count = x.Count, source = x.Source }));
+        }).WithName($"List{tag}MailTags").WithSummary("The tags mail carries — each account's source tag first — with how many conversations.");
 
         g.MapGet("/unread-count", async (HttpContext http, IMailRepository repo, CancellationToken ct) =>
         {

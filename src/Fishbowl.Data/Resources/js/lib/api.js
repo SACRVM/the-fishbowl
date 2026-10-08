@@ -339,18 +339,35 @@
             // { q, account, tag, unread, archived, address, before, limit }
             threads: (opts = {}) => {
                 const qs = new URLSearchParams();
-                for (const [k, v] of Object.entries(opts)) if (v != null && v !== "" && v !== false) qs.set(k, String(v));
+                for (const [k, v] of Object.entries(opts)) {
+                    if (Array.isArray(v)) for (const x of v) qs.append(k, String(x));   // tag=a&tag=b (all of them)
+                    else if (v != null && v !== "" && v !== false) qs.set(k, String(v));
+                }
                 const s = qs.toString();
                 return request(p("/mail/threads") + (s ? `?${s}` : ""));
             },
             thread:  (tid)         => request(p(`/mail/threads/${id(tid)}`)),
             setTags: (tid, tags)   => request(p(`/mail/threads/${id(tid)}/tags`), { method: "PUT", body: JSON.stringify({ tags }) }),
             setSeen: (tid, seen)   => request(p(`/mail/threads/${id(tid)}/seen`), { method: "POST", body: JSON.stringify({ seen }) }),
+            // mode "fishbowl" (only here — the server keeps it) or "everywhere"
+            // (also to the server's Trash); either way into the trash here.
+            deleteThread:  (tid, mode) => request(p(`/mail/threads/${id(tid)}?mode=${mode}`), { method: "DELETE" }),
+            deleteMessage: (mid, mode) => request(p(`/mail/messages/${id(mid)}?mode=${mode}`), { method: "DELETE" }),
             unreadCount: ()        => request(p("/mail/unread-count")),
+            // The tags mail carries: [{ name, count, source }] — each account's
+            // source tag (system-given) first.
+            tags: ()               => request(p("/mail/tags")),
             attachmentUrl: (mid, index) => `${base}${p(`/mail/messages/${id(mid)}/attachments/${index}`)}`,
             // The HTML body as a sandboxed page of its own (MailApi): no script,
-            // nothing remote unless `images`.
-            htmlUrl: (mid, images) => `${base}${p(`/mail/messages/${id(mid)}/html`)}${images ? "?images=true" : ""}`,
+            // nothing remote unless `images`; a plain mail in the app's
+            // `theme` ("dark" | "light").
+            htmlUrl: (mid, images, theme) => {
+                const qs = new URLSearchParams();
+                if (images) qs.set("images", "true");
+                if (theme) qs.set("theme", theme);
+                const s = qs.toString();
+                return `${base}${p(`/mail/messages/${id(mid)}/html`)}${s ? `?${s}` : ""}`;
+            },
         };
     }
     const mail = { ...mailIn(null), in: mailIn };

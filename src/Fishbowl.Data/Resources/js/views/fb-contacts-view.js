@@ -127,7 +127,7 @@ class FbContactsView extends HTMLElement {
                 fb-contacts-view .cv-item-sub { color: var(--text-muted); font-size: 0.8125rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
                 fb-contacts-view .cv-item sac-icon { color: var(--text-muted); flex: none; }
                 fb-contacts-view .cv-editor-pane { height: 100%; overflow-y: auto; }
-                fb-contacts-view .cv-editor { max-width: 760px; margin: 0 auto; padding: 24px 24px 40px; }
+                fb-contacts-view .cv-editor { padding: 24px 24px 40px; }
                 fb-contacts-view .cv-empty { min-height: 60%; justify-content: center; }
                 fb-contacts-view .cv-title { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
                 fb-contacts-view .cv-title h2 { margin: 0; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }

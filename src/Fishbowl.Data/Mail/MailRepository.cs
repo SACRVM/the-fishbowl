@@ -52,9 +52,30 @@ public class MailRepository : IMailRepository
     public async Task<IReadOnlyList<MailAccount>> ListAccountsAsync(ContextRef ctx, CancellationToken ct = default)
     {
         using var db = _db.CreateContextConnection(ctx);
-        var rows = await db.QueryAsync<MailAccount>(new CommandDefinition(
-            $"SELECT {AccountColumns} FROM mail_accounts ORDER BY created_at", cancellationToken: ct));
-        return rows.Select(Fix).ToList();
+        var rows = (await db.QueryAsync<MailAccount>(new CommandDefinition(
+            $"SELECT {AccountColumns} FROM mail_accounts ORDER BY created_at", cancellationToken: ct))).Select(Fix).ToList();
+        await EnsureSourceTagsAsync(db, null, rows, ct);
+        return rows;
+    }
+
+    /// <summary>Every account's source tag is a system tag of the workspace
+    /// (fixed: not assigned, not removed, not renamed by hand); one whose
+    /// account is gone or renamed goes.</summary>
+    private static async Task EnsureSourceTagsAsync(IDbConnection db, IDbTransaction? tx, IReadOnlyList<MailAccount> accounts, CancellationToken ct)
+    {
+        var names = accounts.Select(a => a.SourceTag).Distinct().ToArray();
+        var now = Iso(DateTime.UtcNow);
+        foreach (var name in names)
+            await db.ExecuteAsync(new CommandDefinition(@"
+                INSERT OR IGNORE INTO tags(name, color, created_at, is_system, user_assignable, user_removable)
+                VALUES (@name, @color, @now, 1, 0, 0)",
+                new { name, color = TagPalette.DefaultFor(name), now }, tx, cancellationToken: ct));
+        // Fixed tags nobody holds any more (a renamed or removed account's) go;
+        // Fishbowl's own seeds stay.
+        var keep = names.Concat(SystemTags.ReservedNames).ToArray();
+        await db.ExecuteAsync(new CommandDefinition(
+            "DELETE FROM tags WHERE is_system = 1 AND user_assignable = 0 AND name NOT IN @keep",
+            new { keep }, tx, cancellationToken: ct));
     }
 
     public async Task<MailAccount?> GetAccountAsync(ContextRef ctx, string id, CancellationToken ct = default)
@@ -76,6 +97,10 @@ public class MailRepository : IMailRepository
         account.CreatedAt = account.UpdatedAt = now;
         var secret = await _credentials.ProtectAsync(account.Id, password, ct);
         using var db = _db.CreateContextConnection(ctx);
+        await db.ExecuteAsync(new CommandDefinition(@"
+            INSERT OR IGNORE INTO tags(name, color, created_at, is_system, user_assignable, user_removable)
+            VALUES (@name, @color, @now, 1, 0, 0)",
+            new { name = account.SourceTag, color = TagPalette.DefaultFor(account.SourceTag), now = Iso(now) }, cancellationToken: ct));
         await db.ExecuteAsync(new CommandDefinition(@"
             INSERT INTO mail_accounts (id, name, address, display_name, aliases, provider, username, secret,
                 imap_host, imap_port, imap_security, smtp_host, smtp_port, smtp_security,
@@ -144,7 +169,8 @@ public class MailRepository : IMailRepository
                 await RemoveRowsAsync(db, tx, chunk, token);
             await db.ExecuteAsync(new CommandDefinition(@"
                 DELETE FROM mail_locations WHERE account_id = @id;
-                DELETE FROM mail_folders WHERE account_id = @id;",
+                DELETE FROM mail_folders WHERE account_id = @id;
+                DELETE FROM mail_tombstones WHERE account_id = @id;",
                 new { id }, tx, cancellationToken: token));
             return await db.ExecuteAsync(new CommandDefinition(
                 "DELETE FROM mail_accounts WHERE id = @id", new { id }, tx, cancellationToken: token)) > 0;
@@ -184,10 +210,23 @@ public class MailRepository : IMailRepository
         var where = new List<string>();
         var p = new DynamicParameters();
         if (!string.IsNullOrWhiteSpace(q.AccountId)) { where.Add("m.account_id = @account"); p.Add("account", q.AccountId); }
-        if (!string.IsNullOrWhiteSpace(q.Tag))
+        // Tags, all of them (AND): a source tag is its account's mail, any
+        // other the messages that carry it.
+        var accounts = await ListAccountsAsync(ctx, ct);
+        var tags = q.Tags.Append(q.Tag ?? "").Where(t => !string.IsNullOrWhiteSpace(t)).Distinct().ToList();
+        for (var i = 0; i < tags.Count; i++)
         {
-            where.Add("m.thread_id IN (SELECT t.thread_id FROM mail_messages t, json_each(t.tags) j WHERE j.value = @tag)");
-            p.Add("tag", q.Tag);
+            var from = accounts.Where(a => a.SourceTag == tags[i]).Select(a => a.Id).ToArray();
+            if (from.Length > 0)
+            {
+                where.Add($"m.thread_id IN (SELECT t.thread_id FROM mail_messages t WHERE t.account_id IN @src{i})");
+                p.Add($"src{i}", from);
+            }
+            else
+            {
+                where.Add($"m.thread_id IN (SELECT t.thread_id FROM mail_messages t, json_each(t.tags) j WHERE j.value = @tag{i})");
+                p.Add($"tag{i}", tags[i]);
+            }
         }
         if (!string.IsNullOrWhiteSpace(q.Address))
         {
@@ -224,7 +263,15 @@ public class MailRepository : IMailRepository
             $"SELECT {LightColumns} FROM mail_messages WHERE thread_id IN @ids ORDER BY sent_at",
             new { ids }, cancellationToken: ct))).Select(Fix).ToList();
         var byThread = messages.GroupBy(m => m.ThreadId).ToDictionary(g => g.Key, g => Distinct(g).ToList());
-        return heads.Where(h => byThread.ContainsKey(h.ThreadId)).Select(h => ToThread(byThread[h.ThreadId], h.Active == 0)).ToList();
+        var source = accounts.ToDictionary(a => a.Id, a => a.SourceTag);
+        return heads.Where(h => byThread.ContainsKey(h.ThreadId)).Select(h =>
+        {
+            var thread = ToThread(byThread[h.ThreadId], h.Active == 0);
+            // Where it came from first, then what was given to it.
+            thread.Tags = thread.AccountIds.Select(id => source.GetValueOrDefault(id)).Where(s => s is not null).Select(s => s!)
+                .Distinct().Concat(thread.Tags).ToList();
+            return thread;
+        }).ToList();
     }
 
     /// <summary>The same message in two accounts (sent from one to the
@@ -286,6 +333,23 @@ public class MailRepository : IMailRepository
         return m is null ? null : Fix(m);
     }
 
+    /// <summary>The tags mail carries, with how many conversations: each
+    /// account's source tag, then every tag given to a message.</summary>
+    public async Task<IReadOnlyList<(string Name, int Count, bool Source)>> TagCountsAsync(ContextRef ctx, CancellationToken ct = default)
+    {
+        var accounts = await ListAccountsAsync(ctx, ct);
+        using var db = _db.CreateContextConnection(ctx);
+        var perAccount = (await db.QueryAsync<(string AccountId, int N)>(new CommandDefinition(
+            "SELECT account_id, COUNT(DISTINCT thread_id) FROM mail_messages GROUP BY account_id", cancellationToken: ct)))
+            .ToDictionary(r => r.AccountId, r => r.N);
+        var given = await db.QueryAsync<(string Name, int N)>(new CommandDefinition(
+            "SELECT j.value, COUNT(DISTINCT m.thread_id) FROM mail_messages m, json_each(m.tags) j GROUP BY j.value ORDER BY 2 DESC, 1",
+            cancellationToken: ct));
+        return accounts.GroupBy(a => a.SourceTag)
+            .Select(g => (g.Key, g.Sum(a => perAccount.GetValueOrDefault(a.Id)), true))
+            .Concat(given.Select(r => (r.Name, r.N, false))).ToList();
+    }
+
     public async Task<int> UnreadCountAsync(ContextRef ctx, CancellationToken ct = default)
     {
         using var db = _db.CreateContextConnection(ctx);
@@ -303,7 +367,12 @@ public class MailRepository : IMailRepository
                     "SELECT COUNT(*) FROM mail_messages WHERE thread_id = @threadId", new { threadId }, tx, cancellationToken: token)) == 0)
                 return null;
             // The workspace's tags, like notes': a new name gets its row and colour.
-            var clean = (await _tags.EnsureExistsAsync(db, tx, tags, token)).ToList();
+            // System tags nobody assigns (a source) are never given by hand.
+            var fixedNames = (await db.QueryAsync<string>(new CommandDefinition(
+                "SELECT name FROM tags WHERE is_system = 1 AND user_assignable = 0", transaction: tx, cancellationToken: token))).ToHashSet();
+            var wanted = tags.Where(t => !string.IsNullOrWhiteSpace(t)).Select(t => t.Trim().ToLowerInvariant())
+                .Where(t => !fixedNames.Contains(t)).ToList();
+            var clean = (await _tags.EnsureExistsAsync(db, tx, wanted, token)).ToList();
             var n = await db.ExecuteAsync(new CommandDefinition(
                 "UPDATE mail_messages SET tags = @tags, updated_at = @now WHERE thread_id = @threadId",
                 new { tags = clean, now = Iso(DateTime.UtcNow), threadId }, tx, cancellationToken: token));
@@ -616,6 +685,95 @@ public class MailRepository : IMailRepository
                 ELSE 'archived' END
             WHERE id IN @ids", new { ids = ids.ToArray() }, tx, cancellationToken: ct));
 
+    public async Task<IReadOnlyList<string>> ThreadMessageIdsAsync(ContextRef ctx, string threadId, CancellationToken ct = default)
+    {
+        using var db = _db.CreateContextConnection(ctx);
+        return (await db.QueryAsync<string>(new CommandDefinition(
+            "SELECT id FROM mail_messages WHERE thread_id = @threadId", new { threadId }, cancellationToken: ct))).ToList();
+    }
+
+    public async Task<IReadOnlyList<MailLocationRef>> LocationsOfAsync(ContextRef ctx, IReadOnlyList<string> ids, CancellationToken ct = default)
+    {
+        if (ids.Count == 0) return [];
+        using var db = _db.CreateContextConnection(ctx);
+        return (await db.QueryAsync<(string AccountId, string Role, long Uid)>(new CommandDefinition(
+            "SELECT account_id, role, uid FROM mail_locations WHERE message_id IN @ids",
+            new { ids = ids.ToArray() }, cancellationToken: ct)))
+            .Select(l => new MailLocationRef(l.AccountId, l.Role, (uint)l.Uid)).ToList();
+    }
+
+    /// <summary>
+    /// Deletes messages here (decision 8): each goes to the trash, restorable.
+    /// With <paramref name="tombstone"/> — deleted only in Fishbowl, the server
+    /// keeps it — its key and places are marked so the sync never brings it
+    /// back (a restore lifts the mark). Deleted everywhere, the server copy is
+    /// already in its Trash and nothing is marked. Returns how many went.
+    /// </summary>
+    public Task<int> DeleteMessagesAsync(ContextRef ctx, IReadOnlyList<string> ids, bool tombstone, string? deletedBy, CancellationToken ct = default) =>
+        ids.Count == 0 ? Task.FromResult(0) : _db.WithContextTransactionAsync(ctx, async (db, tx, token) =>
+        {
+            var rows = (await db.QueryAsync<(string Id, string AccountId, string MessageKey)>(new CommandDefinition(
+                "SELECT id, account_id, message_key FROM mail_messages WHERE id IN @ids",
+                new { ids = ids.ToArray() }, tx, cancellationToken: token))).ToList();
+            var now = Iso(DateTime.UtcNow);
+            foreach (var r in rows)
+            {
+                if (tombstone)
+                {
+                    await db.ExecuteAsync(new CommandDefinition(@"
+                        INSERT OR IGNORE INTO mail_tombstones (account_id, message_key, role, uid, created_at)
+                        VALUES (@AccountId, @MessageKey, '', 0, @now);
+                        INSERT OR IGNORE INTO mail_tombstones (account_id, message_key, role, uid, created_at)
+                        SELECT account_id, @MessageKey, role, uid, @now FROM mail_locations WHERE message_id = @Id;",
+                        new { r.Id, r.AccountId, r.MessageKey, now }, tx, cancellationToken: token));
+                }
+                await TrashSnapshots.TakeAsync(db, tx, ctx, TrashKinds.Mail, r.Id, deletedBy, token);
+            }
+            await RemoveRowsAsync(db, tx, rows.Select(r => r.Id).ToList(), token);
+            return rows.Count;
+        }, ct);
+
+    /// <summary>An account's mail deleted only in Fishbowl: the message keys,
+    /// and per role the UIDs not to fetch again.</summary>
+    public sealed record Tombstones(HashSet<string> Keys, Dictionary<string, HashSet<uint>> Uids);
+
+    public async Task<Tombstones> TombstonesAsync(ContextRef ctx, string accountId, CancellationToken ct = default)
+    {
+        using var db = _db.CreateContextConnection(ctx);
+        var rows = await db.QueryAsync<(string MessageKey, string Role, long Uid)>(new CommandDefinition(
+            "SELECT message_key, role, uid FROM mail_tombstones WHERE account_id = @accountId",
+            new { accountId }, cancellationToken: ct));
+        var keys = new HashSet<string>(StringComparer.Ordinal);
+        var uids = new Dictionary<string, HashSet<uint>>(StringComparer.Ordinal);
+        foreach (var r in rows)
+        {
+            keys.Add(r.MessageKey);
+            if (r.Role.Length > 0) (uids.TryGetValue(r.Role, out var set) ? set : uids[r.Role] = new()).Add((uint)r.Uid);
+        }
+        return new Tombstones(keys, uids);
+    }
+
+    /// <summary>A deleted message found again at another place (Gmail's
+    /// labels, a new UIDVALIDITY): that UID isn't fetched again either.</summary>
+    public async Task TombstonePlaceAsync(ContextRef ctx, string accountId, string key, string role, uint uid, CancellationToken ct = default)
+    {
+        using var db = _db.CreateContextConnection(ctx);
+        await db.ExecuteAsync(new CommandDefinition(@"
+            INSERT OR IGNORE INTO mail_tombstones (account_id, message_key, role, uid, created_at)
+            VALUES (@accountId, @key, @role, @uid, @now)",
+            new { accountId, key, role, uid = (long)uid, now = Iso(DateTime.UtcNow) }, cancellationToken: ct));
+    }
+
+    /// <summary>A folder's UIDs were renumbered (new UIDVALIDITY): its marked
+    /// places mean nothing now; the keys stay.</summary>
+    public async Task DropTombstonePlacesAsync(ContextRef ctx, string accountId, string role, CancellationToken ct = default)
+    {
+        using var db = _db.CreateContextConnection(ctx);
+        await db.ExecuteAsync(new CommandDefinition(
+            "DELETE FROM mail_tombstones WHERE account_id = @accountId AND role = @role",
+            new { accountId, role }, cancellationToken: ct));
+    }
+
     /// <summary>
     /// The messages among <paramref name="ids"/> that lie nowhere on the
     /// server any more go to the trash (decision 9 — a delete on the phone is
@@ -654,6 +812,10 @@ public class MailRepository : IMailRepository
         var m = await db.QuerySingleOrDefaultAsync<MailMessage>(new CommandDefinition(
             "SELECT * FROM mail_messages WHERE id = @id", new { id }, tx, cancellationToken: ct));
         if (m is null) return;
+        // Deleted only in Fishbowl: back here, the sync finds its places again.
+        await db.ExecuteAsync(new CommandDefinition(
+            "DELETE FROM mail_tombstones WHERE account_id = @AccountId AND message_key = @MessageKey",
+            new { m.AccountId, m.MessageKey }, tx, cancellationToken: ct));
         foreach (var r in MailThreading.Parents(m.MessageKey, m.InReplyTo, m.Refs))
             await db.ExecuteAsync(new CommandDefinition(
                 "INSERT OR IGNORE INTO mail_refs (message_id, ref) VALUES (@id, @r)", new { id, r }, tx, cancellationToken: ct));

@@ -63,9 +63,21 @@ public class MailAccount
     public string? LastError { get; set; }                    // a code: auth_failed | unreachable | …
     public DateTime? LastSyncAt { get; set; }
     public bool BackfillDone { get; set; }                    // the whole history is in
+    // Where a message came from is a tag too — system-given, never assigned,
+    // removed or renamed by hand: the account's name ("icloud", "gmail").
+    public string SourceTag => SourceTagFor(Name);
     public string? CreatedBy { get; set; }
     public DateTime CreatedAt { get; set; }
     public DateTime UpdatedAt { get; set; }
+
+    /// <summary>The account's source tag: its name in tag letters (a–z, 0–9,
+    /// - and _), at most 40 of them — no prefix, a tag like any other to read.</summary>
+    public static string SourceTagFor(string? name)
+    {
+        var slug = System.Text.RegularExpressions.Regex.Replace((name ?? "").Trim().ToLowerInvariant(), "[^a-z0-9_-]+", "-").Trim('-');
+        if (slug.Length > 40) slug = slug[..40].TrimEnd('-');
+        return slug.Length == 0 ? "mail" : slug;
+    }
 }
 
 public class MailMessage
@@ -123,6 +135,7 @@ public class MailListQuery
     public string? Text { get; set; }          // full text
     public string? AccountId { get; set; }
     public string? Tag { get; set; }
+    public List<string> Tags { get; set; } = new();   // all of them (AND); a source tag means its account
     public bool UnreadOnly { get; set; }
     public bool Archived { get; set; }         // the archived threads instead of the list
     public string? Address { get; set; }       // threads with this person (contacts)

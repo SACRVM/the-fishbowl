@@ -36,6 +36,23 @@ public sealed class MailServer
     public async Task<string?> FolderAsync(ContextRef ctx, string accountId, string role, CancellationToken ct) =>
         (await _repo.GetFolderAsync(ctx, accountId, role, ct))?.Name;
 
+    /// <summary>Moves messages to their account's Trash on the server (decision
+    /// 8, "everywhere"). Not best effort: a refusal is the caller's answer,
+    /// before anything here is deleted.</summary>
+    public async Task TrashAsync(ContextRef ctx, IReadOnlyList<MailLocationRef> places, CancellationToken ct)
+    {
+        foreach (var account in places.GroupBy(p => p.AccountId))
+        {
+            await using var box = await OpenAsync(ctx, account.Key, ct)
+                ?? throw new InvalidOperationException("The mail account or its password is gone.");
+            foreach (var role in account.GroupBy(p => p.Role))
+            {
+                var folder = await FolderAsync(ctx, account.Key, role.Key, ct);
+                if (folder is not null) await box.TrashAsync(folder, role.Select(p => p.Uid).Distinct().ToList(), ct);
+            }
+        }
+    }
+
     /// <summary>Writes seen / unseen to every place, per account. Best effort:
     /// a failure is logged — the next sync brings the server's state back.</summary>
     public async Task MarkSeenAsync(ContextRef ctx, IReadOnlyList<MailLocationRef> places, bool seen, CancellationToken ct)

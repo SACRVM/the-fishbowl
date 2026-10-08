@@ -157,8 +157,26 @@ public sealed class ImapMailbox : IMailbox
         return true;
     }, ct);
 
+    public Task<string?> InlineAsync(string folder, uint uid, string contentId, Stream target, CancellationToken ct) =>
+        InFolder<string?>(folder, async (f, _, t) =>
+        {
+            var id = new UniqueId(uid);
+            var s = (await f.FetchAsync([id], MessageSummaryItems.UniqueId | MessageSummaryItems.BodyStructure, t).ConfigureAwait(false))
+                .FirstOrDefault();
+            var part = s?.BodyParts.FirstOrDefault(b => Clean(b.ContentId) == contentId);
+            if (part is null) return null;
+            if (await f.GetBodyPartAsync(id, part, t).ConfigureAwait(false) is not MimePart { Content: { } content }) return null;
+            await content.DecodeToAsync(target, t).ConfigureAwait(false);
+            return part.ContentType.MimeType;
+        }, ct);
+
     public Task MarkAsync(string folder, IReadOnlyList<uint> uids, bool? seen, bool? flagged, CancellationToken ct) =>
         uids.Count == 0 ? Task.CompletedTask : _session.MarkAsync(folder, uids, seen, flagged, ct);
+
+    // "trash" is the folder marked \Trash (iCloud: Deleted Messages, Gmail:
+    // [Gmail]/Trash), else one named Trash; an account without one refuses.
+    public Task TrashAsync(string folder, IReadOnlyList<uint> uids, CancellationToken ct) =>
+        uids.Count == 0 ? Task.CompletedTask : _session.MoveAsync(folder, uids, "trash", ct);
 
     /// <summary>Runs <paramref name="op"/> with the folder opened read-only, closed after.</summary>
     private Task<T> InFolder<T>(string folder, Func<IMailFolder, ImapClient, CancellationToken, Task<T>> op, CancellationToken ct) =>

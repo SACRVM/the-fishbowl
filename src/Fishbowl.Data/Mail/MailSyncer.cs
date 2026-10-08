@@ -143,7 +143,11 @@ public sealed class MailSyncer
         var state = await _repo.GetFolderAsync(ctx, account.Id, role, ct);
         if (state is null || state.UidValidity != status.UidValidity || state.Name != name)
         {
-            if (state is not null) await _repo.DropLocationsAsync(ctx, account.Id, role, ct);
+            if (state is not null)
+            {
+                await _repo.DropLocationsAsync(ctx, account.Id, role, ct);
+                await _repo.DropTombstonePlacesAsync(ctx, account.Id, role, ct);
+            }
             // From now on is "new"; everything below is history, read newest first.
             state = new MailRepository.FolderState(account.Id, role, name, status.UidValidity, status.UidNext, null, status.UidNext);
         }
@@ -155,16 +159,25 @@ public sealed class MailSyncer
         var gone = known.Keys.Where(u => !serverSet.Contains(u)).ToList();
         if (gone.Count > 0) candidates.UnionWith(await _repo.RemoveLocationsAsync(ctx, account.Id, role, gone, ct));
 
+        // Mail deleted only in Fishbowl stays away (decision 8).
+        var dead = await _repo.TombstonesAsync(ctx, account.Id, ct);
+        var deadHere = dead.Uids.GetValueOrDefault(role) ?? [];
+        bool Wanted(uint u) => !known.ContainsKey(u) && !deadHere.Contains(u);
+
         var budget = BatchPerFolder;
-        var fresh = server.Where(u => u >= state.UidNext && !known.ContainsKey(u)).ToList();
+        var fresh = server.Where(u => u >= state.UidNext && Wanted(u)).ToList();
         var takeNew = fresh.Take(budget).ToList();
         budget -= takeNew.Count;
-        var older = server.Where(u => u < state.BackfillBelow && !known.ContainsKey(u)).OrderByDescending(u => u).ToList();
+        // Gaps in what was read: a message restored from the trash after a
+        // delete only in Fishbowl — its place on the server comes back.
+        var gaps = server.Where(u => u >= state.BackfillBelow && u < state.UidNext && Wanted(u)).Take(budget).ToList();
+        budget -= gaps.Count;
+        var older = server.Where(u => u < state.BackfillBelow && Wanted(u)).OrderByDescending(u => u).ToList();
         var takeOld = older.Take(budget).ToList();
 
         var added = 0;
-        foreach (var chunk in takeNew.Concat(takeOld).Chunk(HeaderChunk))
-            added += await StoreAsync(ctx, account, own, box, role, name, chunk, ct);
+        foreach (var chunk in takeNew.Concat(gaps).Concat(takeOld).Chunk(HeaderChunk))
+            added += await StoreAsync(ctx, account, own, box, role, name, chunk, dead, ct);
 
         // Flags of what was here before this pass (new ones came with theirs).
         if (known.Count > 0)
@@ -189,12 +202,17 @@ public sealed class MailSyncer
 
     private async Task<int> StoreAsync(
         ContextRef ctx, MailAccount account, HashSet<string> own, IMailbox box, string role, string name,
-        IReadOnlyList<uint> uids, CancellationToken ct)
+        IReadOnlyList<uint> uids, MailRepository.Tombstones dead, CancellationToken ct)
     {
         var added = 0;
         foreach (var h in await box.HeadersAsync(name, uids, ct))
         {
             var key = MailThreading.MessageKey(h.MessageId, h.From?.Address, h.Date ?? h.InternalDate, h.Subject, h.Size);
+            if (dead.Keys.Contains(key))
+            {
+                await _repo.TombstonePlaceAsync(ctx, account.Id, key, role, h.Uid, ct);
+                continue;
+            }
             var existing = await _repo.FindByKeyAsync(ctx, account.Id, key, ct);
             if (existing is not null)
             {

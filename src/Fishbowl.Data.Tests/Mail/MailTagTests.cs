@@ -24,7 +24,12 @@ public class MailTagTests : MailFixture
         Assert.Empty(await Repo.ListThreadsAsync(Ctx, new MailListQuery { Tag = "bills" }, Ct));
 
         Assert.True(await tags.DeleteAsync(Ctx, "paid", Ct));
-        Assert.Empty(Assert.Single(await Repo.ListThreadsAsync(Ctx, new MailListQuery(), Ct)).Tags);
+        // What remains is where it came from: the account's source tag, system-given.
+        Assert.Equal(new[] { acc.SourceTag }, Assert.Single(await Repo.ListThreadsAsync(Ctx, new MailListQuery(), Ct)).Tags);
+        Assert.Contains(await tags.GetAllAsync(Ctx, Ct), t => t.Name == acc.SourceTag && t.IsSystem && !t.UserAssignable);
+        // A source tag is never given by hand.
+        Assert.Equal(new[] { "kept" }, await Repo.SetThreadTagsAsync(Ctx, thread.ThreadId, [acc.SourceTag, "kept"], Ct));
+        Assert.Equal("Receipt", Assert.Single(await Repo.ListThreadsAsync(Ctx, new MailListQuery { Tags = [acc.SourceTag, "kept"] }, Ct)).Subject);
 
         // No thread, no tag row.
         Assert.Null(await Repo.SetThreadTagsAsync(Ctx, "no-such-thread", ["ghost"], Ct));

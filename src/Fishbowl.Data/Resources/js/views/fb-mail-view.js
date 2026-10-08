@@ -6,10 +6,12 @@
  * conversations — no folder tree — newest activity first, each marked in or
  * out by its latest message; the open conversation on the right with all its
  * messages, both directions, oldest first. Search is the server's full text;
- * the list header switches to Unread or Archived; the nav toolbar filters by
- * tag and by account and opens the Mail accounts window. A conversation's
- * tags are the workspace's tags. Opening an unread one marks it read here
- * and on the server.
+ * the list header switches to Unread or Archived; tags filter like Notes' — a
+ * strip of chips, all of them must match — and where a message came from is
+ * a tag too: each account's source tag — its name, "icloud" — system-given,
+ * never assigned or removed by hand, always in the strip. A conversation's other tags are the
+ * workspace's, given in its tag bar. The nav toolbar opens the Mail accounts
+ * window. Opening an unread one marks it read here and on the server.
  *
  * Reading is safe by default (decision 7): a message's HTML is its own
  * page at …/messages/{id}/html, framed with a sandbox and a policy that runs
@@ -27,8 +29,7 @@ class FbMailView extends HTMLElement {
         this.accounts = [];
         this.selectedId = null;
         this.view = "list";        // list | unread | archived
-        this.tag = null;
-        this.account = null;
+        this.tags = [];            // the filter strip's picks (all of them)
         this.query = "";
         this.more = false;         // the last page was full: there may be older ones
         this._contactsByAddress = null;
@@ -105,8 +106,7 @@ class FbMailView extends HTMLElement {
             q: this.query || null,
             unread: this.view === "unread" || null,
             archived: this.view === "archived" || null,
-            tag: this.tag,
-            account: this.account,
+            tag: this.tags,
             limit: 50,
         };
     }
@@ -123,6 +123,48 @@ class FbMailView extends HTMLElement {
         this.threads = page;
         this.more = page.length >= 50;
         this.renderList();
+        this.renderTagFilter();
+    }
+
+    /** The accounts' source tags (their names, system-given). */
+    sourceTags() { return new Set(this.accounts.map((a) => a.sourceTag)); }
+
+    /** A row's chips: the source only when there is more than one account to tell apart. */
+    shownTags(tags) {
+        const sources = this.sourceTags();
+        return this.accounts.length > 1 ? tags : tags.filter((x) => !sources.has(x));
+    }
+
+    /**
+     * The tag strip, as Notes': nothing picked — every tag mail carries;
+     * something picked — what the shown conversations still carry (so a chip
+     * always narrows further) and the picks themselves. The sources first
+     * (always — where mail came from is a filter too), then the most used.
+     */
+    async renderTagFilter() {
+        const wrapper = this.querySelector("#mv-tag-wrapper");
+        const strip = this.querySelector("#mv-tag-filter");
+        if (!strip) return;
+        let all = [];
+        try { all = this.accounts.length ? await this.api.tags() : []; } catch { all = []; }
+        if (!this.isConnected) return;
+        const picked = new Set(this.tags);
+        const reachable = new Set(this.threads.flatMap((th) => th.tags));
+        const visible = all.filter((x) => (picked.size === 0 ? x.count > 0 : reachable.has(x.name)) || picked.has(x.name))
+            .sort((a, b) => (b.source - a.source) || (b.count - a.count) || a.name.localeCompare(b.name));
+        wrapper.hidden = visible.length === 0;
+        strip.replaceChildren(...visible.map((x) => {
+            const chip = document.createElement("sac-chip");
+            chip.setAttribute("label", x.name);
+            chip.setAttribute("color", fb.tags.colorFor(x.name));
+            chip.setAttribute("clickable", "");
+            if (picked.has(x.name)) chip.setAttribute("selected", "");
+            chip.addEventListener("click", () => {
+                this.tags = picked.has(x.name) ? this.tags.filter((n) => n !== x.name) : [...this.tags, x.name];
+                this.loadThreads();
+            });
+            return chip;
+        }));
     }
 
     async loadMore() {
@@ -153,6 +195,18 @@ class FbMailView extends HTMLElement {
                 fb-mail-view .mv-list-pane { height: 100%; background: var(--panel); display: flex; flex-direction: column; }
                 fb-mail-view .mv-search { padding: 12px 12px 0; }
                 fb-mail-view .mv-search input { width: 100%; box-sizing: border-box; }
+                /* The tag strip, Notes' own: the row layout only — clamp, fade
+                   and the more/less tab are <sac-collapsible>'s. */
+                fb-mail-view .mv-tag-filter { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; padding: 10px 12px 8px; }
+                fb-mail-view .mv-tag-collapsible[hidden] { display: none !important; }
+                @media (max-width: 768px) {
+                    fb-mail-view .mv-tag-filter { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }
+                    fb-mail-view .mv-tag-filter::-webkit-scrollbar { display: none; }
+                    fb-mail-view .mv-tag-filter > * { flex: none; }
+                }
+                /* A conversation's tag bar: the source (fixed) then what was given. */
+                fb-mail-view .mv-tagbar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 12px 0 20px; }
+                fb-mail-view .mv-tagbar sac-chip-input { flex: 1; min-width: 160px; }
                 fb-mail-view .mv-head { display: flex; align-items: center; gap: 2px; padding: 12px 12px 6px 24px; }
                 fb-mail-view .mv-head-title {
                     flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
@@ -174,13 +228,18 @@ class FbMailView extends HTMLElement {
                 fb-mail-view .mv-items:focus { outline: none; }
                 fb-mail-view .mv-none { padding: 8px 12px; color: var(--text-muted); }
                 fb-mail-view .mv-item {
-                    display: flex; gap: 10px; padding: 9px 12px; margin-bottom: 2px; cursor: pointer;
+                    position: relative;
+                    display: flex; gap: 10px; padding: 9px 12px 9px 20px; margin-bottom: 2px; cursor: pointer;
                     border-radius: var(--radius-m); border: 1px solid transparent;
+                }
+                /* New and unread: a round dot in the accent, left of the entry. */
+                fb-mail-view .mv-item.unread::before {
+                    content: ""; position: absolute; left: 6px; top: 15px;
+                    width: 8px; height: 8px; border-radius: 50%; background: var(--accent);
                 }
                 fb-mail-view .mv-item:hover { background: var(--hover); }
                 fb-mail-view .mv-item.selected { background: var(--accent-tint); border-color: color-mix(in srgb, var(--accent) 28%, transparent); }
                 fb-mail-view .mv-dir { flex: none; color: var(--text-muted); margin-top: 2px; --icon-size: 16px; }
-                fb-mail-view .mv-item.unread .mv-dir { color: var(--accent); }
                 fb-mail-view .mv-item-text { flex: 1; min-width: 0; }
                 fb-mail-view .mv-line { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
                 fb-mail-view .mv-who, fb-mail-view .mv-subject, fb-mail-view .mv-snippet {
@@ -195,29 +254,42 @@ class FbMailView extends HTMLElement {
                 fb-mail-view .mv-item-tags { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
                 fb-mail-view .mv-editor-pane { height: 100%; overflow-y: auto; }
                 fb-mail-view .mv-empty { min-height: 60%; justify-content: center; }
-                fb-mail-view .mv-thread { max-width: 760px; margin: 0 auto; padding: 24px 24px 40px; }
+                fb-mail-view .mv-thread { padding: 24px 24px 40px; }
                 fb-mail-view .mv-thread-head { display: flex; align-items: flex-start; gap: 10px; }
                 fb-mail-view .mv-thread-head h2 { flex: 1; min-width: 0; margin: 0; overflow-wrap: anywhere; }
-                fb-mail-view .mv-tags { display: block; margin: 12px 0 20px; }
                 fb-mail-view .mv-msg { border-top: 1px solid var(--border); }
                 fb-mail-view .mv-msg:last-child { border-bottom: 1px solid var(--border); }
                 fb-mail-view .mv-msg-head {
-                    display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 2px 10px; align-items: baseline;
+                    display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto; gap: 2px 10px; align-items: baseline;
                     padding: 12px 4px; cursor: pointer;
                 }
                 fb-mail-view .mv-msg-head .mv-dir { grid-row: 1 / span 2; align-self: start; margin-top: 3px; }
                 fb-mail-view .mv-msg-from { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
                 fb-mail-view .mv-msg-from .muted { font-size: 0.8125rem; }
                 fb-mail-view .mv-msg-head time { color: var(--text-muted); font-size: 0.8125rem; white-space: nowrap; }
+                fb-mail-view .mv-msg-head .mv-msg-del { align-self: center; margin: -6px 0; }
                 fb-mail-view .mv-msg-sub { grid-column: 2 / -1; color: var(--text-muted); font-size: 0.8125rem;
                     overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
                 fb-mail-view .mv-contact { --icon-btn-size: 22px; --icon-btn-icon: 13px; vertical-align: middle; }
-                fb-mail-view .mv-msg-body { padding: 0 4px 16px 30px; }
+                fb-mail-view .mv-msg-body { padding: 0 0 16px; }
                 fb-mail-view .mv-msg:not(.open) .mv-msg-body { display: none; }
                 fb-mail-view .mv-text { white-space: pre-wrap; overflow-wrap: anywhere; margin: 0; font: inherit; line-height: 1.55; }
-                /* A message's HTML is the sender's page: on paper, whatever the theme. */
-                fb-mail-view .mv-html { display: block; width: 100%; height: 120px; border: 1px solid var(--border);
-                    border-radius: var(--radius-l); background: #fff; }
+                /* A message's HTML is the sender's page: on paper, whatever the
+                   theme, and set light — the frame says so too, so a mail's own
+                   dark rules (prefers-color-scheme) never fire on white. */
+                fb-mail-view .mv-html { display: block; width: 100%; height: 60px; border: 1px solid var(--border);
+                    border-radius: var(--radius-l); background: #fff; color-scheme: light; }
+                /* A plain mail (no backgrounds of its own) is part of the
+                   conversation: no paper, no frame, the app's colours. */
+                /* Its page is set light (the dark theme inverts it); the frame
+                   element says the same, or the browser lays an opaque white
+                   canvas under a page whose colour scheme differs from its
+                   frame's. */
+                fb-mail-view .mv-html.plain { border: 0; border-radius: 0; background: transparent; }
+                /* A mail made for light and dark (Revolut: color-scheme "light
+                   dark"), in the dark theme: set dark, its own dark design on
+                   the app's ground — no paper. */
+                fb-mail-view .mv-html.own-dark { border: 0; border-radius: 0; background: transparent; color-scheme: dark; }
                 /* Remote images: one quiet line above the message, two small text buttons. */
                 fb-mail-view .mv-images { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; margin: 0 0 10px;
                     color: var(--text-muted); font-size: 0.8125rem; }
@@ -242,6 +314,9 @@ class FbMailView extends HTMLElement {
                     <div class="mv-search">
                         <input type="search" id="mv-search" placeholder="${t("search", "Search mail")}"/>
                     </div>
+                    <sac-collapsible class="mv-tag-collapsible" id="mv-tag-wrapper" max-height="82px" hidden>
+                        <div class="mv-tag-filter" id="mv-tag-filter"></div>
+                    </sac-collapsible>
                     <div class="mv-head">
                         <span class="mv-head-title" id="mv-head-title"></span>
                         <button type="button" class="icon-btn" data-view="unread" title="${t("only-unread", "Only unread")}" aria-label="${t("only-unread", "Only unread")}"><sac-icon name="eye"></sac-icon></button>
@@ -285,8 +360,7 @@ class FbMailView extends HTMLElement {
         const title = this.view === "unread" ? this.t("head-unread", "Unread")
             : this.view === "archived" ? this.t("head-archived", "Archived")
             : this.t("head-all", "Mail");
-        const parts = [title, this.tag ? `#${this.tag}` : null, this.account ? this.accounts.find((a) => a.id === this.account)?.name : null];
-        this.querySelector("#mv-head-title").textContent = parts.filter(Boolean).join(" · ");
+        this.querySelector("#mv-head-title").textContent = title;
         for (const btn of this.querySelectorAll(".mv-head [data-view]")) {
             btn.classList.toggle("active", btn.dataset.view === this.view);
             btn.setAttribute("aria-pressed", String(btn.dataset.view === this.view));
@@ -367,13 +441,13 @@ class FbMailView extends HTMLElement {
             if (th.hasAttachments) marks.innerHTML += `<sac-icon name="attachment" title="${this.t("has-attachments", "Attachments")}"></sac-icon>`;
             if (th.flagged) marks.innerHTML += `<sac-icon name="star" title="${this.t("flagged", "Flagged")}"></sac-icon>`;
             const tags = row.querySelector(".mv-item-tags");
-            for (const name of th.tags) {
+            for (const name of this.shownTags(th.tags)) {
                 const chip = document.createElement("sac-chip");
                 chip.setAttribute("label", name);
                 chip.setAttribute("color", fb.tags.colorFor(name));
                 tags.appendChild(chip);
             }
-            if (!th.tags.length) tags.remove();
+            if (!tags.childElementCount) tags.remove();
             row.addEventListener("click", () => this.open(th.threadId));
             return row;
         }));
@@ -437,12 +511,17 @@ class FbMailView extends HTMLElement {
                 <div class="mv-thread-head">
                     <h2></h2>
                     <button type="button" class="icon-btn mv-write" id="mv-unread" title="${this.t("mark-unread", "Mark unread")}" aria-label="${this.t("mark-unread", "Mark unread")}"><sac-icon name="eye-off"></sac-icon></button>
+                    <button type="button" class="icon-btn mv-write" id="mv-delete" title="${this.t("delete", "Delete")}" aria-label="${this.t("delete", "Delete")}"><sac-icon name="trash"></sac-icon></button>
                 </div>
-                <sac-chip-input class="mv-tags" add-label="${this.t("add-tag", "Add tag")}" allow-create></sac-chip-input>
+                <div class="mv-tagbar">
+                    <sac-chip-input class="mv-tags" add-label="${this.t("add-tag", "Add tag")}" allow-create></sac-chip-input>
+                </div>
                 <div class="mv-msgs"></div>
             </div>`;
         pane.querySelector("h2").textContent = subject;
         pane.querySelector("#mv-unread").hidden = !this.writable;
+        pane.querySelector("#mv-delete").hidden = !this.writable;
+        pane.querySelector("#mv-delete").addEventListener("click", () => this.deleteMail(threadId, null));
         pane.querySelector("#mv-unread").addEventListener("click", async () => {
             try {
                 await this.api.setSeen(threadId, false);
@@ -456,24 +535,36 @@ class FbMailView extends HTMLElement {
 
         const list = pane.querySelector(".mv-msgs");
         // The last message open, and every unread one; the rest folded to a line.
-        messages.forEach((m, i) => list.appendChild(this.messageEl(m, i === messages.length - 1 || (m.direction === "in" && !m.seen))));
+        // With more than one, each can be deleted on its own.
+        const single = messages.length < 2;
+        messages.forEach((m, i) => list.appendChild(this.messageEl(m, i === messages.length - 1 || (m.direction === "in" && !m.seen), threadId, single)));
         pane.scrollTop = 0;
     }
 
     async paintTags(input, threadId, messages) {
+        // Where it came from: the accounts' source tags, fixed — shown, never edited.
+        const sources = [...new Set(messages.map((m) => this.accounts.find((a) => a.id === m.accountId)?.sourceTag).filter(Boolean))];
+        for (const name of sources.reverse()) {
+            const chip = document.createElement("sac-chip");
+            chip.setAttribute("label", name);
+            chip.setAttribute("color", fb.tags.colorFor(name));
+            chip.title = this.t("source-tag", "Where it came from — set by Fishbowl");
+            input.before(chip);
+        }
         input.value = [...new Set(messages.flatMap((m) => m.tags || []))];
         if (!this.writable) { input.setAttribute("readonly", ""); return; }
         try {
             input.suggestions = (await fb.tags.all())
-                .filter((x) => x.userAssignable !== false)
+                .filter((x) => x.userAssignable !== false && !this.sourceTags().has(x.name))
                 .map((x) => ({ name: x.name, color: x.color, count: x.usageCount }));
         } catch { /* no suggestions */ }
         const save = async () => {
             try {
                 const res = await this.api.setTags(threadId, input.value);
                 const th = this.threads.find((x) => x.threadId === threadId);
-                if (th) { th.tags = res.tags; this.renderList(); }
+                if (th) { const src = this.sourceTags(); th.tags = th.tags.filter((x) => src.has(x)).concat(res.tags); this.renderList(); }
                 fb.tags.invalidate();
+                this.renderTagFilter();
             } catch (err) { sac.toast?.(fb.errors.text(err, this.t("tags-failed", "The tags couldn't be saved.")), { kind: "error" }); }
         };
         input.addEventListener("sac:change", save);
@@ -484,17 +575,28 @@ class FbMailView extends HTMLElement {
         });
     }
 
-    messageEl(m, open) {
+    messageEl(m, open, threadId, single) {
         const el = document.createElement("article");
         el.className = "mv-msg" + (open ? " open" : "");
         el.innerHTML = `
-            <header class="mv-msg-head">
+            <header class="mv-msg-head reveal-on-hover">
                 <sac-icon class="mv-dir"></sac-icon>
                 <span class="mv-msg-from"><strong></strong> <span class="muted"></span></span>
                 <time></time>
+                <span></span>
                 <div class="mv-msg-sub"></div>
             </header>
             <div class="mv-msg-body"></div>`;
+        if (this.writable && !single) {
+            const del = document.createElement("button");
+            del.type = "button";
+            del.className = "icon-btn hover-reveal mv-msg-del";
+            del.title = this.t("delete-message", "Delete this message");
+            del.setAttribute("aria-label", del.title);
+            del.innerHTML = `<sac-icon name="trash"></sac-icon>`;
+            del.addEventListener("click", (e) => { e.stopPropagation(); this.deleteMail(threadId, m); });
+            el.querySelector(".mv-msg-head time").nextElementSibling.replaceWith(del);
+        }
         const dir = el.querySelector(".mv-dir");
         dir.setAttribute("name", m.direction === "out" ? "fb-mail-out" : "fb-mail-in");
         dir.setAttribute("title", m.direction === "out" ? this.t("sent", "Sent") : this.t("received", "Received"));
@@ -532,12 +634,44 @@ class FbMailView extends HTMLElement {
         return el;
     }
 
+    /**
+     * Decision 8 of the mail spec: only in Fishbowl (the mail server keeps it)
+     * or everywhere (also into the server's Trash). Either way it waits in
+     * Fishbowl's trash. A whole conversation, or one message of it.
+     */
+    async deleteMail(threadId, message) {
+        const answer = await sac.dialog.confirm({
+            title: message ? this.t("delete-message-title", "Delete this message?") : this.t("delete-title", "Delete this conversation?"),
+            message: this.t("delete-how", "Only in Fishbowl: your mail server keeps it. Everywhere: it goes to the server's trash too. Either way it waits in Fishbowl's trash."),
+            buttons: [
+                { action: "cancel", label: fb.t("fb.common.cancel", "Cancel"), kind: "default" },
+                { action: "fishbowl", label: this.t("delete-here", "Only in Fishbowl"), kind: "default" },
+                { action: "everywhere", label: this.t("delete-everywhere", "Everywhere"), kind: "destructive" },
+            ],
+        });
+        if (answer !== "fishbowl" && answer !== "everywhere") return;
+        try {
+            if (message) await this.api.deleteMessage(message.id, answer);
+            else await this.api.deleteThread(threadId, answer);
+        } catch (err) {
+            sac.toast?.(fb.errors.text(err, this.t("delete-failed", "That couldn't be deleted.")), { kind: "error" });
+            return;
+        }
+        sac.toast?.(answer === "everywhere"
+            ? this.t("deleted-everywhere", "Deleted — in the trash here and on the server.")
+            : this.t("deleted-here", "Deleted here — it's in the trash. Your mail server keeps it."));
+        await this.loadThreads();
+        if (message && this.threads.some((x) => x.threadId === threadId)) this.open(threadId);
+        else if (this.selectedId === threadId) { this.selectedId = null; this.showNone(); }
+    }
+
     paintBody(el, m) {
         const body = el.querySelector(".mv-msg-body");
         if (body.dataset.painted) return;
         body.dataset.painted = "1";
         if (m.hasHtml) {
             const shown = this._imagesAllowed(m);
+            let watchFrame = () => {};
             if (m.remoteImages && !shown) {
                 const note = document.createElement("div");
                 note.className = "mv-images";
@@ -549,34 +683,54 @@ class FbMailView extends HTMLElement {
                     if (!how) return;
                     if (how === "sender") this._allowImagesFrom(m.fromAddress);
                     note.remove();
-                    frame.src = this.api.htmlUrl(m.id, true);
+                    frame.src = this.api.htmlUrl(m.id, true, this.theme());
+                    watchFrame();
                 });
                 body.appendChild(note);
             }
             const frame = document.createElement("iframe");
-            frame.className = "mv-html";
+            frame.className = "mv-html" + (m.htmlLook === "plain" ? " plain"
+                : m.htmlLook === "adaptive" && this.theme() === "dark" ? " own-dark" : "");
             frame.setAttribute("sandbox", "allow-same-origin allow-popups allow-popups-to-escape-sandbox");
             frame.setAttribute("referrerpolicy", "no-referrer");
             frame.title = m.subject || this.t("message", "Message");
-            frame.src = this.api.htmlUrl(m.id, shown);
+            frame.src = this.api.htmlUrl(m.id, shown, this.theme());
             // Same origin, no script: the frame is measured from here, and
-            // follows its own size as images load.
-            frame.addEventListener("load", () => {
-                const doc = frame.contentDocument;
-                if (!doc?.body) return;
-                // The page's own height: its body plus the body's margins —
-                // measured now, again once fonts and images settle, and
-                // whenever the body changes size.
+            // follows its own size as images load — from the moment its page
+            // is parsed, not at load, which waits for every remote image: a
+            // slow image server would leave the frame empty until then.
+            const fitted = new WeakSet();
+            const setup = (doc) => {
+                const root = doc?.documentElement;
+                if (!root || fitted.has(doc) || doc.URL === "about:blank") return;
+                fitted.add(doc);
+                // The whole page's height — the <html> with its inset and any
+                // margin that runs out of a body set to margin: 0 — plus a
+                // sideways scrollbar when a wide table needs one: measured now,
+                // again once fonts and images settle, and whenever it changes.
                 const fit = () => {
-                    const h = Math.ceil(Math.max(doc.body.scrollHeight, doc.body.getBoundingClientRect().height));
-                    frame.style.height = `${Math.max(60, h + 2)}px`;
+                    const bar = Math.max(0, (frame.contentWindow?.innerHeight || 0) - root.clientHeight);
+                    frame.style.height = `${Math.ceil(root.scrollHeight + bar) + 2}px`;
                 };
                 fit();
                 requestAnimationFrame(fit);
                 setTimeout(fit, 300);
                 doc.fonts?.ready?.then(fit);
-                try { new ResizeObserver(fit).observe(doc.body); } catch { /* fitted above */ }
-            });
+                for (const img of doc.images) if (!img.complete) img.addEventListener("load", fit, { once: true });
+                try { const ro = new ResizeObserver(fit); ro.observe(root); if (doc.body) ro.observe(doc.body); } catch { /* fitted above */ }
+            };
+            // Every frame until its page is parsed (a new src starts it again).
+            watchFrame = () => {
+                let left = 600;
+                const tick = () => {
+                    const doc = frame.contentDocument;
+                    if (doc && doc.URL !== "about:blank" && doc.readyState !== "loading") setup(doc);
+                    if ((!doc || !fitted.has(doc)) && --left > 0) requestAnimationFrame(tick);
+                };
+                requestAnimationFrame(tick);
+            };
+            frame.addEventListener("load", () => setup(frame.contentDocument));
+            watchFrame();
             body.appendChild(frame);
         } else {
             const pre = document.createElement("pre");
@@ -599,6 +753,12 @@ class FbMailView extends HTMLElement {
             }
             body.appendChild(box);
         }
+    }
+
+    /** "dark" or "light", from the page's actual background — whatever set it. */
+    theme() {
+        const rgb = (getComputedStyle(document.body).backgroundColor.match(/\d+(\.\d+)?/g) || [0, 0, 0]).map(Number);
+        return (0.2126 * rgb[0] + 0.7152 * rgb[1] + 0.0722 * rgb[2]) / 255 < 0.5 ? "dark" : "light";
     }
 
     // Senders whose remote images show without asking — per browser.
@@ -637,34 +797,8 @@ class FbMailView extends HTMLElement {
         });
     }
 
-    async paintToolbar() {
-        const items = [];
-        let tags = [];
-        try { tags = (await fb.tags.all()).map((x) => x.name); } catch { /* no tags */ }
-        if (tags.length) {
-            items.push({
-                id: "mv-tag", icon: "tag", title: this.t("filter-tag", "Filter by tag"),
-                menu: [
-                    { action: "", label: this.t("all-tags", "All conversations"), checked: !this.tag },
-                    "-",
-                    ...tags.map((name) => ({ action: name, label: name, icon: "tag", color: fb.accents.cssVar(fb.tags.colorFor(name)), checked: this.tag === name })),
-                ],
-                onSelect: (action) => { this.tag = action || null; this.paintHead(); this.loadThreads(); this.paintToolbar(); },
-            });
-        }
-        if (this.accounts.length > 1) {
-            items.push({
-                id: "mv-account", icon: "users", title: this.t("filter-account", "Filter by account"),
-                menu: [
-                    { action: "", label: this.t("all-accounts", "All accounts"), checked: !this.account },
-                    "-",
-                    ...this.accounts.map((a) => ({ action: a.id, label: a.name, icon: "mail", checked: this.account === a.id })),
-                ],
-                onSelect: (action) => { this.account = action || null; this.paintHead(); this.loadThreads(); this.paintToolbar(); },
-            });
-        }
-        items.push({ id: "mv-accounts", icon: "settings", title: this.t("accounts", "Mail accounts"), onClick: () => this.openAccounts() });
-        if (this.isConnected) fb.toolbar.set(items);
+    paintToolbar() {
+        if (this.isConnected) fb.toolbar.set([{ id: "mv-accounts", icon: "settings", title: this.t("accounts", "Mail accounts"), onClick: () => this.openAccounts() }]);
     }
 }
 

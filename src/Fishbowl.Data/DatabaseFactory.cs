@@ -518,8 +518,31 @@ public class DatabaseFactory
             ApplyUserV22(connection);
             connection.Execute("PRAGMA user_version = 22");
             _logger.LogInformation("Applied user schema v22 to {DbPath}", ((SqliteConnection)connection).DataSource);
+            version = 22;
+        }
+
+        if (version < 23)
+        {
+            ApplyUserV23(connection);
+            connection.Execute("PRAGMA user_version = 23");
+            _logger.LogInformation("Applied user schema v23 to {DbPath}", ((SqliteConnection)connection).DataSource);
         }
     }
+
+    // Mail deleted only in Fishbowl (mail spec, decision 8): the sync never
+    // brings it back. One row per message key (role '', uid 0) and one per
+    // place it had on the server, so those UIDs aren't fetched again; a trash
+    // restore removes them all and the next pass finds its places again.
+    private static void ApplyUserV23(IDbConnection connection) =>
+        connection.Execute(@"
+            CREATE TABLE IF NOT EXISTS mail_tombstones (
+                account_id TEXT NOT NULL,
+                message_key TEXT NOT NULL,
+                role TEXT NOT NULL DEFAULT '',
+                uid INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL,
+                PRIMARY KEY (account_id, message_key, role, uid)
+            )");
 
     // Mail (spec 2026-10-07-mail-design): a workspace's accounts — the
     // password encrypted with the instance's Mail:CredentialKey — each synced

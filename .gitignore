@@ -490,6 +490,9 @@ $RECYCLE.BIN/
 # that appears when running from that directory.
 fishbowl-data/
 **/fishbowl-data/
+# tools/snapshot-data's default output: copies of the same data.
+fishbowl-backups/
+**/fishbowl-backups/
 
 # User-dropped mods. Dir may exist during dev but its contents are end-user
 # artifacts — anything committed belongs in src/Fishbowl.Data/Resources/ instead.

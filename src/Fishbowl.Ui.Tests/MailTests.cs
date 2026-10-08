@@ -92,13 +92,15 @@ public class MailTests
             await page.WaitForFunctionAsync(@"() => {
                 const f = document.querySelector('fb-mail-view iframe.mv-html');
                 const d = f && f.contentDocument;
-                return d && d.body && d.body.scrollHeight > 40 && d.body.scrollHeight <= f.clientHeight + 1;
+                // …and as wide: a 100vw block doesn't push the page sideways.
+                return d && d.body && d.body.scrollHeight > 40 && d.documentElement.scrollHeight <= f.clientHeight + 1
+                    && d.documentElement.scrollWidth <= d.documentElement.clientWidth;
             }");
             var src = await frame.GetAttributeAsync("src");
             var html = await page.APIRequest.GetAsync(src!.StartsWith("http") ? src : _fixture.BaseUrl + src);
             var csp = html.Headers["content-security-policy"];
             Assert.Contains("sandbox", csp);
-            Assert.Contains("img-src data:;", csp);
+            Assert.Contains("img-src data: 'self';", csp);   // its own embedded parts, nothing remote
             Assert.DoesNotContain("allow-scripts", csp);
             await page.ScreenshotAsync(new() { Path = Shot("html") });
             await page.Locator("fb-mail-view .mv-images [data-images='once']").ClickAsync();
@@ -112,6 +114,15 @@ public class MailTests
             var file = await page.APIRequest.GetAsync(_fixture.BaseUrl + href);
             Assert.True(file.Ok);
             Assert.StartsWith("%PDF", System.Text.Encoding.ASCII.GetString(await file.BodyAsync()));
+            // A plain mail (no backgrounds) is in the app's colours, without paper;
+            // its embedded logo (cid:) comes from the mail server.
+            var plain = page.Locator("fb-mail-view iframe.mv-html");
+            await Assertions.Expect(plain).ToHaveClassAsync(new System.Text.RegularExpressions.Regex(@"\bplain\b"));
+            await page.WaitForFunctionAsync(@"() => {
+                const img = document.querySelector('fb-mail-view iframe.mv-html')?.contentDocument?.querySelector('img');
+                return img && img.complete && img.naturalWidth === 8;
+            }");
+            await page.ScreenshotAsync(new() { Path = Shot("plain") });
 
             // Archived and search.
             await page.Locator("fb-mail-view .mv-head [data-view='archived']").ClickAsync();
@@ -166,6 +177,130 @@ public class MailTests
             await Assertions.Expect(page.Locator("fb-mail-view .mv-msg")).ToHaveCountAsync(3, new() { Timeout = 10000 });
             await Assertions.Expect(page.Locator("fb-mail-view .mv-msg-from .mv-contact").First).ToBeVisibleAsync();
             Assert.NotNull(id);
+        }
+        finally
+        {
+            await page.APIRequest.DeleteAsync($"{_fixture.BaseUrl}/api/v1/spaces/{slug}?archive=false");
+            await context.CloseAsync();
+        }
+    }
+
+    // Tags as in Notes: a strip of chips under the search (all picked must
+    // match), the account's source tag — its name, no prefix — always in it
+    // and fixed in a conversation's tag bar; given tags in the chip input.
+    [Fact]
+    public async Task Mail_TagStrip_FiltersLikeNotes_SourceTagIsFixed_Test()
+    {
+        var (context, page, slug, api) = await SpaceWithMailAsync();
+        try
+        {
+            var invoice = (await (await page.APIRequest.GetAsync($"{api}/threads?q=invoice")).JsonAsync())!.Value[0].GetProperty("threadId").GetString();
+            Assert.True((await page.APIRequest.PutAsync($"{api}/threads/{invoice}/tags", new() { DataObject = new { tags = new[] { "bills" } } })).Ok);
+
+            await page.GotoAsync($"{_fixture.BaseUrl}/#/space/{slug}/mail");
+            var rows = page.Locator("fb-mail-view .mv-item");
+            await Assertions.Expect(rows).ToHaveCountAsync(3, new() { Timeout = 15000 });
+            var strip = page.Locator("fb-mail-view #mv-tag-filter sac-chip");
+            await Assertions.Expect(strip.First).ToHaveAttributeAsync("label", "sample");   // the account "Sample"
+            await Assertions.Expect(page.Locator("fb-mail-view #mv-tag-filter sac-chip[label='bills']")).ToHaveCountAsync(1);
+            await page.ScreenshotAsync(new() { Path = Shot("tags") });
+
+            await page.Locator("fb-mail-view #mv-tag-filter sac-chip[label='bills']").ClickAsync();
+            await Assertions.Expect(rows).ToHaveCountAsync(1);
+            await Assertions.Expect(rows.First).ToContainTextAsync("Your invoice");
+            await page.Locator("fb-mail-view #mv-tag-filter sac-chip[label='bills']").ClickAsync();
+            await Assertions.Expect(rows).ToHaveCountAsync(3);
+
+            // The conversation: the source fixed before the input, the given tags in it.
+            await rows.Filter(new() { HasText = "Your invoice" }).ClickAsync();
+            await Assertions.Expect(page.Locator("fb-mail-view .mv-tagbar > sac-chip[label='sample']")).ToHaveCountAsync(1);
+            var given = await page.Locator("fb-mail-view .mv-tagbar sac-chip-input").EvaluateAsync<string[]>("el => el.value");
+            Assert.Equal(new[] { "bills" }, given);
+            // A plain mail's frame says the same colour scheme as its page: no white canvas under it.
+            Assert.Equal("light", await page.Locator("fb-mail-view iframe.mv-html").EvaluateAsync<string>("el => getComputedStyle(el).colorScheme"));
+        }
+        finally
+        {
+            await page.APIRequest.DeleteAsync($"{_fixture.BaseUrl}/api/v1/spaces/{slug}?archive=false");
+            await context.CloseAsync();
+        }
+    }
+
+    // A mail made for light and dark (Revolut) shows its own dark design in the
+    // dark theme — never white text on white paper, whatever the system
+    // prefers (emulated the other way round each time); a light-only
+    // newsletter stays on paper.
+    [Fact]
+    public async Task Mail_MadeForDark_ShowsItsDarkDesign_PaperStaysLight_Test()
+    {
+        var (context, page, slug, api) = await SpaceWithMailAsync();
+        try
+        {
+            const string inFrame = @"(el, sel) => {
+                const d = el.contentDocument, t = d.querySelector(sel);
+                return [t ? getComputedStyle(t).color : '', getComputedStyle(d.documentElement).backgroundColor].join('|');
+            }";
+            await page.EmulateMediaAsync(new() { ColorScheme = ColorScheme.Light });
+            await page.GotoAsync($"{_fixture.BaseUrl}/#/space/{slug}/mail");
+            var rows = page.Locator("fb-mail-view .mv-item");
+            await Assertions.Expect(rows).ToHaveCountAsync(3, new() { Timeout = 15000 });
+
+            // The newsletter (paper) in the dark theme: on white.
+            await rows.Filter(new() { HasText = "This week in engines" }).ClickAsync();
+            var frame = page.Locator("fb-mail-view iframe.mv-html");
+            await Assertions.Expect(frame).Not.ToHaveClassAsync(new System.Text.RegularExpressions.Regex(@"\b(plain|own-dark)\b"));
+            await page.WaitForFunctionAsync("() => document.querySelector('fb-mail-view iframe.mv-html')?.contentDocument?.querySelector('h1')");
+            Assert.EndsWith("|rgb(255, 255, 255)", await frame.EvaluateAsync<string>(inFrame, "h1"));
+
+            // The adaptive one: its dark rules apply, on the app's ground.
+            await page.Locator("fb-mail-view .mv-head [data-view='archived']").ClickAsync();
+            await rows.Filter(new() { HasText = "Old project" }).ClickAsync();
+            await Assertions.Expect(frame).ToHaveClassAsync(new System.Text.RegularExpressions.Regex(@"\bown-dark\b"));
+            await page.WaitForFunctionAsync("() => document.querySelector('fb-mail-view iframe.mv-html')?.contentDocument?.querySelector('.t')");
+            Assert.Equal("rgb(255, 255, 255)|rgba(0, 0, 0, 0)", await frame.EvaluateAsync<string>(inFrame, ".t"));
+            await page.ScreenshotAsync(new() { Path = Shot("own-dark") });
+
+            // The light theme on a dark system: the same mail on paper, its light design.
+            await page.EmulateMediaAsync(new() { ColorScheme = ColorScheme.Dark });
+            await page.EvaluateAsync("() => localStorage.setItem('sac-theme', 'light')");
+            await page.ReloadAsync();
+            await page.Locator("fb-mail-view .mv-head [data-view='archived']").ClickAsync();
+            await rows.Filter(new() { HasText = "Old project" }).ClickAsync();
+            await page.WaitForFunctionAsync("() => document.querySelector('fb-mail-view iframe.mv-html')?.contentDocument?.querySelector('.t')");
+            await Assertions.Expect(frame).Not.ToHaveClassAsync(new System.Text.RegularExpressions.Regex(@"\bown-dark\b"));
+            Assert.Equal("rgb(25, 28, 31)|rgb(255, 255, 255)", await frame.EvaluateAsync<string>(inFrame, ".t"));
+        }
+        finally
+        {
+            await page.APIRequest.DeleteAsync($"{_fixture.BaseUrl}/api/v1/spaces/{slug}?archive=false");
+            await context.CloseAsync();
+        }
+    }
+
+    // Unread shows as a dot; a conversation is deleted from its head — the
+    // dialog asks only here or everywhere.
+    [Fact]
+    public async Task Mail_UnreadDot_DeleteOnlyInFishbowl_Test()
+    {
+        var (context, page, slug, api) = await SpaceWithMailAsync();
+        try
+        {
+            await page.GotoAsync($"{_fixture.BaseUrl}/#/space/{slug}/mail");
+            var rows = page.Locator("fb-mail-view .mv-item");
+            await Assertions.Expect(rows).ToHaveCountAsync(3, new() { Timeout = 15000 });
+            var news = rows.Filter(new() { HasText = "This week in engines" });
+            await Assertions.Expect(news).ToHaveClassAsync(new System.Text.RegularExpressions.Regex(@"\bunread\b"));
+            Assert.Equal("8px", await news.EvaluateAsync<string>("el => getComputedStyle(el, '::before').width"));
+            Assert.Equal("none", await rows.Filter(new() { HasText = "Your invoice" }).EvaluateAsync<string>("el => getComputedStyle(el, '::before').content"));
+
+            await rows.Filter(new() { HasText = "Your invoice" }).ClickAsync();
+            await page.Locator("fb-mail-view #mv-delete").ClickAsync();
+            var dialog = page.Locator("sac-dialog[title='Delete this conversation?']");
+            await dialog.GetByRole(AriaRole.Button, new() { Name = "Only in Fishbowl", Exact = true }).ClickAsync();
+            await Assertions.Expect(rows).ToHaveCountAsync(2);
+            await Assertions.Expect(rows.Filter(new() { HasText = "Your invoice" })).ToHaveCountAsync(0);
+            await Assertions.Expect(page.Locator("fb-mail-view .mv-empty")).ToBeVisibleAsync();
+            await page.ScreenshotAsync(new() { Path = Shot("deleted") });
         }
         finally
         {

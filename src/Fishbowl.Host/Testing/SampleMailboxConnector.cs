@@ -48,6 +48,7 @@ internal sealed class SampleMailbox : IMailbox
             ["Archive"] = new(),
         };
         public readonly object Gate = new();
+        public readonly List<Message> Trashed = new();   // the server's Trash (not synced)
 
         public static Store Seed(string me)
         {
@@ -72,12 +73,26 @@ internal sealed class SampleMailbox : IMailbox
                 "Re: Analytical engine notes", TimeSpan.FromHours(3), false, "The variables live in the store, column by column.");
             Add("INBOX", "news-1@example.com", null, [], new MailAddress("Weekly News", "news@example.com"), self, "This week in engines",
                 TimeSpan.FromHours(5), false, null,
-                "<h1>This week</h1><p>Engines everywhere.</p><img src=\"https://example.com/pixel.png\" width=\"1\" height=\"1\">");
+                // Like real newsletters: a background of its own (on paper), body
+                // margin forced to 0, a last block whose margin runs out of the
+                // body — the frame must still fit it.
+                "<style>body{margin:0 !important;padding:0}</style><h1>This week</h1><p>Engines everywhere.</p>" +
+                "<table width=\"100%\" bgcolor=\"#f4f4f4\" style=\"margin-bottom:40px\"><tr><td>Footer</td></tr></table>" +
+                "<div style=\"width:100vw;height:1px\"></div>" +
+                "<img src=\"https://example.com/pixel.png\" width=\"1\" height=\"1\">");
+            // A plain HTML mail as Outlook writes it — no backgrounds, its
+            // signature's logo embedded as cid: — with a PDF attached.
             Add("INBOX", "invoice-1@example.net", null, [], new MailAddress("Billing", "billing@example.net"), self, "Your invoice",
                 TimeSpan.FromDays(1), true, "Your invoice is attached.",
+                "<p style=\"color:windowtext\">Your invoice is attached.</p><p><img src=\"cid:logo@billing\" alt=\"Billing\" width=\"8\" height=\"8\"></p>",
                 file: ("invoice.pdf", "application/pdf", Encoding.ASCII.GetBytes("%PDF-1.4\n% sample invoice\n")));
+            // Designed for light and dark, as Revolut's are: a colour-scheme
+            // declaration and dark rules that turn the text white.
             Add("Archive", "old-1@example.org", null, [], new MailAddress("Grace Hopper", "grace@example.org"), self, "Old project",
-                TimeSpan.FromDays(40), true, "The old project is done.");
+                TimeSpan.FromDays(40), true, "The old project is done.",
+                "<meta name=\"color-scheme\" content=\"light dark\"><style>.card{background-color:#ffffff}.t{color:#191c1f}" +
+                "@media (prefers-color-scheme: dark){.card{background-color:#262626 !important}.t{color:#ffffff !important}}</style>" +
+                "<div class=\"card\"><p class=\"t\">The old project is done.</p></div>");
             for (var i = 1; i <= 30; i++)
                 Add("Archive", $"digest-{i}@example.com", null, [], new MailAddress("Digest", "digest@example.com"), self, $"Digest #{i}",
                     TimeSpan.FromDays(60 + i), true, $"Digest number {i}.");
@@ -145,11 +160,34 @@ internal sealed class SampleMailbox : IMailbox
         await target.WriteAsync(bytes, ct);
     }
 
+    // The one embedded part in the sample: an 8x8 PNG logo.
+    private static readonly byte[] Logo = Convert.FromBase64String(
+        "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAIAAABLbSncAAAAEUlEQVR4nGNQcvmPFTEMLQkAqIZZQVz3JK0AAAAASUVORK5CYII=");
+
+    public async Task<string?> InlineAsync(string folder, uint uid, string contentId, Stream target, CancellationToken ct)
+    {
+        lock (Data.Gate) _ = Folder(folder).First(m => m.Uid == uid);
+        if (contentId != "logo@billing") return null;
+        await target.WriteAsync(Logo, ct);
+        return "image/png";
+    }
+
     public Task MarkAsync(string folder, IReadOnlyList<uint> uids, bool? seen, bool? flagged, CancellationToken ct)
     {
         lock (Data.Gate)
             foreach (var m in Folder(folder).Where(m => uids.Contains(m.Uid)))
                 if (seen is { } s) m.Seen = s;
+        return Task.CompletedTask;
+    }
+
+    public Task TrashAsync(string folder, IReadOnlyList<uint> uids, CancellationToken ct)
+    {
+        lock (Data.Gate)
+        {
+            var f = Folder(folder);
+            Data.Trashed.AddRange(f.Where(m => uids.Contains(m.Uid)));
+            f.RemoveAll(m => uids.Contains(m.Uid));
+        }
         return Task.CompletedTask;
     }
 }

@@ -56,9 +56,18 @@ public interface IMailbox : IAsyncDisposable
     Task<IReadOnlyList<SyncFlags>> FlagsAsync(string folder, ulong? changedSince, CancellationToken ct);
     /// <summary>Writes one attachment's decoded content to <paramref name="target"/>.</summary>
     Task AttachmentAsync(string folder, uint uid, string part, Stream target, CancellationToken ct);
+    /// <summary>Writes the part a message's HTML embeds as <c>cid:&lt;contentId&gt;</c>
+    /// (a signature's logo) to <paramref name="target"/> and returns its type, or
+    /// null when the message has no such part.</summary>
+    Task<string?> InlineAsync(string folder, uint uid, string contentId, Stream target, CancellationToken ct) =>
+        throw new NotSupportedException("This mailbox can't read embedded parts.");
     /// <summary>Sets or clears seen / flagged on the server (null leaves it).</summary>
     Task MarkAsync(string folder, IReadOnlyList<uint> uids, bool? seen, bool? flagged, CancellationToken ct) =>
         throw new NotSupportedException("This mailbox can't change flags.");
+    /// <summary>Moves messages to the account's Trash folder. Never expunges
+    /// there — the provider's own retention applies.</summary>
+    Task TrashAsync(string folder, IReadOnlyList<uint> uids, CancellationToken ct) =>
+        throw new NotSupportedException("This mailbox can't delete.");
 }
 
 /// <summary>Opens a mailbox for an account; the password comes from the caller.</summary>

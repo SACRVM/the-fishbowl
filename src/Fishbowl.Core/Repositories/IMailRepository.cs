@@ -29,4 +29,11 @@ public interface IMailRepository
     Task<IReadOnlyList<MailLocationRef>> SetThreadSeenAsync(ContextRef ctx, string threadId, bool seen, CancellationToken ct = default);
     /// <summary>Where a message lies on the server (for its attachments).</summary>
     Task<IReadOnlyList<MailLocationRef>> LocationsAsync(ContextRef ctx, string messageId, CancellationToken ct = default);
+    /// <summary>A conversation's message ids.</summary>
+    Task<IReadOnlyList<string>> ThreadMessageIdsAsync(ContextRef ctx, string threadId, CancellationToken ct = default);
+    /// <summary>Where these messages lie on their servers.</summary>
+    Task<IReadOnlyList<MailLocationRef>> LocationsOfAsync(ContextRef ctx, IReadOnlyList<string> ids, CancellationToken ct = default);
+    /// <summary>Deletes messages here, each into the trash; <paramref name="tombstone"/>
+    /// keeps the sync from bringing them back (deleted only in Fishbowl).</summary>
+    Task<int> DeleteMessagesAsync(ContextRef ctx, IReadOnlyList<string> ids, bool tombstone, string? deletedBy, CancellationToken ct = default);
 }

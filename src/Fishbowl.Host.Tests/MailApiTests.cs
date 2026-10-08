@@ -255,6 +255,31 @@ public class MailApiTests : IClassFixture<WebApplicationFactory<Program>>, IDisp
         Assert.True(news[0].GetProperty("hasHtml").GetBoolean());
         Assert.True(news[0].GetProperty("remoteImages").GetBoolean());
         Assert.False(news[0].TryGetProperty("bodyHtml", out _));
+        // How each is shown: a newsletter on paper, Outlook's plain HTML in the
+        // app's colours, a mail made for light and dark in its own dark design.
+        Assert.Equal("paper", news[0].GetProperty("htmlLook").GetString());
+        Assert.Equal("plain", (await Messages(c, P, ThreadIdOf(threads, "Your invoice")))[0].GetProperty("htmlLook").GetString());
+        var old = await Messages(c, P, ThreadIdOf(await Threads(c, P, "?archived=true"), "Old project"));
+        Assert.Equal("adaptive", old[0].GetProperty("htmlLook").GetString());
+        Assert.Equal(JsonValueKind.Null, msgs[0].GetProperty("htmlLook").ValueKind);
+    }
+
+    [Fact]
+    public async Task Html_MadeForDark_IsSetDarkInTheDarkTheme_PaperNever()
+    {
+        var c = Fresh();
+        await SyncedAccountAsync(c, P);
+        var old = (await Messages(c, P, ThreadIdOf(await Threads(c, P, "?archived=true"), "Old project")))[0].GetProperty("id").GetString();
+        var news = (await Messages(c, P, ThreadIdOf(await Threads(c, P), "This week in engines")))[0].GetProperty("id").GetString();
+
+        var dark = await c.GetStringAsync($"{P}/messages/{old}/html?theme=dark", Ct);
+        Assert.Contains("html{background:transparent;color-scheme:dark}", dark);
+        Assert.Contains("@media (min-width:0px)", dark);           // its dark rules hold, whatever the browser prefers
+        var light = await c.GetStringAsync($"{P}/messages/{old}/html?theme=light", Ct);
+        Assert.Contains("html{background:#fff;color:#1a1a1a;color-scheme:light}", light);
+        Assert.Contains("@media (max-width:0px)", light);          // …and never on paper
+        Assert.DoesNotContain("prefers-color-scheme", light);
+        Assert.Contains("html{background:#fff;color:#1a1a1a;color-scheme:light}", await c.GetStringAsync($"{P}/messages/{news}/html?theme=dark", Ct));
     }
 
     // ---- 2. errors ----
@@ -324,7 +349,7 @@ public class MailApiTests : IClassFixture<WebApplicationFactory<Program>>, IDisp
 
         var withImages = await c.GetAsync($"{P}/messages/{msgId}/html?images=true", Ct);
         var csp2 = string.Join(";", withImages.Headers.GetValues("Content-Security-Policy"));
-        Assert.Contains("img-src data: https:", csp2);
+        Assert.Contains("img-src data: 'self' https:", csp2);
         Assert.DoesNotContain("allow-scripts", csp2);
         Assert.Equal("nosniff", withImages.Headers.GetValues("X-Content-Type-Options").Single());
     }
@@ -334,8 +359,70 @@ public class MailApiTests : IClassFixture<WebApplicationFactory<Program>>, IDisp
     {
         var c = Fresh();
         await SyncedAccountAsync(c, P);
-        var msgId = (await Messages(c, P, ThreadIdOf(await Threads(c, P), "Your invoice")))[0].GetProperty("id").GetString();
+        var msgId = (await Messages(c, P, ThreadIdOf(await Threads(c, P), "Analytical engine notes")))[0].GetProperty("id").GetString();
         Assert.Equal(HttpStatusCode.NotFound, (await c.GetAsync($"{P}/messages/{msgId}/html", Ct)).StatusCode);
+    }
+
+    // ---- 3b. delete (decision 8) ----
+
+    /// <summary>One pass now: an account synced a moment ago isn't due until asked.</summary>
+    private async Task SyncNowAsync(HttpClient c, string accountId)
+    {
+        Assert.Equal(HttpStatusCode.Accepted, (await c.PostAsync($"{P}/accounts/{accountId}/sync", null, Ct)).StatusCode);
+        await SyncService.RunOnceAsync(Ct);
+    }
+
+    private static async Task<string> TrashIdOfMailAsync(HttpClient c)
+    {
+        var trash = await Json(await c.GetAsync("/api/v1/trash", Ct));
+        return trash.EnumerateArray().Single(x => x.GetProperty("kind").GetString() == "mail").GetProperty("id").GetString()!;
+    }
+
+    [Fact]
+    public async Task Delete_OnlyInFishbowl_StaysAway_ARestoreFindsItsPlaceAgain()
+    {
+        var c = Fresh();
+        var accountId = await SyncedAccountAsync(c, P);
+        var id = ThreadIdOf(await Threads(c, P), "Your invoice");
+
+        var r = await c.DeleteAsync($"{P}/threads/{id}?mode=fishbowl", Ct);
+        Assert.Equal(HttpStatusCode.OK, r.StatusCode);
+        Assert.Equal(1, (await Json(r)).GetProperty("deleted").GetInt32());
+        Assert.DoesNotContain(await Threads(c, P), t => t.GetProperty("subject").GetString() == "Your invoice");
+
+        // The server keeps it; the next pass leaves it out.
+        await SyncNowAsync(c, accountId);
+        Assert.DoesNotContain(await Threads(c, P), t => t.GetProperty("subject").GetString() == "Your invoice");
+
+        // Restored, the next pass finds it in the inbox again.
+        var restore = await c.PostAsync($"/api/v1/trash/{await TrashIdOfMailAsync(c)}/restore", null, Ct);
+        Assert.Equal(HttpStatusCode.OK, restore.StatusCode);
+        await SyncNowAsync(c, accountId);
+        Assert.Contains(await Threads(c, P), t => t.GetProperty("subject").GetString() == "Your invoice");
+    }
+
+    [Fact]
+    public async Task Delete_Everywhere_GoesToTheServersTrash_OneMessageOfAThread()
+    {
+        var c = Fresh();
+        var accountId = await SyncedAccountAsync(c, P);
+        var engine = ThreadIdOf(await Threads(c, P), "Analytical engine notes");
+        var first = (await Messages(c, P, engine))[0].GetProperty("id").GetString();
+
+        var r = await c.DeleteAsync($"{P}/messages/{first}?mode=everywhere", Ct);
+        Assert.Equal(HttpStatusCode.OK, r.StatusCode);
+        Assert.Equal("everywhere", (await Json(r)).GetProperty("mode").GetString());
+        Assert.Equal(2, (await Messages(c, P, engine)).Count);
+
+        // Off the server's inbox: restored, it finds no place there and stays archived.
+        await SyncNowAsync(c, accountId);
+        Assert.Equal(2, (await Messages(c, P, engine)).Count);
+        await c.PostAsync($"/api/v1/trash/{await TrashIdOfMailAsync(c)}/restore", null, Ct);
+        await SyncNowAsync(c, accountId);
+        var back = (await Messages(c, P, engine)).Single(m => m.GetProperty("id").GetString() == first);
+        Assert.Equal("archived", back.GetProperty("state").GetString());
+
+        Assert.Equal(HttpStatusCode.NotFound, (await c.DeleteAsync($"{P}/messages/nope?mode=everywhere", Ct)).StatusCode);
     }
 
     // ---- 4. attachment ----
@@ -378,7 +465,11 @@ public class MailApiTests : IClassFixture<WebApplicationFactory<Program>>, IDisp
         var filtered = await Threads(c, P, "?tag=bills");
         Assert.Single(filtered);
         Assert.Equal(id, filtered[0].GetProperty("threadId").GetString());
-        Assert.Equal("bills", filtered[0].GetProperty("tags")[0].GetString());
+        // Where it came from first (the account's source tag), then what was given.
+        // The account's source tag: its name (here its address) in tag letters, no prefix.
+        Assert.DoesNotContain(":", filtered[0].GetProperty("tags")[0].GetString());
+        Assert.NotEqual("bills", filtered[0].GetProperty("tags")[0].GetString());
+        Assert.Equal("bills", filtered[0].GetProperty("tags")[1].GetString());
     }
 
     // ---- 6. seen ----
