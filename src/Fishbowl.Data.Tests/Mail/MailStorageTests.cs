@@ -69,7 +69,7 @@ public class MailStorageTests : MailFixture
                 INSERT INTO mail_fts (rowid, subject, people, body) SELECT rowid, subject, from_address, body_text FROM mail_messages;
                 PRAGMA user_version = 24;", new { Html });
 
-        Assert.Equal(25, Scalar("PRAGMA user_version"));
+        Assert.Equal(Fishbowl.Data.DatabaseFactory.UserSchemaHead, Scalar("PRAGMA user_version"));
         Assert.Equal(0, Scalar("SELECT COUNT(*) FROM mail_messages WHERE body_html IS NOT NULL"));
         Assert.Contains("contentless_delete", FtsSql());
         Assert.Equal(0, Scalar("SELECT COUNT(*) FROM sqlite_master WHERE name LIKE 'mail_fts_new%'"));

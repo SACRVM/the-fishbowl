@@ -40,14 +40,17 @@ public sealed class MailWriter
     private readonly MailServer _server;
     private readonly ISystemRepository _system;
     private readonly IFileService _files;
+    private readonly MailRuleRepository? _rules;
 
-    public MailWriter(MailRepository mail, MailDraftRepository drafts, MailServer server, ISystemRepository system, IFileService files)
+    public MailWriter(MailRepository mail, MailDraftRepository drafts, MailServer server, ISystemRepository system, IFileService files,
+        MailRuleRepository? rules = null)
     {
         _mail = mail;
         _drafts = drafts;
         _server = server;
         _system = system;
         _files = files;
+        _rules = rules;
     }
 
     public async Task<MailDraft> CreateAsync(ContextRef ctx, string userId, string? kind, string? refMessageId, string? accountId, CancellationToken ct)
@@ -243,6 +246,12 @@ public sealed class MailWriter
                 Attachments = files.Select((f, i) => new MailAttachment(i, (i + 2).ToString(CultureInfo.InvariantCulture), f.Name, f.ContentType, f.Content.LongLength)).ToList(),
                 Seen = true,
             };
+            // What goes out meets the rules too — their tags; it is sent, not in an inbox.
+            if (_rules is not null)
+            {
+                var tags = MailRules.For(await _rules.ListAsync(ctx, ct), message).Tags;
+                if (tags.Count > 0) message.Tags = (await _rules.EnsureTagsAsync(ctx, tags, ct)).ToList();
+            }
             id = await _mail.InsertSentAsync(ctx, message, sentUid, sentBy, ct);
             threadId = message.ThreadId;
         }

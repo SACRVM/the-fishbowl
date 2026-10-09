@@ -40,6 +40,10 @@
     if (!sac.icons.has("fb-mail-out")) {
         sac.icons.register("fb-mail-out", '<path d="M7 7h10v10"/><path d="M7 17 17 7"/>');
     }
+    // A mail rule sorts what comes in: a funnel.
+    if (!sac.icons.has("fb-rule")) {
+        sac.icons.register("fb-rule", '<path d="M3 4h18l-7 8.5V19l-4 2v-8.5z"/>');
+    }
     // Writing mail: reply, reply all, forward, send — the kit ships none.
     const mailIcons = {
         "fb-reply": '<path d="M9 17 4 12l5-5"/><path d="M20 18v-2a4 4 0 0 0-4-4H4"/>',

@@ -23,7 +23,7 @@ public class ContextRefTests : IDisposable
     {
         using var db = _factory.CreateContextConnection(ContextRef.User("alice"));
         var version = db.ExecuteScalar<long>("PRAGMA user_version");
-        Assert.Equal(25, version);
+        Assert.Equal(Fishbowl.Data.DatabaseFactory.UserSchemaHead, version);
 
         var file = Path.Combine(_dataDir, "users", "alice", "personal.db");
         Assert.True(File.Exists(file));
@@ -34,7 +34,7 @@ public class ContextRefTests : IDisposable
     {
         using var db = _factory.CreateContextConnection(ContextRef.Space("fishbowl-dev"));
         var version = db.ExecuteScalar<long>("PRAGMA user_version");
-        Assert.Equal(25, version);
+        Assert.Equal(Fishbowl.Data.DatabaseFactory.UserSchemaHead, version);
 
         var file = Path.Combine(_dataDir, "spaces", "fishbowl-dev", "space.db");
         Assert.True(File.Exists(file));

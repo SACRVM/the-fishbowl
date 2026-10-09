@@ -209,3 +209,36 @@ public class MailDraftUpdate
     public string? Subject { get; set; }
     public string? Body { get; set; }
 }
+
+// A mail rule (mail spec, decision 11): when its conditions meet a message as
+// it comes in, its actions apply. Every rule that matches applies — their
+// actions only add up, so the order doesn't matter.
+public class MailRule
+{
+    public string Id { get; set; } = string.Empty;            // ULID
+    public string Name { get; set; } = string.Empty;
+    public bool Enabled { get; set; } = true;
+    public bool MatchAll { get; set; } = true;                // all conditions, else any of them
+    public List<MailRuleCondition> Conditions { get; set; } = new();
+    public List<string> AddTags { get; set; } = new();
+    public bool Archive { get; set; }
+    public bool MarkRead { get; set; }
+    public string? CreatedBy { get; set; }
+    public DateTime CreatedAt { get; set; }
+    public DateTime UpdatedAt { get; set; }
+}
+
+// Field: from | to | anyone | subject | account | list (MailRuleFields); the
+// value is text the field contains (any case), for account the account's id.
+public record MailRuleCondition(string Field, string Value);
+
+public static class MailRuleFields
+{
+    public const string From = "from";
+    public const string To = "to";            // To, Cc or Bcc
+    public const string Anyone = "anyone";    // From, To, Cc or Bcc
+    public const string Subject = "subject";
+    public const string Account = "account";
+    public const string List = "list";        // List-Id
+    public static readonly IReadOnlyList<string> All = [From, To, Anyone, Subject, Account, List];
+}

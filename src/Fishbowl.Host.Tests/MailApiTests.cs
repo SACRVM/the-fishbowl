@@ -965,4 +965,126 @@ public class MailApiTests : IClassFixture<WebApplicationFactory<Program>>, IDisp
         Assert.Empty(await Threads(c, P));
         Assert.Empty(await Threads(c, P, "?archived=true"));
     }
+
+    // ---- rules (decision 11) ----
+
+    private static object RuleBody(string field, string value, string[]? tags = null, bool archive = false, bool markRead = false, string name = "Rule") => new
+    {
+        name,
+        conditions = new[] { new { field, value } },
+        addTags = tags ?? [],
+        archive,
+        markRead,
+    };
+
+    private static IEnumerable<string?> TagsOf(JsonElement thread) => thread.GetProperty("tags").EnumerateArray().Select(x => x.GetString());
+
+    [Fact]
+    public async Task Rules_ApplyToExisting_TagsReadAndArchive()
+    {
+        var c = Fresh();
+        await SyncedAccountAsync(c, P);
+
+        // "From or to" meets Ada's mail and my reply to her.
+        var r = await c.PostAsJsonAsync(P + "/rules", RuleBody("anyone", "LOVELACE", ["Helvetia", "versicherungen"], name: "Ada"), Ct);
+        Assert.Equal(HttpStatusCode.OK, r.StatusCode);
+        var rule = await Json(r);
+        Assert.Equal(new[] { "helvetia", "versicherungen" }, rule.GetProperty("addTags").EnumerateArray().Select(x => x.GetString()));
+        var applied = await Json(await c.PostAsync($"{P}/rules/{rule.GetProperty("id").GetString()}/apply", null, Ct));
+        Assert.Equal(1, applied.GetProperty("conversations").GetInt32());
+
+        var threads = await Threads(c, P);
+        var engine = threads.Single(t => t.GetProperty("subject").GetString() == "Analytical engine notes");
+        Assert.Contains("helvetia", TagsOf(engine));
+        Assert.Contains("versicherungen", TagsOf(engine));
+        Assert.All(await Messages(c, P, engine.GetProperty("threadId").GetString()!),
+            m => Assert.Contains("helvetia", m.GetProperty("tags").EnumerateArray().Select(x => x.GetString())));
+        Assert.DoesNotContain("helvetia", TagsOf(threads.Single(t => t.GetProperty("subject").GetString() == "This week in engines")));
+
+        // Read + archive: the newsletter leaves the inbox, read, on the server too.
+        var news = await Json(await c.PostAsJsonAsync(P + "/rules", RuleBody("from", "news@example", archive: true, markRead: true), Ct));
+        var done = await Json(await c.PostAsync($"{P}/rules/{news.GetProperty("id").GetString()}/apply", null, Ct));
+        Assert.Equal(1, done.GetProperty("archived").GetInt32());
+        Assert.False(done.GetProperty("archiveFolderMissing").GetBoolean());
+        Assert.DoesNotContain(await Threads(c, P), t => t.GetProperty("subject").GetString() == "This week in engines");
+        var archived = (await Threads(c, P, "?archived=true")).Single(t => t.GetProperty("subject").GetString() == "This week in engines");
+        Assert.Equal(0, archived.GetProperty("unread").GetInt32());
+    }
+
+    [Fact]
+    public async Task Rules_MeetNewMail_OnSync_InAndOut()
+    {
+        var c = Fresh();
+        // The rules are there before the mail: the sync applies them as it stores.
+        Assert.Equal(HttpStatusCode.OK, (await c.PostAsJsonAsync(P + "/rules", RuleBody("anyone", "ada@example.org", ["ada"], markRead: true), Ct)).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await c.PostAsJsonAsync(P + "/rules", RuleBody("from", "billing", archive: true), Ct)).StatusCode);
+        var off = await Json(await c.PostAsJsonAsync(P + "/rules", RuleBody("subject", "week", ["never"]), Ct));
+        Assert.Equal(HttpStatusCode.OK, (await c.PutAsJsonAsync($"{P}/rules/{off.GetProperty("id").GetString()}",
+            new { name = "Off", enabled = false, conditions = new[] { new { field = "subject", value = "week" } }, addTags = new[] { "never" } }, Ct)).StatusCode);
+
+        await SyncedAccountAsync(c, P);
+
+        var threads = await Threads(c, P);
+        var engine = threads.Single(t => t.GetProperty("subject").GetString() == "Analytical engine notes");
+        // Every message of the conversation — Ada's and my reply to her — has the tag; read now.
+        Assert.All(await Messages(c, P, engine.GetProperty("threadId").GetString()!),
+            m => Assert.Contains("ada", m.GetProperty("tags").EnumerateArray().Select(x => x.GetString())));
+        Assert.Equal(0, engine.GetProperty("unread").GetInt32());
+        Assert.DoesNotContain("never", TagsOf(threads.Single(t => t.GetProperty("subject").GetString() == "This week in engines")));
+        // Archived at the end of the pass, on the server first.
+        Assert.DoesNotContain(threads, t => t.GetProperty("subject").GetString() == "Your invoice");
+        Assert.Contains(await Threads(c, P, "?archived=true"), t => t.GetProperty("subject").GetString() == "Your invoice");
+
+        // The next pass reads the server: still read, still archived.
+        await SyncService.RunOnceAsync(Ct);
+        Assert.Equal(1, (await Json(await c.GetAsync(P + "/unread-count", Ct))).GetProperty("unread").GetInt32());
+        Assert.DoesNotContain(await Threads(c, P), t => t.GetProperty("subject").GetString() == "Your invoice");
+    }
+
+    [Fact]
+    public async Task Rules_AreManagedByTheOwnerOrASpaceAdmin_ByCookie()
+    {
+        var c = Fresh();
+        // What a rule must have.
+        Assert.Equal("rule_incomplete", await ErrorOf(await c.PostAsJsonAsync(P + "/rules", RuleBody("from", "x"), Ct)));
+        Assert.Equal("rule_incomplete", await ErrorOf(await c.PostAsJsonAsync(P + "/rules", RuleBody("body", "x", ["t"]), Ct)));
+        Assert.Equal("invalid_tag", await ErrorOf(await c.PostAsJsonAsync(P + "/rules", RuleBody("from", "x", ["no spaces"]), Ct)));
+
+        // A key reads them, never writes them.
+        var key = await KeyAsync(Owner, ContextRef.User(Owner), "read:mail", "write:mail");
+        Assert.Equal(HttpStatusCode.OK, (await key.GetAsync(P + "/rules", Ct)).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await key.PostAsJsonAsync(P + "/rules", RuleBody("from", "x", ["t"]), Ct)).StatusCode);
+
+        // In a space: everyone reads, an Admin writes, a Member doesn't.
+        var (_, sp) = await SpaceAsync();
+        var made = await As(Admin).PostAsJsonAsync(sp + "/rules", RuleBody("from", "x", ["t"]), Ct);
+        Assert.Equal(HttpStatusCode.OK, made.StatusCode);
+        var id = (await Json(made)).GetProperty("id").GetString();
+        Assert.Single((await Json(await As(Reader).GetAsync(sp + "/rules", Ct))).EnumerateArray());
+        Assert.Equal(HttpStatusCode.Forbidden, (await As(Member).PostAsJsonAsync(sp + "/rules", RuleBody("from", "y", ["t"]), Ct)).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await As(Member).DeleteAsync($"{sp}/rules/{id}", Ct)).StatusCode);
+        Assert.Equal(HttpStatusCode.NoContent, (await As(Owner).DeleteAsync($"{sp}/rules/{id}", Ct)).StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, (await As(Owner).DeleteAsync($"{sp}/rules/{id}", Ct)).StatusCode);
+    }
+
+    [Fact]
+    public async Task DeleteThreads_SeveralAtOnce_Everywhere()
+    {
+        var c = Fresh();
+        await SyncedAccountAsync(c, P);
+        var threads = await Threads(c, P);
+        var ids = new[] { ThreadIdOf(threads, "Your invoice"), ThreadIdOf(threads, "This week in engines") };
+
+        var r = await c.PostAsJsonAsync(P + "/threads/delete", new { threadIds = ids, mode = "everywhere" }, Ct);
+        Assert.Equal(HttpStatusCode.OK, r.StatusCode);
+        Assert.Equal(2, (await Json(r)).GetProperty("deleted").GetInt32());
+        Assert.Equal(new[] { "Analytical engine notes" }, (await Threads(c, P)).Select(t => t.GetProperty("subject").GetString()));
+        // Gone from the server's inbox too: the next pass doesn't bring them back.
+        await SyncService.RunOnceAsync(Ct);
+        Assert.Single(await Threads(c, P));
+
+        Assert.Equal(HttpStatusCode.NotFound, (await c.PostAsJsonAsync(P + "/threads/delete", new { threadIds = ids, mode = "fishbowl" }, Ct)).StatusCode);
+        Assert.Equal("too_many_threads", await ErrorOf(await c.PostAsJsonAsync(P + "/threads/delete",
+            new { threadIds = Enumerable.Range(0, 1001).Select(i => "t" + i), mode = "fishbowl" }, Ct)));
+    }
 }

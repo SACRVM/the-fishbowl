@@ -40,9 +40,9 @@ public sealed class MailServer
     /// <summary>Moves messages to their account's Trash on the server (decision
     /// 8, "everywhere"). Not best effort: a refusal is the caller's answer,
     /// before anything here is deleted.</summary>
-    public async Task TrashAsync(ContextRef ctx, IReadOnlyList<MailLocationRef> places, CancellationToken ct)
-    {
-        foreach (var account in places.GroupBy(p => p.AccountId))
+    public Task TrashAsync(ContextRef ctx, IReadOnlyList<MailLocationRef> places, CancellationToken ct) =>
+        // Each account is its own server, and a visit is seconds: side by side.
+        Task.WhenAll(places.GroupBy(p => p.AccountId).Select(async account =>
         {
             await using var box = await OpenAsync(ctx, account.Key, ct)
                 ?? throw new InvalidOperationException("The mail account or its password is gone.");
@@ -51,8 +51,7 @@ public sealed class MailServer
                 var folder = await FolderAsync(ctx, account.Key, role.Key, ct);
                 if (folder is not null) await box.TrashAsync(folder, role.Select(p => p.Uid).Distinct().ToList(), ct);
             }
-        }
-    }
+        }));
 
     /// <summary>
     /// Deletes messages (decision 8): <paramref name="everywhere"/> moves them

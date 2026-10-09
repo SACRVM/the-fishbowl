@@ -193,6 +193,8 @@ builder.Services.AddScoped<Fishbowl.Data.Mail.MailSyncer>();
 builder.Services.AddScoped<Fishbowl.Data.Mail.MailServer>();
 builder.Services.AddScoped<Fishbowl.Data.Mail.MailDraftRepository>();
 builder.Services.AddScoped<Fishbowl.Data.Mail.MailWriter>();
+builder.Services.AddScoped<Fishbowl.Data.Mail.MailRuleRepository>();
+builder.Services.AddScoped<Fishbowl.Data.Mail.MailRuleRunner>();
 builder.Services.AddScoped<IEventRepository, EventRepository>();
 builder.Services.AddScoped<ISpaceRepository, SpaceRepository>();
 builder.Services.AddScoped<ISpaceInviteRepository, SpaceInviteRepository>();

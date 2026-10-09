@@ -189,6 +189,8 @@ class FbMailView extends HTMLElement {
             const ids = new Set(page.map((x) => x.threadId));
             page = page.concat(this.threads.filter((x) => !ids.has(x.threadId) && (!page.length || x.latestAt < page[page.length - 1].latestAt)));
         }
+        // Conversations on their way out stay out while their servers answer.
+        if (this._deleting?.size) page = page.filter((x) => !this._deleting.has(x.threadId));
         this.threads = page;
         this.more = page.length >= 50;
         this.renderList();
@@ -1355,24 +1357,44 @@ class FbMailView extends HTMLElement {
             ],
         });
         if (answer !== "fishbowl" && answer !== "everywhere") return;
-        let done = 0, firstError = null;
-        for (const id of ids) {
-            try { await this.api.deleteThread(id, answer); done++; }
-            catch (err) { firstError ??= err; }
-        }
+        // The rows go at once — a mail server takes seconds — and come back
+        // when a server refuses (then nothing was deleted). All in one request,
+        // so each server is visited once; a refresh meanwhile leaves them out.
+        const gone = new Set(ids);
+        this._deleting ??= new Set();
+        for (const id of ids) this._deleting.add(id);
+        // The open one went: the next conversation takes its place, as in any
+        // mail app — the one below the last that went, else the one above.
+        const order = this.threads.map((x) => x.threadId);
+        const at = ids.map((id) => order.indexOf(id)).filter((i) => i >= 0);
+        const next = !gone.has(this.selectedId) || !at.length ? undefined
+            : order.slice(Math.max(...at) + 1).find((id) => !gone.has(id))
+                ?? order.slice(0, Math.min(...at)).reverse().find((id) => !gone.has(id))
+                ?? null;
+        this.threads = this.threads.filter((x) => !gone.has(x.threadId));
         this.sel?.clear();
-        const failed = (err) => fb.errors.text(err, this.t("delete-failed", "That couldn't be deleted."));
-        if (firstError && one) sac.toast?.(failed(firstError), { kind: "error" });
-        else if (firstError) sac.toast?.(this.t("delete-some-failed", "{done} deleted; {failed} couldn't be: {reason}",
-            { done, failed: ids.length - done, reason: failed(firstError) }), { kind: "error" });
-        else if (one) sac.toast?.(answer === "everywhere"
+        this.renderList();
+        if (next) {
+            this.open(next);
+            this.querySelector(`.mv-item[data-id="${CSS.escape(next)}"]`)?.scrollIntoView({ block: "nearest" });
+        } else if (next === null) { this.selectedId = null; this.showNone(); }
+        let error = null;
+        try { await this.api.deleteThreads(ids, answer); }
+        catch (err) { error = err; }
+        for (const id of ids) this._deleting.delete(id);
+        if (error) {
+            sac.toast?.(fb.errors.text(error, this.t("delete-failed", "That couldn't be deleted.")), { kind: "error" });
+            await this.loadThreads({ keep: true });
+            return;
+        }
+        const done = ids.length;
+        if (one) sac.toast?.(answer === "everywhere"
             ? this.t("deleted-everywhere", "Deleted — in the trash here and on the server.")
             : this.t("deleted-here", "Deleted here — it's in the trash. Your mail server keeps it."));
         else sac.toast?.(answer === "everywhere"
             ? this.t("deleted-n-everywhere", "{n} conversations deleted — in the trash here and on the server.", { n: done })
             : this.t("deleted-n-here", "{n} conversations deleted here — they're in the trash. Your mail server keeps them.", { n: done }));
-        await this.loadThreads();
-        if (ids.includes(this.selectedId) && !this.threads.some((x) => x.threadId === this.selectedId)) { this.selectedId = null; this.showNone(); }
+        await this.loadThreads({ keep: true });
     }
 
     paintBody(el, m) {
@@ -1507,8 +1529,20 @@ class FbMailView extends HTMLElement {
         });
     }
 
+    openRules() {
+        fb.mailRules.open({
+            ws: this.ws,
+            canManage: this.manager,
+            accounts: this.accounts,
+            onChanged: () => this.reload({ keep: true }),
+        });
+    }
+
     paintToolbar() {
-        if (this.isConnected) fb.toolbar.set([{ id: "mv-accounts", icon: "settings", title: this.t("accounts", "Mail accounts"), onClick: () => this.openAccounts() }]);
+        if (this.isConnected) fb.toolbar.set([
+            { id: "mv-rules", icon: "fb-rule", title: this.t("rules", "Mail rules"), onClick: () => this.openRules() },
+            { id: "mv-accounts", icon: "settings", title: this.t("accounts", "Mail accounts"), onClick: () => this.openAccounts() },
+        ]);
     }
 }
 

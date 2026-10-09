@@ -39,11 +39,16 @@ namespace Fishbowl.Api.Endpoints;
 //   POST   …/drafts/{id}/files?name=       the body is the file; …/files/from-files { path }; DELETE …/files/{index}
 //   POST   …/drafts/{id}/send              { timeZone?, language? } — a key needs send:mail
 //   GET    …/messages/{id}/attachments/{index}   fetched from the server on demand
+//   POST   …/threads/delete                { threadIds, mode } — several conversations, one trip to each server
 //   GET    …/tags                          the tags mail carries, each account's source tag (system-given) first
 //   GET    …/unread-count
-// Scopes read:mail / write:mail; adding, changing and removing accounts is
-// cookie-only. A space Reader reads; a Member organises; an Admin manages
-// the accounts (they speak for the whole space).
+//   GET    …/rules                         the workspace's rules (decision 11)
+//   POST   …/rules                         { name, enabled?, matchAll?, conditions: [{ field, value }], addTags?, archive?, markRead? }
+//   PUT|DELETE …/rules/{id}                the whole rule again / gone; cookie, space Admin+
+//   POST   …/rules/{id}/apply              the rule over the mail already here → { conversations, archived, archiveFolderMissing }
+// Scopes read:mail / write:mail; adding, changing and removing accounts and
+// rules is cookie-only. A space Reader reads; a Member organises; an Admin
+// manages the accounts and the rules (they speak for the whole space).
 public static partial class MailApi
 {
     // An <img src> or CSS url() that leaves this page: what "Show images" is for.
@@ -131,6 +136,33 @@ public static partial class MailApi
     public sealed record DraftFromFilesRequest(string? Path);
     public sealed record SendDraftRequest(string? TimeZone, string? Language);
     public sealed record NotSpamRequest(uint UidValidity);
+    public sealed record DeleteThreadsRequest(List<string>? ThreadIds, string? Mode);
+
+    /// <summary>How many conversations one bulk delete takes.</summary>
+    public const int MaxBulkThreads = 1000;
+    public sealed record RuleRequest(
+        string? Name, bool? Enabled, bool? MatchAll, List<MailRuleCondition>? Conditions, List<string>? AddTags, bool? Archive, bool? MarkRead);
+
+    /// <summary>The rule a request describes, or why it can't be one.</summary>
+    private static (MailRule? Rule, IResult? Error) ToRule(RuleRequest body)
+    {
+        var tags = (body.AddTags ?? new()).Where(x => !string.IsNullOrWhiteSpace(x)).ToList();
+        if (tags.FirstOrDefault(x => !TagName.IsValid(x)) is { } bad)
+            return (null, ApiErrors.BadRequest("invalid_tag", $"Tag '{bad}' is invalid: 1–{TagName.MaxLength} characters of a–z, 0–9, _ : -.", new { tag = bad, max = TagName.MaxLength }));
+        var rule = new MailRule
+        {
+            Name = body.Name?.Trim() ?? "",
+            Enabled = body.Enabled ?? true,
+            MatchAll = body.MatchAll ?? true,
+            Conditions = (body.Conditions ?? new()).Select(c => new MailRuleCondition(c?.Field ?? "", c?.Value ?? "")).ToList(),
+            AddTags = tags,
+            Archive = body.Archive == true,
+            MarkRead = body.MarkRead == true,
+        };
+        if (MailRules.Problem(rule) is { } missing)
+            return (null, ApiErrors.BadRequest("rule_incomplete", "A rule needs a name, at least one condition with a value and an action.", new { missing }));
+        return (rule, null);
+    }
 
     /// <summary>How many of each account's newest spam the Spam view reads.</summary>
     public const int SpamPerAccount = 50;
@@ -151,13 +183,13 @@ public static partial class MailApi
     /// <summary>Everywhere: to the server's Trash first — a refusal there
     /// deletes nothing —, then here; otherwise only here, marked so the sync
     /// leaves it out. Both into Fishbowl's trash.</summary>
-    private static async Task<IResult> DeleteMailAsync(Target t, IReadOnlyList<string> ids, string? mode,
-        MailServer server, CancellationToken ct)
+    private static async Task<IResult> DeleteMailAsync(Target t, IReadOnlyList<string> ids, string? mode, MailServer server)
     {
         var everywhere = mode == "everywhere";
         int deleted;
-        try { deleted = await server.DeleteAsync(t.Ctx, ids, everywhere, t.UserId, ct); }
-        catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
+        // The list let the rows go before this answers (the servers take
+        // seconds): a page closed or reloaded meanwhile mustn't stop it halfway.
+        try { deleted = await server.DeleteAsync(t.Ctx, ids, everywhere, t.UserId, CancellationToken.None); }
         catch (Exception ex)
         {
             var (code, why) = ServerError(ex);
@@ -534,8 +566,22 @@ public static partial class MailApi
             var (t, err) = await ResolveAsync(http, space, Need.Write, ct);
             if (err is not null) return err;
             var ids = await repo.ThreadMessageIdsAsync(t!.Ctx, threadId, ct);
-            return ids.Count == 0 ? Results.NotFound() : await DeleteMailAsync(t, ids, mode, server, ct);
+            return ids.Count == 0 ? Results.NotFound() : await DeleteMailAsync(t, ids, mode, server);
         }).WithName($"Delete{tag}MailThread").WithSummary("Deletes the conversation — only here (the server keeps it) or everywhere (also to the server's Trash).");
+
+        // Several conversations at once (the list's marked rows): every message
+        // in one go, so each server is visited once — a server trip is seconds.
+        g.MapPost("/threads/delete", async (DeleteThreadsRequest body, HttpContext http, MailRepository repo,
+            MailServer server, CancellationToken ct) =>
+        {
+            var (t, err) = await ResolveAsync(http, space, Need.Write, ct);
+            if (err is not null) return err;
+            var threads = (body.ThreadIds ?? new()).Where(x => !string.IsNullOrWhiteSpace(x)).Distinct().ToList();
+            if (threads.Count > MaxBulkThreads)
+                return ApiErrors.BadRequest("too_many_threads", $"At most {MaxBulkThreads} conversations at once.", new { max = MaxBulkThreads });
+            var ids = await repo.ThreadsMessageIdsAsync(t!.Ctx, threads, ct);
+            return ids.Count == 0 ? Results.NotFound() : await DeleteMailAsync(t, ids, body.Mode, server);
+        }).WithName($"Delete{tag}MailThreads").WithSummary("Deletes several conversations — only here or everywhere, each server visited once.");
 
         g.MapDelete("/messages/{id}", async (string id, string? mode, HttpContext http, IMailRepository repo,
             MailServer server, CancellationToken ct) =>
@@ -543,7 +589,7 @@ public static partial class MailApi
             var (t, err) = await ResolveAsync(http, space, Need.Write, ct);
             if (err is not null) return err;
             return await repo.GetMessageAsync(t!.Ctx, id, ct) is null ? Results.NotFound()
-                : await DeleteMailAsync(t, [id], mode, server, ct);
+                : await DeleteMailAsync(t, [id], mode, server);
         }).WithName($"Delete{tag}MailMessage").WithSummary("Deletes one message — only here or everywhere.");
 
         g.MapGet("/messages/{id}/attachments/{index:int}", async (string id, int index, HttpContext http, IMailRepository repo,
@@ -796,5 +842,61 @@ public static partial class MailApi
             if (err is not null) return err;
             return Results.Ok(new { unread = await repo.UnreadCountAsync(t!.Ctx, ct) });
         }).WithName($"Count{tag}UnreadMail").WithSummary("Conversations in the list with an unread incoming message.");
+
+        // Rules (decision 11): every reader sees them; whoever manages the
+        // accounts — personal: the owner; a space: its Admins — writes them.
+        g.MapGet("/rules", async (HttpContext http, MailRuleRepository rules, CancellationToken ct) =>
+        {
+            var (t, err) = await ResolveAsync(http, space, Need.Read, ct);
+            if (err is not null) return err;
+            return Results.Ok(await rules.ListAsync(t!.Ctx, ct));
+        }).WithName($"List{tag}MailRules").WithSummary("The workspace's mail rules.");
+
+        g.MapPost("/rules", async (RuleRequest body, HttpContext http, MailRuleRepository rules, CancellationToken ct) =>
+        {
+            var (t, err) = await ResolveAsync(http, space, Need.Manage, ct);
+            if (err is not null) return err;
+            var (rule, bad) = ToRule(body);
+            if (bad is not null) return bad;
+            if (await rules.CountAsync(t!.Ctx, ct) >= MailRules.MaxRules)
+                return ApiErrors.BadRequest("too_many_rules", $"A workspace has at most {MailRules.MaxRules} mail rules.", new { max = MailRules.MaxRules });
+            return Results.Ok(await rules.CreateAsync(t.Ctx, rule!, t.UserId, ct));
+        }).WithName($"Create{tag}MailRule").WithSummary("Adds a rule; it meets the mail that comes in from now on.");
+
+        g.MapPut("/rules/{id}", async (string id, RuleRequest body, HttpContext http, MailRuleRepository rules, CancellationToken ct) =>
+        {
+            var (t, err) = await ResolveAsync(http, space, Need.Manage, ct);
+            if (err is not null) return err;
+            var (rule, bad) = ToRule(body);
+            if (bad is not null) return bad;
+            var saved = await rules.UpdateAsync(t!.Ctx, id, rule!, ct);
+            return saved is null ? Results.NotFound() : Results.Ok(saved);
+        }).WithName($"Update{tag}MailRule").WithSummary("Replaces what the rule is.");
+
+        g.MapDelete("/rules/{id}", async (string id, HttpContext http, MailRuleRepository rules, CancellationToken ct) =>
+        {
+            var (t, err) = await ResolveAsync(http, space, Need.Manage, ct);
+            if (err is not null) return err;
+            return await rules.DeleteAsync(t!.Ctx, id, ct) ? Results.NoContent() : Results.NotFound();
+        }).WithName($"Delete{tag}MailRule").WithSummary("Removes the rule; what it did stays.");
+
+        g.MapPost("/rules/{id}/apply", async (string id, HttpContext http, MailRuleRepository rules, MailRuleRunner runner, CancellationToken ct) =>
+        {
+            var (t, err) = await ResolveAsync(http, space, Need.Manage, ct);
+            if (err is not null) return err;
+            var rule = await rules.GetAsync(t!.Ctx, id, ct);
+            if (rule is null) return Results.NotFound();
+            try
+            {
+                var r = await runner.ApplyAsync(t.Ctx, rule, ct);
+                return Results.Ok(new { conversations = r.Conversations, archived = r.Archived, archiveFolderMissing = r.ArchiveFolderMissing });
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
+            catch (Exception ex)
+            {
+                var (code, why) = ServerError(ex);
+                return ApiErrors.Json(StatusCodes.Status502BadGateway, code, why);
+            }
+        }).WithName($"Apply{tag}MailRule").WithSummary("Runs the rule over the mail already here — tags, read, archive (on the server first).");
     }
 }

@@ -23,6 +23,7 @@ public static class DapperConventions
             SqlMapper.AddTypeHandler(new JsonListHandler<Fishbowl.Core.Models.ContactAddress>());
             SqlMapper.AddTypeHandler(new JsonListHandler<Fishbowl.Core.Models.MailPerson>());
             SqlMapper.AddTypeHandler(new JsonListHandler<Fishbowl.Core.Models.MailAttachment>());
+            SqlMapper.AddTypeHandler(new JsonListHandler<Fishbowl.Core.Models.MailRuleCondition>());
 
             _installed = true;
         }

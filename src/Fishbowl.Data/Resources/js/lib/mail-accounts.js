@@ -9,6 +9,7 @@
  * says plainly that whoever runs the server can read the mail.
  *
  *   fb.mailAccounts.open({ ws, canManage, onChanged })
+ *   fb.mailAccounts.formDialog({ title, primary, html, init, submit, width }) — also the rules' editor
  */
 (function () {
     if (!window.fb) return;
@@ -326,5 +327,5 @@
         });
     }
 
-    fb.mailAccounts = { open, errorText };
+    fb.mailAccounts = { open, errorText, formDialog };
 })();

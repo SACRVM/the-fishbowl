@@ -29,7 +29,10 @@ namespace Fishbowl.Data.Mail;
 /// </list>
 /// A message already here (same account and key) found in a folder gets one
 /// more place; a new one is stored with its text and HTML parts — the
-/// attachments stay on the server.
+/// attachments stay on the server — and meets the workspace's rules
+/// (decision 11): their tags come with it, read is written back at once, and
+/// what lies in the inbox is archived — its conversation — once every folder
+/// was read.
 /// </summary>
 public sealed class MailSyncer
 {
@@ -40,13 +43,22 @@ public sealed class MailSyncer
 
     private readonly MailRepository _repo;
     private readonly IMailboxConnector _connector;
+    private readonly MailRuleRepository? _rules;
     private readonly ILogger<MailSyncer> _logger;
 
-    public MailSyncer(MailRepository repo, IMailboxConnector connector, ILogger<MailSyncer>? logger = null)
+    public MailSyncer(MailRepository repo, IMailboxConnector connector, ILogger<MailSyncer>? logger = null, MailRuleRepository? rules = null)
     {
         _repo = repo;
         _connector = connector;
+        _rules = rules;
         _logger = logger ?? NullLogger<MailSyncer>.Instance;
+    }
+
+    // The rules of one pass, and the messages they archive at its end.
+    private sealed class PassRules(IReadOnlyList<MailRule> rules)
+    {
+        public IReadOnlyList<MailRule> Rules { get; } = rules;
+        public HashSet<string> Archive { get; } = new();
     }
 
     public sealed record Result(bool Ok, string? Error, bool BackfillDone, int Added, int Trashed);
@@ -109,17 +121,19 @@ public sealed class MailSyncer
             await using var box = _connector.Open(Resolve(account), password);
             var own = new HashSet<string>(account.Aliases.Append(account.Address).Select(a => a.Trim().ToLowerInvariant()));
             var candidates = new HashSet<string>();
+            var rules = new PassRules(await RulesAsync(ctx, ct));
             var added = 0;
             var done = true;
             foreach (var role in MailRoles.All)
             {
                 var name = await box.RoleFolderAsync(role, ct);
                 if (name is null) continue;
-                var (a, d) = await SyncFolderAsync(ctx, account, own, box, role, name, candidates, ct);
+                var (a, d) = await SyncFolderAsync(ctx, account, own, box, role, name, candidates, rules, ct);
                 added += a;
                 done &= d;
             }
             var trashed = await _repo.TrashOrphansAsync(ctx, candidates, ct);
+            if (rules.Archive.Count > 0) await ArchiveAsync(ctx, account, rules.Archive, ct);
             await _repo.SetAccountStateAsync(ctx, account.Id, MailAccountStates.Ok, null, done, ct);
             return new Result(true, null, done, added, trashed);
         }
@@ -135,9 +149,36 @@ public sealed class MailSyncer
         }
     }
 
+    private async Task<IReadOnlyList<MailRule>> RulesAsync(ContextRef ctx, CancellationToken ct)
+    {
+        if (_rules is null) return [];
+        var rules = (await _rules.ListAsync(ctx, ct)).Where(r => r.Enabled).ToList();
+        // A tag deleted since a rule named it comes back with the rule's mail.
+        if (rules.Count > 0) await _rules.EnsureTagsAsync(ctx, rules.SelectMany(r => r.AddTags), ct);
+        return rules;
+    }
+
+    /// <summary>Rules' archive: the conversations of the messages, on the
+    /// server first (<see cref="MailServer.ArchiveAsync"/>). Best effort — the
+    /// pass stands; an account without an archive folder keeps them.</summary>
+    private async Task ArchiveAsync(ContextRef ctx, MailAccount account, IReadOnlyCollection<string> ids, CancellationToken ct)
+    {
+        try
+        {
+            var all = await _repo.WholeThreadsOfAsync(ctx, ids, ct);
+            if (!await new MailServer(_repo, _connector).ArchiveAsync(ctx, all, true, ct))
+                _logger.LogWarning("Mail rules: account {AccountId} has no archive folder", account.Id);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
+        catch (Exception ex)
+        {
+            _logger.LogWarning("Mail rules: archive failed for account {AccountId}: {Code}", account.Id, ErrorCode(ex));
+        }
+    }
+
     private async Task<(int Added, bool BackfillDone)> SyncFolderAsync(
         ContextRef ctx, MailAccount account, HashSet<string> own, IMailbox box, string role, string name,
-        HashSet<string> candidates, CancellationToken ct)
+        HashSet<string> candidates, PassRules rules, CancellationToken ct)
     {
         var status = await box.StatusAsync(name, ct);
         var state = await _repo.GetFolderAsync(ctx, account.Id, role, ct);
@@ -177,7 +218,7 @@ public sealed class MailSyncer
 
         var added = 0;
         foreach (var chunk in takeNew.Concat(gaps).Concat(takeOld).Chunk(HeaderChunk))
-            added += await StoreAsync(ctx, account, own, box, role, name, chunk, dead, ct);
+            added += await StoreAsync(ctx, account, own, box, role, name, chunk, dead, rules, ct);
 
         // Flags of what was here before this pass (new ones came with theirs).
         if (known.Count > 0)
@@ -202,9 +243,10 @@ public sealed class MailSyncer
 
     private async Task<int> StoreAsync(
         ContextRef ctx, MailAccount account, HashSet<string> own, IMailbox box, string role, string name,
-        IReadOnlyList<uint> uids, MailRepository.Tombstones dead, CancellationToken ct)
+        IReadOnlyList<uint> uids, MailRepository.Tombstones dead, PassRules rules, CancellationToken ct)
     {
         var added = 0;
+        var read = new List<uint>();
         foreach (var h in await box.HeadersAsync(name, uids, ct))
         {
             var key = MailThreading.MessageKey(h.MessageId, h.From?.Address, h.Date ?? h.InternalDate, h.Subject, h.Size);
@@ -229,7 +271,7 @@ public sealed class MailSyncer
                 : body?.Html is { Length: > 0 } html ? HtmlToText.Convert(html) : null;
             if (text is { Length: > MaxTextChars }) text = text[..MaxTextChars];
             var from = h.From?.Address?.Trim().ToLowerInvariant();
-            await _repo.InsertAsync(ctx, new MailMessage
+            var m = new MailMessage
             {
                 AccountId = account.Id,
                 MessageKey = key,
@@ -252,8 +294,24 @@ public sealed class MailSyncer
                 Seen = h.Seen,
                 Flagged = h.Flagged,
                 ListId = h.ListId,
-            }, role, h.Uid, ct);
+            };
+            var outcome = MailRules.For(rules.Rules, m);
+            m.Tags = outcome.Tags.ToList();
+            if (outcome.MarkRead && m.Direction == MailDirections.In && !m.Seen)
+            {
+                m.Seen = true;
+                read.Add(h.Uid);
+            }
+            var id = await _repo.InsertAsync(ctx, m, role, h.Uid, ct);
+            if (outcome.Archive && role == MailRoles.Inbox) rules.Archive.Add(id);
             added++;
+        }
+        if (read.Count > 0)
+        {
+            // Best effort, like a person's read: the flags come back with the next pass.
+            try { await box.MarkAsync(name, read, true, null, ct); }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
+            catch (Exception ex) { _logger.LogWarning("Mail rules: read not written back for account {AccountId}: {Code}", account.Id, ErrorCode(ex)); }
         }
         return added;
     }

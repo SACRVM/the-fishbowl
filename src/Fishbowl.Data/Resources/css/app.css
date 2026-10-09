@@ -426,6 +426,19 @@ label.fb-quota-field input { width: 6em; }
 .fb-mail-form-note { display: flex; gap: 8px; margin: 0; font-size: 0.8125rem; color: var(--text-muted); }
 .fb-mail-form-note sac-icon { flex: none; --icon-size: 16px; margin-top: 2px; }
 .fb-mail-form-error { color: var(--danger); margin: 12px 0 0; }
+/* Mail rules: a condition is field · text · remove; "When" / "Then" head their parts. */
+.fb-mail-rule.is-off .fb-row-name,
+.fb-mail-rule.is-off > sac-icon { color: var(--text-muted); }
+.fb-mail-rule[tabindex] { cursor: pointer; }
+.fb-mail-form .fb-rule-head { display: flex; align-items: center; gap: 8px; min-height: 32px; margin: 4px 0 -4px; }
+.fb-mail-form .fb-rule-head sac-select { width: auto; text-transform: none; font-weight: 400; letter-spacing: 0; }
+.fb-mail-form .fb-rule-head sac-select[hidden] { display: none; }
+.fb-rule-conds { display: grid; gap: 8px; }
+.fb-rule-cond { display: grid; grid-template-columns: 150px minmax(0, 1fr) auto; gap: 8px; align-items: center; }
+.fb-rule-apply { padding-top: 4px; border-top: 1px solid var(--border); }
+/* A checkbox line in a mail form reads inline, as everywhere else. */
+.fb-mail-form label.fb-check { display: flex; color: var(--text); font-size: 0.85rem; }
+.fb-mail-form label.fb-check input { display: inline-block; width: auto; }
 
 /* Lists on the kit's keyboard (sac.selection, kit 2.30): the list takes the
    focus for its keys without a ring of its own (each view's style); the

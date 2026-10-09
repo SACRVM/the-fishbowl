@@ -336,6 +336,13 @@
             updateAccount: (aid, body) => request(p(`/mail/accounts/${id(aid)}`), { method: "PATCH", body: JSON.stringify(body) }),
             removeAccount: (aid)       => request(p(`/mail/accounts/${id(aid)}`), { method: "DELETE" }),
             sync:          (aid)       => request(p(`/mail/accounts/${id(aid)}/sync`), { method: "POST" }),
+            // Rules (decision 11): every reader sees them; the account managers write them.
+            rules:      ()          => request(p("/mail/rules")),
+            addRule:    (body)      => request(p("/mail/rules"), { method: "POST", body: JSON.stringify(body) }),
+            updateRule: (rid, body) => request(p(`/mail/rules/${id(rid)}`), { method: "PUT", body: JSON.stringify(body) }),
+            removeRule: (rid)       => request(p(`/mail/rules/${id(rid)}`), { method: "DELETE" }),
+            // → { conversations, archived, archiveFolderMissing }
+            applyRule:  (rid)       => request(p(`/mail/rules/${id(rid)}/apply`), { method: "POST" }),
             // { q, account, tag, unread, archived, address, before, limit }
             threads: (opts = {}) => {
                 const qs = new URLSearchParams();
@@ -354,6 +361,8 @@
             // mode "fishbowl" (only here — the server keeps it) or "everywhere"
             // (also to the server's Trash); either way into the trash here.
             deleteThread:  (tid, mode) => request(p(`/mail/threads/${id(tid)}?mode=${mode}`), { method: "DELETE" }),
+            // Several at once: each server is visited once, not once per conversation.
+            deleteThreads: (tids, mode) => request(p("/mail/threads/delete"), { method: "POST", body: JSON.stringify({ threadIds: tids, mode }) }),
             deleteMessage: (mid, mode) => request(p(`/mail/messages/${id(mid)}?mode=${mode}`), { method: "DELETE" }),
             // Spam: read live from the servers, never stored (cookie only).
             // { items: [{ accountId, uid, uidValidity, fromName, fromAddress, subject, date }], failed: [accountId] }

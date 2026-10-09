@@ -110,6 +110,7 @@ public class TagRepository : ITagRepository
 
             await RewriteNoteTagsAsync(db, tx, oldN, newN, token);
             await RewriteMailTagsAsync(db, tx, oldN, newN, token);
+            await RewriteRuleTagsAsync(db, tx, oldN, newN, token);
             return true;
         }, ct);
     }
@@ -133,6 +134,7 @@ public class TagRepository : ITagRepository
 
             await RewriteNoteTagsAsync(db, tx, normalized, newName: null, token);
             await RewriteMailTagsAsync(db, tx, normalized, newName: null, token);
+            await RewriteRuleTagsAsync(db, tx, normalized, newName: null, token);
             return true;
         }, ct);
     }
@@ -195,6 +197,24 @@ public class TagRepository : ITagRepository
             if (newName is not null && !next.Contains(newName)) next.Add(newName);
             await db.ExecuteAsync(new CommandDefinition(
                 "UPDATE mail_messages SET tags = @next WHERE id = @id",
+                new { next, id }, transaction: tx, cancellationToken: ct));
+        }
+    }
+
+    // And the tags mail rules give (user/space schema v26).
+    private static async Task RewriteRuleTagsAsync(
+        IDbConnection db, IDbTransaction tx, string oldName, string? newName, CancellationToken ct)
+    {
+        var rows = (await db.QueryAsync<(string Id, string Tags)>(new CommandDefinition(@"
+            SELECT id, add_tags FROM mail_rules
+            WHERE EXISTS (SELECT 1 FROM json_each(mail_rules.add_tags) je WHERE je.value = @oldName)",
+            new { oldName }, transaction: tx, cancellationToken: ct))).ToList();
+        foreach (var (id, json) in rows)
+        {
+            var next = (System.Text.Json.JsonSerializer.Deserialize<List<string>>(json) ?? new()).Where(t => t != oldName).ToList();
+            if (newName is not null && !next.Contains(newName)) next.Add(newName);
+            await db.ExecuteAsync(new CommandDefinition(
+                "UPDATE mail_rules SET add_tags = @next WHERE id = @id",
                 new { next, id }, transaction: tx, cancellationToken: ct));
         }
     }

@@ -11,6 +11,10 @@ namespace Fishbowl.Data;
 
 public class DatabaseFactory
 {
+    /// <summary>The user/space schema head: the PRAGMA user_version a context
+    /// DB has once it is open. Raise it with every ApplyUserVN.</summary>
+    public const int UserSchemaHead = 26;
+
     private readonly string _dataRoot;
     private readonly string _usersPath;
     private readonly string _spacesPath;
@@ -568,8 +572,33 @@ public class DatabaseFactory
             ApplyUserV25(connection);
             connection.Execute("PRAGMA user_version = 25");
             _logger.LogInformation("Applied user schema v25 to {DbPath}", ((SqliteConnection)connection).DataSource);
+            version = 25;
+        }
+
+        if (version < 26)
+        {
+            ApplyUserV26(connection);
+            connection.Execute($"PRAGMA user_version = {UserSchemaHead}");
+            _logger.LogInformation("Applied user schema v26 to {DbPath}", ((SqliteConnection)connection).DataSource);
         }
     }
+
+    // Mail rules (mail spec, decision 11): conditions and actions as JSON;
+    // every rule that matches applies, so there is no order.
+    private static void ApplyUserV26(IDbConnection connection) => connection.Execute(@"
+        CREATE TABLE IF NOT EXISTS mail_rules (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            enabled INTEGER NOT NULL DEFAULT 1,
+            match_all INTEGER NOT NULL DEFAULT 1,
+            conditions TEXT NOT NULL DEFAULT '[]',
+            add_tags TEXT NOT NULL DEFAULT '[]',
+            archive INTEGER NOT NULL DEFAULT 0,
+            mark_read INTEGER NOT NULL DEFAULT 0,
+            created_by TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );");
 
     // Mail takes less room (2026-10-09). The HTML as sent is kept packed in
     // body_html_z (MailBodies, about a seventh); body_html stays for rows a

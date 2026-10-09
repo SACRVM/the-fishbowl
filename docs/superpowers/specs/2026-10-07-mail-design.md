@@ -118,13 +118,18 @@ connected over MCP can search, read, tag, file, delete, set expiry, draft and
       mode.
     - The list shows a small timer mark.
 11. **Rules, without scripting.**
-    - Each workspace has an ordered list of rules.
-    - **Match:** account, from, to, subject contains, `List-Id`.
-    - **Actions:** add tags, archive, mark read, expire after N days (with its
-      mode).
-    - Rules run as mail arrives. "Apply to existing" runs one over what is
-      already here.
-    - The Mail app's Rules window and the MCP tools both manage them.
+    - Each workspace has a list of rules. Every rule that matches applies;
+      their actions only add up, so there is no order (decided 2026-10-09 —
+      the ordered list had nothing to order without a "stop here").
+    - **Match:** account, from, to (To, Cc or Bcc), from or to, subject,
+      `List-Id` — "contains", in any case, a name or an address; all of a
+      rule's conditions or any of them.
+    - **Actions:** add tags, archive, mark read; expire after N days (with its
+      mode) comes with expiry.
+    - Rules meet every message the sync stores for the first time — the
+      history too — and mail sent from here (its tags). "Apply to existing"
+      runs one over what is already here.
+    - The Mail app's Rules window manages them; the MCP tools follow.
     - Table triggers stay for tables.
 12. **Writing.**
     - New, Reply, Reply all, Forward, from one of the workspace's accounts,

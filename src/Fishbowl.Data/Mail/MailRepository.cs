@@ -400,6 +400,39 @@ public class MailRepository : IMailRepository
             return n == 0 ? null : clean;
         }, ct);
 
+    /// <summary>Every message with what a rule looks at — the people, the
+    /// subject, the list, the account — and its thread, state and tags; no text.</summary>
+    public async Task<IReadOnlyList<MailMessage>> RuleCandidatesAsync(ContextRef ctx, CancellationToken ct = default)
+    {
+        using var db = _db.CreateContextConnection(ctx);
+        return (await db.QueryAsync<MailMessage>(new CommandDefinition(@"
+            SELECT id, account_id, thread_id, direction, state, seen, from_name, from_address, to_list, cc_list, bcc_list,
+                   subject, list_id, tags
+            FROM mail_messages", cancellationToken: ct))).ToList();
+    }
+
+    /// <summary>Adds the tags to each message that hasn't got them all (a
+    /// rule's tags, beside what it has); how many messages changed.</summary>
+    public Task<int> AddTagsAsync(ContextRef ctx, IReadOnlyList<string> ids, IReadOnlyList<string> tags, CancellationToken ct = default) =>
+        ids.Count == 0 || tags.Count == 0 ? Task.FromResult(0) : _db.WithContextTransactionAsync(ctx, async (db, tx, token) =>
+        {
+            var clean = await _tags.EnsureExistsAsync(db, tx, tags, token);
+            var now = Iso(DateTime.UtcNow);
+            var changed = 0;
+            foreach (var chunk in ids.Chunk(500))
+                foreach (var (id, json) in await db.QueryAsync<(string Id, string Tags)>(new CommandDefinition(
+                    "SELECT id, tags FROM mail_messages WHERE id IN @chunk", new { chunk }, tx, cancellationToken: token)))
+                {
+                    var has = System.Text.Json.JsonSerializer.Deserialize<List<string>>(json) ?? new();
+                    var next = has.Concat(clean).Distinct(StringComparer.Ordinal).ToList();
+                    if (next.Count == has.Count) continue;
+                    await db.ExecuteAsync(new CommandDefinition(
+                        "UPDATE mail_messages SET tags = @next, updated_at = @now WHERE id = @id", new { next, now, id }, tx, cancellationToken: token));
+                    changed++;
+                }
+            return changed;
+        }, ct);
+
     public async Task<IReadOnlyList<MailLocationRef>> SetThreadSeenAsync(ContextRef ctx, string threadId, bool seen, CancellationToken ct = default) =>
         await _db.WithContextTransactionAsync<IReadOnlyList<MailLocationRef>>(ctx, async (db, tx, token) =>
         {
@@ -726,6 +759,23 @@ public class MailRepository : IMailRepository
     }
 
     /// <summary>Where these messages lie, each place with its message.</summary>
+    /// <summary>Every message of the conversations these messages are in.</summary>
+    public Task<IReadOnlyList<string>> WholeThreadsOfAsync(ContextRef ctx, IReadOnlyCollection<string> messageIds, CancellationToken ct = default) =>
+        IdsAsync(ctx, "SELECT id FROM mail_messages WHERE thread_id IN (SELECT thread_id FROM mail_messages WHERE id IN @chunk)", messageIds, ct);
+
+    /// <summary>Every message of these conversations.</summary>
+    public Task<IReadOnlyList<string>> ThreadsMessageIdsAsync(ContextRef ctx, IReadOnlyCollection<string> threadIds, CancellationToken ct = default) =>
+        IdsAsync(ctx, "SELECT id FROM mail_messages WHERE thread_id IN @chunk", threadIds, ct);
+
+    private async Task<IReadOnlyList<string>> IdsAsync(ContextRef ctx, string sql, IReadOnlyCollection<string> keys, CancellationToken ct)
+    {
+        using var db = _db.CreateContextConnection(ctx);
+        var all = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var chunk in keys.Chunk(500))
+            all.UnionWith(await db.QueryAsync<string>(new CommandDefinition(sql, new { chunk }, cancellationToken: ct)));
+        return all.ToList();
+    }
+
     public async Task<IReadOnlyList<MailPlace>> PlacesOfAsync(ContextRef ctx, IReadOnlyList<string> ids, CancellationToken ct = default)
     {
         if (ids.Count == 0) return [];

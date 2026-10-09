@@ -304,7 +304,7 @@ public class MailTests
             await Assertions.Expect(menu.Locator("button[data-action]", new() { HasText = "Delete…" })).ToBeVisibleAsync();
             await page.WaitForTimeoutAsync(250);
             await menu.Locator("button[data-action]", new() { HasText = "Mark read" }).ClickAsync();
-            await Assertions.Expect(news).Not.ToHaveClassAsync(new System.Text.RegularExpressions.Regex(@"unread"));
+            await Assertions.Expect(news).Not.ToHaveClassAsync(new System.Text.RegularExpressions.Regex(@"\bunread\b"));
 
             await rows.Filter(new() { HasText = "Your invoice" }).ClickAsync();
             await page.Locator("fb-mail-view #mv-delete").ClickAsync();
@@ -312,7 +312,9 @@ public class MailTests
             await dialog.GetByRole(AriaRole.Button, new() { Name = "Only in Fishbowl", Exact = true }).ClickAsync();
             await Assertions.Expect(rows).ToHaveCountAsync(2);
             await Assertions.Expect(rows.Filter(new() { HasText = "Your invoice" })).ToHaveCountAsync(0);
-            await Assertions.Expect(page.Locator("fb-mail-view .mv-empty")).ToBeVisibleAsync();
+            // The last one went: the one above it is open now.
+            await Assertions.Expect(news).ToHaveClassAsync(new System.Text.RegularExpressions.Regex(@"\bselected\b"));
+            await Assertions.Expect(page.Locator("fb-mail-view .mv-thread")).ToBeVisibleAsync();
             await page.ScreenshotAsync(new() { Path = Shot("deleted") });
         }
         finally
@@ -342,15 +344,18 @@ public class MailTests
             await Assertions.Expect(page.Locator("fb-mail-view .mv-thread")).ToBeVisibleAsync();
 
             var head = page.Locator("fb-mail-view #mv-head-title");
-            await page.Keyboard.PressAsync("Shift+ArrowDown");
+            await page.Keyboard.PressAsync("Shift+ArrowUp");
             await Assertions.Expect(head).ToHaveTextAsync("2 selected");
 
+            // The first two go; the one below them is open at once, the list stays where it is.
             await page.Keyboard.PressAsync("Delete");
             await page.Locator("sac-dialog[title='Delete 2 conversations?']")
                 .GetByRole(AriaRole.Button, new() { Name = "Only in Fishbowl", Exact = true }).ClickAsync();
             await Assertions.Expect(rows).ToHaveCountAsync(1, new() { Timeout = 5000 });
             await Assertions.Expect(head).ToHaveTextAsync("Inbox");
-            await Assertions.Expect(page.Locator("fb-mail-view .mv-empty")).ToBeVisibleAsync();
+            await Assertions.Expect(rows.Nth(0)).ToContainTextAsync("Your invoice");
+            await Assertions.Expect(rows.Nth(0)).ToHaveClassAsync(selected);
+            await Assertions.Expect(page.Locator("fb-mail-view .mv-thread")).ToBeVisibleAsync();
         }
         finally
         {
@@ -588,6 +593,63 @@ public class MailTests
             await Assertions.Expect(dlg).ToBeVisibleAsync();
             await Assertions.Expect(dlg.Locator("[data-hint]")).ToContainTextAsync("app-specific password");
             await page.ScreenshotAsync(new() { Path = Shot("add") });
+        }
+        finally
+        {
+            await page.APIRequest.DeleteAsync($"{_fixture.BaseUrl}/api/v1/spaces/{slug}?archive=false");
+            await context.CloseAsync();
+        }
+    }
+
+    [Fact]
+    public async Task Mail_Rules_ANewRuleTagsTheMailAlreadyHere_Test()
+    {
+        var (context, page, slug, _) = await SpaceWithMailAsync();
+        try
+        {
+            await page.GotoAsync($"{_fixture.BaseUrl}/#/space/{slug}/mail");
+            var engine = page.Locator("fb-mail-view .mv-item", new() { HasText = "Analytical engine notes" });
+            await Assertions.Expect(engine).ToBeVisibleAsync(new() { Timeout = 15000 });
+            await page.Locator("#mv-rules").ClickAsync();
+            var win = page.Locator("#fb-mail-rules");
+            await Assertions.Expect(win.Locator(".empty-state")).ToBeVisibleAsync();
+
+            await win.Locator(".wa-bar button").ClickAsync();
+            var form = page.Locator("sac-dialog .fb-mail-form");
+            await Assertions.Expect(form).ToBeVisibleAsync();
+            // The condition's text has the focus: "From or to" contains …
+            await Assertions.Expect(form.Locator(".fb-rule-cond input[data-value]")).ToBeFocusedAsync();
+            await page.Keyboard.TypeAsync("Lovelace");
+            // "all / any" only shows with a second condition.
+            var match = form.Locator("sac-select[name='match']");
+            await Assertions.Expect(match).ToBeHiddenAsync();
+            await form.Locator("[data-add-cond]").ClickAsync();
+            await Assertions.Expect(form.Locator(".fb-rule-cond")).ToHaveCountAsync(2);
+            await Assertions.Expect(form.Locator(".fb-rule-cond").Nth(1).Locator("input[data-value]")).ToBeFocusedAsync();
+            await Assertions.Expect(match).ToBeVisibleAsync();
+            await page.ScreenshotAsync(new() { Path = Shot("rule-two") });
+            await form.Locator(".fb-rule-cond").Nth(1).Locator("[data-remove]").ClickAsync();
+            await Assertions.Expect(match).ToBeHiddenAsync();
+            var tags = form.Locator("sac-chip-input[name='tags']");
+            await tags.Locator(".add-btn").ClickAsync();
+            await tags.Locator("input.entry").FillAsync("helvetia");
+            await tags.Locator(".opt.create").ClickAsync();
+            await tags.Locator(".swatch-btn[data-color='teal']").ClickAsync();
+            // A new rule also runs over what is already here.
+            await Assertions.Expect(form.Locator("input[name='applyNow']")).ToBeCheckedAsync();
+            await page.ScreenshotAsync(new() { Path = Shot("rule") });
+            await page.GetByRole(AriaRole.Button, new() { Name = "Create", Exact = true }).ClickAsync();
+
+            await Assertions.Expect(win.Locator(".fb-mail-rule")).ToHaveCountAsync(1);
+            await Assertions.Expect(win.Locator(".fb-mail-rule .fb-row-name")).ToHaveTextAsync("Lovelace");
+            await Assertions.Expect(win.Locator(".fb-mail-rule .fb-row-meta")).ToContainTextAsync("From or to: Lovelace");
+            await Assertions.Expect(engine.Locator("sac-chip[label='helvetia']")).ToHaveCountAsync(1);
+            await Assertions.Expect(page.Locator("fb-mail-view .mv-item", new() { HasText = "Your invoice" }).Locator("sac-chip[label='helvetia']")).ToHaveCountAsync(0);
+            await page.ScreenshotAsync(new() { Path = Shot("rules") });
+
+            // Escape closes the window.
+            await page.Keyboard.PressAsync("Escape");
+            await Assertions.Expect(win).ToBeHiddenAsync();
         }
         finally
         {
