@@ -40,7 +40,7 @@ public sealed class FakeServer
     /// <summary>Adds a message with the next UID; returns the UID.</summary>
     public uint AddMessage(string role, string? messageId = null, string subject = "Hello", string from = "alice@example.com",
         string to = "me@example.com", DateTimeOffset? date = null, string? inReplyTo = null, string[]? references = null,
-        bool seen = false, bool flagged = false, string? text = null, bool noMessageId = false)
+        bool seen = false, bool flagged = false, string? text = null, bool noMessageId = false, string? html = null)
     {
         var f = ByRole[role];
         var uid = f.UidNext++;
@@ -52,7 +52,7 @@ public sealed class FakeServer
         {
             Header = new SyncHeader(uid, id, inReplyTo, references ?? [], d, d, new MailAddress("Sender", from),
                 [new MailAddress(null, to)], [], [], [], subject, seen, flagged, 100 + _n, null),
-            Body = new SyncBody(text ?? $"text of {subject} #{_n}", null, []),
+            Body = new SyncBody(text ?? $"text of {subject} #{_n}", html, []),
             ModSeq = f.ModSeq,
         };
         return uid;

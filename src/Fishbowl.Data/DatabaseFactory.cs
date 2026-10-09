@@ -3,6 +3,7 @@ using Microsoft.Data.Sqlite;
 using Dapper;
 using Fishbowl.Core;
 using Fishbowl.Core.Util;
+using Fishbowl.Data.Mail;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 
@@ -559,6 +560,72 @@ public class DatabaseFactory
             ApplyUserV24(connection);
             connection.Execute("PRAGMA user_version = 24");
             _logger.LogInformation("Applied user schema v24 to {DbPath}", ((SqliteConnection)connection).DataSource);
+            version = 24;
+        }
+
+        if (version < 25)
+        {
+            ApplyUserV25(connection);
+            connection.Execute("PRAGMA user_version = 25");
+            _logger.LogInformation("Applied user schema v25 to {DbPath}", ((SqliteConnection)connection).DataSource);
+        }
+    }
+
+    // Mail takes less room (2026-10-09). The HTML as sent is kept packed in
+    // body_html_z (MailBodies, about a seventh); body_html stays for rows a
+    // trash restore brings back from before. mail_fts becomes contentless:
+    // it held a second copy of every subject, address list and text, and
+    // search only ever matches against it (MATCH), never reads it back.
+    // Rows are packed in chunks, each its own transaction, so the WAL stays
+    // small; the room it frees is given back with one VACUUM. On a large
+    // mailbox the first open after the update takes a few minutes.
+    private static void ApplyUserV25(IDbConnection connection)
+    {
+        var cols = connection.Query<string>("SELECT name FROM pragma_table_info('mail_messages')").ToList();
+        if (cols.Count == 0) return;   // a test DB without mail
+        if (!cols.Contains("body_html_z")) connection.Execute("ALTER TABLE mail_messages ADD COLUMN body_html_z BLOB;");
+
+        var pending = connection.Query<(long RowId, long Length)>(
+            "SELECT rowid, length(body_html) FROM mail_messages WHERE body_html IS NOT NULL ORDER BY rowid").ToList();
+        for (var i = 0; i < pending.Count;)
+        {
+            // At most 500 rows or 32 MB of text at a time.
+            var chunk = new List<long>();
+            long chars = 0;
+            while (i < pending.Count && chunk.Count < 500 && (chunk.Count == 0 || chars + pending[i].Length <= 32 << 20))
+            {
+                chars += pending[i].Length;
+                chunk.Add(pending[i++].RowId);
+            }
+            using var tx = connection.BeginTransaction();
+            var rows = connection.Query<(long RowId, string Html)>(
+                "SELECT rowid, body_html FROM mail_messages WHERE rowid IN @chunk", new { chunk = chunk.ToArray() }, tx).ToList();
+            var packed = new byte[]?[rows.Count];
+            Parallel.For(0, rows.Count, n => packed[n] = MailBodies.Pack(rows[n].Html));
+            for (var n = 0; n < rows.Count; n++)
+                connection.Execute("UPDATE mail_messages SET body_html = NULL, body_html_z = @z WHERE rowid = @rowId",
+                    new { rowId = rows[n].RowId, z = packed[n] }, tx);
+            tx.Commit();
+        }
+
+        var fts = connection.ExecuteScalar<string?>("SELECT sql FROM sqlite_master WHERE name = 'mail_fts'");
+        if (fts is not null && !fts.Contains("contentless_delete", StringComparison.OrdinalIgnoreCase))
+        {
+            using var tx = connection.BeginTransaction();
+            connection.Execute(@"
+                DROP TABLE IF EXISTS mail_fts_new;
+                CREATE VIRTUAL TABLE mail_fts_new USING fts5(subject, people, body, content='', contentless_delete=1);
+                INSERT INTO mail_fts_new (rowid, subject, people, body) SELECT rowid, subject, people, body FROM mail_fts;
+                DROP TABLE mail_fts;
+                ALTER TABLE mail_fts_new RENAME TO mail_fts;", transaction: tx);
+            tx.Commit();
+        }
+
+        var free = connection.ExecuteScalar<long>("PRAGMA freelist_count") * connection.ExecuteScalar<long>("PRAGMA page_size");
+        if (free > 64L << 20)
+        {
+            connection.Execute("VACUUM");
+            connection.Execute("PRAGMA wal_checkpoint(TRUNCATE)");
         }
     }
 

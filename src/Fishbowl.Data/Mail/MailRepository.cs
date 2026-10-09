@@ -197,6 +197,22 @@ public class MailRepository : IMailRepository
         from_name, from_address, to_list, cc_list, bcc_list, reply_to, subject, sent_at, snippet,
         attachments, size, seen, flagged, tags, list_id, sent_by, created_at, updated_at";
 
+    // A message with its HTML packed as stored (v25); Dapper fills
+    // BodyHtmlZ from body_html_z. body_html is only ever set on a row a trash
+    // restore brought back from before v25.
+    private sealed class StoredMessage : MailMessage
+    {
+        [System.Text.Json.Serialization.JsonIgnore]
+        public byte[]? BodyHtmlZ { get; set; }
+    }
+
+    private static MailMessage Unpacked(StoredMessage m)
+    {
+        m.BodyHtml ??= MailBodies.Unpack(m.BodyHtmlZ);
+        m.BodyHtmlZ = null;
+        return Fix(m);
+    }
+
     private static MailMessage Fix(MailMessage m)
     {
         m.SentAt = TimeUtil.AsUtc(m.SentAt);
@@ -325,17 +341,17 @@ public class MailRepository : IMailRepository
     public async Task<IReadOnlyList<MailMessage>> GetThreadAsync(ContextRef ctx, string threadId, CancellationToken ct = default)
     {
         using var db = _db.CreateContextConnection(ctx);
-        var rows = await db.QueryAsync<MailMessage>(new CommandDefinition(
+        var rows = await db.QueryAsync<StoredMessage>(new CommandDefinition(
             "SELECT * FROM mail_messages WHERE thread_id = @threadId ORDER BY sent_at", new { threadId }, cancellationToken: ct));
-        return Distinct(rows.Select(Fix)).ToList();
+        return Distinct(rows.Select(Unpacked)).ToList();
     }
 
     public async Task<MailMessage?> GetMessageAsync(ContextRef ctx, string id, CancellationToken ct = default)
     {
         using var db = _db.CreateContextConnection(ctx);
-        var m = await db.QuerySingleOrDefaultAsync<MailMessage>(new CommandDefinition(
+        var m = await db.QuerySingleOrDefaultAsync<StoredMessage>(new CommandDefinition(
             "SELECT * FROM mail_messages WHERE id = @id", new { id }, cancellationToken: ct));
-        return m is null ? null : Fix(m);
+        return m is null ? null : Unpacked(m);
     }
 
     /// <summary>The tags mail carries, with how many conversations: each
@@ -621,10 +637,10 @@ public class MailRepository : IMailRepository
         await db.ExecuteAsync(new CommandDefinition(@"
                 INSERT INTO mail_messages (id, account_id, message_key, thread_id, in_reply_to, refs, direction, state,
                     from_name, from_address, to_list, cc_list, bcc_list, reply_to, subject, subject_key, sent_at, snippet,
-                    body_text, body_html, attachments, size, seen, flagged, tags, list_id, sent_by, created_at, updated_at)
+                    body_text, body_html_z, attachments, size, seen, flagged, tags, list_id, sent_by, created_at, updated_at)
                 VALUES (@Id, @AccountId, @MessageKey, @ThreadId, @InReplyTo, @Refs, @Direction, @State,
                     @FromName, @FromAddress, @ToList, @CcList, @BccList, @ReplyTo, @Subject, @SubjectKey, @SentAtIso, @Snippet,
-                    @BodyText, @BodyHtml, @Attachments, @Size, @Seen, @Flagged, @Tags, @ListId, @sentBy, @Now, @Now)",
+                    @BodyText, @BodyHtmlZ, @Attachments, @Size, @Seen, @Flagged, @Tags, @ListId, @sentBy, @Now, @Now)",
             new
             {
                 m.Id,
@@ -646,7 +662,7 @@ public class MailRepository : IMailRepository
                 SentAtIso = Iso(m.SentAt),
                 m.Snippet,
                 m.BodyText,
-                m.BodyHtml,
+                BodyHtmlZ = MailBodies.Pack(m.BodyHtml),
                 m.Attachments,
                 m.Size,
                 m.Seen,
