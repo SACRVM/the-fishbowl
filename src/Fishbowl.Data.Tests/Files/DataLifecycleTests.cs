@@ -182,8 +182,8 @@ public class DataLifecycleTests : IDisposable
         // Materialise both workspaces first so the baseline includes their DBs.
         await Put(me, "seed.txt", 1);
         await Put(sctx, "seed.txt", 1);
-        var baseline = DiskFileStore.Measure(_db.ResolveContextFolder(me)).Bytes
-                       + DiskFileStore.Measure(_db.ResolveContextFolder(sctx)).Bytes;
+        var baseline = FileService.ContextBytes(_db.ResolveContextFolder(me))
+                       + FileService.ContextBytes(_db.ResolveContextFolder(sctx));
         var quota = baseline + 1_000_000;
         using (var sys = _db.CreateSystemConnection())
             sys.Execute("UPDATE users SET quota_bytes = @quota WHERE id = @user", new { quota, user });
@@ -231,7 +231,7 @@ public class DataLifecycleTests : IDisposable
         var user = NewUser();
         var me = ContextRef.User(user);
         await Put(me, "seed.txt", 1);
-        var baseline = DiskFileStore.Measure(_db.ResolveContextFolder(me)).Bytes;
+        var baseline = FileService.ContextBytes(_db.ResolveContextFolder(me));
         var quota = baseline + 100_000;
         using (var sys = _db.CreateSystemConnection())
             sys.Execute("UPDATE users SET quota_bytes = @quota WHERE id = @user", new { quota, user });

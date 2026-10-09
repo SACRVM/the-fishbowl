@@ -20,6 +20,8 @@ public class DatabaseFactory
     // reads its usage together) would otherwise both see user_version 7 and
     // both ALTER TABLE — "duplicate column name".
     private readonly System.Collections.Concurrent.ConcurrentDictionary<string, object> _initLocks = new(StringComparer.OrdinalIgnoreCase);
+    // The files already in write-ahead-log mode (see OpenAndInitialize).
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, bool> _wal = new(StringComparer.OrdinalIgnoreCase);
 
     static DatabaseFactory()
     {
@@ -295,6 +297,27 @@ public class DatabaseFactory
         CancellationToken ct = default)
         => WithContextTransactionAsync(ContextRef.User(userId), work, ct);
 
+    // Write-ahead log: readers never wait for a writer, a writer never waits
+    // for readers — with the rollback journal a mail sync writing for minutes
+    // stalled every read behind it. The mode lives in the file (the -wal and
+    // -shm files beside it come and go with the connections; a closed file
+    // is checkpointed back into the .db), so this runs once per file and
+    // process. A file that can't switch right now (another process holds it)
+    // stays as it is and is asked again on the next open. WAL needs a local
+    // disk — the data folder on a network share is not supported.
+    private void UseWriteAheadLog(IDbConnection connection, string key)
+    {
+        try
+        {
+            var mode = connection.ExecuteScalar<string>("PRAGMA journal_mode = WAL");
+            if (string.Equals(mode, "wal", StringComparison.OrdinalIgnoreCase)) _wal[key] = true;
+        }
+        catch (SqliteException ex)
+        {
+            _logger.LogWarning("Database stays in its journal mode for now (code {Code})", ex.SqliteErrorCode);
+        }
+    }
+
     private IDbConnection OpenAndInitialize(string dbPath, Action<IDbConnection> initializer, bool loadVec)
     {
         var connectionString = new SqliteConnectionStringBuilder
@@ -310,8 +333,10 @@ public class DatabaseFactory
 
             if (loadVec) SqliteVecLoader.LoadInto(connection);
 
-            lock (_initLocks.GetOrAdd(Path.GetFullPath(dbPath), _ => new object()))
+            var key = Path.GetFullPath(dbPath);
+            lock (_initLocks.GetOrAdd(key, _ => new object()))
             {
+                if (!_wal.ContainsKey(key)) UseWriteAheadLog(connection, key);
                 initializer(connection);
             }
         }

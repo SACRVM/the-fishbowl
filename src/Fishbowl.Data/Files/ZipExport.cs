@@ -46,7 +46,7 @@ public static class ZipExport
             }.ToString()))
             {
                 dest.Open();
-                source.BackupDatabase(dest);
+                PlainCopy(dest, () => source.BackupDatabase(dest));
             }
             ct.ThrowIfCancellationRequested();
             var entry = zip.CreateEntry(entryName, CompressionLevel.Optimal);
@@ -59,6 +59,17 @@ public static class ZipExport
         {
             try { File.Delete(temp); } catch (IOException) { /* best effort */ }
         }
+    }
+
+    // A backup carries its source's WAL flag into the copy; the copy is
+    // made a plain rollback-journal file again, so it opens anywhere — read
+    // only, or on a share without shared memory. Exclusive locking first
+    // keeps SQLite from making a -shm beside the copy on the way.
+    public static void PlainCopy(SqliteConnection dest, Action backup)
+    {
+        using (var c = dest.CreateCommand()) { c.CommandText = "PRAGMA locking_mode = EXCLUSIVE"; c.ExecuteNonQuery(); }
+        backup();
+        using (var c = dest.CreateCommand()) { c.CommandText = "PRAGMA journal_mode = DELETE"; c.ExecuteNonQuery(); }
     }
 
     // Same, for a DB file no DatabaseFactory context owns (an app's app.db).

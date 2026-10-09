@@ -36,6 +36,32 @@ public class DatabaseFactoryTests : IDisposable
         SqliteConnection.ClearAllPools();
     }
 
+    // Write-ahead log, so a long write never stalls the reads beside it — and
+    // once the connections close, the folder holds just the .db again (what a
+    // cold import or a copy of the folder carries).
+    [Fact]
+    public void Connections_UseWriteAheadLog_AndLeaveOnlyTheDbBehind_Test()
+    {
+        var factory = new DatabaseFactory(_tempDbDir);
+        using (var system = factory.CreateSystemConnection())
+            Assert.Equal("wal", system.ExecuteScalar<string>("PRAGMA journal_mode"));
+        var ctx = Fishbowl.Core.ContextRef.User("wal_user");
+        using (var writer = factory.CreateContextConnection(ctx))
+        using (var reader = factory.CreateContextConnection(ctx))
+        {
+            Assert.Equal("wal", writer.ExecuteScalar<string>("PRAGMA journal_mode"));
+            using var tx = writer.BeginTransaction();
+            writer.Execute("INSERT INTO tags(name, color, created_at) VALUES ('wal', 'blue', '2026-10-09T00:00:00Z')", transaction: tx);
+            // A reader isn't held up by the open write.
+            Assert.Equal(0, reader.ExecuteScalar<long>("SELECT count(*) FROM tags WHERE name = 'wal'"));
+            tx.Commit();
+            Assert.Equal(1, reader.ExecuteScalar<long>("SELECT count(*) FROM tags WHERE name = 'wal'"));
+        }
+        SqliteConnection.ClearAllPools();
+        Assert.Equal(new[] { "personal.db" },
+            Directory.GetFiles(Path.Combine(_tempDbDir, "users", "wal_user")).Select(Path.GetFileName).ToArray());
+    }
+
     [Fact]
     public void CreateConnection_CreatesPhysicalFile_Test()
     {

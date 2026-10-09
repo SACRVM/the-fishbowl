@@ -267,6 +267,13 @@ static string FormatBytes(long bytes)
 // when we dispose it the OS handle closes immediately — otherwise the pool
 // holds a lock on the snapshot file and a subsequent integrity-check would
 // fail on Windows. Mirrors the pattern in ExportApi.BackupContextAsync.
+static void Exec(SqliteConnection c, string sql)
+{
+    using var cmd = c.CreateCommand();
+    cmd.CommandText = sql;
+    cmd.ExecuteNonQuery();
+}
+
 static void BackupSqliteFile(string sourcePath, string destPath)
 {
     using var source = new SqliteConnection(new SqliteConnectionStringBuilder
@@ -285,7 +292,13 @@ static void BackupSqliteFile(string sourcePath, string destPath)
     }.ToString());
     dest.Open();
 
+    // A backup carries its source's WAL flag into the copy; the snapshot is
+    // made a plain rollback-journal file again (it lives on a share, where
+    // WAL's shared memory doesn't work). Exclusive locking first keeps SQLite
+    // from making a -shm beside it on the way.
+    Exec(dest, "PRAGMA locking_mode = EXCLUSIVE");
     source.BackupDatabase(dest);
+    Exec(dest, "PRAGMA journal_mode = DELETE");
     dest.Close();
     source.Close();
 }

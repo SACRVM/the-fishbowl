@@ -396,14 +396,29 @@ public sealed class FileService : IFileService
     private long OwnerUsage(string ownerId)
     {
         if (OwnerUsageCache.TryGetValue(ownerId, out var hit) && DateTime.UtcNow - hit.At < OwnerUsageTtl) return hit.Bytes;
-        long total = DiskFileStore.Measure(_dbFactory.ResolveContextFolder(ContextRef.User(ownerId))).Bytes;
+        long total = ContextBytes(_dbFactory.ResolveContextFolder(ContextRef.User(ownerId)));
         using (var sys = _dbFactory.CreateSystemConnection())
             foreach (var spaceId in sys.Query<string>(
                          "SELECT space_id FROM space_members WHERE user_id = @ownerId AND role = @owner",
                          new { ownerId, owner = SpaceRole.Owner.ToDbValue() }))
-                total += DiskFileStore.Measure(_dbFactory.ResolveContextFolder(ContextRef.Space(spaceId))).Bytes;
+                total += ContextBytes(_dbFactory.ResolveContextFolder(ContextRef.Space(spaceId)));
         OwnerUsageCache[ownerId] = (DateTime.UtcNow, total);
         return total;
+    }
+
+    // A workspace folder without SQLite's write-ahead files beside its DB
+    // (personal.db-wal, -shm): they come and go with the connections and
+    // would make the quota flicker.
+    public static long ContextBytes(string folder)
+    {
+        var bytes = DiskFileStore.Measure(folder).Bytes;
+        foreach (var db in new[] { DatabaseFactory.PersonalDbFileName, DatabaseFactory.SpaceDbFileName })
+            foreach (var sidecar in new[] { "-wal", "-shm" })
+            {
+                var f = new FileInfo(Path.Combine(folder, db + sidecar));
+                if (f.Exists) bytes -= f.Length;
+            }
+        return Math.Max(0, bytes);
     }
 
     private long OwnerRoom(OwnerQuota? q)
