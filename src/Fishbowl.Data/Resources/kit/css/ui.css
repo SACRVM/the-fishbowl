@@ -801,6 +801,19 @@ a.nav-icon-btn { text-decoration: none; }
     color: var(--text-muted);
 }
 
+/* sac.contextMenu's reserved columns: a checkmark (a state) and an icon,
+   each as wide as the menu's 16px glyph, so every label starts in one
+   column — a checked entry, an icon entry and a plain one alike. */
+.sac-menu-check,
+.sac-menu-icon {
+    flex: none;
+    width: 16px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    --icon-size: 16px;
+}
+
 /* sac.selection — rows of a list that marks several (kit/js/lib/selection.js).
    No text selection or touch callout (Shift+click and a long-press would
    start one); a marked row is the --accent-tint ground, its swapped icon

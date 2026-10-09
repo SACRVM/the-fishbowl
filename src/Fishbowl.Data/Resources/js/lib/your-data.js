@@ -19,6 +19,7 @@
     function ensureWindow() {
         if (win?.isConnected) return win;
         win = document.createElement("sac-window");
+        win.setAttribute("escape-closes", "");
         win.classList.add("fb-window");
         win.id = "fb-your-data";
         win.setAttribute("width", "520px");

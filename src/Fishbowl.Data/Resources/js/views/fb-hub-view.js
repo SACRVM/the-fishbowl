@@ -881,7 +881,7 @@ class FbHubView extends HTMLElement {
         const current = e.size || "medium";
         const size = (s, key, label) => ({
             id: "size:" + s, label: fb.t(key, label),
-            icon: current === s ? "check" : undefined,   // the current size, marked
+            checked: current === s, type: "radio",      // one of the four, in the kit's check column
             onClick: () => this._update(e, { size: s }),
         });
         const items = [
@@ -895,7 +895,7 @@ class FbHubView extends HTMLElement {
         if (e.size !== "small" && fb.desktopLive.has(e.key, e)) {
             const on = !fb.desktopLive.isQuiet(fb.api.workspace(), e.key);
             items.push("-", { id: "live:toggle", label: fb.t("fb.desk.live.show-content", "Show content"),
-                icon: on ? "check" : undefined, onClick: () => this._toggleContent(e) });
+                checked: on, onClick: () => this._toggleContent(e) });
         }
         items.push("-", { id: "hide", label: fb.t("fb.desk.hide", "Hide from this desktop"), onClick: () => this._update(e, { hidden: true }) });
         if (e.app && e.app.mode !== "space") {

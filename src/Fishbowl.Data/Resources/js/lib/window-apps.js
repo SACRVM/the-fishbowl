@@ -37,6 +37,7 @@
         let win = document.getElementById(id);
         if (!win) {
             win = document.createElement("sac-window");
+            win.setAttribute("escape-closes", "");
             win.id = id;
             win.dataset.app = name;
             win.setAttribute("width", `min(${app.w}px, 94vw)`);

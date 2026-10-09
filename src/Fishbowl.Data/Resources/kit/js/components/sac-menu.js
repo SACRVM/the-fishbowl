@@ -409,11 +409,14 @@ class SacMenu extends HTMLElement {
             .filter(el => el.matches("button:not([disabled]):not([hidden])"));
     }
 
-    /** Tag slotted buttons as menuitems so role="menu" is complete for AT. */
+    /** Tag slotted buttons as menuitems so role="menu" is complete for AT
+     *  (a menuitemcheckbox / menuitemradio the author set stays one). */
     _syncItems() {
         if (!this._itemSlot) return;
         for (const el of this._itemSlot.assignedElements({ flatten: true })) {
-            if (el.matches("button")) el.setAttribute("role", "menuitem");
+            if (el.matches("button") && !/^menuitem(checkbox|radio)$/.test(el.getAttribute("role") || "")) {
+                el.setAttribute("role", "menuitem");
+            }
         }
     }
 

@@ -43,6 +43,9 @@
  *                         methods stay callable regardless.
  *             no-resize — boolean; hides the resize handle and disables
  *                         resizing. Dragging is unaffected.
+ *             escape-closes — boolean; Escape closes the window (see
+ *                         Keyboard). Opt-in: an editor or a tool palette
+ *                         keeps Escape for itself.
  *             no-compact — boolean; opts OUT of the compact rules below: on
  *                         a narrow screen the window stays a floating
  *                         window (draggable, its own size, pushed into
@@ -80,6 +83,19 @@
  * top-left, title bar first.
  *
  * Double-clicking the title bar toggles maximize / restore.
+ *
+ * Keyboard:
+ *   - On open (open() or the attribute, not the first paint) focus moves
+ *     into the window: an element with `autofocus`, else the first focusable
+ *     one in the toolbar or content that isn't a text field (no keyboard
+ *     popping up on a phone, no hotkeys typed into a field), else the window
+ *     itself. A focus the app sets right after open() wins. On close it goes
+ *     back to whoever had it before — if it is still in the window (or
+ *     nowhere); a user who has moved on keeps theirs.
+ *   - Escape (`escape-closes`) closes the window focus is in, when nothing
+ *     inside consumed the key (an open sac-select list, a menu, a field
+ *     reverting its typing — stopPropagation or preventDefault). A
+ *     <sac-dialog> open above takes the Escape first.
  *
  * CSS custom properties: --window-padding — the content's inner padding,
  *             default 20px (a tool palette wants ~8px; 0 for edge-to-edge
@@ -123,6 +139,8 @@ class SacWindow extends HTMLElement {
 
         this._mq = window.matchMedia('(max-width: 768px), (max-height: 480px) and (pointer: coarse)');
         this._autoMax = false;        // maximized by compact, not by the user
+        this._restoreFocus = null;    // who had focus before open()
+        this.addEventListener('keydown', (e) => this._onKey(e));
         this._onCompactChange = () => this._syncCompact();
 
         this._onViewportResize = () => {
@@ -152,6 +170,9 @@ class SacWindow extends HTMLElement {
         }
         this.applyAttributes();
         this._updateControls();
+        // Focusable, so focus has a home in the window and a click on its
+        // plain content keeps it there.
+        if (!this.hasAttribute('tabindex')) this.tabIndex = -1;
         window.addEventListener('resize', this._onViewportResize);
         this._mq.addEventListener('change', this._onCompactChange);
         this._syncCompact();
@@ -187,7 +208,8 @@ class SacWindow extends HTMLElement {
         if (this.shadowRoot.innerHTML === '') return;
 
         if (name === 'open') {
-            if (newValue !== null) { this._syncCompact(); this._fitIntoView(); }
+            if (newValue !== null) { this._syncCompact(); this._fitIntoView(); this._focusIn(); }
+            else this._focusBack();
             return;
         }
         if (name === 'no-compact') { this._syncCompact(); return; }
@@ -229,6 +251,81 @@ class SacWindow extends HTMLElement {
     toggle() {
         if (this.hasAttribute('open')) this.close();
         else this.open();
+    }
+
+    /** The focused element itself, through every open shadow root. */
+    static _deepActive() {
+        let a = document.activeElement;
+        while (a && a.shadowRoot && a.shadowRoot.activeElement) a = a.shadowRoot.activeElement;
+        return a;
+    }
+
+    /** el is this window or inside it — across shadow roots. */
+    _holds(el) {
+        for (let n = el; n; n = n.parentNode || n.host) if (n === this) return true;
+        return false;
+    }
+
+    /** The first focusable in the toolbar, then the content — slots followed,
+     *  shadow roots walked — that isn't a text field. */
+    _firstFocusable() {
+        const sel = 'a[href], button:not([disabled]), input:not([disabled]):not([type="hidden"]), ' +
+            'select:not([disabled]), [tabindex]:not([tabindex="-1"])';
+        const typing = (el) => el.localName === 'input'
+            && !/^(button|submit|reset|checkbox|radio|range|color|file|image)$/.test(el.type);
+        const walk = (el) => {
+            if (el.hidden || el.inert) return null;
+            if (el.localName === 'slot') {
+                const assigned = el.assignedElements({ flatten: true });
+                for (const c of assigned.length ? assigned : Array.from(el.children)) {
+                    const hit = walk(c);
+                    if (hit) return hit;
+                }
+                return null;
+            }
+            const self = el.matches(sel) && !el.matches('textarea') && !typing(el)
+                && !el.isContentEditable && el.getClientRects().length > 0;
+            // Document order: the element before its children — but a host
+            // with focusables of its own: its insides are the stops.
+            if (self && !el.shadowRoot) return el;
+            for (const c of Array.from((el.shadowRoot || el).children)) {
+                const hit = walk(c);
+                if (hit) return hit;
+            }
+            return self ? el : null;
+        };
+        for (const part of this.shadowRoot.querySelectorAll('.toolbar, .content')) {
+            const hit = walk(part);
+            if (hit) return hit;
+        }
+        return null;
+    }
+
+    _focusIn() {
+        const active = SacWindow._deepActive();
+        if (this._holds(active)) return;
+        this._restoreFocus = active && active !== document.body ? active : null;
+        const target = this.querySelector('[autofocus]') || this._firstFocusable() || this;
+        target.focus({ preventScroll: true });
+    }
+
+    _focusBack() {
+        const back = this._restoreFocus;
+        this._restoreFocus = null;
+        if (!back || !back.isConnected || typeof back.focus !== 'function') return;
+        const active = SacWindow._deepActive();
+        if (active && active !== document.body && !this._holds(active)) return;
+        back.focus({ preventScroll: true });
+    }
+
+    /** Escape that bubbled out of the window's content unconsumed closes it
+     *  (`escape-closes`). preventDefault keeps sac.hotkeys out of it. */
+    _onKey(e) {
+        if (e.key !== 'Escape' || e.defaultPrevented || !this.hasAttribute('escape-closes')
+            || !this.hasAttribute('open')) return;
+        e.stopPropagation();
+        e.preventDefault();
+        this.close();
     }
 
     /** Collapse to the title bar. Clears `maximized` (normal rect first). */
@@ -279,6 +376,7 @@ class SacWindow extends HTMLElement {
                 display: none;
                 position: fixed;
                 z-index: 10000;
+                outline: none;
                 font-family: 'Inter', sans-serif;
                 box-sizing: border-box;
             }

@@ -238,6 +238,8 @@ window.sac?.i18n?.add?.("de", {
     "fb.messages.unknown": "Eine Benachrichtigung, die diese Version noch nicht anzeigen kann.",
     "fb.messages.mail-failed": "Das Mail-Konto „{name}“ wird nicht mehr abgeglichen: {why}",
     "fb.messages.mark-read": "Als gelesen markieren",
+    "fb.messages.read-marked": "Auswahl als gelesen markieren ({n})",
+    "fb.messages.clear-marks": "Auswahl aufheben",
 
     // --- Accounts: the request actions (Messages, Users) ----------------------
     "fb.accounts.approve": "Freigeben",

@@ -39,8 +39,9 @@
  *   touch/pen — a long-press does (see above).
  *   keyboard  — Shift+F10 or the Menu key opens it at the focused target
  *               (`keyTarget()` names it when focus sits on the surface
- *               itself, e.g. a listbox with aria-activedescendant); the
- *               first item takes focus.
+ *               itself, e.g. a listbox with aria-activedescendant; else
+ *               the `selection`'s keyboard cursor row); the first item
+ *               takes focus.
  *   A long-press is ALWAYS the menu. Where the list marks several rows,
  *   pass `selection`: the menu's first entry "Select" starts marking (and
  *   the selection's own long-press steps aside).
@@ -48,10 +49,16 @@
  *   Inside [data-arranging] (tiles being arranged) no menu opens: a press
  *   is a drag there.
  *
- * Items: { id, label, labelKey, icon, danger, disabled, onClick(info) } or
- * "-" for a separator. `labelKey` translates via sac.t(labelKey, label).
+ * Items: { id, label, labelKey, icon, checked, type, danger, disabled,
+ * onClick(info) } or "-" for a separator. `labelKey` translates via
+ * sac.t(labelKey, label). `checked` (true / false) makes the entry a
+ * state — a checkmark in its own column, not an icon; `type: "radio"` for
+ * one-of-a-group (the size of a tile), else a checkbox (for assistive tech:
+ * menuitemradio / menuitemcheckbox + aria-checked). Columns are reserved:
+ * once one entry is checkable, every entry has the check column; once one
+ * has an icon, every entry has the icon column — the labels never jump.
  * Choosing one calls onSelect(item, target, index) when given, else
- * item.onClick({ id, target, menu }). Opening dispatches sac:context-open
+ * item.onClick({ id, target, menu, checked }). Opening dispatches sac:context-open
  * on the target (bubbles, composed) — a press waiting to become a drag
  * (sac.sortable, sac.tiles.sortable) lets go.
  *
@@ -172,7 +179,7 @@
                 if (!item || item === "-") return;
                 // "Select" is ours: it runs even when the host has an onSelect.
                 if (item._own || typeof onSelect !== "function") {
-                    if (typeof item.onClick === "function") item.onClick({ id: item.id, target: c.target, menu: api });
+                    if (typeof item.onClick === "function") item.onClick({ id: item.id, target: c.target, menu: api, checked: item.checked });
                 } else {
                     onSelect(item, c.target, i);
                 }
@@ -201,6 +208,12 @@
             target.dispatchEvent(new CustomEvent("sac:context-open", { bubbles: true, composed: true }));
             const m = ensureMenu();
             m.replaceChildren();
+            // Reserved columns (ui.css .sac-menu-check / .sac-menu-icon): every
+            // label starts where the others do.
+            const entries = list.filter((it) => it !== "-");
+            const checkCol = entries.some((it) => typeof it.checked === "boolean");
+            const iconCol = entries.some((it) => it.icon);
+            const glyph = (name) => { const ic = document.createElement("sac-icon"); ic.setAttribute("name", name); return ic; };
             list.forEach((it, i) => {
                 if (it === "-") { m.appendChild(document.createElement("hr")); return; }
                 const b = document.createElement("button");
@@ -208,10 +221,21 @@
                 b.dataset.action = String(i);
                 if (it.danger) b.setAttribute("data-danger", "");
                 if (it.disabled) b.disabled = true;
-                if (it.icon) {
-                    const ic = document.createElement("sac-icon");
-                    ic.setAttribute("name", it.icon);
-                    b.appendChild(ic);
+                if (checkCol) {
+                    const c = document.createElement("span");
+                    c.className = "sac-menu-check";
+                    if (typeof it.checked === "boolean") {
+                        b.setAttribute("role", it.type === "radio" ? "menuitemradio" : "menuitemcheckbox");
+                        b.setAttribute("aria-checked", String(it.checked));
+                        if (it.checked) c.appendChild(glyph("check"));
+                    }
+                    b.appendChild(c);
+                }
+                if (iconCol) {
+                    const s = document.createElement("span");
+                    s.className = "sac-menu-icon";
+                    if (it.icon) s.appendChild(glyph(it.icon));
+                    b.appendChild(s);
                 }
                 const span = document.createElement("span");
                 span.textContent = it.labelKey ? t(it.labelKey, it.label || "") : String(it.label == null ? "" : it.label);
@@ -245,6 +269,7 @@
             if (keepsNative(e) || off()) return;
             let target = targetFromPath(e.composedPath());
             if (!target && typeof keyTarget === "function") target = keyTarget();
+            if (!target && selection && selection.cursorRow && selection.cursorRow.matches(targets)) target = selection.cursorRow;
             if (!target) return;
             e.preventDefault();
             e.stopPropagation();

@@ -27,11 +27,46 @@ class FbTrashView extends HTMLElement {
             <div class="fb-block" id="trash-list"></div>`;
         this._onScope = () => this.refresh();
         window.addEventListener("sac:scope-changed", this._onScope);
+        // Keyboard: arrows move a cursor, Shift+arrows mark, Delete deletes
+        // for good, Enter restores. Attached once; marks survive a repaint.
+        const list = this.querySelector("#trash-list");
+        this.sel = sac.selection.attach(list, {
+            rows: ".fb-trash-row",
+            disabled: () => !this.writable,
+            onChange: () => this.paintToolbar(),
+            keyboard: true,
+        });
+        list.addEventListener("sac:request-remove", (e) => this.removeMany(this.byIds(e.detail.ids)));
+        list.addEventListener("sac:activate", (e) => this.restoreMany(this.byIds([e.detail.id])));
         this.refresh();
     }
 
     disconnectedCallback() {
         window.removeEventListener("sac:scope-changed", this._onScope);
+        this.sel?.destroy();
+    }
+
+    // The items behind some row ids that this caller may change.
+    byIds(ids) {
+        if (!this.writable) return [];
+        return this.items.filter((i) => ids.includes(i.id) && i.canChange !== false);
+    }
+
+    // Empty trash, and while rows are marked: restore / delete them, clear.
+    paintToolbar() {
+        const n = this.sel?.marked.length || 0;
+        const items = [];
+        if (this.writable && n) {
+            const marked = () => this.byIds(this.sel.marked);
+            items.push(
+                { id: "fb-trash-restore-marked", icon: "undo", title: fb.t("fb.trash.restore-marked", "Restore selected ({n})", { n }), onClick: () => this.restoreMany(marked()) },
+                { id: "fb-trash-delete-marked", icon: "trash", title: fb.t("fb.trash.delete-marked", "Delete selected for good ({n})", { n }), onClick: () => this.removeMany(marked()) },
+                { id: "fb-trash-clear-marks", icon: "close", title: fb.t("fb.trash.clear-marks", "Clear selection"), onClick: () => this.sel.clear() });
+        }
+        if (this.writable && this.items.length) {
+            items.push({ id: "fb-trash-empty", icon: "trash", title: fb.t("fb.trash.empty-action", "Empty trash"), onClick: () => this.emptyAll() });
+        }
+        fb.windowApps.toolbar(this, items);
     }
 
     async refresh() {
@@ -70,9 +105,7 @@ class FbTrashView extends HTMLElement {
 
     render() {
         const list = this.querySelector("#trash-list");
-        fb.windowApps.toolbar(this, this.writable && this.items.length ? [{
-            id: "fb-trash-empty", icon: "trash", title: fb.t("fb.trash.empty-action", "Empty trash"), onClick: () => this.emptyAll(),
-        }] : []);
+        this.paintToolbar();
         if (!this.items.length) {
             list.innerHTML = `
                 <div class="empty-state">
@@ -97,6 +130,7 @@ class FbTrashView extends HTMLElement {
         row.className = "fb-row fb-trash-row";
         row.dataset.id = item.id;
         row.dataset.kind = item.kind;
+        row.tabIndex = -1;   // takes focus as the keyboard cursor moves
         row.innerHTML = `
             <sac-icon name="${icons[item.kind] || "document"}"></sac-icon>
             <div class="fb-row-info">
@@ -130,31 +164,82 @@ class FbTrashView extends HTMLElement {
         return b;
     }
 
+    // Puts one item back; false when the person declined a file's copy.
+    async restoreOne(item) {
+        if (item.source === "record") {
+            await this.recordsApi.restore(item.id);
+        } else {
+            try {
+                await this.filesApi.restore(item.id);
+            } catch (err) {
+                if (err?.status !== 409) throw err;
+                const answer = await sac.dialog.confirm({
+                    title: fb.t("fb.files.in-the-way", "Something is in the way"),
+                    message: fb.t("fb.files.in-the-way-msg", "“{name}” exists again at its old place.", { name: item.title }),
+                    buttons: [
+                        { action: "cancel", label: fb.t("fb.common.cancel", "Cancel") },
+                        { action: "rename", label: fb.t("fb.files.restore-copy", "Restore as a copy"), kind: "primary" },
+                    ],
+                });
+                if (answer !== "rename") return false;
+                await this.filesApi.restore(item.id, "rename");
+            }
+        }
+        return true;
+    }
+
     async restore(item) {
         try {
-            if (item.source === "record") {
-                await this.recordsApi.restore(item.id);
-            } else {
-                try {
-                    await this.filesApi.restore(item.id);
-                } catch (err) {
-                    if (err?.status !== 409) throw err;
-                    const answer = await sac.dialog.confirm({
-                        title: fb.t("fb.files.in-the-way", "Something is in the way"),
-                        message: fb.t("fb.files.in-the-way-msg", "“{name}” exists again at its old place.", { name: item.title }),
-                        buttons: [
-                            { action: "cancel", label: fb.t("fb.common.cancel", "Cancel") },
-                            { action: "rename", label: fb.t("fb.files.restore-copy", "Restore as a copy"), kind: "primary" },
-                        ],
-                    });
-                    if (answer !== "rename") return;
-                    await this.filesApi.restore(item.id, "rename");
-                }
-            }
-            sac.toast(fb.t("fb.trash.restored", "“{name}” is back.", { name: item.title || "" }), { kind: "success" });
+            if (await this.restoreOne(item)) {
+                sac.toast(fb.t("fb.trash.restored", "“{name}” is back.", { name: item.title || "" }), { kind: "success" });
+            } else return;
         } catch (err) {
             sac.toast(fb.errors.text(err, fb.t("fb.trash.restore-failed", "Couldn't restore that.")), { kind: "error" });
         }
+        await this.refresh();
+    }
+
+    // Several at once (the keyboard / the marked rows): one toast at the end.
+    async restoreMany(items) {
+        if (items.length === 1) return this.restore(items[0]);
+        if (!items.length) return;
+        let done = 0;
+        let failed = null;
+        for (const item of items) {
+            try { if (await this.restoreOne(item)) done++; }
+            catch (err) { failed = err; }
+        }
+        this.sel.clear();
+        if (failed) sac.toast(fb.errors.text(failed, fb.t("fb.trash.restore-failed", "Couldn't restore that.")), { kind: "error" });
+        else if (done) sac.toast(fb.t("fb.trash.restored-many", "{n} items are back.", { n: done }), { kind: "success" });
+        await this.refresh();
+    }
+
+    // Delete for good, one question for however many.
+    async removeMany(items) {
+        if (!items.length) return;
+        if (items.length === 1) return this.remove(items[0]);
+        const answer = await sac.dialog.confirm({
+            title: fb.t("fb.trash.delete-many-title", "Delete {n} items for good?", { n: items.length }),
+            message: fb.t("fb.trash.delete-many-body", "They will be gone and can't be restored."),
+            buttons: [
+                { action: "cancel", label: fb.t("fb.common.cancel", "Cancel") },
+                { action: "delete", label: fb.t("fb.trash.delete-forever", "Delete for good"), kind: "destructive", armAfterMs: 2000 },
+            ],
+        });
+        if (answer !== "delete") return;
+        let done = 0;
+        let failed = null;
+        for (const item of items) {
+            try {
+                if (item.source === "record") await this.recordsApi.remove(item.id);
+                else await this.filesApi.purge(item.id);
+                done++;
+            } catch (err) { failed = err; }
+        }
+        this.sel.clear();
+        if (failed) sac.toast(fb.errors.text(failed, fb.t("fb.trash.delete-failed", "Couldn't delete that.")), { kind: "error" });
+        else sac.toast(fb.t("fb.trash.deleted-many", "{n} items deleted.", { n: done }), { kind: "success" });
         await this.refresh();
     }
 

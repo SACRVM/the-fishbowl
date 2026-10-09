@@ -92,7 +92,7 @@
  * Tiles), or a link tile's id — the same keys `sac:layout` reports.
  *
  * Per-tile menu: `menu` on a manifest, a manifest `tiles` entry, a link, or
- * via setMenu() — [{ id, label, labelKey, icon, danger, disabled, onClick }]
+ * via setMenu() — [{ id, label, labelKey, icon, checked, type, danger, disabled, onClick }]
  * with "-" for a separator. It is the tile's CONTEXT menu (sac.contextMenu):
  * right-click, a long-press on touch, Shift+F10 / the Menu key on a
  * focused tile — no corner button. Its last entry, while the layout can be
@@ -889,7 +889,8 @@ class SacLauncher extends HTMLElement {
     _contextItems(cell) {
         if (!cell || !cell._entry || cell.classList.contains("sac-launcher-add-cell")) return null;
         const list = (cell._menuItems || []).map((it, i) => it === "-" ? "-" : {
-            id: it.id, icon: it.icon, danger: !!it.danger, disabled: !!it.disabled, _index: i,
+            id: it.id, icon: it.icon, checked: it.checked, type: it.type,
+            danger: !!it.danger, disabled: !!it.disabled, _index: i,
             label: it.labelKey ? t(it.labelKey, it.label || "") : String(it.label || ""),
         });
         if (this._canEdit() && this.getAttribute("drag") !== "none") {

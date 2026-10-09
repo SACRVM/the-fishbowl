@@ -322,6 +322,43 @@ public class MailTests
         }
     }
 
+    // The list's keys (kit 2.30): ↓ opens the next conversation, Shift+↓
+    // marks, Delete asks once for the marked ones — only here or everywhere.
+    [Fact]
+    public async Task Mail_Keys_OpenTheNext_MarkAndDelete_Test()
+    {
+        var (context, page, slug, _) = await SpaceWithMailAsync();
+        try
+        {
+            await page.GotoAsync($"{_fixture.BaseUrl}/#/space/{slug}/mail");
+            var rows = page.Locator("fb-mail-view .mv-item");
+            var selected = new System.Text.RegularExpressions.Regex(@"\bselected\b");
+            await Assertions.Expect(rows).ToHaveCountAsync(3, new() { Timeout = 15000 });
+            await rows.Nth(0).ClickAsync();
+            await Assertions.Expect(rows.Nth(0)).ToHaveClassAsync(selected);
+
+            await page.Keyboard.PressAsync("ArrowDown");
+            await Assertions.Expect(rows.Nth(1)).ToHaveClassAsync(selected, new() { Timeout = 5000 });
+            await Assertions.Expect(page.Locator("fb-mail-view .mv-thread")).ToBeVisibleAsync();
+
+            var head = page.Locator("fb-mail-view #mv-head-title");
+            await page.Keyboard.PressAsync("Shift+ArrowDown");
+            await Assertions.Expect(head).ToHaveTextAsync("2 selected");
+
+            await page.Keyboard.PressAsync("Delete");
+            await page.Locator("sac-dialog[title='Delete 2 conversations?']")
+                .GetByRole(AriaRole.Button, new() { Name = "Only in Fishbowl", Exact = true }).ClickAsync();
+            await Assertions.Expect(rows).ToHaveCountAsync(1, new() { Timeout = 5000 });
+            await Assertions.Expect(head).ToHaveTextAsync("Inbox");
+            await Assertions.Expect(page.Locator("fb-mail-view .mv-empty")).ToBeVisibleAsync();
+        }
+        finally
+        {
+            await page.APIRequest.DeleteAsync($"{_fixture.BaseUrl}/api/v1/spaces/{slug}?archive=false");
+            await context.CloseAsync();
+        }
+    }
+
     // Phase 2: a conversation is flagged from its head (the star stays on) and
     // archived from its row's menu — it leaves the list, waits under Archived,
     // and the toast's Undo brings it back.
@@ -429,12 +466,13 @@ public class MailTests
             await draft.ClickAsync();
             await Assertions.Expect(compose.Locator("#mc-subject")).ToHaveValueAsync("Hello Grace");
 
-            // Discarded from its menu: gone.
+            // Discarded from its menu, after a question: gone.
             await draft.ClickAsync(new() { Button = MouseButton.Right });
             var menu = page.Locator("sac-menu.sac-context-menu[open]");
             await Assertions.Expect(menu.Locator("button[data-action]", new() { HasText = "Discard" })).ToBeVisibleAsync();
             await page.WaitForTimeoutAsync(250);
             await menu.Locator("button[data-action]", new() { HasText = "Discard" }).ClickAsync();
+            await page.Locator("sac-dialog[title='Discard this draft?']").GetByRole(AriaRole.Button, new() { Name = "Discard", Exact = true }).ClickAsync();
             await Assertions.Expect(page.Locator("fb-mail-view .mv-none")).ToHaveTextAsync("No drafts");
             await Assertions.Expect(compose).ToHaveCountAsync(0);
         }

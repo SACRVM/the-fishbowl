@@ -75,9 +75,25 @@ class FbMailView extends HTMLElement {
         this._onIntent();
         this._onVisible = () => { if (document.visibilityState === "visible") this.reload({ keep: true }); };
         document.addEventListener("visibilitychange", this._onVisible);
+        // The list's keys and marks (kit 2.30), one for all three tabs: an
+        // arrow opens the next conversation, draft or spam message, Shift
+        // marks, Delete asks for the marked ones (else the one open). Spam is
+        // read here, never deleted: there the arrows only move.
+        const items = this.querySelector("#mv-items");
+        this.sel = sac.selection.attach(items, {
+            rows: ".mv-item",
+            id: (row) => this.rowKey(row),
+            current: () => this.openKey(),
+            disabled: () => !this.writable || this.view === "spam",
+            onChange: () => this.paintHead(),
+            keyboard: true,
+            onCursor: (key) => this.openRow(key),
+        });
+        items.addEventListener("sac:request-remove", (e) => this.removeMany(e.detail.ids));
         // A conversation's own menu (kit 2.29): a right-click or a long press.
-        this._rowMenu = sac.contextMenu(this.querySelector("#mv-items"), {
+        this._rowMenu = sac.contextMenu(items, {
             targets: ".mv-item",
+            selection: this.writable ? this.sel : undefined,
             items: (row) => this.rowItems(row),
         });
         this._schedule();
@@ -87,6 +103,7 @@ class FbMailView extends HTMLElement {
         if (this._onIntent) window.removeEventListener("fb:intent", this._onIntent);
         if (this._onVisible) document.removeEventListener("visibilitychange", this._onVisible);
         this._rowMenu?.destroy();
+        this.sel?.destroy();
         this._compose?.leave();
         clearTimeout(this._poll);
         clearTimeout(this._searchTimer);
@@ -460,9 +477,11 @@ class FbMailView extends HTMLElement {
                         <button type="button" class="icon-btn" id="mv-unread-only" title="${t("only-unread", "Only unread")}" aria-label="${t("only-unread", "Only unread")}" aria-pressed="false"><sac-icon name="eye"></sac-icon></button>
                         <button type="button" class="icon-btn mv-write" id="mv-refresh" title="${t("refresh", "Fetch new mail")}" aria-label="${t("refresh", "Fetch new mail")}"><sac-icon name="sync"></sac-icon></button>
                         <button type="button" class="icon-btn mv-write" id="mv-new" title="${t("new", "New mail")}" aria-label="${t("new", "New mail")}"><sac-icon name="plus"></sac-icon></button>
+                        <button type="button" class="icon-btn danger" id="mv-delete-marked" hidden title="${t("delete-marked", "Delete selected")}" aria-label="${t("delete-marked", "Delete selected")}"><sac-icon name="trash"></sac-icon></button>
+                        <button type="button" class="icon-btn" id="mv-clear-marks" hidden title="${t("clear-marks", "Clear selection")}" aria-label="${t("clear-marks", "Clear selection")}"><sac-icon name="close"></sac-icon></button>
                     </div>
                     <button type="button" class="mv-status" id="mv-status" hidden></button>
-                    <div class="mv-items fb-scroll-fade" id="mv-items" tabindex="-1"></div>
+                    <div class="mv-items fb-scroll-fade" id="mv-items"></div>
                 </aside>
                 <main class="mv-editor-pane" slot="end" id="mv-pane"></main>
             </sac-split>`;
@@ -479,6 +498,8 @@ class FbMailView extends HTMLElement {
             setTimeout(() => this.reload({ keep: true }), 4000);
         });
         this.querySelector("#mv-new").addEventListener("click", () => this.compose("new"));
+        this.querySelector("#mv-delete-marked").addEventListener("click", () => this.removeMany(this.sel.marked));
+        this.querySelector("#mv-clear-marks").addEventListener("click", () => this.sel.clear());
         this.querySelector("#mv-status").addEventListener("click", () => this.openAccounts());
         this.querySelector("#split").addEventListener("sac:resize", (e) => {
             try { localStorage.setItem("fb.mail.split", e.detail.position); } catch { /* storage off */ }
@@ -512,14 +533,20 @@ class FbMailView extends HTMLElement {
             : this.view === "drafts" ? this.t("drafts", "Drafts")
             : this.view === "spam" ? this.t("spam", "Spam")
             : this.t("tab-inbox", "Inbox");
-        this.querySelector("#mv-head-title").textContent =
-            filtered && this.unreadOnly ? `${tab} · ${this.t("head-unread", "Unread")}` : tab;
+        // While rows are marked: how many, with Delete and Clear in place of
+        // the head's own buttons.
+        const n = this.sel?.marked.length || 0;
+        this.querySelector("#mv-head-title").textContent = n
+            ? (n === 1 ? this.t("marked-1", "1 selected") : this.t("marked", "{n} selected", { n }))
+            : filtered && this.unreadOnly ? `${tab} · ${this.t("head-unread", "Unread")}` : tab;
         const unread = this.querySelector("#mv-unread-only");
-        unread.hidden = !filtered || !this.accounts.length;
+        unread.hidden = !filtered || !this.accounts.length || n > 0;
         unread.classList.toggle("active", this.unreadOnly);
         unread.setAttribute("aria-pressed", String(this.unreadOnly));
-        this.querySelector("#mv-refresh").hidden = !this.writable || !this.accounts.length;
-        this.querySelector("#mv-new").hidden = !this.writable || !this.accounts.length;
+        this.querySelector("#mv-refresh").hidden = !this.writable || !this.accounts.length || n > 0;
+        this.querySelector("#mv-new").hidden = !this.writable || !this.accounts.length || n > 0;
+        this.querySelector("#mv-delete-marked").hidden = n === 0;
+        this.querySelector("#mv-clear-marks").hidden = n === 0;
         this.paintTabs();
     }
 
@@ -870,12 +897,16 @@ class FbMailView extends HTMLElement {
             if (this.writable) items.push({ id: "not-spam", label: this.t("not-spam", "Not spam"), icon: "fb-inbox", onClick: () => this.notSpam(item) });
             return items;
         }
+        const marked = this.sel?.marked || [];
+        const many = marked.length > 1 && marked.includes(this.rowKey(row));
         if (row.dataset.draft) {
             const id = row.dataset.draft;
             return [
                 { id: "open", label: fb.t("fb.common.open", "Open"), icon: "pencil", onClick: () => this.openDraft(id) },
                 "-",
-                { id: "discard", label: this.t("discard", "Discard"), icon: "trash", danger: true, onClick: () => this.discardDraft(id) },
+                many
+                    ? { id: "discard", label: this.t("discard-marked", "Discard selected"), icon: "trash", danger: true, onClick: () => this.removeMany(marked) }
+                    : { id: "discard", label: this.t("discard", "Discard"), icon: "trash", danger: true, onClick: () => this.discardDrafts([id]) },
             ];
         }
         const th = this.threads.find((x) => x.threadId === row.dataset.id);
@@ -891,9 +922,48 @@ class FbMailView extends HTMLElement {
         items.push(th.archived
             ? { id: "unarchive", label: this.t("unarchive", "Move to inbox"), icon: "fb-inbox", onClick: () => this.archive(th.threadId, false) }
             : { id: "archive", label: this.t("archive", "Archive"), icon: "archive", onClick: () => this.archive(th.threadId, true) });
-        items.push("-", { id: "delete", label: this.t("delete-more", "Delete…"), icon: "trash", danger: true,
-            onClick: () => this.deleteMail(th.threadId, null) });
+        items.push("-", many
+            ? { id: "delete", label: this.t("delete-marked-more", "Delete selected…"), icon: "trash", danger: true, onClick: () => this.removeMany(marked) }
+            : { id: "delete", label: this.t("delete-more", "Delete…"), icon: "trash", danger: true, onClick: () => this.deleteMail(th.threadId, null) });
         return items;
+    }
+
+    // ------------------------------------------------- keys and marks --
+
+    /** One key per row over the three tabs: a conversation's id, "d:" a
+     *  draft's, "s:" a spam message's account and UID. */
+    rowKey(row) {
+        if (row.dataset.draft) return "d:" + row.dataset.draft;
+        if (row.dataset.spam) return "s:" + row.dataset.spam;
+        return row.dataset.id || null;
+    }
+
+    openKey() {
+        if (this.view === "spam") return this.spamOpen ? "s:" + this.spamOpen : null;
+        if (this.view === "drafts") return this._compose?.id ? "d:" + this._compose.id : null;
+        return this.selectedId;
+    }
+
+    /** An arrow moved onto a row: it opens, as a click would. */
+    openRow(key) {
+        if (!key) return;
+        if (key.startsWith("d:")) return this.openDraft(key.slice(2));
+        if (key.startsWith("s:")) {
+            const item = this.spam.items.find((i) => `${i.accountId}:${i.uid}` === key.slice(2));
+            return item ? this.openSpam(item) : undefined;
+        }
+        return this.open(key);
+    }
+
+    /** Delete on the keys, the head's trash or a marked row's menu: the
+     *  conversations asked like one (only here or everywhere), drafts
+     *  discarded after a question; spam is never deleted here. */
+    removeMany(keys) {
+        if (!this.writable || !keys.length) return;
+        const drafts = keys.filter((k) => k.startsWith("d:")).map((k) => k.slice(2));
+        if (drafts.length) return this.discardDrafts(drafts);
+        const threads = keys.filter((k) => !k.startsWith("d:") && !k.startsWith("s:"));
+        if (threads.length) return this.deleteThreads(threads);
     }
 
     async markSeen(th, seen) {
@@ -1196,10 +1266,25 @@ class FbMailView extends HTMLElement {
         else { this.selectedId = null; this.showNone(); }
     }
 
-    async discardDraft(id) {
-        if (this._compose?.id === id) { this._compose = null; this.selectedId = null; this.showNone(); }
-        try { await this.api.deleteDraft(id); }
-        catch (err) { sac.toast?.(fb.errors.text(err, this.t("failed", "That didn't work.")), { kind: "error" }); }
+    async discardDrafts(ids) {
+        const one = ids.length === 1;
+        const answer = await sac.dialog.confirm({
+            title: one ? this.t("discard-title", "Discard this draft?") : this.t("discard-title-n", "Discard {n} drafts?", { n: ids.length }),
+            message: one ? this.t("discard-msg-1", "It's gone for good.") : this.t("discard-msg", "They're gone for good."),
+            buttons: [
+                { action: "cancel", label: fb.t("fb.common.cancel", "Cancel"), kind: "default" },
+                { action: "discard", label: this.t("discard", "Discard"), kind: "destructive" },
+            ],
+        });
+        if (answer !== "discard") return;
+        if (ids.includes(this._compose?.id)) { this._compose = null; this.selectedId = null; this.showNone(); }
+        let firstError = null;
+        for (const id of ids) {
+            try { await this.api.deleteDraft(id); }
+            catch (err) { firstError ??= err; }
+        }
+        this.sel?.clear();
+        if (firstError) sac.toast?.(fb.errors.text(firstError, this.t("failed", "That didn't work.")), { kind: "error" });
         this.loadThreads();
     }
 
@@ -1233,8 +1318,9 @@ class FbMailView extends HTMLElement {
      * Fishbowl's trash. A whole conversation, or one message of it.
      */
     async deleteMail(threadId, message) {
+        if (!message) return this.deleteThreads([threadId]);
         const answer = await sac.dialog.confirm({
-            title: message ? this.t("delete-message-title", "Delete this message?") : this.t("delete-title", "Delete this conversation?"),
+            title: this.t("delete-message-title", "Delete this message?"),
             message: this.t("delete-how", "Only in Fishbowl: your mail server keeps it. Everywhere: it goes to the server's trash too. Either way it waits in Fishbowl's trash."),
             buttons: [
                 { action: "cancel", label: fb.t("fb.common.cancel", "Cancel"), kind: "default" },
@@ -1243,10 +1329,8 @@ class FbMailView extends HTMLElement {
             ],
         });
         if (answer !== "fishbowl" && answer !== "everywhere") return;
-        try {
-            if (message) await this.api.deleteMessage(message.id, answer);
-            else await this.api.deleteThread(threadId, answer);
-        } catch (err) {
+        try { await this.api.deleteMessage(message.id, answer); }
+        catch (err) {
             sac.toast?.(fb.errors.text(err, this.t("delete-failed", "That couldn't be deleted.")), { kind: "error" });
             return;
         }
@@ -1254,8 +1338,41 @@ class FbMailView extends HTMLElement {
             ? this.t("deleted-everywhere", "Deleted — in the trash here and on the server.")
             : this.t("deleted-here", "Deleted here — it's in the trash. Your mail server keeps it."));
         await this.loadThreads();
-        if (message && this.threads.some((x) => x.threadId === threadId)) this.open(threadId);
+        if (this.threads.some((x) => x.threadId === threadId)) this.open(threadId);
         else if (this.selectedId === threadId) { this.selectedId = null; this.showNone(); }
+    }
+
+    /** Whole conversations, one or several, with one question for all. */
+    async deleteThreads(ids) {
+        const one = ids.length === 1;
+        const answer = await sac.dialog.confirm({
+            title: one ? this.t("delete-title", "Delete this conversation?") : this.t("delete-title-n", "Delete {n} conversations?", { n: ids.length }),
+            message: this.t("delete-how", "Only in Fishbowl: your mail server keeps it. Everywhere: it goes to the server's trash too. Either way it waits in Fishbowl's trash."),
+            buttons: [
+                { action: "cancel", label: fb.t("fb.common.cancel", "Cancel"), kind: "default" },
+                { action: "fishbowl", label: this.t("delete-here", "Only in Fishbowl"), kind: "default" },
+                { action: "everywhere", label: this.t("delete-everywhere", "Everywhere"), kind: "destructive" },
+            ],
+        });
+        if (answer !== "fishbowl" && answer !== "everywhere") return;
+        let done = 0, firstError = null;
+        for (const id of ids) {
+            try { await this.api.deleteThread(id, answer); done++; }
+            catch (err) { firstError ??= err; }
+        }
+        this.sel?.clear();
+        const failed = (err) => fb.errors.text(err, this.t("delete-failed", "That couldn't be deleted."));
+        if (firstError && one) sac.toast?.(failed(firstError), { kind: "error" });
+        else if (firstError) sac.toast?.(this.t("delete-some-failed", "{done} deleted; {failed} couldn't be: {reason}",
+            { done, failed: ids.length - done, reason: failed(firstError) }), { kind: "error" });
+        else if (one) sac.toast?.(answer === "everywhere"
+            ? this.t("deleted-everywhere", "Deleted — in the trash here and on the server.")
+            : this.t("deleted-here", "Deleted here — it's in the trash. Your mail server keeps it."));
+        else sac.toast?.(answer === "everywhere"
+            ? this.t("deleted-n-everywhere", "{n} conversations deleted — in the trash here and on the server.", { n: done })
+            : this.t("deleted-n-here", "{n} conversations deleted here — they're in the trash. Your mail server keeps them.", { n: done }));
+        await this.loadThreads();
+        if (ids.includes(this.selectedId) && !this.threads.some((x) => x.threadId === this.selectedId)) { this.selectedId = null; this.showNone(); }
     }
 
     paintBody(el, m) {

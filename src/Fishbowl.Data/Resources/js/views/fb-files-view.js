@@ -97,9 +97,10 @@
                 title: t("fb.files.clash-title", "A file with this name exists"),
                 message: t("fb.files.clash-msg", "“{name}” is already in the target folder.", { name }),
                 allLabel: remaining > 1 ? t("fb.files.clash-all", "Do this for the other {n} too", { n: remaining - 1 }) : null,
+                // Enter keeps both — it loses nothing; Replace stays one key away.
                 buttons: [
                     { action: "skip", label: t("fb.files.skip", "Skip") },
-                    { action: "rename", label: t("fb.files.keep-both", "Keep both") },
+                    { action: "rename", label: t("fb.files.keep-both", "Keep both"), default: true },
                     { action: "replace", label: t("fb.files.replace", "Replace"), kind: "primary" },
                 ],
             });
@@ -1322,6 +1323,7 @@
         async _openTrash(pane) {
             this._trashWin?.remove();
             const win = document.createElement("sac-window");
+            win.setAttribute("escape-closes", "");
             win.classList.add("fb-window");
             win.setAttribute("title", t("fb.files.trash-title", "Trash — {ws}", { ws: this._label(pane.workspace) }));
             win.setAttribute("width", "640px");

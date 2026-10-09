@@ -16,11 +16,26 @@ class FbMessagesView extends HTMLElement {
         this.render();
         this._onChanged = () => this.refresh();
         window.addEventListener("fb:messages-changed", this._onChanged);
+        // Keyboard: arrows move a cursor, Shift+arrows mark, and the toolbar
+        // marks the marked ones read. There is no delete for messages, so
+        // Delete is left alone. Attached once; marks survive a repaint.
+        this.sel = sac.selection.attach(this.querySelector("#messages-body"), {
+            rows: ".msg-row",
+            onChange: () => this._paintToolbar(),
+            keyboard: true,
+        });
         this.refresh();
     }
 
     disconnectedCallback() {
         window.removeEventListener("fb:messages-changed", this._onChanged);
+        this.sel?.destroy();
+    }
+
+    async _readMarked() {
+        const ids = this.sel.marked.filter((id) => this.querySelector(`.msg-row.unread[data-id="${id}"]`));
+        this.sel.clear();
+        await Promise.all(ids.map((id) => fb.api.messages.read(id).catch(() => {})));
     }
 
     render() {
@@ -29,6 +44,7 @@ class FbMessagesView extends HTMLElement {
             <style>
                 /* Page frame, card, rows and buttons are the kit's (app.css
                    .fb-page / .fb-row); only this page's own bits. */
+                fb-messages-view #messages-body:focus { outline: none; }
                 fb-messages-view .msg-row { align-items: flex-start; }
                 fb-messages-view .msg-row > sac-icon { color: var(--text-muted); margin-top: 1px; }
                 fb-messages-view .msg-row.unread > sac-icon { color: var(--accent); }
@@ -108,9 +124,17 @@ class FbMessagesView extends HTMLElement {
         let muted = [];
         try { muted = (await fb.api.messages.muted()).muted || []; } catch { /* nothing to offer */ }
         if (!this.isConnected) return;
-        fb.windowApps.toolbar(this, muted.length
-            ? [{ id: "fb-messages-muted", icon: "eye-off", title: fb.t("fb.messages.muted", "Muted ({n})", { n: muted.length }), onClick: () => this._openMuted(muted) }]
-            : []);
+        const n = this.sel?.marked.length || 0;
+        const items = [];
+        if (n) {
+            items.push(
+                { id: "fb-messages-read-marked", icon: "check", title: fb.t("fb.messages.read-marked", "Mark selected read ({n})", { n }), onClick: () => this._readMarked() },
+                { id: "fb-messages-clear-marks", icon: "close", title: fb.t("fb.messages.clear-marks", "Clear selection"), onClick: () => this.sel.clear() });
+        }
+        if (muted.length) {
+            items.push({ id: "fb-messages-muted", icon: "eye-off", title: fb.t("fb.messages.muted", "Muted ({n})", { n: muted.length }), onClick: () => this._openMuted(muted) });
+        }
+        fb.windowApps.toolbar(this, items);
     }
 
     _openMuted(muted) {
@@ -155,6 +179,7 @@ class FbMessagesView extends HTMLElement {
         row.className = "fb-row msg-row" + (m.readAt ? "" : " unread");
         row.dataset.kind = m.kind;
         row.dataset.id = m.id;
+        row.tabIndex = -1;   // takes focus as the keyboard cursor moves
         row.innerHTML = `
             <sac-icon></sac-icon>
             <div class="fb-row-info msg-body">

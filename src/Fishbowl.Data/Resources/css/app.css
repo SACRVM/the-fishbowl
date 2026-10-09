@@ -426,3 +426,9 @@ label.fb-quota-field input { width: 6em; }
 .fb-mail-form-note { display: flex; gap: 8px; margin: 0; font-size: 0.8125rem; color: var(--text-muted); }
 .fb-mail-form-note sac-icon { flex: none; --icon-size: 16px; margin-top: 2px; }
 .fb-mail-form-error { color: var(--danger); margin: 12px 0 0; }
+
+/* Lists on the kit's keyboard (sac.selection, kit 2.30): the list takes the
+   focus for its keys without a ring of its own (each view's style); the
+   cursor row carries the kit's focus mark, as .icon-btn:focus-visible does. */
+[data-sac-row]:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+fb-trash-view #trash-list:focus { outline: none; }

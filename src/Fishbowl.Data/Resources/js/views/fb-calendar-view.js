@@ -94,6 +94,24 @@ class FbCalendarView extends HTMLElement {
             || fb.t("fb.calendar.all-day-short", "all day").length > 7;   // "ganztägig"
         this.style.setProperty("--cv-time-w", longTime ? "66px" : "52px");
         this.render();
+        // The agenda's keys and marks (kit 2.30): an arrow opens the next
+        // event, Shift marks, Delete asks for the marked ones (else the one
+        // open). An occurrence is its own row (the key adds its start), a
+        // multi-day event's later days, birthdays and spaces' events aren't
+        // rows to it — they open a card, not the editor.
+        const agenda = this.querySelector("#cv-agenda");
+        this.sel = sac.selection.attach(agenda, {
+            rows: ".cv-agenda-item:not(.cont):not(.birthday):not(.from-space)",
+            id: (row) => row.dataset.key,
+            current: () => this.agendaKey(),
+            disabled: () => !this.writable,
+            onChange: () => this.paintListHead(),
+            keyboard: true,
+            onCursor: (key, row) => { this._agendaKey = key; this.openById(row.dataset.id); },
+        });
+        agenda.addEventListener("sac:request-remove", (e) => this.removeMany(e.detail.ids));
+        this.querySelector("#cv-delete-marked").addEventListener("click", () => this.removeMany(this.sel.marked));
+        this.querySelector("#cv-clear-marks").addEventListener("click", () => this.sel.clear());
         // A space Reader gets no write actions (the server would refuse them):
         // no new events, and the editor only shows.
         this.writable = await fb.access.canWrite();
@@ -103,7 +121,7 @@ class FbCalendarView extends HTMLElement {
             this._onSpaces = async () => { await this.loadSources(); if (!this.editing) this.paintToolbar(); this.loadEvents(); };
             window.addEventListener("fb:spaces-changed", this._onSpaces);
         }
-        this.querySelector("#cv-new-btn").hidden = !this.canCreate();
+        this.paintListHead();
         this.querySelector("#cv-editor-wrap").toggleAttribute("inert", !this.writable);
         await this.loadEvents();
         if (!this.isConnected) return;   // left during the load — don't hook a dead view
@@ -122,6 +140,7 @@ class FbCalendarView extends HTMLElement {
     disconnectedCallback() {
         if (this._onIntent) window.removeEventListener("fb:intent", this._onIntent);
         if (this._onSpaces) window.removeEventListener("fb:spaces-changed", this._onSpaces);
+        this.sel?.destroy();
         this.flushSave();
         if (window.fb?.toolbar) fb.toolbar.clear();
     }
@@ -171,7 +190,7 @@ class FbCalendarView extends HTMLElement {
             sac.toast?.(fb.errors.text(err, fb.t("fb.calendar.sources-failed", "Couldn't change what the calendar shows.")), { kind: "error" });
             return;
         }
-        this.querySelector("#cv-new-btn").hidden = !this.canCreate();
+        this.paintListHead();
         if (!this.editing) this.paintToolbar();
         await this.loadEvents();
     }
@@ -310,6 +329,7 @@ class FbCalendarView extends HTMLElement {
                     border: 1px solid transparent;
                     transition: background 0.12s, border-color 0.12s;
                 }
+                fb-calendar-view #cv-agenda:focus { outline: none; }
                 fb-calendar-view .cv-agenda-item:hover { background: var(--hover); }
                 fb-calendar-view .cv-agenda-item.selected {
                     background: var(--accent-tint);
@@ -631,9 +651,11 @@ class FbCalendarView extends HTMLElement {
                         <button class="icon-btn" id="cv-next" title="${fb.t("fb.calendar.next", "Next month")}" aria-label="${fb.t("fb.calendar.next", "Next month")}"><sac-icon name="chevron-right"></sac-icon></button>
                     </div>
                     <div class="cv-list-header">
-                        <span class="cv-list-title">${fb.t("fb.calendar.agenda", "Agenda")}</span>
+                        <span class="cv-list-title" id="cv-list-title">${fb.t("fb.calendar.agenda", "Agenda")}</span>
                         <button class="icon-btn" id="cv-today-btn" title="${fb.t("fb.calendar.today", "Jump to today")}" aria-label="${fb.t("fb.calendar.today", "Jump to today")}"><sac-icon name="clock"></sac-icon></button>
                         <button class="icon-btn" id="cv-new-btn" title="${fb.t("fb.calendar.new", "New event")}" aria-label="${fb.t("fb.calendar.new", "New event")}"><sac-icon name="plus"></sac-icon></button>
+                        <button class="icon-btn danger" id="cv-delete-marked" hidden title="${fb.t("fb.calendar.delete-marked", "Delete selected")}" aria-label="${fb.t("fb.calendar.delete-marked", "Delete selected")}"><sac-icon name="trash"></sac-icon></button>
+                        <button class="icon-btn" id="cv-clear-marks" hidden title="${fb.t("fb.calendar.clear-marks", "Clear selection")}" aria-label="${fb.t("fb.calendar.clear-marks", "Clear selection")}"><sac-icon name="close"></sac-icon></button>
                     </div>
                     <div class="cv-items fb-scroll-fade" id="cv-agenda"></div>
                 </aside>
@@ -930,7 +952,7 @@ class FbCalendarView extends HTMLElement {
                 const time = e.allDay || e._cont ? fb.t("fb.calendar.all-day-short", "all day") : fb.format.time(e.startAt);
                 const mark = FbCalendarView.mark(e);
                 return `
-                    <div class="cv-agenda-item ${e.id === this.editing?.id ? "selected" : ""} ${e._cont ? "cont" : ""} ${e._birthday ? "birthday" : ""} ${e._source ? "from-space" : ""}" data-id="${e.id}"${FbCalendarView.sourceStyle(e)}>
+                    <div class="cv-agenda-item ${e.id === this.editing?.id ? "selected" : ""} ${e._cont ? "cont" : ""} ${e._birthday ? "birthday" : ""} ${e._source ? "from-space" : ""}" data-id="${e.id}" data-key="${escapeHtml(`${e.id}@${e.startAt}`)}"${FbCalendarView.sourceStyle(e)}>
                         <span class="cv-agenda-time">${time}</span>
                         <span class="cv-agenda-title">${dots ? `<span class="cv-src-dot" title="${escapeHtml(e._source ? e._source.name || e._source.slug : fb.t("fb.shell.personal", "Personal"))}"></span>` : ""}${mark}${escapeHtml(e.title || fb.t("fb.calendar.untitled", "Untitled"))}</span>
                         ${e.location ? `<span class="cv-agenda-loc">${escapeHtml(e.location)}</span>` : ""}
@@ -946,8 +968,76 @@ class FbCalendarView extends HTMLElement {
         }).join("");
 
         agenda.querySelectorAll(".cv-agenda-item").forEach(el => {
-            el.addEventListener("click", () => this.openById(el.dataset.id));
+            el.addEventListener("click", () => { this._agendaKey = el.dataset.key; this.openById(el.dataset.id); });
         });
+    }
+
+    /** The agenda row of the open event: the occurrence last opened there,
+     *  else its first row. */
+    agendaKey() {
+        const id = this.editing?.id;
+        if (!id) return null;
+        if (this._agendaKey?.startsWith(id + "@")) return this._agendaKey;
+        return this.querySelector(`#cv-agenda .cv-agenda-item[data-id="${CSS.escape(id)}"]`)?.dataset.key ?? null;
+    }
+
+    /** "Agenda" — or, while events are marked, how many, with Delete and
+     *  Clear in place of Today and "+". */
+    paintListHead() {
+        const n = this.sel?.marked.length || 0;
+        this.querySelector("#cv-list-title").textContent = n
+            ? (n === 1 ? fb.t("fb.calendar.marked-1", "1 selected") : fb.t("fb.calendar.marked", "{n} selected", { n }))
+            : fb.t("fb.calendar.agenda", "Agenda");
+        this.querySelector("#cv-today-btn").hidden = n > 0;
+        this.querySelector("#cv-new-btn").hidden = !this.canCreate() || n > 0;
+        this.querySelector("#cv-delete-marked").hidden = n === 0;
+        this.querySelector("#cv-clear-marks").hidden = n === 0;
+    }
+
+    /** Delete on the keys or the head's trash: the marked events (an
+     *  occurrence stands for its series), asked once. */
+    async removeMany(keys) {
+        if (!this.writable) return;
+        const ids = [...new Set(keys.map((k) => k.slice(0, k.indexOf("@"))))];
+        const events = ids.map((id) => this.events.find((e) => e.id === id)).filter(Boolean);
+        if (!events.length) return;
+        if (events.length === 1 && events[0].id === this.editing?.id) { await this.deleteEditing(); this.sel.clear(); return; }
+        const one = events.length === 1;
+        const series = events.some((e) => e.rRule);
+        const result = await sac.dialog.confirm({
+            title: one ? fb.t("fb.calendar.delete-title", "Delete this event?") : fb.t("fb.calendar.delete-title-n", "Delete {n} events?", { n: events.length }),
+            message: one
+                ? (series
+                    ? fb.t("fb.calendar.delete-msg-series", "This event repeats — the whole series moves to the trash; its reminders are dropped.")
+                    : fb.t("fb.calendar.delete-msg", "This event moves to the trash; its reminders are dropped."))
+                : (series
+                    ? fb.t("fb.calendar.delete-msg-n-series", "They move to the trash — a repeating one with its whole series; their reminders are dropped.")
+                    : fb.t("fb.calendar.delete-msg-n", "They move to the trash; their reminders are dropped.")),
+            buttons: [
+                { action: "cancel", label: fb.t("fb.common.cancel", "Cancel"), kind: "default" },
+                { action: "delete", label: fb.t("fb.common.delete", "Delete"), kind: "destructive", armAfterMs: 2000 },
+            ],
+        });
+        if (result !== "delete") return;
+        const open = this.editing?.id && ids.includes(this.editing.id);
+        if (open) {
+            clearTimeout(this._saveDebounce);
+            this._saveDebounce = null;
+            await this._saving;   // nothing of it may land after the delete
+        }
+        let done = 0, firstError = null;
+        for (const e of events) {
+            try { await this.api.delete(e.id); done++; }
+            catch (err) { firstError ??= err; }
+        }
+        this.sel.clear();
+        if (open) this._discardEditor();
+        await this.loadEvents();
+        const failed = (err) => fb.errors.text(err, fb.t("fb.calendar.delete-failed", "Couldn't delete the event."));
+        if (firstError && one) window.sac?.toast?.(failed(firstError), { kind: "error" });
+        else if (firstError) window.sac?.toast?.(fb.t("fb.calendar.delete-some-failed", "{done} moved to the trash; {failed} couldn't be deleted: {reason}",
+            { done, failed: events.length - done, reason: failed(firstError) }), { kind: "error" });
+        else if (!one) window.sac?.toast?.(fb.t("fb.calendar.deleted-n", "{n} events moved to the trash.", { n: done }));
     }
 
     async openById(id) {

@@ -212,7 +212,7 @@ class FbContactsView extends HTMLElement {
                             <button type="button" data-action="organisation"><sac-icon name="users"></sac-icon> ${t("new-organisation", "New organisation")}</button>
                         </sac-menu>
                     </div>
-                    <div class="cv-items fb-scroll-fade" id="cv-items" tabindex="-1"></div>
+                    <div class="cv-items fb-scroll-fade" id="cv-items"></div>
                 </aside>
                 <main class="cv-editor-pane" slot="end">
                     <div class="empty-state cv-empty" id="cv-empty">
@@ -233,13 +233,19 @@ class FbContactsView extends HTMLElement {
         }
         // Marking several contacts: the kit's gestures, kept by id across
         // re-renders and to the rows the list shows; the header follows.
-        this.sel = sac.selection.attach(this.querySelector("#cv-items"), {
+        // The keys too (kit 2.30): an arrow opens the next contact, Shift
+        // marks, Delete asks for the marked ones (else the one open).
+        const items = this.querySelector("#cv-items");
+        this.sel = sac.selection.attach(items, {
             rows: ".cv-item",
             current: () => this.selectedId,
             icon: ":scope > sac-icon",
             disabled: () => !this.writable,
             onChange: () => this.paintHead(),
+            keyboard: true,
+            onCursor: (id) => this.open(id),
         });
+        items.addEventListener("sac:request-remove", (e) => this.removeMany(e.detail.ids));
         this.querySelector("#cv-delete-marked").addEventListener("click", () => this.removeMany(this.sel.marked));
         this.querySelector("#cv-clear-marks").addEventListener("click", () => this.sel.clear());
         this.querySelector("#split").addEventListener("sac:resize", (e) => {

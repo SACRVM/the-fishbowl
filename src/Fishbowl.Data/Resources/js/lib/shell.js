@@ -408,6 +408,7 @@
         let win = document.getElementById("fb-profile-window");
         if (!win) {
             win = document.createElement("sac-window");
+            win.setAttribute("escape-closes", "");
             win.id = "fb-profile-window";
             win.classList.add("fb-window");
             win.setAttribute("title", fb.t("fb.profile.title", "Profile"));

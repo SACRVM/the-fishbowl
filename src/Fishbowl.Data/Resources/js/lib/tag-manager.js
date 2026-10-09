@@ -26,6 +26,7 @@
     function ensureWindow() {
         if (win) return win;
         win = document.createElement("sac-window");
+        win.setAttribute("escape-closes", "");
         win.id = "fb-tag-manager";
         win.classList.add("fb-window");
         win.setAttribute("title", fb.t("fb.notes.manage-tags", "Manage tags"));

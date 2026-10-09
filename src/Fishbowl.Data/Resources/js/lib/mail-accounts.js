@@ -64,6 +64,7 @@
     function ensureWindow() {
         if (win) return win;
         win = document.createElement("sac-window");
+        win.setAttribute("escape-closes", "");
         win.id = "fb-mail-accounts";
         win.classList.add("fb-window");
         win.setAttribute("width", "640px");

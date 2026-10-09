@@ -18,13 +18,27 @@
  *   dlg.open();
  *
  * Keyboard:
+ *   - On open           → a button has focus, so Enter acts at once: the one
+ *                         marked `default: true`, else the first primary,
+ *                         else the first that isn't destructive (Cancel) —
+ *                         disabled ones and one still waiting to arm skipped.
+ *                         A body element with `autofocus` takes it instead;
+ *                         so does a field focused right after open() (a
+ *                         prompt's), and Enter there presses the primary.
+ *   - ← / → (↑ / ↓)     → move focus through the action buttons while focus
+ *                         is on one of them (or the dialog itself): wrapping,
+ *                         disabled ones skipped; Home / End = first / last.
+ *                         ↑ / ↓ follow the bottom sheet's stacked buttons.
+ *                         Inside the body's fields the arrows are theirs.
+ *   - Enter / Space     → presses the focused button (native). A focus ring
+ *                         marks it — also when script set the focus, where
+ *                         :focus-visible stays dark — never after a click.
  *   - Escape            → close with action=null. Something inside the dialog
  *                         that handles Escape itself goes first: an open field
  *                         popover (sac-select list, sac-date-field calendar),
  *                         a menu, a field reverting its typing. It consumes
  *                         the key (stopPropagation or preventDefault) and the
  *                         dialog stays; the next Escape closes it.
- *   - Enter             → activates focused button (native).
  *   - Tab / Shift-Tab   → focus trap over everything focusable in the body,
  *                         then the buttons, in document order — including
  *                         the inputs inside kit fields' shadow roots, and
@@ -33,12 +47,16 @@
  *
  * Arming:
  *   - A button with armAfterMs waits N ms, then receives focus so Enter acts.
- *   - If the user's pointer enters (or a finger touches) any other button
- *     before the arm fires, the timer is cancelled — we don't steal focus
- *     from an actively-interacting user.
+ *     Until then the dialog sits on the safe button (the order above).
+ *   - Any key (an arrow, Tab, typing) and the pointer entering (or a finger
+ *     touching) any other button cancel the timer — we never steal focus
+ *     from an actively-interacting user. Nor does it fire into a field.
  *
  * Buttons: { action, label, kind: "default"|"primary"|"destructive",
- *            armAfterMs?, disabled?, labelKey? }. setDisabled(action, flag)
+ *            default?, armAfterMs?, disabled?, labelKey? }. `default: true`
+ *            = the button focused on open.
+ *
+ *            setDisabled(action, flag)
  *            toggles one later (a Save that waits for a filename). labelKey
  *            makes `label` the English fallback of sac.t(labelKey): the
  *            button then follows a runtime language switch in place.
@@ -64,6 +82,7 @@ class SacDialog extends HTMLElement {
         this.buttons = [];
         this._armTimer = null;
         this._resolved = false;
+        this._pointer = false;        // the last focus came from the pointer: no ring
         this._onKeydown = this._onKeydown.bind(this);
         // Escape from inside the dialog, bubble phase: see _onKeydown.
         this.addEventListener("keydown", (e) => this._onInnerEscape(e));
@@ -115,6 +134,11 @@ class SacDialog extends HTMLElement {
         this.focus();
         document.addEventListener("keydown", this._onKeydown, true);
         if (!SacDialog._open.includes(this)) SacDialog._open.push(this);
+        // Enter acts at once: a body element marked autofocus, else the
+        // default button. A caller that focuses a field next keeps it.
+        const auto = this.querySelector("[autofocus]");
+        if (auto) auto.focus();
+        else { const btn = this._defaultButton(); if (btn) this._focusButton(btn); }
         this._startArmTimer();
         this.dispatchEvent(new CustomEvent("sac:open", { bubbles: true, composed: true }));
     }
@@ -183,8 +207,52 @@ class SacDialog extends HTMLElement {
         return a;
     }
 
+    /** The button focused on open: `default: true`, else the first primary,
+     *  else the first non-destructive — never disabled, never one waiting to arm. */
+    _defaultButton() {
+        const btns = this.shadowRoot.querySelectorAll(".actions .btn");
+        const ok = (spec, i) => btns[i] && !btns[i].disabled && !(spec.armAfterMs > 0);
+        const pick = (test) => this.buttons.findIndex((b, i) => test(b) && ok(b, i));
+        let i = pick((b) => b.default);
+        if (i < 0) i = pick((b) => b.kind === "primary");
+        if (i < 0) i = pick((b) => b.kind !== "destructive");
+        return i < 0 ? null : btns[i];
+    }
+
+    _focusButton(btn) {
+        this._pointer = false;
+        btn.focus({ preventScroll: true });
+    }
+
+    /** ← / → (and ↑ / ↓, Home / End) through the enabled action buttons —
+     *  only while focus is on one of them or on the dialog itself. */
+    _moveButtons(e) {
+        const steps = { ArrowLeft: -1, ArrowRight: 1, ArrowUp: -1, ArrowDown: 1, Home: "first", End: "last" };
+        if (!(e.key in steps) || e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return false;
+        const row = this.shadowRoot.querySelector(".actions");
+        const btns = Array.from(row.querySelectorAll(".btn")).filter((b) => !b.disabled);
+        const act = SacDialog._deepActive();
+        const at = btns.indexOf(act);
+        if (!btns.length || (at < 0 && act !== this)) return false;
+        e.preventDefault();
+        let step = steps[e.key];
+        // The bottom sheet stacks them last-on-top: ↑ is the next one there.
+        if ((e.key === "ArrowUp" || e.key === "ArrowDown")
+            && getComputedStyle(row).flexDirection === "column-reverse") step = -step;
+        const n = btns.length;
+        const to = step === "first" ? 0 : step === "last" ? n - 1
+            : at < 0 ? (step > 0 ? 0 : n - 1) : (at + step + n) % n;
+        this._focusButton(btns[to]);
+        return true;
+    }
+
     _onKeydown(e) {
         if (SacDialog._open[SacDialog._open.length - 1] !== this) return;
+        // The user is on the keys: the arm timer never takes focus from them,
+        // and a focus they move gets its ring.
+        this._pointer = false;
+        if (e.key !== "Escape") this._cancelArmTimer();
+        if (this._moveButtons(e)) return;
         if (e.key === "Escape") {
             // From inside the dialog: the target gets its say first (an open
             // popover, a field reverting) — _onInnerEscape decides on the way
@@ -255,6 +323,9 @@ class SacDialog extends HTMLElement {
             this._armTimer = null;
             const btn = this.shadowRoot.querySelectorAll(".btn")[armed];
             if (!btn) return;
+            // Never into a field the user is in — only from a button or the dialog.
+            const act = SacDialog._deepActive();
+            if (act && act !== this && act !== document.body && !btn.parentNode.contains(act)) return;
             // .armed gives the explicit visual cue — :focus-visible won't
             // fire reliably for programmatic focus (Chrome hides the ring
             // when focus is set by script without a prior keyboard event).
@@ -393,7 +464,10 @@ class SacDialog extends HTMLElement {
                     background: var(--hover-strong);
                     border-color: color-mix(in srgb, var(--fg) 18%, transparent);
                 }
-                .btn:focus-visible {
+                /* .focus: the ring for a focus set by script or the keys,
+                   where :focus-visible stays dark — Enter presses this one. */
+                .btn:focus-visible,
+                .btn.focus {
                     outline: 2px solid var(--accent);
                     outline-offset: 2px;
                 }
@@ -424,7 +498,8 @@ class SacDialog extends HTMLElement {
                     color: var(--text);
                     border-color: var(--danger);
                 }
-                .btn.destructive:focus-visible {
+                .btn.destructive:focus-visible,
+                .btn.destructive.focus {
                     outline-color: var(--danger);
                 }
 
@@ -502,6 +577,8 @@ class SacDialog extends HTMLElement {
     _renderButtons() {
         const row = this.shadowRoot.querySelector(".actions");
         row.innerHTML = "";
+        // A focus the pointer gave shows no ring (as :focus-visible).
+        row.addEventListener("pointerdown", () => { this._pointer = true; }, true);
         this.buttons.forEach((spec) => {
             const btn = document.createElement("button");
             btn.className = "btn" + (spec.kind && spec.kind !== "default" ? " " + spec.kind : "");
@@ -522,6 +599,8 @@ class SacDialog extends HTMLElement {
             };
             btn.addEventListener("mouseenter", disarm);
             btn.addEventListener("pointerdown", disarm);
+            btn.addEventListener("focus", () => btn.classList.toggle("focus", !this._pointer));
+            btn.addEventListener("blur", () => btn.classList.remove("focus"));
             row.appendChild(btn);
         });
     }

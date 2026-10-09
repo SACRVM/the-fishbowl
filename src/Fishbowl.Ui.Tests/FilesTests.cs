@@ -247,11 +247,14 @@ public class FilesTests
             Assert.True(await ExistsAsync(page, "a.txt", slug));
             Assert.True(await ExistsAsync(page, $"{folder}/a.txt"));
 
-            // Again: the name is taken — Keep both.
+            // Again: the name is taken — Enter keeps both (the safe default,
+            // though Replace is the primary).
             await FocusRowAsync(page, "left", "a.txt");
             await page.Keyboard.PressAsync("Alt+C");
             var clash = page.Locator("sac-dialog[title='A file with this name exists']");
-            await clash.GetByRole(AriaRole.Button, new() { Name = "Keep both" }).ClickAsync();
+            await Assertions.Expect(clash).ToBeVisibleAsync();
+            await Dialogs.ExpectFocusedAsync(page, "Keep both");
+            await page.Keyboard.PressAsync("Enter");
             await Assertions.Expect(Row(page, "right", "a (2).txt")).ToHaveCountAsync(1, new() { Timeout = 10000 });
 
             // Alt+M moves: gone here, there in the space.

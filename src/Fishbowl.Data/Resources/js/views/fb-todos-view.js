@@ -32,7 +32,7 @@ class FbTodosView extends HTMLElement {
         this.render();
         // A space Reader gets no write actions (the server would refuse them).
         this.writable = await fb.access.canWrite();
-        this.querySelector("#new-btn").hidden = !this.writable;
+        this.paintHead();
         this.querySelector("#empty-new-btn").hidden = !this.writable;
         for (const id of ["#title", "#description"]) this.querySelector(id)?.toggleAttribute("readonly", !this.writable);
         this.querySelector("#due-at")?.toggleAttribute("disabled", !this.writable);
@@ -45,8 +45,10 @@ class FbTodosView extends HTMLElement {
             onReorder: (from, to) => this._moveTodo(from, to),
         });
         // A todo's own menu (kit 2.29): a right-click or a long press.
+        // For a writer "Select" comes first and starts marking.
         this._rowMenu = sac.contextMenu(this.querySelector("#todo-list"), {
             targets: ".tv-item",
+            selection: this.writable ? this.sel : undefined,
             items: (row) => this._rowItems(row),
         });
         await this.loadTodos();
@@ -62,6 +64,7 @@ class FbTodosView extends HTMLElement {
         this._leaving?.clear();
         if (this._onIntent) window.removeEventListener("fb:intent", this._onIntent);
         this._sortable?.destroy();
+        this.sel?.destroy();
         this._rowMenu?.destroy();
         this.flushSave();
         if (window.fb?.toolbar) fb.toolbar.clear();
@@ -177,6 +180,7 @@ class FbTodosView extends HTMLElement {
                     box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35);
                     z-index: 2;
                 }
+                fb-todos-view #todo-list:focus { outline: none; }
                 fb-todos-view .tv-item.selected {
                     background: var(--accent-tint);
                     border-color: color-mix(in srgb, var(--accent) 28%, transparent);
@@ -426,6 +430,8 @@ class FbTodosView extends HTMLElement {
                     </div>
                     <div class="tv-list-header">
                         <span class="tv-list-title" id="list-title">${fb.t("fb.todos.open", "Open Todos")}</span>
+                        <button type="button" class="icon-btn danger" id="delete-marked-btn" hidden title="${fb.t("fb.todos.delete-marked", "Delete selected")}" aria-label="${fb.t("fb.todos.delete-marked", "Delete selected")}"><sac-icon name="trash"></sac-icon></button>
+                        <button type="button" class="icon-btn" id="clear-marks-btn" hidden title="${fb.t("fb.todos.clear-marks", "Clear selection")}" aria-label="${fb.t("fb.todos.clear-marks", "Clear selection")}"><sac-icon name="close"></sac-icon></button>
                         <button class="icon-btn" id="toggle-completed-btn" title="${fb.t("fb.todos.show-completed", "Show completed")}" aria-label="${fb.t("fb.todos.show-completed", "Show completed")}">
                             <sac-icon name="check"></sac-icon>
                         </button>
@@ -486,14 +492,27 @@ class FbTodosView extends HTMLElement {
         // way out.
         split.addEventListener("sac:split-back", () => this.flushSave());
 
+        // Marking several todos: the kit's gestures and keys (kit 2.30), kept
+        // by id across re-renders; an arrow opens the next todo, Shift marks,
+        // Delete asks for the marked ones (else the one open).
+        const list = this.querySelector("#todo-list");
+        this.sel = sac.selection.attach(list, {
+            rows: ".tv-item",
+            current: () => this.selectedId,
+            disabled: () => !this.writable,
+            onChange: () => this.paintHead(),
+            keyboard: true,
+            onCursor: (id) => this.select(id),
+        });
+        list.addEventListener("sac:request-remove", (e) => this.removeMany(e.detail.ids));
+        this.querySelector("#delete-marked-btn").addEventListener("click", () => this.removeMany(this.sel.marked));
+        this.querySelector("#clear-marks-btn").addEventListener("click", () => this.sel.clear());
         this.querySelector("#new-btn").addEventListener("click", () => this.createTodo());
         this.querySelector("#empty-new-btn").addEventListener("click", () => this.createTodo());
         this.querySelector("#toggle-completed-btn").addEventListener("click", () => {
             this.hideCompleted = !this.hideCompleted;
             this.querySelector("#toggle-completed-btn").classList.toggle("active", !this.hideCompleted);
-            this.querySelector("#list-title").textContent = this.hideCompleted
-                ? fb.t("fb.todos.open", "Open Todos")
-                : fb.t("fb.todos.all", "All Todos");
+            this.paintHead();
             this.renderList();
         });
         this.querySelector("#search-input").addEventListener("input", (e) => {
@@ -602,6 +621,21 @@ class FbTodosView extends HTMLElement {
             this.renderList();
             window.sac?.toast?.(fb.t("fb.todos.order-failed", "Couldn't save the new order."), { kind: "error" });
         }
+    }
+
+    // The header names the list — or, while todos are marked, how many, with
+    // Delete and Clear in place of the completed toggle and "+".
+    paintHead() {
+        const n = this.sel?.marked.length || 0;
+        this.querySelector("#list-title").textContent = n
+            ? (n === 1 ? fb.t("fb.todos.marked-1", "1 selected") : fb.t("fb.todos.marked", "{n} selected", { n }))
+            : this.hideCompleted
+                ? fb.t("fb.todos.open", "Open Todos")
+                : fb.t("fb.todos.all", "All Todos");
+        this.querySelector("#toggle-completed-btn").hidden = n > 0;
+        this.querySelector("#new-btn").hidden = this.writable === false || n > 0;
+        this.querySelector("#delete-marked-btn").hidden = n === 0;
+        this.querySelector("#clear-marks-btn").hidden = n === 0;
     }
 
     renderList() {
@@ -831,11 +865,14 @@ class FbTodosView extends HTMLElement {
         if (!todo) return null;
         const items = [{ id: "open", label: fb.t("fb.common.open", "Open"), icon: "document", onClick: () => this.select(todo.id) }];
         if (this.writable === false) return items;
+        const marked = this.sel?.marked || [];
         items.push(
             { id: "done", label: todo.completedAt ? fb.t("fb.todos.mark-undone", "Mark as not done") : fb.t("fb.todos.mark-done", "Mark as done"),
               icon: "check", onClick: () => this.toggleCompletedById(todo.id) },
             "-",
-            { id: "delete", label: fb.t("fb.todos.delete", "Delete todo"), icon: "trash", danger: true, onClick: () => this.deleteById(todo.id) },
+            marked.length > 1 && marked.includes(todo.id)
+                ? { id: "delete", label: fb.t("fb.todos.delete-marked", "Delete selected"), icon: "trash", danger: true, onClick: () => this.removeMany(marked) }
+                : { id: "delete", label: fb.t("fb.todos.delete", "Delete todo"), icon: "trash", danger: true, onClick: () => this.deleteById(todo.id) },
         );
         return items;
     }
@@ -921,6 +958,46 @@ class FbTodosView extends HTMLElement {
         } catch (err) {
             console.error("[fb-todos-view] delete failed:", err);
             window.sac?.toast?.(fb.errors.text(err, fb.t("fb.todos.delete-failed", "Couldn't delete the todo.")), { kind: "error" });
+        }
+    }
+
+    // The keyboard's and the header's delete: one todo asks the usual
+    // question; several ask once, then go to the trash.
+    async removeMany(ids) {
+        if (!this.writable) return;
+        const items = ids.map(id => this.todos.find(t => t.id === id)).filter(Boolean);
+        if (items.length === 0) return;
+        if (items.length === 1) return this.deleteById(items[0].id);
+        const answer = await sac.dialog.confirm({
+            title: fb.t("fb.todos.delete-title-n", "Delete {n} todos?", { n: items.length }),
+            message: fb.t("fb.todos.delete-msg-n", "They move to the trash — you can restore them there."),
+            buttons: [
+                { action: "cancel", label: fb.t("fb.common.cancel", "Cancel"), kind: "default" },
+                { action: "delete", label: fb.t("fb.common.delete", "Delete"), kind: "destructive", armAfterMs: 2000 },
+            ],
+        });
+        if (answer !== "delete") return;
+        // A pending autosave would PUT the todo after it is gone.
+        if (items.some(t => t.id === this.selectedId)) {
+            clearTimeout(this._saveDebounce);
+            this._saveDebounce = null;
+        }
+        let done = 0, firstError = null;
+        for (const t of items) {
+            try {
+                await this.api.delete(t.id);
+                done++;
+                this.todos = this.todos.filter(x => x.id !== t.id);
+                if (t.id === this.selectedId) this.clearSelection();
+            } catch (err) { firstError ??= err; }
+        }
+        this.sel?.clear();
+        this.renderList();
+        if (!firstError) {
+            window.sac?.toast?.(fb.t("fb.todos.deleted-n", "{n} todos moved to the trash.", { n: done }));
+        } else {
+            window.sac?.toast?.(fb.t("fb.todos.delete-some-failed", "{done} moved to the trash; {failed} couldn't be deleted: {reason}",
+                { done, failed: items.length - done, reason: fb.errors.text(firstError, fb.t("fb.todos.delete-failed", "Couldn't delete the todo.")) }), { kind: "error" });
         }
     }
 

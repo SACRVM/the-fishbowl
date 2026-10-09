@@ -61,12 +61,6 @@ class FbNotesView extends HTMLElement {
         // goes there, even when the hash has already moved on.
         this.api = fb.api.notes.in(fb.api.workspace());
         this.render();
-        // A note's own menu (kit 2.29): a right-click or a long press — the
-        // row's actions, plus Open.
-        this._rowMenu = sac.contextMenu(this.querySelector("#note-list"), {
-            targets: ".nv-item",
-            items: (row) => this._rowItems(row),
-        });
         window.addEventListener("fb-tags-invalidated", this._onTagsInvalidated);
         window.addEventListener("fb:vault-changed", this._onVaultChanged);
         // Save pending edits while the key still exists; after the lock a
@@ -77,6 +71,15 @@ class FbNotesView extends HTMLElement {
         this.toggleAttribute("readonly", !this.writable);
         this.querySelector("#new-btn").hidden = !this.writable;
         this.querySelector("#empty-new-btn").hidden = !this.writable;
+        // A note's own menu (kit 2.29): a right-click or a long press — the
+        // row's actions, plus Open; for a writer "Select" comes first and
+        // starts marking (how marking starts on touch).
+        this._rowMenu = sac.contextMenu(this.querySelector("#note-list"), {
+            targets: ".nv-item",
+            selection: this.writable ? this.sel : undefined,
+            items: (row) => this._rowItems(row),
+        });
+        this.paintHead();
         this._setViewToolbar();
         await this.loadNotes();
         if (!this.isConnected) return;   // left during the load — don't hook a dead view
@@ -152,6 +155,7 @@ class FbNotesView extends HTMLElement {
 
     disconnectedCallback() {
         if (this._onIntent) window.removeEventListener("fb:intent", this._onIntent);
+        this.sel?.destroy();
         this._rowMenu?.destroy();
         // Router already clears on swap, but guard against any other unmount.
         // Fire-and-forget any pending autosave so a quick view-switch mid-typing
@@ -344,6 +348,7 @@ class FbNotesView extends HTMLElement {
                     transition: background 0.12s, border-color 0.12s;
                 }
                 fb-notes-view .nv-item:hover { background: var(--hover); }
+                fb-notes-view #note-list:focus { outline: none; }
                 fb-notes-view .nv-item.selected {
                     background: var(--accent-tint);
                     border-color: color-mix(in srgb, var(--accent) 28%, transparent);
@@ -658,6 +663,8 @@ class FbNotesView extends HTMLElement {
                     </sac-collapsible>
                     <div class="nv-list-header">
                         <span class="nv-list-title" id="list-title">${fb.t("fb.notes.all", "All Notes")}</span>
+                        <button type="button" class="icon-btn danger" id="delete-marked-btn" hidden title="${fb.t("fb.notes.delete-marked", "Delete selected")}" aria-label="${fb.t("fb.notes.delete-marked", "Delete selected")}"><sac-icon name="trash"></sac-icon></button>
+                        <button type="button" class="icon-btn" id="clear-marks-btn" hidden title="${fb.t("fb.notes.clear-marks", "Clear selection")}" aria-label="${fb.t("fb.notes.clear-marks", "Clear selection")}"><sac-icon name="close"></sac-icon></button>
                         <button class="icon-btn" id="toggle-archived-btn" title="${fb.t("fb.notes.show-archived", "Show archived")}" aria-label="${fb.t("fb.notes.show-archived", "Show archived")}">
                             <sac-icon name="archive"></sac-icon>
                         </button>
@@ -718,14 +725,27 @@ class FbNotesView extends HTMLElement {
         // way out — the editor stays mounted, so nothing is lost either way.
         split.addEventListener("sac:split-back", () => this.flushSave());
 
+        // Marking several notes: the kit's gestures and keys (kit 2.30), kept
+        // by id across re-renders; an arrow opens the next note, Shift marks,
+        // Delete asks for the marked ones (else the one open).
+        const list = this.querySelector("#note-list");
+        this.sel = sac.selection.attach(list, {
+            rows: ".nv-item",
+            current: () => this.selectedId,
+            disabled: () => !this.writable,
+            onChange: () => this.paintHead(),
+            keyboard: true,
+            onCursor: (id) => this.select(id),
+        });
+        list.addEventListener("sac:request-remove", (e) => this.removeMany(e.detail.ids));
+        this.querySelector("#delete-marked-btn").addEventListener("click", () => this.removeMany(this.sel.marked));
+        this.querySelector("#clear-marks-btn").addEventListener("click", () => this.sel.clear());
         this.querySelector("#new-btn").addEventListener("click", () => this.createNote());
         this.querySelector("#empty-new-btn").addEventListener("click", () => this.createNote());
         this.querySelector("#toggle-archived-btn").addEventListener("click", () => {
             this.showArchived = !this.showArchived;
             this.querySelector("#toggle-archived-btn").classList.toggle("active", this.showArchived);
-            this.querySelector("#list-title").textContent = this.showArchived
-                ? fb.t("fb.notes.all-archived", "All + Archived")
-                : fb.t("fb.notes.all", "All Notes");
+            this.paintHead();
             this.renderList();
         });
         this.querySelector("#search-input").addEventListener("input", (e) => {
@@ -910,6 +930,21 @@ class FbNotesView extends HTMLElement {
      *  shows tag management, which doesn't depend on the active note. */
     updateToolbar(_note) {
         this._setViewToolbar();
+    }
+
+    // The header names the list — or, while notes are marked, how many, with
+    // Delete and Clear in place of the archive toggle and "+".
+    paintHead() {
+        const n = this.sel?.marked.length || 0;
+        this.querySelector("#list-title").textContent = n
+            ? (n === 1 ? fb.t("fb.notes.marked-1", "1 selected") : fb.t("fb.notes.marked", "{n} selected", { n }))
+            : this.showArchived
+                ? fb.t("fb.notes.all-archived", "All + Archived")
+                : fb.t("fb.notes.all", "All Notes");
+        this.querySelector("#toggle-archived-btn").hidden = n > 0;
+        this.querySelector("#new-btn").hidden = this.writable === false || n > 0;
+        this.querySelector("#delete-marked-btn").hidden = n === 0;
+        this.querySelector("#clear-marks-btn").hidden = n === 0;
     }
 
     renderList() {
@@ -1303,6 +1338,7 @@ class FbNotesView extends HTMLElement {
         const items = [{ id: "open", label: fb.t("fb.common.open", "Open"), icon: "document", onClick: () => this.select(n.id) }];
         if (this.writable === false) return items;
         items.push("-");
+        const marked = this.sel?.marked || [];
         if ((n.tags || []).includes("review:pending"))
             items.push({ id: "approve", label: fb.t("fb.notes.approve", "Approve"), icon: "check", onClick: () => this.approveById(n.id) });
         items.push(
@@ -1311,7 +1347,9 @@ class FbNotesView extends HTMLElement {
             { id: "archive", label: n.archived ? fb.t("fb.notes.unarchive", "Unarchive") : fb.t("fb.notes.archive", "Archive"), icon: "archive",
               onClick: () => this.toggleArchivedById(n.id) },
             "-",
-            { id: "delete", label: fb.t("fb.common.delete", "Delete"), icon: "trash", danger: true, onClick: () => this.deleteById(n.id) },
+            marked.length > 1 && marked.includes(n.id)
+                ? { id: "delete", label: fb.t("fb.notes.delete-marked", "Delete selected"), icon: "trash", danger: true, onClick: () => this.removeMany(marked) }
+                : { id: "delete", label: fb.t("fb.common.delete", "Delete"), icon: "trash", danger: true, onClick: () => this.deleteById(n.id) },
         );
         return items;
     }
@@ -1430,6 +1468,46 @@ class FbNotesView extends HTMLElement {
         } catch (err) {
             console.error("[fb-notes-view] delete failed:", err);
             window.sac?.toast?.(fb.errors.text(err, fb.t("fb.notes.delete-failed", "Couldn't delete the note.")), { kind: "error" });
+        }
+    }
+
+    // The keyboard's and the header's delete: one note asks the usual question
+    // (with Archive as the alternative); several ask once, then go to the trash.
+    async removeMany(ids) {
+        if (!this.writable) return;
+        const items = ids.map(id => this.notes.find(n => n.id === id)).filter(Boolean);
+        if (items.length === 0) return;
+        if (items.length === 1) return this.deleteById(items[0].id);
+        const answer = await sac.dialog.confirm({
+            title: fb.t("fb.notes.delete-title-n", "Delete {n} notes?", { n: items.length }),
+            message: fb.t("fb.notes.delete-msg-n", "They move to the trash — you can restore them there."),
+            buttons: [
+                { action: "cancel", label: fb.t("fb.common.cancel", "Cancel"), kind: "default" },
+                { action: "delete", label: fb.t("fb.common.delete", "Delete"), kind: "destructive", armAfterMs: 2000 },
+            ],
+        });
+        if (answer !== "delete") return;
+        // A pending autosave would PUT the note after it is gone.
+        if (items.some(n => n.id === this._openNote?.id)) {
+            clearTimeout(this._saveDebounce);
+            this._saveDebounce = null;
+        }
+        let done = 0, firstError = null;
+        for (const n of items) {
+            try {
+                await this.api.delete(n.id);
+                done++;
+                this.notes = this.notes.filter(x => x.id !== n.id);
+                if (n.id === this._openNote?.id || n.id === this.selectedId) this.clearSelection();
+            } catch (err) { firstError ??= err; }
+        }
+        this.sel?.clear();
+        this.renderList();
+        if (!firstError) {
+            window.sac?.toast?.(fb.t("fb.notes.deleted-n", "{n} notes moved to the trash.", { n: done }));
+        } else {
+            window.sac?.toast?.(fb.t("fb.notes.delete-some-failed", "{done} moved to the trash; {failed} couldn't be deleted: {reason}",
+                { done, failed: items.length - done, reason: fb.errors.text(firstError, fb.t("fb.notes.delete-failed", "Couldn't delete the note.")) }), { kind: "error" });
         }
     }
 
