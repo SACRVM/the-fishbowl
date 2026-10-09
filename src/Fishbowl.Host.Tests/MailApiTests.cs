@@ -623,6 +623,46 @@ public class MailApiTests : IClassFixture<WebApplicationFactory<Program>>, IDisp
         Assert.Equal("Hello", Fishbowl.Host.Testing.SampleMailboxConnector.Outbox(address).Single().Subject);
     }
 
+    // ---- 3e. spam: read live, never stored, a person's only ----
+
+    [Fact]
+    public async Task Spam_IsReadLive_NeverStored_NotSpamBringsItIn_AndNoKeySeesIt()
+    {
+        const string user = "mail_spam";
+        using (var db = _db.CreateSystemConnection())
+            db.Execute("INSERT OR IGNORE INTO users(id, name, email, created_at) VALUES (@id, 'S', 'sp@example.com', @now)",
+                new { id = user, now = DateTime.UtcNow.ToString("o") });
+        var c = As(user);
+        var accountId = await SyncedAccountAsync(c, P);
+        // The sync never reads the spam folder: not in the list, not in search.
+        Assert.DoesNotContain(await Threads(c, P), t => t.GetProperty("subject").GetString() == "Contract renewal");
+        Assert.Empty(await Threads(c, P, "?q=renewal"));
+
+        var items = (await Json(await c.GetAsync($"{P}/spam", Ct))).GetProperty("items").EnumerateArray().Select(e => e.Clone()).ToList();
+        Assert.Equal(new[] { "Contract renewal", "You have won!!!" }, items.Select(i => i.GetProperty("subject").GetString()).ToArray());
+        var contract = items[0];
+        var uid = contract.GetProperty("uid").GetUInt32();
+        var one = await Json(await c.GetAsync($"{P}/spam/{accountId}/{uid}", Ct));
+        Assert.Contains("renewal by Friday", one.GetProperty("text").GetString());
+
+        // A spam folder that changed under the UID moves nothing.
+        var r = await c.PostAsJsonAsync($"{P}/spam/{accountId}/{uid}/not-spam", new { uidValidity = 999u }, Ct);
+        Assert.Equal(HttpStatusCode.Conflict, r.StatusCode);
+        Assert.Equal("spam_changed", (await Json(r)).GetProperty("error").GetString());
+
+        r = await c.PostAsJsonAsync($"{P}/spam/{accountId}/{uid}/not-spam", new { uidValidity = contract.GetProperty("uidValidity").GetUInt32() }, Ct);
+        Assert.Equal(HttpStatusCode.OK, r.StatusCode);
+        await SyncNowAsync(c, accountId);
+        Assert.Contains(await Threads(c, P), t => t.GetProperty("subject").GetString() == "Contract renewal");
+        Assert.Single((await Json(await c.GetAsync($"{P}/spam", Ct))).GetProperty("items").EnumerateArray());
+
+        // No key reads spam or moves it, whatever its scopes.
+        var key = await KeyAsync(user, ContextRef.User(user), "read:mail", "write:mail", "send:mail");
+        Assert.Equal(HttpStatusCode.Forbidden, (await key.GetAsync($"{P}/spam", Ct)).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await key.GetAsync($"{P}/spam/{accountId}/1", Ct)).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await key.PostAsJsonAsync($"{P}/spam/{accountId}/1/not-spam", new { uidValidity = 1u }, Ct)).StatusCode);
+    }
+
     // ---- 4. attachment ----
 
     [Fact]

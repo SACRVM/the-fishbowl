@@ -68,6 +68,7 @@
         "invalid_port": "A port is a number from 1 to 65535.",
         "attachment_gone": "The message is no longer on the mail server.",
         "archive_folder_missing": "The mail account has no archive folder.",
+        "spam_changed": "The spam folder changed — load it again.",
         "mail_too_large": "A mail's files may be 25 MB together.",
         "no_recipients": "The mail needs at least one recipient.",
         "send_blocked": "The mail couldn't be sent like this.",

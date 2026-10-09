@@ -313,3 +313,6 @@ User/space schema **v22**:
 - **A forward joins its original's conversation**, like Gmail: same subject, a shared address.
 - **Recipients are plain text fields** (comma-separated), never chips: an address stays text you can correct in place.
 - **`send:mail` is a tick of its own** in Connect an agent and on the OAuth consent page, only with write.
+- **Spam is read live, never stored** (decided 2026-10-08): the Mail app's Spam view reads each account's
+  spam folder on demand, shows a message as text only, and "Not spam" moves it into the inbox on the server,
+  where the sync finds it. Spam never reaches search, tags, the trash or an agent (the routes are cookie-only).

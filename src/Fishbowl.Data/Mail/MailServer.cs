@@ -66,6 +66,86 @@ public sealed class MailServer
         return await _repo.DeleteMessagesAsync(ctx, ids, tombstone: !everywhere, deletedBy, ct);
     }
 
+    // ---- spam (read live, never stored) ----
+
+    public sealed record SpamItem(string AccountId, uint Uid, uint UidValidity, string? FromName, string? FromAddress,
+        string? Subject, DateTimeOffset Date);
+
+    public sealed record SpamMessage(SpamItem Item, IReadOnlyList<string> To, string? Text, IReadOnlyList<string> Attachments);
+
+    /// <summary>
+    /// The newest mail in every account's spam folder, read live from the
+    /// server and never stored — spam stays out of search, tags, threads, the
+    /// agents and the trash. An account whose server can't be read is named
+    /// in <c>Failed</c>; one without a spam folder has nothing.
+    /// </summary>
+    public async Task<(IReadOnlyList<SpamItem> Items, IReadOnlyList<string> Failed)> SpamAsync(ContextRef ctx, int perAccount, CancellationToken ct)
+    {
+        // The accounts side by side: each server takes seconds to sign in to.
+        var accounts = await _repo.ListAccountsAsync(ctx, ct);
+        var reads = await Task.WhenAll(accounts.Select(a => ReadAsync(a.Id)));
+        return (reads.SelectMany(r => r ?? []).OrderByDescending(i => i.Date).ToList(),
+            accounts.Where((_, i) => reads[i] is null).Select(a => a.Id).ToList());
+
+        // An account's newest spam; null when its server can't be read.
+        async Task<List<SpamItem>?> ReadAsync(string accountId)
+        {
+            try
+            {
+                await using var box = await OpenAsync(ctx, accountId, ct);
+                if (box is null) return null;
+                var folder = await box.RoleFolderAsync(MailRoles.Junk, ct);
+                if (folder is null) return [];
+                var status = await box.StatusAsync(folder, ct);
+                var uids = (await box.UidsAsync(folder, ct)).OrderByDescending(u => u).Take(perAccount).ToList();
+                if (uids.Count == 0) return [];
+                return (await box.HeadersAsync(folder, uids, ct)).Select(h => new SpamItem(accountId, h.Uid, status.UidValidity,
+                    h.From?.Name, h.From?.Address, h.Subject, h.Date ?? h.InternalDate ?? DateTimeOffset.MinValue)).ToList();
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
+            catch (Exception ex)
+            {
+                _logger.LogWarning("Mail: spam not read for account {AccountId}: {Code}", accountId, MailSyncer.ErrorCode(ex));
+                return null;
+            }
+        }
+    }
+
+    /// <summary>One spam message as text (an HTML one converted — no HTML is
+    /// shown for spam), its attachments by name only; null when it's gone.</summary>
+    public async Task<SpamMessage?> SpamMessageAsync(ContextRef ctx, string accountId, uint uid, CancellationToken ct)
+    {
+        await using var box = await OpenAsync(ctx, accountId, ct);
+        var folder = box is null ? null : await box.RoleFolderAsync(MailRoles.Junk, ct);
+        if (box is null || folder is null) return null;
+        var status = await box.StatusAsync(folder, ct);
+        var h = (await box.HeadersAsync(folder, [uid], ct)).FirstOrDefault();
+        if (h is null) return null;
+        var body = await box.BodyAsync(folder, uid, ct);
+        var text = body.Text is { Length: > 0 } t ? Fishbowl.Mail.Text.HtmlToText.Normalize(t)
+            : body.Html is { Length: > 0 } html ? Fishbowl.Mail.Text.HtmlToText.Convert(html) : null;
+        return new SpamMessage(
+            new SpamItem(accountId, h.Uid, status.UidValidity, h.From?.Name, h.From?.Address, h.Subject, h.Date ?? h.InternalDate ?? DateTimeOffset.MinValue),
+            h.To.Select(a => string.IsNullOrEmpty(a.Name) ? a.Address : $"{a.Name} <{a.Address}>").ToList(),
+            text,
+            body.Attachments.Select(a => a.FileName ?? a.ContentType).ToList());
+    }
+
+    /// <summary>"Not spam": moved from the spam folder into the inbox on the
+    /// server (the provider's filter learns from it); the next sync brings it
+    /// in like any mail. False — nothing moved — when the spam folder changed
+    /// under the UID (another UIDVALIDITY) or the account has no spam folder.</summary>
+    public async Task<bool> NotSpamAsync(ContextRef ctx, string accountId, uint uid, uint uidValidity, CancellationToken ct)
+    {
+        await using var box = await OpenAsync(ctx, accountId, ct)
+            ?? throw new InvalidOperationException("The mail account or its password is gone.");
+        var junk = await box.RoleFolderAsync(MailRoles.Junk, ct);
+        var inbox = await box.RoleFolderAsync(MailRoles.Inbox, ct);
+        if (junk is null || inbox is null || (await box.StatusAsync(junk, ct)).UidValidity != uidValidity) return false;
+        await box.MoveAsync(junk, [uid], inbox, ct);
+        return true;
+    }
+
     /// <summary>Sends a message from an account (decision 12) and files the
     /// copy in its Sent folder; returns the copy's UID there when it can be
     /// told. Not best effort: a refusal is thrown and nothing went out.</summary>

@@ -355,6 +355,12 @@
             // (also to the server's Trash); either way into the trash here.
             deleteThread:  (tid, mode) => request(p(`/mail/threads/${id(tid)}?mode=${mode}`), { method: "DELETE" }),
             deleteMessage: (mid, mode) => request(p(`/mail/messages/${id(mid)}?mode=${mode}`), { method: "DELETE" }),
+            // Spam: read live from the servers, never stored (cookie only).
+            // { items: [{ accountId, uid, uidValidity, fromName, fromAddress, subject, date }], failed: [accountId] }
+            spam:        ()          => request(p("/mail/spam")),
+            spamMessage: (aid, uid)  => request(p(`/mail/spam/${id(aid)}/${uid}`)),
+            // Out of spam into the inbox on the server; the sync brings it in.
+            notSpam: (aid, uid, uidValidity) => request(p(`/mail/spam/${id(aid)}/${uid}/not-spam`), { method: "POST", body: JSON.stringify({ uidValidity }) }),
             // Writing (decision 12): drafts here, each its writer's own.
             drafts:      ()          => request(p("/mail/drafts")),
             draft:       (did)       => request(p(`/mail/drafts/${id(did)}`)),

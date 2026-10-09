@@ -54,6 +54,7 @@ internal sealed class SampleMailbox : IMailbox
             ["INBOX"] = new(),
             ["Sent Messages"] = new(),
             ["Archive"] = new(),
+            ["Junk"] = new(),
         };
         public readonly object Gate = new();
         public readonly List<Message> Trashed = new();   // the server's Trash (not synced)
@@ -106,6 +107,11 @@ internal sealed class SampleMailbox : IMailbox
             for (var i = 1; i <= 30; i++)
                 Add("Archive", $"digest-{i}@example.com", null, [], new MailAddress("Digest", "digest@example.com"), self, $"Digest #{i}",
                     TimeSpan.FromDays(60 + i), true, $"Digest number {i}.");
+            // The spam folder: one that is spam, one that isn't.
+            Add("Junk", "prize-1@spam.example", null, [], new MailAddress("Prize Desk", "prize@spam.example"), self, "You have won!!!",
+                TimeSpan.FromHours(2), false, "Click here to claim your prize.");
+            Add("Junk", "contract-1@example.org", null, [], new MailAddress("Grace Hopper", "grace@example.org"), self, "Contract renewal",
+                TimeSpan.FromHours(1), false, "Please sign the renewal by Friday (https://example.org/sign).");
             s.NextUid = uid;
             return s;
         }
@@ -128,7 +134,7 @@ internal sealed class SampleMailbox : IMailbox
     public Task<string?> RoleFolderAsync(string role, CancellationToken ct)
     {
         _ = Data;
-        return Task.FromResult<string?>(role switch { "inbox" => "INBOX", "sent" => "Sent Messages", "archive" => "Archive", _ => null });
+        return Task.FromResult<string?>(role switch { "inbox" => "INBOX", "sent" => "Sent Messages", "archive" => "Archive", "junk" => "Junk", _ => null });
     }
 
     public Task<SyncFolderStatus> StatusAsync(string folder, CancellationToken ct)
@@ -224,6 +230,9 @@ internal sealed class SampleMailbox : IMailbox
             return Task.FromResult<uint?>(uid);
         }
     }
+
+    public Task<MailTransfer> MoveAsync(string folder, IReadOnlyList<uint> uids, string target, CancellationToken ct) =>
+        Task.FromResult(Move(folder, uids, target));
 
     public Task<MailTransfer> ArchiveAsync(string inbox, IReadOnlyList<uint> uids, string archive, CancellationToken ct) =>
         Task.FromResult(Move(inbox, uids, archive));

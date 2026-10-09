@@ -64,6 +64,11 @@ public class MailRepository : IMailRepository
     private static async Task EnsureSourceTagsAsync(IDbConnection db, IDbTransaction? tx, IReadOnlyList<MailAccount> accounts, CancellationToken ct)
     {
         var names = accounts.Select(a => a.SourceTag).Distinct().ToArray();
+        // Read first: a list is a read, and a write would queue behind the sync's.
+        var fixedNow = (await db.QueryAsync<string>(new CommandDefinition(
+            "SELECT name FROM tags WHERE is_system = 1 AND user_assignable = 0", transaction: tx, cancellationToken: ct)))
+            .Where(n => !SystemTags.ReservedNames.Contains(n)).ToHashSet();
+        if (fixedNow.SetEquals(names)) return;
         var now = Iso(DateTime.UtcNow);
         foreach (var name in names)
             await db.ExecuteAsync(new CommandDefinition(@"

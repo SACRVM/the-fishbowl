@@ -15,6 +15,8 @@ public static class MailRoles
     public const string Sent = "sent";
     public const string Archive = "archive";
     public static readonly IReadOnlyList<string> All = new[] { Inbox, Sent, Archive };
+    // The spam folder: read live, never synced or stored (the Mail app's Spam view).
+    public const string Junk = "junk";
 }
 
 public static class MailDirections

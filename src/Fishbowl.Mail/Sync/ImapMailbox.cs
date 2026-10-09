@@ -43,6 +43,7 @@ public sealed class ImapMailbox : IMailbox
         {
             "sent" => (SpecialFolder.Sent, new[] { "Sent", "Sent Messages", "Sent Items", "Sent Mail", "Gesendet", "Gesendete Objekte", "Gesendete Elemente" }),
             "archive" => (SpecialFolder.Archive, new[] { "Archive", "Archiv" }),
+            "junk" => (SpecialFolder.Junk, new[] { "Junk", "Spam", "Junk E-mail", "Junk Email", "Junk-E-Mail", "Bulk Mail" }),
             _ => throw new ArgumentOutOfRangeException(nameof(role), role, null),
         };
         var found = await MailboxSession.FindSpecialFolderAsync(c, special, t).ConfigureAwait(false);
@@ -71,16 +72,61 @@ public sealed class ImapMailbox : IMailbox
 
     private static readonly HeaderSet ExtraHeaders = new(["List-Id"]);
 
-    public Task<IReadOnlyList<SyncHeader>> HeadersAsync(string folder, IReadOnlyList<uint> uids, CancellationToken ct) =>
-        InFolder<IReadOnlyList<SyncHeader>>(folder, async (f, _, t) =>
+    public async Task<IReadOnlyList<SyncHeader>> HeadersAsync(string folder, IReadOnlyList<uint> uids, CancellationToken ct)
+    {
+        if (uids.Count == 0) return [];
+        var ids = uids.Select(u => new UniqueId(u)).ToList();
+        try
         {
-            if (uids.Count == 0) return [];
-            var request = new FetchRequest(MessageSummaryItems.UniqueId | MessageSummaryItems.Envelope | MessageSummaryItems.Flags
-                | MessageSummaryItems.InternalDate | MessageSummaryItems.Size | MessageSummaryItems.References)
-            { Headers = ExtraHeaders };
-            var summaries = await f.FetchAsync(uids.Select(u => new UniqueId(u)).ToList(), request, t).ConfigureAwait(false);
-            return summaries.Select(ToHeader).ToList();
-        }, ct);
+            return await InFolder<IReadOnlyList<SyncHeader>>(folder, async (f, _, t) =>
+            {
+                var request = new FetchRequest(MessageSummaryItems.UniqueId | MessageSummaryItems.Envelope | MessageSummaryItems.Flags
+                    | MessageSummaryItems.InternalDate | MessageSummaryItems.Size | MessageSummaryItems.References)
+                { Headers = ExtraHeaders };
+                return (await f.FetchAsync(ids, request, t).ConfigureAwait(false)).Select(ToHeader).ToList();
+            }, ct).ConfigureAwait(false);
+        }
+        catch (ImapProtocolException)
+        {
+            // A server can send a message's ENVELOPE broken (iCloud does, for an
+            // old mail with an unquoted address) and MailKit refuses the whole
+            // batch: the header block itself instead, which MimeKit reads leniently.
+            return await InFolder<IReadOnlyList<SyncHeader>>(folder, async (f, _, t) =>
+            {
+                var request = new FetchRequest(MessageSummaryItems.UniqueId | MessageSummaryItems.Headers | MessageSummaryItems.Flags
+                    | MessageSummaryItems.InternalDate | MessageSummaryItems.Size);
+                return (await f.FetchAsync(ids, request, t).ConfigureAwait(false))
+                    .Select(s => FromHeaders(s.UniqueId.Id, s.Headers, s.Flags ?? MessageFlags.None, s.InternalDate, (long?)s.Size)).ToList();
+            }, ct).ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>A message's header block read the way MimeKit reads a whole
+    /// message — what the ENVELOPE would have said.</summary>
+    internal static SyncHeader FromHeaders(uint uid, HeaderList? headers, MessageFlags flags, DateTimeOffset? internalDate, long? size)
+    {
+        using var stream = new MemoryStream();
+        headers?.WriteTo(stream);
+        stream.Write("\r\n"u8);
+        stream.Position = 0;
+        var m = MimeMessage.Load(stream);
+        static IReadOnlyList<MailAddress> List(InternetAddressList l) =>
+            l.Mailboxes.Select(x => new MailAddress(string.IsNullOrWhiteSpace(x.Name) ? null : x.Name, x.Address)).ToList();
+        return new SyncHeader(
+            uid,
+            Clean(m.MessageId),
+            Clean(m.InReplyTo),
+            m.References.ToList(),
+            m.Headers.Contains(HeaderId.Date) && m.Date != DateTimeOffset.MinValue ? m.Date : null,
+            internalDate,
+            List(m.From).FirstOrDefault(),
+            List(m.To), List(m.Cc), List(m.Bcc), List(m.ReplyTo),
+            m.Subject,
+            flags.HasFlag(MessageFlags.Seen),
+            flags.HasFlag(MessageFlags.Flagged),
+            size,
+            m.Headers["List-Id"]);
+    }
 
     private static SyncHeader ToHeader(IMessageSummary s)
     {
@@ -192,6 +238,10 @@ public sealed class ImapMailbox : IMailbox
     public async Task<MailTransfer> ArchiveAsync(string inbox, IReadOnlyList<uint> uids, string archive, CancellationToken ct) =>
         uids.Count == 0 ? new MailTransfer(new Dictionary<uint, uint>(), false)
             : new MailTransfer(await _session.MoveAsync(inbox, uids, archive, ct), false);
+
+    public async Task<MailTransfer> MoveAsync(string folder, IReadOnlyList<uint> uids, string target, CancellationToken ct) =>
+        uids.Count == 0 ? new MailTransfer(new Dictionary<uint, uint>(), false)
+            : new MailTransfer(await _session.MoveAsync(folder, uids, target, ct), false);
 
     public async Task<uint?> SendAsync(MimeMessage message, string? sent, CancellationToken ct)
     {

@@ -31,6 +31,8 @@ namespace Fishbowl.Api.Endpoints;
 //   POST   …/threads/{threadId}/seen       { seen } — here at once, on the server in the background
 //   POST   …/threads/{threadId}/flagged    { flagged } — its latest message; off = every flag
 //   POST   …/threads/{threadId}/archive    { archived } — on the server first, then here
+//   GET    …/spam                          each account's newest spam, read live, never stored (cookie only)
+//   GET    …/spam/{accountId}/{uid}        one as text; POST …/not-spam { uidValidity } → into the inbox on the server
 //   GET    …/drafts                        the caller's drafts (each draft is its writer's own)
 //   POST   …/drafts                        { kind?, messageId?, accountId? } — a reply / forward filled from its message
 //   GET|PATCH|DELETE …/drafts/{id}         { accountId?, to?, cc?, bcc?, subject?, body? } (markdown)
@@ -128,6 +130,10 @@ public static partial class MailApi
     public sealed record DraftRequest(string? Kind, string? MessageId, string? AccountId);
     public sealed record DraftFromFilesRequest(string? Path);
     public sealed record SendDraftRequest(string? TimeZone, string? Language);
+    public sealed record NotSpamRequest(uint UidValidity);
+
+    /// <summary>How many of each account's newest spam the Spam view reads.</summary>
+    public const int SpamPerAccount = 50;
 
     // Send needs its own scope (decision 18): a key that reads mail and sends
     // it can be steered by a crafted mail — a deliberate grant, never implied.
@@ -572,6 +578,87 @@ public static partial class MailApi
             http.Response.Headers[HeaderNames.ContentSecurityPolicy] = "sandbox";
             return Results.Stream(buffer, "application/octet-stream");
         }).WithName($"Get{tag}MailAttachment").WithSummary("One attachment, fetched from the mail server.");
+
+        // ---- spam: read live from the server, never stored; a person's only ----
+        // (an agent never reads spam — it's where crafted mail lands).
+
+        static bool Bearer(HttpContext http) => http.User.Identity?.AuthenticationType == McpContextClaims.BearerScheme;
+        static object SpamView(MailServer.SpamItem i) => new
+        {
+            i.AccountId,
+            i.Uid,
+            i.UidValidity,
+            i.FromName,
+            i.FromAddress,
+            i.Subject,
+            date = i.Date.UtcDateTime,
+        };
+
+        g.MapGet("/spam", async (HttpContext http, MailServer server, IMemoryCache cache, CancellationToken ct) =>
+        {
+            if (Bearer(http)) return Results.Forbid();
+            var (t, err) = await ResolveAsync(http, space, Need.Read, ct);
+            if (err is not null) return err;
+            // One read per workspace at a time, kept a minute: whoever asks
+            // while the servers are being read waits for that same read.
+            var key = $"mail-spam:{t!.Ctx.Type}:{t.Ctx.Id}";
+            var read = cache.GetOrCreate(key, e =>
+            {
+                e.AbsoluteExpirationRelativeToNow = TimeSpan.FromSeconds(60);
+                return server.SpamAsync(t.Ctx, SpamPerAccount, CancellationToken.None);
+            })!;
+            try
+            {
+                var (items, failed) = await read.WaitAsync(ct);
+                return Results.Ok(new { items = items.Select(SpamView), failed });
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
+            catch
+            {
+                cache.Remove(key);   // a failed read isn't kept
+                throw;
+            }
+        }).WithName($"List{tag}MailSpam").WithSummary("The newest mail in each account's spam folder, read live (cookie only).");
+
+        g.MapGet("/spam/{accountId}/{uid:long}", async (string accountId, long uid, HttpContext http, MailServer server, CancellationToken ct) =>
+        {
+            if (Bearer(http)) return Results.Forbid();
+            var (t, err) = await ResolveAsync(http, space, Need.Read, ct);
+            if (err is not null) return err;
+            if (uid is < 1 or > uint.MaxValue) return Results.NotFound();
+            MailServer.SpamMessage? m;
+            try { m = await server.SpamMessageAsync(t!.Ctx, accountId, (uint)uid, ct); }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
+            catch (Exception ex)
+            {
+                var (code, why) = ServerError(ex);
+                return ApiErrors.Json(StatusCodes.Status502BadGateway, code, why);
+            }
+            return m is null ? Results.NotFound() : Results.Ok(new { item = SpamView(m.Item), to = m.To, text = m.Text, attachments = m.Attachments });
+        }).WithName($"Get{tag}MailSpam").WithSummary("One spam message as text (cookie only).");
+
+        g.MapPost("/spam/{accountId}/{uid:long}/not-spam", async (string accountId, long uid, NotSpamRequest body, HttpContext http,
+            MailServer server, MailSyncQueue queue, IMemoryCache cache, CancellationToken ct) =>
+        {
+            if (Bearer(http)) return Results.Forbid();
+            var (t, err) = await ResolveAsync(http, space, Need.Write, ct);
+            if (err is not null) return err;
+            if (uid is < 1 or > uint.MaxValue) return Results.NotFound();
+            try
+            {
+                if (!await server.NotSpamAsync(t!.Ctx, accountId, (uint)uid, body.UidValidity, ct))
+                    return ApiErrors.Json(StatusCodes.Status409Conflict, "spam_changed", "The spam folder changed — load it again.");
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
+            catch (Exception ex)
+            {
+                var (code, why) = ServerError(ex);
+                return ApiErrors.Json(StatusCodes.Status502BadGateway, code, why);
+            }
+            cache.Remove($"mail-spam:{t.Ctx.Type}:{t.Ctx.Id}");
+            queue.Request(accountId);
+            return Results.Ok(new { moved = true });
+        }).WithName($"NotSpam{tag}Mail").WithSummary("Moves a message out of spam into the inbox on the server; the sync brings it in (cookie only).");
 
         // ---- writing (decision 12): drafts here, each its writer's own ----
 

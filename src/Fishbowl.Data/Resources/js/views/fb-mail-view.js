@@ -5,19 +5,26 @@
  * list-and-editor frame: every account of the workspace in ONE list of
  * conversations — no folder tree — newest activity first, each marked in or
  * out by its latest message; the open conversation on the right with all its
- * messages, both directions, oldest first. Search is the server's full text;
- * the list header switches to Unread or Archived; tags filter like Notes' — a
+ * messages, both directions, oldest first. Tabs over the list switch between
+ * Inbox, Archive, Drafts and Spam (Drafts and Spam with their count, Inbox
+ * with its unread); Only unread in the list head filters Inbox and Archive.
+ * Search is the server's full text; tags filter like Notes' — a
  * strip of chips, all of them must match — and where a message came from is
  * a tag too: each account's source tag — its name, "icloud" — system-given,
  * never assigned or removed by hand, always in the strip. A conversation's other tags are the
  * workspace's, given in its tag bar. The nav toolbar opens the Mail accounts
  * window. Opening an unread one marks it read here and on the server.
  *
+ * Spam is read live from each account's spam folder, never stored (no
+ * search, tags, agents or trash for it): the Spam tab, a count on it for
+ * what came since the last look, each as plain text with
+ * "Not spam" — moved into the inbox on the server, the sync brings it in.
+ *
  * Writing (decision 12, fb.mailCompose) takes the right pane: "+" in the
  * list head (and the desktop tile's, the palette's) starts a new mail, the
  * open conversation's head replies, replies to all or forwards its latest
- * message; drafts are saved as they are typed and listed under Drafts in the
- * list head. Archive and the flag (phase 2) sit in the conversation's head
+ * message; drafts are saved as they are typed and listed under the Drafts
+ * tab. Archive and the flag (phase 2) sit in the conversation's head
  * and in a row's context menu.
  *
  * Reading is safe by default (decision 7): a message's HTML is its own
@@ -35,7 +42,12 @@ class FbMailView extends HTMLElement {
         this.threads = [];
         this.accounts = [];
         this.selectedId = null;
-        this.view = "list";        // list | unread | archived | drafts
+        this.view = "list";        // the tab: list (Inbox) | archived | drafts | spam
+        this.unreadOnly = false;   // Only unread, in Inbox and Archive
+        this.unreadCount = 0;      // the Inbox tab's count
+        this.draftCount = 0;       // the Drafts tab's
+        this.spam = { items: [], failed: [], loaded: false };
+        this.spamOpen = null;      // "<accountId>:<uid>" of the spam message shown
         this.drafts = [];          // the Drafts view: the caller's own
         this._compose = null;      // the mail being written in the right pane
         this.tags = [];            // the filter strip's picks (all of them)
@@ -114,6 +126,8 @@ class FbMailView extends HTMLElement {
         catch (err) { console.warn("[fb-mail-view] accounts failed:", err?.status); this.accounts = []; }
         await this.loadThreads({ keep });
         this.paintStatus();
+        this.loadCounts();
+        this.checkSpam();
         if (!this.accounts.length) this.showEmpty();
         else if (!this.selectedId) this.showNone();
     }
@@ -121,7 +135,7 @@ class FbMailView extends HTMLElement {
     query_() {
         return {
             q: this.query || null,
-            unread: this.view === "unread" || null,
+            unread: this.unreadOnly || null,
             archived: this.view === "archived" || null,
             tag: this.tags,
             limit: 50,
@@ -129,9 +143,21 @@ class FbMailView extends HTMLElement {
     }
 
     async loadThreads({ keep = false } = {}) {
+        if (this.view === "spam") {
+            // The servers take seconds: what was read last (or "Reading…")
+            // shows at once, the fresh read when it's in.
+            this.threads = [];
+            this.more = false;
+            this.renderList();
+            this.renderTagFilter();
+            if (await this.loadSpam() && this.view === "spam") { this.renderList(); this.renderTagFilter(); }
+            return;
+        }
         if (this.view === "drafts") {
             try { this.drafts = await this.api.drafts(); }
             catch (err) { console.warn("[fb-mail-view] drafts failed:", err?.status); this.drafts = []; }
+            this.draftCount = this.drafts.length;
+            this.paintTabs();
             this.threads = [];
             this.more = false;
             this.renderList();
@@ -171,26 +197,58 @@ class FbMailView extends HTMLElement {
         const wrapper = this.querySelector("#mv-tag-wrapper");
         const strip = this.querySelector("#mv-tag-filter");
         if (!strip) return;
-        let all = [];
-        try { all = this.accounts.length ? await this.api.tags() : []; } catch { all = []; }
-        if (!this.isConnected) return;
         const picked = new Set(this.tags);
-        const reachable = new Set(this.threads.flatMap((th) => th.tags));
-        const visible = all.filter((x) => (picked.size === 0 ? x.count > 0 : reachable.has(x.name)) || picked.has(x.name))
-            .sort((a, b) => (b.source - a.source) || (b.count - a.count) || a.name.localeCompare(b.name));
+        const local = this.isLocalList();
+        let visible;
+        if (local) {
+            // Spam and drafts carry no tags, only where they came from: the
+            // accounts, filtered here.
+            const items = this.view === "spam" ? this.spam.items : this.drafts;
+            const sourceOf = this.sourceOf();
+            const present = new Set(items.map(sourceOf));
+            const reachable = new Set(this.narrowed(items).map(sourceOf));
+            visible = [...this.sourceTags()].filter((n) => (picked.size === 0 ? present.has(n) : reachable.has(n)) || picked.has(n));
+        } else {
+            let all = [];
+            try { all = this.accounts.length ? await this.api.tags() : []; } catch { all = []; }
+            if (!this.isConnected) return;
+            const reachable = new Set(this.threads.flatMap((th) => th.tags));
+            visible = all.filter((x) => (picked.size === 0 ? x.count > 0 : reachable.has(x.name)) || picked.has(x.name))
+                .sort((a, b) => (b.source - a.source) || (b.count - a.count) || a.name.localeCompare(b.name))
+                .map((x) => x.name);
+        }
         wrapper.hidden = visible.length === 0;
-        strip.replaceChildren(...visible.map((x) => {
+        strip.replaceChildren(...visible.map((name) => {
             const chip = document.createElement("sac-chip");
-            chip.setAttribute("label", x.name);
-            chip.setAttribute("color", fb.tags.colorFor(x.name));
+            chip.setAttribute("label", name);
+            chip.setAttribute("color", fb.tags.colorFor(name));
             chip.setAttribute("clickable", "");
-            if (picked.has(x.name)) chip.setAttribute("selected", "");
+            if (picked.has(name)) chip.setAttribute("selected", "");
             chip.addEventListener("click", () => {
-                this.tags = picked.has(x.name) ? this.tags.filter((n) => n !== x.name) : [...this.tags, x.name];
-                this.loadThreads();
+                this.tags = picked.has(name) ? this.tags.filter((n) => n !== name) : [...this.tags, name];
+                if (local) { this.renderList(); this.renderTagFilter(); } else this.loadThreads();
             });
             return chip;
         }));
+    }
+
+    /** Spam and drafts are read whole and narrowed here, not by the server. */
+    isLocalList() { return this.view === "spam" || this.view === "drafts"; }
+
+    /** An item's account as its source tag. */
+    sourceOf() {
+        const by = new Map(this.accounts.map((a) => [a.id, a.sourceTag]));
+        return (x) => by.get(x.accountId);
+    }
+
+    /** Spam or drafts as the search and the picked accounts narrow them (other tags don't apply there). */
+    narrowed(items) {
+        const sources = this.sourceTags();
+        const picked = this.tags.filter((x) => sources.has(x));
+        const sourceOf = this.sourceOf();
+        const q = this.query.toLowerCase();
+        const text = (x) => [x.fromName, x.fromAddress, x.subject, x.to, x.body].filter(Boolean).join(" ").toLowerCase();
+        return items.filter((x) => picked.every((p) => p === sourceOf(x)) && (!q || text(x).includes(q)));
     }
 
     async loadMore() {
@@ -219,6 +277,9 @@ class FbMailView extends HTMLElement {
                 }
                 fb-mail-view [hidden] { display: none !important; }
                 fb-mail-view .mv-list-pane { height: 100%; background: var(--panel); display: flex; flex-direction: column; }
+                /* The tabs: Inbox, Archive, Drafts, Spam — a count beside a name. */
+                fb-mail-view .mv-tabs { flex: none; padding: 8px 12px 0; }
+                fb-mail-view .mv-tab-count { margin-left: 6px; color: var(--text-muted); font-variant-numeric: tabular-nums; }
                 fb-mail-view .mv-search { padding: 12px 12px 0; }
                 fb-mail-view .mv-search input { width: 100%; box-sizing: border-box; }
                 /* The tag strip, Notes' own: the row layout only — clamp, fade
@@ -337,6 +398,11 @@ class FbMailView extends HTMLElement {
                 fb-mail-view .mv-att:hover { background: var(--hover); }
                 fb-mail-view .mv-att span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
                 fb-mail-view .mv-att .muted { flex: none; }
+                /* A spam message: who, when and which account under the subject. */
+                fb-mail-view .mv-spam-meta { margin: 6px 0 16px; color: var(--text-muted); font-size: 0.8125rem; overflow-wrap: anywhere; }
+                fb-mail-view .mv-spam-actions { margin-bottom: 20px; }
+                fb-mail-view .mv-text.is-waiting { color: var(--text-muted); }
+                fb-mail-view .mv-text a { color: var(--accent); }
                 /* Writing (fb.mailCompose): the fields on one grid, the text
                    below growing with the pane, the actions held at the bottom. */
                 fb-mail-view .mc { display: flex; flex-direction: column; min-height: 100%; padding: 24px 24px 0; box-sizing: border-box; }
@@ -377,6 +443,12 @@ class FbMailView extends HTMLElement {
             <sac-split id="split" collapse show="start" position="${this._splitPosition()}" min-start="300px" min-end="380px"
                        aria-label="${t("resize", "Resize the mail list")}">
                 <aside class="mv-list-pane" slot="start">
+                    <sac-tab-group class="mv-tabs" id="mv-tabs" active="list" overflow="scroll" aria-label="${t("folders", "Mail folders")}" hidden>
+                        <sac-tab name="list">${t("tab-inbox", "Inbox")}<span class="mv-tab-count" hidden></span></sac-tab>
+                        <sac-tab name="archived">${t("tab-archive", "Archive")}</sac-tab>
+                        <sac-tab name="drafts">${t("drafts", "Drafts")}<span class="mv-tab-count" hidden></span></sac-tab>
+                        <sac-tab name="spam">${t("spam", "Spam")}<span class="mv-tab-count" hidden></span></sac-tab>
+                    </sac-tab-group>
                     <div class="mv-search">
                         <input type="search" id="mv-search" placeholder="${t("search", "Search mail")}"/>
                     </div>
@@ -385,9 +457,7 @@ class FbMailView extends HTMLElement {
                     </sac-collapsible>
                     <div class="mv-head">
                         <span class="mv-head-title" id="mv-head-title"></span>
-                        <button type="button" class="icon-btn" data-view="unread" title="${t("only-unread", "Only unread")}" aria-label="${t("only-unread", "Only unread")}"><sac-icon name="eye"></sac-icon></button>
-                        <button type="button" class="icon-btn" data-view="archived" title="${t("archived", "Archived")}" aria-label="${t("archived", "Archived")}"><sac-icon name="archive"></sac-icon></button>
-                        <button type="button" class="icon-btn mv-write" data-view="drafts" title="${t("drafts", "Drafts")}" aria-label="${t("drafts", "Drafts")}"><sac-icon name="pencil"></sac-icon></button>
+                        <button type="button" class="icon-btn" id="mv-unread-only" title="${t("only-unread", "Only unread")}" aria-label="${t("only-unread", "Only unread")}" aria-pressed="false"><sac-icon name="eye"></sac-icon></button>
                         <button type="button" class="icon-btn mv-write" id="mv-refresh" title="${t("refresh", "Fetch new mail")}" aria-label="${t("refresh", "Fetch new mail")}"><sac-icon name="sync"></sac-icon></button>
                         <button type="button" class="icon-btn mv-write" id="mv-new" title="${t("new", "New mail")}" aria-label="${t("new", "New mail")}"><sac-icon name="plus"></sac-icon></button>
                     </div>
@@ -397,13 +467,12 @@ class FbMailView extends HTMLElement {
                 <main class="mv-editor-pane" slot="end" id="mv-pane"></main>
             </sac-split>`;
 
-        for (const btn of this.querySelectorAll(".mv-head [data-view]")) {
-            btn.addEventListener("click", () => {
-                this.view = this.view === btn.dataset.view ? "list" : btn.dataset.view;
-                this.paintHead();
-                this.loadThreads();
-            });
-        }
+        this.querySelector("#mv-tabs").addEventListener("sac:tab-show", (e) => this.setView(e.detail.name));
+        this.querySelector("#mv-unread-only").addEventListener("click", () => {
+            this.unreadOnly = !this.unreadOnly;
+            this.paintHead();
+            this.loadThreads();
+        });
         this.querySelector("#mv-refresh").addEventListener("click", async () => {
             for (const a of this.accounts) { try { await this.api.sync(a.id); } catch { /* the status says */ } }
             sac.toast?.(this.t("fetching", "Fetching new mail…"));
@@ -416,7 +485,10 @@ class FbMailView extends HTMLElement {
         });
         this.querySelector("#mv-search").addEventListener("input", (e) => {
             clearTimeout(this._searchTimer);
-            this._searchTimer = setTimeout(() => { this.query = e.target.value.trim(); this.loadThreads(); }, 250);
+            this._searchTimer = setTimeout(() => {
+                this.query = e.target.value.trim();
+                if (this.isLocalList()) { this.renderList(); this.renderTagFilter(); } else this.loadThreads();
+            }, 250);
         });
         const items = this.querySelector("#mv-items");
         items.addEventListener("scroll", () => {
@@ -425,19 +497,61 @@ class FbMailView extends HTMLElement {
         this.paintHead();
     }
 
+    /** Another tab: its list, the open spam message forgotten. */
+    setView(view) {
+        if (this.view === view) return;
+        this.view = view;
+        this.spamOpen = null;
+        this.paintHead();
+        this.loadThreads();
+    }
+
     paintHead() {
-        const title = this.view === "unread" ? this.t("head-unread", "Unread")
-            : this.view === "archived" ? this.t("head-archived", "Archived")
-            : this.view === "drafts" ? this.t("head-drafts", "Drafts")
-            : this.t("head-all", "Mail");
-        this.querySelector("#mv-head-title").textContent = title;
-        for (const btn of this.querySelectorAll(".mv-head [data-view]")) {
-            btn.classList.toggle("active", btn.dataset.view === this.view);
-            btn.setAttribute("aria-pressed", String(btn.dataset.view === this.view));
-        }
+        const filtered = this.view === "list" || this.view === "archived";
+        const tab = this.view === "archived" ? this.t("tab-archive", "Archive")
+            : this.view === "drafts" ? this.t("drafts", "Drafts")
+            : this.view === "spam" ? this.t("spam", "Spam")
+            : this.t("tab-inbox", "Inbox");
+        this.querySelector("#mv-head-title").textContent =
+            filtered && this.unreadOnly ? `${tab} · ${this.t("head-unread", "Unread")}` : tab;
+        const unread = this.querySelector("#mv-unread-only");
+        unread.hidden = !filtered || !this.accounts.length;
+        unread.classList.toggle("active", this.unreadOnly);
+        unread.setAttribute("aria-pressed", String(this.unreadOnly));
         this.querySelector("#mv-refresh").hidden = !this.writable || !this.accounts.length;
         this.querySelector("#mv-new").hidden = !this.writable || !this.accounts.length;
-        this.querySelector(".mv-head [data-view='drafts']").hidden = !this.writable || !this.accounts.length;
+        this.paintTabs();
+    }
+
+    /** The tabs: the one shown, and the counts — Inbox unread, Drafts, new Spam. */
+    paintTabs() {
+        const tabs = this.querySelector("#mv-tabs");
+        if (!tabs) return;
+        tabs.hidden = !this.accounts.length;
+        if (tabs.active !== this.view) tabs.active = this.view;
+        tabs.querySelector("sac-tab[name='drafts']").hidden = !this.writable;
+        const count = (name, n) => {
+            const el = tabs.querySelector(`sac-tab[name='${name}'] .mv-tab-count`);
+            el.textContent = n > 99 ? "99+" : String(n);
+            el.hidden = !n;
+        };
+        count("list", this.unreadCount);
+        count("drafts", this.draftCount);
+        count("spam", this.spamFresh());
+    }
+
+    /** The Inbox's unread and the caller's drafts, for the tabs. */
+    async loadCounts() {
+        try {
+            const [unread, drafts] = await Promise.all([
+                this.api.unreadCount(),
+                this.writable ? this.api.drafts() : Promise.resolve([]),
+            ]);
+            if (!this.isConnected) return;
+            this.unreadCount = unread.unread || 0;
+            this.draftCount = drafts.length;
+            this.paintTabs();
+        } catch (err) { console.warn("[fb-mail-view] counts failed:", err?.status); }
     }
 
     /** One line about the accounts: one that fails, else one that fetches. */
@@ -480,10 +594,11 @@ class FbMailView extends HTMLElement {
         const box = this.querySelector("#mv-items");
         if (!box) return;
         if (this.view === "drafts") { this.renderDrafts(box); return; }
+        if (this.view === "spam") { this.renderSpam(box); return; }
         if (!this.threads.length) {
             const text = !this.accounts.length ? this.t("no-mail", "No mail")
                 : this.query ? this.t("no-match", "Nothing matches")
-                : this.view === "unread" ? this.t("no-unread", "Nothing unread")
+                : this.unreadOnly ? this.t("no-unread", "Nothing unread")
                 : this.view === "archived" ? this.t("no-archived", "Nothing archived")
                 : this.t("no-mail", "No mail");
             box.innerHTML = `<div class="mv-none"></div>`;
@@ -573,6 +688,7 @@ class FbMailView extends HTMLElement {
             try {
                 await this.api.setSeen(threadId, true);
                 if (th) { th.unread = 0; this.renderList(); }
+                this.loadCounts();
             } catch (err) { console.warn("[fb-mail-view] seen failed:", err?.status); }
         }
     }
@@ -637,6 +753,7 @@ class FbMailView extends HTMLElement {
                 await this.api.setSeen(threadId, false);
                 const th = this.threads.find((x) => x.threadId === threadId);
                 if (th) { th.unread = Math.max(1, th.unread); this.renderList(); }
+                this.loadCounts();
                 sac.toast?.(this.t("marked-unread", "Marked unread."));
             } catch (err) { sac.toast?.(fb.errors.text(err, this.t("failed", "That didn't work.")), { kind: "error" }); }
         });
@@ -746,6 +863,13 @@ class FbMailView extends HTMLElement {
 
     /** A conversation row's context menu: open it, read / unread, delete. */
     rowItems(row) {
+        if (row.dataset.spam) {
+            const item = this.spam.items.find((i) => `${i.accountId}:${i.uid}` === row.dataset.spam);
+            if (!item) return null;
+            const items = [{ id: "open", label: fb.t("fb.common.open", "Open"), icon: "fb-spam", onClick: () => this.openSpam(item) }];
+            if (this.writable) items.push({ id: "not-spam", label: this.t("not-spam", "Not spam"), icon: "fb-inbox", onClick: () => this.notSpam(item) });
+            return items;
+        }
         if (row.dataset.draft) {
             const id = row.dataset.draft;
             return [
@@ -777,19 +901,216 @@ class FbMailView extends HTMLElement {
             await this.api.setSeen(th.threadId, seen);
             th.unread = seen ? 0 : Math.max(1, th.unread);
             this.renderList();
+            this.loadCounts();
         } catch (err) { sac.toast?.(fb.errors.text(err, this.t("failed", "That didn't work.")), { kind: "error" }); }
+    }
+
+    /**
+     * A mail's text with its web addresses as links: only http(s), the link
+     * always the address shown (text can't hide where it goes), in a new tab
+     * that learns nothing of Fishbowl (noopener, noreferrer). With `warn`
+     * (spam) a link first says where it goes and what spam does there.
+     */
+    fillText(el, text, { warn = false } = {}) {
+        el.replaceChildren();
+        let at = 0;
+        for (const match of text.matchAll(/\bhttps?:\/\/[^\s<>"]+/gi)) {
+            let url = match[0];
+            // Sentence punctuation and an unopened closing bracket aren't the address's.
+            for (;;) {
+                const last = url.at(-1);
+                const close = { ")": "(", "]": "[", "}": "{" }[last];
+                if (/[.,;:!?'*]/.test(last)) url = url.slice(0, -1);
+                else if (close && url.split(close).length < url.split(last).length) url = url.slice(0, -1);
+                else break;
+            }
+            let ok = false;
+            try { ok = ["http:", "https:"].includes(new URL(url).protocol); } catch { /* not an address */ }
+            if (!ok) continue;
+            el.append(text.slice(at, match.index));
+            const a = document.createElement("a");
+            a.href = url;
+            a.textContent = url;
+            a.target = "_blank";
+            a.rel = "noopener noreferrer";
+            if (warn) {
+                a.addEventListener("click", (e) => { e.preventDefault(); this.openWarned(url); });
+                a.addEventListener("auxclick", (e) => { if (e.button === 1) { e.preventDefault(); this.openWarned(url); } });
+            }
+            el.append(a);
+            at = match.index + url.length;
+        }
+        el.append(text.slice(at));
+    }
+
+    /** A link from spam: where it really goes (the host as the browser reads it — a look-alike shows as xn--…), then open or not. */
+    async openWarned(url) {
+        const answer = await sac.dialog.confirm({
+            title: this.t("link-title", "Open a link from spam?"),
+            message: [
+                this.t("link-where", "It goes to {host}:", { host: new URL(url).hostname }),
+                url,
+                this.t("link-warn", "Spam often leads to fake sign-in pages. Don't enter a password or payment details there."),
+            ],
+            buttons: [
+                { action: "cancel", label: fb.t("fb.common.cancel", "Cancel"), kind: "primary" },
+                { action: "open", label: this.t("link-open", "Open link"), kind: "destructive" },
+            ],
+        });
+        if (answer === "open") window.open(url, "_blank", "noopener,noreferrer");
+    }
+
+    // ------------------------------------------------------------ spam --
+
+    _spamSeenKey() { return `fb.mail.spam-seen.${this.ws}`; }
+
+    /** Reads the spam folders; false when a later read overtook this one. */
+    async loadSpam() {
+        const token = this._spamRead = (this._spamRead || 0) + 1;
+        let spam;
+        try { spam = await this.api.spam(); }
+        catch (err) { console.warn("[fb-mail-view] spam failed:", err?.status); spam = { items: [], failed: [], error: err }; }
+        if (token !== this._spamRead || !this.isConnected) return false;
+        this.spam = { ...spam, loaded: true };
+        // Looking at the Spam view is the last look: its count goes.
+        if (this.view === "spam" && this.spam.items.length) {
+            try { localStorage.setItem(this._spamSeenKey(), this.spam.items[0].date); } catch { /* storage off */ }
+        }
+        this.paintTabs();
+        return true;
+    }
+
+    /** Now and then, beside the list: is there new spam since the last look? */
+    async checkSpam() {
+        if (!this.accounts.length || this.view === "spam" || Date.now() - (this._spamAt || 0) < 5 * 60 * 1000) return;
+        this._spamAt = Date.now();
+        await this.loadSpam();
+    }
+
+    /** Spam that came since the last look (none while looking). */
+    spamFresh() {
+        if (this.view === "spam") return 0;
+        let seen = "";
+        try { seen = localStorage.getItem(this._spamSeenKey()) || ""; } catch { /* storage off */ }
+        return this.spam.items.filter((i) => i.date > seen).length;
+    }
+
+    renderSpam(box) {
+        const failedNames = this.spam.failed.map((id) => this.accounts.find((a) => a.id === id)?.name || id);
+        const rows = this.narrowed(this.spam.items).map((item) => {
+            const row = document.createElement("div");
+            row.dataset.spam = `${item.accountId}:${item.uid}`;
+            row.className = "mv-item" + (row.dataset.spam === this.spamOpen ? " selected" : "");
+            row.innerHTML = `
+                <sac-icon class="mv-dir" name="fb-spam"></sac-icon>
+                <div class="mv-item-text">
+                    <div class="mv-line"><span class="mv-who"></span><span class="mv-when"></span></div>
+                    <div class="mv-line"><span class="mv-subject"></span></div>
+                    <div class="mv-item-tags"></div>
+                </div>`;
+            row.querySelector(".mv-who").textContent = item.fromName || item.fromAddress || this.t("unknown-sender", "(unknown sender)");
+            row.querySelector(".mv-when").textContent = this.when(item.date);
+            row.querySelector(".mv-subject").textContent = item.subject || this.t("no-subject", "(no subject)");
+            const tags = row.querySelector(".mv-item-tags");
+            const account = this.accounts.find((a) => a.id === item.accountId);
+            if (this.accounts.length > 1 && account) {
+                const chip = document.createElement("sac-chip");
+                chip.setAttribute("label", account.sourceTag);
+                chip.setAttribute("color", fb.tags.colorFor(account.sourceTag));
+                tags.appendChild(chip);
+            } else tags.remove();
+            row.addEventListener("click", () => this.openSpam(item));
+            return row;
+        });
+        if (!rows.length) {
+            const none = document.createElement("div");
+            none.className = "mv-none";
+            none.textContent = !this.spam.loaded ? this.t("spam-reading", "Reading the spam folders…")
+                : this.spam.error ? fb.errors.text(this.spam.error, this.t("spam-unreadable", "Spam can't be read right now."))
+                : this.spam.items.length ? this.t("no-match", "Nothing matches")
+                : this.t("no-spam", "Nothing in spam");
+            rows.push(none);
+        }
+        if (failedNames.length) {
+            const failed = document.createElement("div");
+            failed.className = "mv-none";
+            failed.textContent = this.t("spam-failed", "Spam of {names} can't be read right now.", { names: failedNames.join(", ") });
+            rows.push(failed);
+        }
+        box.replaceChildren(...rows);
+    }
+
+    /** A spam message as plain text — never its HTML — with "Not spam". */
+    async openSpam(item) {
+        await this.leaveCompose();
+        const key = `${item.accountId}:${item.uid}`;
+        this.selectedId = null;
+        this.spamOpen = key;
+        for (const row of this.querySelectorAll(".mv-item")) row.classList.toggle("selected", row.dataset.spam === key);
+        const split = this.querySelector("#split");
+        if (split) split.show = "end";
+        const pane = this.querySelector("#mv-pane");
+        // What the row knows shows at once; the text comes from the server.
+        pane.innerHTML = `
+            <div class="mv-thread">
+                <div class="mv-thread-head"><h2></h2></div>
+                <p class="mv-spam-meta"></p>
+                <div class="toolbar mv-spam-actions">
+                    <button type="button" class="btn primary" id="mv-not-spam"><sac-icon name="fb-inbox"></sac-icon> ${this.t("not-spam", "Not spam")}</button>
+                </div>
+                <pre class="mv-text"></pre>
+                <p class="mv-spam-meta" id="mv-spam-atts" hidden></p>
+            </div>`;
+        pane.querySelector("h2").textContent = item.subject || this.t("no-subject", "(no subject)");
+        const from = item.fromName ? `${item.fromName} <${item.fromAddress}>` : (item.fromAddress || "");
+        const account = this.accounts.find((a) => a.id === item.accountId)?.name || "";
+        pane.querySelector(".mv-spam-meta").textContent =
+            [from, `${fb.format.date(new Date(item.date))} ${fb.format.time(new Date(item.date))}`, account].filter(Boolean).join(" · ");
+        const button = pane.querySelector("#mv-not-spam");
+        button.hidden = !this.writable;
+        button.addEventListener("click", () => this.notSpam(item));
+        const text = pane.querySelector(".mv-text");
+        text.classList.add("is-waiting");
+        text.textContent = fb.t("fb.common.loading", "Loading…");
+
+        let m;
+        try { m = await this.api.spamMessage(item.accountId, item.uid); }
+        catch (err) {
+            if (this.spamOpen === key && text.isConnected)
+                text.textContent = fb.errors.text(err, this.t("load-failed", "The conversation can't be loaded right now."));
+            return;
+        }
+        if (this.spamOpen !== key || !text.isConnected) return;
+        text.classList.remove("is-waiting");
+        this.fillText(text, m.text || "", { warn: true });
+        if (m.attachments?.length) {
+            const atts = pane.querySelector("#mv-spam-atts");
+            atts.textContent = this.t("spam-attachments", "Attachments: {names}", { names: m.attachments.join(", ") });
+            atts.hidden = false;
+        }
+    }
+
+    async notSpam(item) {
+        try { await this.api.notSpam(item.accountId, item.uid, item.uidValidity); }
+        catch (err) { sac.toast?.(fb.errors.text(err, this.t("failed", "That didn't work.")), { kind: "error" }); return; }
+        sac.toast?.(this.t("not-spam-done", "Moved to the inbox."));
+        this.spam.items = this.spam.items.filter((i) => i !== item);
+        this.spamOpen = null;
+        if (this.view === "spam") this.renderList();
+        this.showNone();
     }
 
     // ---------------------------------------------------------- writing --
 
     renderDrafts(box) {
-        if (!this.drafts.length) {
+        const shown = this.narrowed(this.drafts);
+        if (!shown.length) {
             box.innerHTML = `<div class="mv-none"></div>`;
-            box.firstElementChild.textContent = this.t("no-drafts", "No drafts");
+            box.firstElementChild.textContent = this.drafts.length ? this.t("no-match", "Nothing matches") : this.t("no-drafts", "No drafts");
             return;
         }
         const open = this._compose?.id;
-        box.replaceChildren(...this.drafts.map((d) => {
+        box.replaceChildren(...shown.map((d) => {
             const row = document.createElement("div");
             row.className = "mv-item" + (d.id === open ? " selected" : "");
             row.dataset.draft = d.id;
@@ -857,13 +1178,15 @@ class FbMailView extends HTMLElement {
         if (!c) return;
         await c.leave();
         if (this.view === "drafts") this.loadThreads();
+        else this.loadCounts();
     }
 
     async composeClosed(draft, result) {
         this._compose = null;
         if (result?.sent) {
             sac.toast?.(this.t("sent-done", "Sent."));
-            if (this.view === "drafts" || this.view === "archived") { this.view = "list"; this.paintHead(); }
+            if (this.view !== "list") { this.view = "list"; this.paintHead(); }
+            this.loadCounts();
             await this.loadThreads();
             this.open(result.sent.threadId);
             return;
@@ -1005,7 +1328,7 @@ class FbMailView extends HTMLElement {
         } else {
             const pre = document.createElement("pre");
             pre.className = "mv-text";
-            pre.textContent = m.bodyText || "";
+            this.fillText(pre, m.bodyText || "");
             body.appendChild(pre);
         }
         if (m.attachments?.length) {

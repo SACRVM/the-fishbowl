@@ -592,6 +592,7 @@ window.sac?.i18n?.add?.("de", {
     "fb.errors.mail_unreachable": "Der Mailserver ist nicht erreichbar — prüfe Servername und Port.",
     "fb.errors.mail_tls_failed": "Die sichere Verbindung zum Mailserver ist fehlgeschlagen.",
     "fb.errors.archive_folder_missing": "Das Mailkonto hat keinen Archivordner.",
+    "fb.errors.spam_changed": "Der Spam-Ordner hat sich geändert — lade ihn neu.",
     "fb.errors.mail_too_large": "Die Anhänge einer Mail dürfen zusammen 25 MB groß sein.",
     "fb.errors.no_recipients": "Die Mail braucht mindestens einen Empfänger.",
     "fb.errors.send_blocked": "Die Mail ließ sich so nicht senden.",

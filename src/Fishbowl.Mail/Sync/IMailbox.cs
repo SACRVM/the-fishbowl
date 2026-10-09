@@ -44,8 +44,8 @@ public sealed record SyncFlags(uint Uid, bool Seen, bool Flagged);
 public interface IMailbox : IAsyncDisposable
 {
     Task<IReadOnlyList<FolderInfo>> ListFoldersAsync(CancellationToken ct);
-    /// <summary>The server folder that plays a role — "inbox", "sent" or
-    /// "archive" (Gmail: All Mail) — or null when the account has none.</summary>
+    /// <summary>The server folder that plays a role — "inbox", "sent",
+    /// "archive" (Gmail: All Mail) or "junk" (spam) — or null when the account has none.</summary>
     Task<string?> RoleFolderAsync(string role, CancellationToken ct);
     Task<SyncFolderStatus> StatusAsync(string folder, CancellationToken ct);
     /// <summary>Every UID in the folder now.</summary>
@@ -76,6 +76,9 @@ public interface IMailbox : IAsyncDisposable
     /// copied — the Inbox label goes on; a move out of All Mail would delete).</summary>
     Task<MailTransfer> UnarchiveAsync(string archive, IReadOnlyList<uint> uids, string inbox, CancellationToken ct) =>
         throw new NotSupportedException("This mailbox can't archive.");
+    /// <summary>Moves messages to another folder (out of spam into the inbox).</summary>
+    Task<MailTransfer> MoveAsync(string folder, IReadOnlyList<uint> uids, string target, CancellationToken ct) =>
+        throw new NotSupportedException("This mailbox can't move.");
     /// <summary>Sends a message over the account's SMTP server and files a
     /// copy in <paramref name="sent"/> (the server's Sent folder) unless the
     /// provider does that itself (Gmail). Returns the copy's UID there when it

@@ -130,9 +130,9 @@ public class MailTests
             await page.ScreenshotAsync(new() { Path = Shot("plain") });
 
             // Archived and search.
-            await page.Locator("fb-mail-view .mv-head [data-view='archived']").ClickAsync();
+            await page.Locator("fb-mail-view #mv-tabs sac-tab[name='archived']").ClickAsync();
             await Assertions.Expect(page.Locator("fb-mail-view .mv-item", new() { HasText = "Old project" })).ToHaveCountAsync(1);
-            await page.Locator("fb-mail-view .mv-head [data-view='archived']").ClickAsync();
+            await page.Locator("fb-mail-view #mv-tabs sac-tab[name='list']").ClickAsync();
             await page.Locator("#mv-search").FillAsync("variables");
             await Assertions.Expect(rows).ToHaveCountAsync(1);
             await Assertions.Expect(rows.First).ToContainTextAsync("Analytical engine notes");
@@ -258,7 +258,7 @@ public class MailTests
             Assert.EndsWith("|rgb(255, 255, 255)", await frame.EvaluateAsync<string>(inFrame, "h1"));
 
             // The adaptive one: its dark rules apply, on the app's ground.
-            await page.Locator("fb-mail-view .mv-head [data-view='archived']").ClickAsync();
+            await page.Locator("fb-mail-view #mv-tabs sac-tab[name='archived']").ClickAsync();
             await rows.Filter(new() { HasText = "Old project" }).ClickAsync();
             await Assertions.Expect(frame).ToHaveClassAsync(new System.Text.RegularExpressions.Regex(@"\bown-dark\b"));
             await page.WaitForFunctionAsync("() => document.querySelector('fb-mail-view iframe.mv-html')?.contentDocument?.querySelector('.t')");
@@ -269,7 +269,7 @@ public class MailTests
             await page.EmulateMediaAsync(new() { ColorScheme = ColorScheme.Dark });
             await page.EvaluateAsync("() => localStorage.setItem('sac-theme', 'light')");
             await page.ReloadAsync();
-            await page.Locator("fb-mail-view .mv-head [data-view='archived']").ClickAsync();
+            await page.Locator("fb-mail-view #mv-tabs sac-tab[name='archived']").ClickAsync();
             await rows.Filter(new() { HasText = "Old project" }).ClickAsync();
             await page.WaitForFunctionAsync("() => document.querySelector('fb-mail-view iframe.mv-html')?.contentDocument?.querySelector('.t')");
             await Assertions.Expect(frame).Not.ToHaveClassAsync(new System.Text.RegularExpressions.Regex(@"\bown-dark\b"));
@@ -354,8 +354,7 @@ public class MailTests
             await Assertions.Expect(page.Locator("fb-mail-view .mv-empty")).ToBeVisibleAsync();
 
             // Under Archived, with "Move to inbox" in its head.
-            var archivedView = page.Locator("fb-mail-view [data-view='archived']");
-            await archivedView.ClickAsync();
+            await page.Locator("fb-mail-view #mv-tabs sac-tab[name='archived']").ClickAsync();
             await Assertions.Expect(engine).ToBeVisibleAsync();
             await engine.ClickAsync();
             await Assertions.Expect(page.Locator("fb-mail-view #mv-archive")).ToHaveAttributeAsync("title", "Move to inbox");
@@ -369,7 +368,7 @@ public class MailTests
             await Assertions.Expect(engine).ToHaveCountAsync(0);
             await page.Locator("#sac-toast-stack .toast").Filter(new() { HasText = "Moved to the inbox." }).Locator("button.action").ClickAsync();
             await Assertions.Expect(engine).ToBeVisibleAsync();
-            await archivedView.ClickAsync();   // the list again: not in it
+            await page.Locator("fb-mail-view #mv-tabs sac-tab[name='list']").ClickAsync();   // the inbox again: not in it
             await Assertions.Expect(rows).ToHaveCountAsync(2);
             await page.ScreenshotAsync(new() { Path = Shot("archived") });
         }
@@ -421,7 +420,8 @@ public class MailTests
             await rows.Filter(new() { HasText = "Your invoice" }).ClickAsync();
             await Assertions.Expect(compose).ToHaveCountAsync(0);
 
-            var drafts = page.Locator("fb-mail-view [data-view='drafts']");
+            var drafts = page.Locator("fb-mail-view #mv-tabs sac-tab[name='drafts']");
+            await Assertions.Expect(drafts.Locator(".mv-tab-count")).ToHaveTextAsync("1");
             await drafts.ClickAsync();
             var draft = rows.Filter(new() { HasText = "Hello Grace" });
             await Assertions.Expect(draft).ToContainTextAsync("Grace");
@@ -437,6 +437,66 @@ public class MailTests
             await menu.Locator("button[data-action]", new() { HasText = "Discard" }).ClickAsync();
             await Assertions.Expect(page.Locator("fb-mail-view .mv-none")).ToHaveTextAsync("No drafts");
             await Assertions.Expect(compose).ToHaveCountAsync(0);
+        }
+        finally
+        {
+            await page.APIRequest.DeleteAsync($"{_fixture.BaseUrl}/api/v1/spaces/{slug}?archive=false");
+            await context.CloseAsync();
+        }
+    }
+
+    // Spam, read live: the Spam button counts what came since the last look;
+    // the view shows each as text, and "Not spam" brings one into the list.
+    [Fact]
+    public async Task Mail_Spam_CountsNew_ShowsText_NotSpamBringsItIn_Test()
+    {
+        var (context, page, slug, _) = await SpaceWithMailAsync();
+        try
+        {
+            await page.GotoAsync($"{_fixture.BaseUrl}/#/space/{slug}/mail");
+            var rows = page.Locator("fb-mail-view .mv-item");
+            await Assertions.Expect(rows).ToHaveCountAsync(3, new() { Timeout = 15000 });
+            await Assertions.Expect(rows.Filter(new() { HasText = "Contract renewal" })).ToHaveCountAsync(0);
+            var spam = page.Locator("fb-mail-view #mv-tabs sac-tab[name='spam']");
+            await Assertions.Expect(spam.Locator(".mv-tab-count")).ToHaveTextAsync("2", new() { Timeout = 15000 });
+
+            await spam.ClickAsync();
+            await Assertions.Expect(rows).ToHaveCountAsync(2);
+            await Assertions.Expect(spam.Locator(".mv-tab-count")).ToBeHiddenAsync();
+            // Search and the account's chip stay, and narrow the spam here.
+            var search = page.Locator("fb-mail-view #mv-search");
+            await search.FillAsync("prize");
+            await Assertions.Expect(rows).ToHaveCountAsync(1);
+            await search.FillAsync("");
+            await Assertions.Expect(rows).ToHaveCountAsync(2);
+            await Assertions.Expect(page.Locator("fb-mail-view #mv-tag-filter sac-chip")).ToHaveCountAsync(1);
+            await rows.Filter(new() { HasText = "Contract renewal" }).ClickAsync();
+            await Assertions.Expect(page.Locator("fb-mail-view #mv-pane h2")).ToHaveTextAsync("Contract renewal");
+            await Assertions.Expect(page.Locator("fb-mail-view #mv-pane .mv-text")).ToContainTextAsync("renewal by Friday");
+            await Assertions.Expect(page.Locator("fb-mail-view #mv-pane iframe")).ToHaveCountAsync(0);   // never its HTML
+            // Its address is a link — the bracket after it isn't — and from spam it warns first.
+            var link = page.Locator("fb-mail-view #mv-pane .mv-text a");
+            await Assertions.Expect(link).ToHaveAttributeAsync("href", "https://example.org/sign");
+            await link.ClickAsync();
+            var warning = page.Locator("sac-dialog[title='Open a link from spam?']");
+            await Assertions.Expect(warning.GetByText("It goes to example.org:")).ToBeVisibleAsync();
+            await warning.GetByRole(AriaRole.Button, new() { Name = "Cancel", Exact = true }).ClickAsync();
+            await Assertions.Expect(warning).ToHaveCountAsync(0);
+            await page.ScreenshotAsync(new() { Path = Shot("spam") });
+
+            await page.Locator("fb-mail-view #mv-not-spam").ClickAsync();
+            await Assertions.Expect(page.Locator("#sac-toast-stack .toast").Filter(new() { HasText = "Moved to the inbox." })).ToBeVisibleAsync();
+            await Assertions.Expect(rows).ToHaveCountAsync(1);
+
+            // The sync brings it in like any mail.
+            await page.Locator("fb-mail-view #mv-tabs sac-tab[name='list']").ClickAsync();
+            var renewal = rows.Filter(new() { HasText = "Contract renewal" });
+            for (var i = 0; i < 20 && await renewal.CountAsync() == 0; i++)
+            {
+                await page.WaitForTimeoutAsync(1000);
+                await page.Locator("fb-mail-view #mv-search").FillAsync(i % 2 == 0 ? " " : "");
+            }
+            await Assertions.Expect(renewal).ToBeVisibleAsync(new() { Timeout = 5000 });
         }
         finally
         {
