@@ -449,6 +449,33 @@ public class MailRepository : IMailRepository
                 .Select(l => new MailLocationRef(l.AccountId, l.Role, (uint)l.Uid)).ToList();
         }, ct);
 
+    /// <summary>
+    /// Every unread conversation of the list (or of the archive) read at once —
+    /// by the list's own rule (decision 3), whatever is loaded or filtered —
+    /// and where its messages lie, for the server. In SQL, not by ids: an inbox
+    /// may hold more unread mail than a statement takes parameters.
+    /// </summary>
+    public async Task<(int Conversations, IReadOnlyList<MailLocationRef> Places)> MarkAllSeenAsync(ContextRef ctx, bool archived, CancellationToken ct = default) =>
+        await _db.WithContextTransactionAsync<(int, IReadOnlyList<MailLocationRef>)>(ctx, async (db, tx, token) =>
+        {
+            const string unread = @"
+                SELECT m.id FROM mail_messages m
+                WHERE m.direction = 'in' AND m.seen = 0 AND m.thread_id IN (
+                    SELECT thread_id FROM mail_messages GROUP BY thread_id
+                    HAVING MAX(CASE WHEN state IN ('inbox', 'sent') THEN 1 ELSE 0 END) = @active)";
+            var active = archived ? 0 : 1;
+            var conversations = await db.ExecuteScalarAsync<int>(new CommandDefinition(
+                $"SELECT COUNT(DISTINCT thread_id) FROM mail_messages WHERE id IN ({unread})", new { active }, tx, cancellationToken: token));
+            if (conversations == 0) return (0, []);
+            var places = (await db.QueryAsync<(string AccountId, string Role, long Uid)>(new CommandDefinition(
+                $"SELECT account_id, role, uid FROM mail_locations WHERE message_id IN ({unread})", new { active }, tx, cancellationToken: token)))
+                .Select(l => new MailLocationRef(l.AccountId, l.Role, (uint)l.Uid)).ToList();
+            await db.ExecuteAsync(new CommandDefinition(
+                $"UPDATE mail_messages SET seen = 1, updated_at = @now WHERE id IN ({unread})",
+                new { active, now = Iso(DateTime.UtcNow) }, tx, cancellationToken: token));
+            return (conversations, places);
+        }, ct);
+
     public async Task<IReadOnlyList<MailLocationRef>> LocationsAsync(ContextRef ctx, string messageId, CancellationToken ct = default)
     {
         using var db = _db.CreateContextConnection(ctx);

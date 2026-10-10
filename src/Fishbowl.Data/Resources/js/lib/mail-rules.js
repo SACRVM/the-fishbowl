@@ -274,7 +274,7 @@
                 tags.value = rule.addTags;
                 fb.tags.all().then((all) => {
                     tags.suggestions = all.filter((x) => x.userAssignable !== false)
-                        .map((x) => ({ name: x.name, color: x.color, count: x.usageCount }));
+                        .map((x) => ({ name: x.name, color: x.color, count: x.mailCount }));
                 }).catch(() => { /* no suggestions — typing still works */ });
                 tags.addEventListener("sac:create", async (e) => {
                     try { await fb.api.tags.upsertColor(e.detail.name, e.detail.color); fb.tags.invalidate(); }

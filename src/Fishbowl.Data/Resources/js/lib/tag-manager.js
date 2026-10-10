@@ -1,10 +1,12 @@
 /**
- * fb.tagManager — the "Manage tags" window.
+ * fb.tagManager — the "Manage tags" window, in Notes and in Mail: a tag is
+ * the workspace's, not an app's.
  *
  * Built from kit parts, no component of its own: a <sac-window> whose
- * light-DOM body lists every tag with an inline rename field, the palette
- * as a <sac-swatch-grid>, its usage count and a delete button (sac.dialog
- * confirms when the tag is in use); a system tag carries a <sac-chip>.
+ * light-DOM body lists every tag with an inline rename field, where it is
+ * used (notes, mail conversations, mail rules), the palette as a
+ * <sac-swatch-grid> and a delete button (sac.dialog confirms when the tag
+ * is used anywhere); a system tag carries a <sac-chip>.
  * Row layout lives in app.css under .fb-tags-*.
  *
  * System tags (source:mcp, review:pending) keep their name — workflows key
@@ -68,15 +70,23 @@
             ${system ? `<sac-chip class="fb-tags-badge" label="${fb.t("fb.notes.tags.system-chip", "system")}" title="${fb.t("fb.notes.tags.system", "System tag")}"></sac-chip>` : ""}
             <input class="fb-tags-name" type="text" aria-label="${fb.t("fb.notes.tags.name", "Tag name")}"
                    ${system ? `readonly title="${fb.t("fb.notes.tags.protected", "System tag — the name is protected")}"` : ""}>
+            <span class="fb-tags-count"></span>
             <sac-swatch-grid selectable columns="${fb.tags.SLOTS.length}" aria-label="${fb.t("fb.notes.tags.colour", "Tag colour")}"></sac-swatch-grid>
-            <span class="fb-tags-count" title="${fb.t("fb.notes.tags.count", "Notes using this tag")}"></span>
             ${system ? "" : `<button type="button" class="icon-btn fb-tags-delete" title="${fb.t("fb.notes.tags.delete", "Delete tag")}" aria-label="${fb.t("fb.notes.tags.delete", "Delete tag")}">
                                  <sac-icon name="trash"></sac-icon></button>`}`;
 
         // User-sourced strings go in through properties, never markup.
         const nameInput = row.querySelector(".fb-tags-name");
         nameInput.value = tag.name;
-        row.querySelector(".fb-tags-count").textContent = String(tag.usageCount || 0);
+        const uses = usesOf(tag);
+        row.querySelector(".fb-tags-count").replaceChildren(...uses.map((u) => {
+            const part = document.createElement("span");
+            part.title = u.text;
+            part.setAttribute("aria-label", u.text);
+            part.innerHTML = `<sac-icon name="${u.icon}"></sac-icon>`;
+            part.append(String(u.n));
+            return part;
+        }));
 
         let currentName = tag.name;
 
@@ -129,14 +139,12 @@
 
         row.querySelector(".fb-tags-delete")?.addEventListener("click", async () => {
             // Unused tags go silently — nothing to lose. A tag in use comes
-            // off every note that carries it, so ask first.
-            const used = tag.usageCount || 0;
-            if (used > 0) {
+            // off every note, conversation and rule that carries it, so ask first.
+            if (uses.length) {
                 const answer = await sac.dialog.confirm({
                     title: fb.t("fb.notes.tags.delete-title", "Delete tag \"{name}\"?", { name: currentName }),
-                    message: used === 1
-                        ? fb.t("fb.notes.tags.delete-msg-1", "Used by 1 note. Deleting removes the tag from it. The note itself stays.")
-                        : fb.t("fb.notes.tags.delete-msg", "Used by {n} notes. Deleting removes the tag from all of them. The notes themselves stay.", { n: used }),
+                    message: fb.t("fb.tags.delete-msg", "Used by {uses}. Deleting takes the tag off all of them; they themselves stay.",
+                        { uses: uses.map((u) => u.text).join(", ") }),
                     buttons: [
                         { action: "cancel", label: fb.t("fb.common.cancel", "Cancel"), kind: "default" },
                         { action: "delete", label: fb.t("fb.common.delete", "Delete"), kind: "destructive", armAfterMs: 1500 },
@@ -154,6 +162,19 @@
         });
 
         return row;
+    }
+
+    /** Where a tag is used: notes, mail conversations, mail rules — the kinds it is on. */
+    function usesOf(tag) {
+        const kinds = [
+            { n: tag.usageCount || 0, icon: "note", one: ["fb.tags.notes-1", "1 note"], many: ["fb.tags.notes", "{n} notes"] },
+            { n: tag.mailCount || 0, icon: "mail", one: ["fb.tags.mails-1", "1 conversation"], many: ["fb.tags.mails", "{n} conversations"] },
+            { n: tag.ruleCount || 0, icon: "fb-rule", one: ["fb.tags.rules-1", "1 mail rule"], many: ["fb.tags.rules", "{n} mail rules"] },
+        ];
+        return kinds.filter((k) => k.n > 0).map((k) => ({
+            n: k.n, icon: k.icon,
+            text: k.n === 1 ? fb.t(...k.one) : fb.t(k.many[0], k.many[1], { n: k.n }),
+        }));
     }
 
     fb.tagManager = { open };

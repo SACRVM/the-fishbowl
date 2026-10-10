@@ -283,12 +283,19 @@ public sealed class ImapMailbox : IMailbox
 }
 
 /// <summary>Opens <see cref="ImapMailbox"/>es with a password the caller holds.</summary>
-public sealed class ImapMailboxConnector(ILoggerFactory? loggers = null) : IMailboxConnector
+public sealed class ImapMailboxConnector(ILoggerFactory? loggers = null) : IMailboxConnector, IAsyncDisposable
 {
-    public IMailbox Open(ResolvedAccount account, string password)
-    {
-        var auth = new PasswordAuthenticator(_ => password);
-        return new ImapMailbox(new MailboxSession(account, auth, new MailLimits(),
-            (loggers ?? NullLoggerFactory.Instance).CreateLogger<MailboxSession>()), account, auth);
-    }
+    // A signed-in connection is kept a little after use: the next action on
+    // the account skips connecting and signing in (MailboxPool).
+    private readonly MailboxPool _pool = new();
+
+    public IMailbox Open(ResolvedAccount account, string password) =>
+        _pool.Lease(account.Id, MailboxPool.KeyFor(account, password), () =>
+        {
+            var auth = new PasswordAuthenticator(_ => password);
+            return new ImapMailbox(new MailboxSession(account, auth, new MailLimits(),
+                (loggers ?? NullLoggerFactory.Instance).CreateLogger<MailboxSession>()), account, auth);
+        });
+
+    public ValueTask DisposeAsync() => _pool.DisposeAsync();
 }

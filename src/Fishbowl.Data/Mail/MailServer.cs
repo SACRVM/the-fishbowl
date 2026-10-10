@@ -68,7 +68,7 @@ public sealed class MailServer
     // ---- spam (read live, never stored) ----
 
     public sealed record SpamItem(string AccountId, uint Uid, uint UidValidity, string? FromName, string? FromAddress,
-        string? Subject, DateTimeOffset Date);
+        string? Subject, DateTimeOffset Date, bool Seen);
 
     public sealed record SpamMessage(SpamItem Item, IReadOnlyList<string> To, string? Text, IReadOnlyList<string> Attachments);
 
@@ -99,7 +99,7 @@ public sealed class MailServer
                 var uids = (await box.UidsAsync(folder, ct)).OrderByDescending(u => u).Take(perAccount).ToList();
                 if (uids.Count == 0) return [];
                 return (await box.HeadersAsync(folder, uids, ct)).Select(h => new SpamItem(accountId, h.Uid, status.UidValidity,
-                    h.From?.Name, h.From?.Address, h.Subject, h.Date ?? h.InternalDate ?? DateTimeOffset.MinValue)).ToList();
+                    h.From?.Name, h.From?.Address, h.Subject, h.Date ?? h.InternalDate ?? DateTimeOffset.MinValue, h.Seen)).ToList();
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
             catch (Exception ex)
@@ -124,10 +124,43 @@ public sealed class MailServer
         var text = body.Text is { Length: > 0 } t ? Fishbowl.Mail.Text.HtmlToText.Normalize(t)
             : body.Html is { Length: > 0 } html ? Fishbowl.Mail.Text.HtmlToText.Convert(html) : null;
         return new SpamMessage(
-            new SpamItem(accountId, h.Uid, status.UidValidity, h.From?.Name, h.From?.Address, h.Subject, h.Date ?? h.InternalDate ?? DateTimeOffset.MinValue),
+            new SpamItem(accountId, h.Uid, status.UidValidity, h.From?.Name, h.From?.Address, h.Subject, h.Date ?? h.InternalDate ?? DateTimeOffset.MinValue, h.Seen),
             h.To.Select(a => string.IsNullOrEmpty(a.Name) ? a.Address : $"{a.Name} <{a.Address}>").ToList(),
             text,
             body.Attachments.Select(a => a.FileName ?? a.ContentType).ToList());
+    }
+
+    /// <summary>
+    /// Marks every unread message in every account's spam folder read on the
+    /// server — the whole folder, not only what the Spam view lists. How many,
+    /// and the accounts whose server couldn't be reached (the others are done).
+    /// </summary>
+    public async Task<(int Messages, IReadOnlyList<string> Failed)> SpamReadAllAsync(ContextRef ctx, CancellationToken ct)
+    {
+        var accounts = await _repo.ListAccountsAsync(ctx, ct);
+        var marked = await Task.WhenAll(accounts.Select(a => ReadAllAsync(a.Id)));
+        return (marked.Sum(n => n ?? 0), accounts.Where((_, i) => marked[i] is null).Select(a => a.Id).ToList());
+
+        // An account's unread spam marked read; null when its server can't be reached.
+        async Task<int?> ReadAllAsync(string accountId)
+        {
+            try
+            {
+                await using var box = await OpenAsync(ctx, accountId, ct);
+                if (box is null) return null;
+                var folder = await box.RoleFolderAsync(MailRoles.Junk, ct);
+                if (folder is null) return 0;
+                var unread = (await box.FlagsAsync(folder, null, ct)).Where(f => !f.Seen).Select(f => f.Uid).ToList();
+                if (unread.Count > 0) await box.MarkAsync(folder, unread, true, null, ct);
+                return unread.Count;
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
+            catch (Exception ex)
+            {
+                _logger.LogWarning("Mail: spam not marked read for account {AccountId}: {Code}", accountId, MailSyncer.ErrorCode(ex));
+                return null;
+            }
+        }
     }
 
     /// <summary>"Not spam": moved from the spam folder into the inbox on the

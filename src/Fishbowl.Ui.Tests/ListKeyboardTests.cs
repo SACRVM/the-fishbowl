@@ -78,6 +78,37 @@ public class ListKeyboardTests
         await WalkAsync(page, view.Locator(".nv-item"), view.Locator("#list-title"), "Delete 2 notes?");
     });
 
+    // A tag picked or a search typed that still shows the open note: it stays
+    // highlighted and the arrows go on from it — from the search field too.
+    [Fact]
+    public Task Notes_FilterOrSearch_KeysGoOnFromTheOpenNote_Test() => InSpaceAsync("Note filter keys", async (page, slug) =>
+    {
+        await PostAsync(page, slug, "notes", new { title = "Alpha", content = "alpha text", tags = new[] { "work" } });
+        await PostAsync(page, slug, "notes", new { title = "Beta", content = "beta text" });
+        await PostAsync(page, slug, "notes", new { title = "Gamma", content = "gamma text", tags = new[] { "work" } });
+        await page.GotoAsync($"{_fixture.BaseUrl}/#/space/{slug}/notes");
+        var view = page.Locator("fb-notes-view");
+        var rows = view.Locator(".nv-item");
+        var alpha = rows.Filter(new() { HasText = "Alpha" });
+        var gamma = rows.Filter(new() { HasText = "Gamma" });
+        var step = async () => await rows.EvaluateAllAsync<int>("(rs) => rs.findIndex((r) => r.classList.contains('selected'))") == 0 ? "ArrowDown" : "ArrowUp";
+        await Assertions.Expect(rows).ToHaveCountAsync(3, new() { Timeout = 15000 });
+        await alpha.ClickAsync();
+        await Assertions.Expect(alpha).ToHaveClassAsync(Selected, new() { Timeout = 5000 });
+
+        await view.Locator("#tag-filter sac-chip[label='work']").ClickAsync();
+        await Assertions.Expect(rows).ToHaveCountAsync(2, new() { Timeout = 5000 });
+        await Assertions.Expect(alpha).ToHaveClassAsync(Selected);
+        await page.Keyboard.PressAsync(await step());
+        await Assertions.Expect(gamma).ToHaveClassAsync(Selected, new() { Timeout = 5000 });
+
+        var search = view.Locator("#search-input");
+        await search.FillAsync("text");
+        await Assertions.Expect(gamma).ToHaveClassAsync(Selected, new() { Timeout = 5000 });
+        await search.PressAsync(await step());
+        await Assertions.Expect(alpha).ToHaveClassAsync(Selected, new() { Timeout = 5000 });
+    });
+
     [Fact]
     public Task Todos_Keys_OpenMarkAndDelete_Test() => InSpaceAsync("Todo keys", async (page, slug) =>
     {

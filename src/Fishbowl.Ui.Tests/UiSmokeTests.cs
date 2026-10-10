@@ -781,6 +781,25 @@ public class UiSmokeTests
         Assert.Equal("", await system.Locator("input.fb-tags-name").GetAttributeAsync("readonly"));
         Assert.Equal(0, await system.Locator(".fb-tags-delete").CountAsync());
 
+        // An unused tag says nothing about its uses; one on a note says so,
+        // and deleting it asks first, naming where it is used.
+        await page.APIRequest.PostAsync(_fixture.BaseUrl + "/api/v1/notes", new APIRequestContextOptions
+        {
+            DataObject = new { title = "Tag manager uses", content = "x", tags = new[] { "manage-uses" } },
+        });
+        await page.EvaluateAsync("() => fb.tagManager.open()");
+        await page.WaitForFunctionAsync(
+            "() => [...document.querySelectorAll('#fb-tag-manager .fb-tags-name')].some(i => i.value === 'manage-uses')");
+        await page.EvaluateAsync(@"() => { for (const r of document.querySelectorAll('#fb-tag-manager .fb-tags-row'))
+            r.dataset.test = r.querySelector('.fb-tags-name').value; }");
+        Assert.Equal("", await win.Locator("[data-test='manage-smoke'] .fb-tags-count").InnerTextAsync());
+        var used = win.Locator("[data-test='manage-uses']");
+        await Assertions.Expect(used.Locator(".fb-tags-count [aria-label='1 note']")).ToHaveCountAsync(1);
+        await used.Locator(".fb-tags-delete").ClickAsync();
+        var dialog = page.Locator("sac-dialog[open]");
+        await Assertions.Expect(dialog).ToContainTextAsync("Used by 1 note");
+        await page.Keyboard.PressAsync("Escape");
+
         await context.CloseAsync();
     }
 

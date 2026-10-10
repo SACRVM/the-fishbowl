@@ -663,6 +663,31 @@ public class MailApiTests : IClassFixture<WebApplicationFactory<Program>>, IDisp
         Assert.Equal(HttpStatusCode.Forbidden, (await key.PostAsJsonAsync($"{P}/spam/{accountId}/1/not-spam", new { uidValidity = 1u }, Ct)).StatusCode);
     }
 
+    [Fact]
+    public async Task SpamReadAll_MarksTheWholeSpamFolderRead_OnTheServer()
+    {
+        const string user = "mail_spam_read";
+        using (var db = _db.CreateSystemConnection())
+            db.Execute("INSERT OR IGNORE INTO users(id, name, email, created_at) VALUES (@id, 'S', 'spr@example.com', @now)",
+                new { id = user, now = DateTime.UtcNow.ToString("o") });
+        var c = As(user);
+        await SyncedAccountAsync(c, P);
+        async Task<bool[]> Seen() => (await Json(await c.GetAsync($"{P}/spam", Ct))).GetProperty("items").EnumerateArray()
+            .Select(i => i.GetProperty("seen").GetBoolean()).ToArray();
+        Assert.Equal(new[] { false, false }, await Seen());
+
+        // A key never does it, whatever its scopes.
+        var key = await KeyAsync(user, ContextRef.User(user), "read:mail", "write:mail", "send:mail");
+        Assert.Equal(HttpStatusCode.Forbidden, (await key.PostAsync($"{P}/spam/read-all", null, Ct)).StatusCode);
+
+        var r = await Json(await c.PostAsync($"{P}/spam/read-all", null, Ct));
+        Assert.Equal(2, r.GetProperty("messages").GetInt32());
+        Assert.Empty(r.GetProperty("failed").EnumerateArray());
+        // Read on the server: the next look (no cached read) says so; again, nothing is left.
+        Assert.Equal(new[] { true, true }, await Seen());
+        Assert.Equal(0, (await Json(await c.PostAsync($"{P}/spam/read-all", null, Ct))).GetProperty("messages").GetInt32());
+    }
+
     // ---- 4. attachment ----
 
     [Fact]
@@ -708,6 +733,15 @@ public class MailApiTests : IClassFixture<WebApplicationFactory<Program>>, IDisp
         Assert.DoesNotContain(":", filtered[0].GetProperty("tags")[0].GetString());
         Assert.NotEqual("bills", filtered[0].GetProperty("tags")[0].GetString());
         Assert.Equal("bills", filtered[0].GetProperty("tags")[1].GetString());
+
+        // The workspace's tag says where it is used: a conversation, no note —
+        // and a rule once one adds it.
+        async Task<JsonElement> Bills() => (await Json(await c.GetAsync("/api/v1/tags", Ct))).EnumerateArray()
+            .First(t => t.GetProperty("name").GetString() == "bills");
+        var bills = await Bills();
+        Assert.Equal((0, 1, 0), (bills.GetProperty("usageCount").GetInt32(), bills.GetProperty("mailCount").GetInt32(), bills.GetProperty("ruleCount").GetInt32()));
+        Assert.Equal(HttpStatusCode.OK, (await c.PostAsJsonAsync(P + "/rules", RuleBody("from", "billing", ["bills"]), Ct)).StatusCode);
+        Assert.Equal(1, (await Bills()).GetProperty("ruleCount").GetInt32());
     }
 
     // ---- 6. seen ----
@@ -732,6 +766,32 @@ public class MailApiTests : IClassFixture<WebApplicationFactory<Program>>, IDisp
         Assert.Equal(1, (await Json(await c.GetAsync(P + "/unread-count", Ct))).GetProperty("unread").GetInt32());
         var thread = (await Threads(c, P)).Single(t => t.GetProperty("threadId").GetString() == id);
         Assert.Equal(0, thread.GetProperty("unread").GetInt32());
+    }
+
+    [Fact]
+    public async Task ReadAll_ReadsTheWholeTab_AndTheServerKeepsIt()
+    {
+        var c = Fresh();
+        var accountId = await SyncedAccountAsync(c, P);
+        int Unread(JsonElement e) => e.GetProperty("unread").GetInt32();
+        Assert.Equal(2, Unread(await Json(await c.GetAsync(P + "/unread-count", Ct))));
+
+        // The archive holds nothing unread: the list keeps its two.
+        var r = await c.PostAsJsonAsync($"{P}/read-all", new { archived = true }, Ct);
+        Assert.Equal(0, (await Json(r)).GetProperty("conversations").GetInt32());
+        Assert.Equal(2, Unread(await Json(await c.GetAsync(P + "/unread-count", Ct))));
+
+        r = await c.PostAsJsonAsync($"{P}/read-all", new { archived = false }, Ct);
+        Assert.Equal(HttpStatusCode.OK, r.StatusCode);
+        Assert.Equal(2, (await Json(r)).GetProperty("conversations").GetInt32());
+        Assert.Equal(0, Unread(await Json(await c.GetAsync(P + "/unread-count", Ct))));
+        Assert.Equal(0, (await Json(await c.PostAsJsonAsync($"{P}/read-all", new { }, Ct))).GetProperty("conversations").GetInt32());
+
+        // Written back in the background: a later sync reads the server's flags.
+        await Task.Delay(1500, Ct);
+        await SyncNowAsync(c, accountId);
+        Assert.Equal(0, Unread(await Json(await c.GetAsync(P + "/unread-count", Ct))));
+        Assert.All(await Threads(c, P), t => Assert.Equal(0, t.GetProperty("unread").GetInt32()));
     }
 
     // ---- 7. space roles ----

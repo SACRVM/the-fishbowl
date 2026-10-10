@@ -25,16 +25,28 @@ public class TagRepository : ITagRepository
     public async Task<IEnumerable<Tag>> GetAllAsync(ContextRef ctx, CancellationToken ct = default)
     {
         using var db = _dbFactory.CreateContextConnection(ctx);
+        // A tag is the workspace's: where it is used, counted per kind in one
+        // pass each (not one scan of the mail per tag).
         return await db.QueryAsync<Tag>(new CommandDefinition(@"
+            WITH note_use AS (SELECT je.value AS name, COUNT(DISTINCT n.id) AS n
+                                FROM notes n, json_each(n.tags) je GROUP BY je.value),
+                 mail_use AS (SELECT je.value AS name, COUNT(DISTINCT m.thread_id) AS n
+                                FROM mail_messages m, json_each(m.tags) je GROUP BY je.value),
+                 rule_use AS (SELECT je.value AS name, COUNT(DISTINCT r.id) AS n
+                                FROM mail_rules r, json_each(r.add_tags) je GROUP BY je.value)
             SELECT t.name AS Name,
                    t.color AS Color,
                    t.created_at AS CreatedAt,
                    t.is_system AS IsSystem,
                    t.user_assignable AS UserAssignable,
                    t.user_removable AS UserRemovable,
-                   COALESCE((SELECT COUNT(*) FROM notes n
-                             WHERE EXISTS (SELECT 1 FROM json_each(n.tags) je WHERE je.value = t.name)), 0) AS UsageCount
+                   COALESCE(nu.n, 0) AS UsageCount,
+                   COALESCE(mu.n, 0) AS MailCount,
+                   COALESCE(ru.n, 0) AS RuleCount
             FROM tags t
+            LEFT JOIN note_use nu ON nu.name = t.name
+            LEFT JOIN mail_use mu ON mu.name = t.name
+            LEFT JOIN rule_use ru ON ru.name = t.name
             ORDER BY t.name", cancellationToken: ct));
     }
 

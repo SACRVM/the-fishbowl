@@ -766,6 +766,13 @@ class FbNotesView extends HTMLElement {
             // masking the perceived latency of the server hop.
             this._searchDebounce = setTimeout(() => this._doSearch(q), 250);
         });
+        // ↑/↓ in the search field go on in the list, from the open note.
+        this.querySelector("#search-input").addEventListener("keydown", (e) => {
+            if (!["ArrowDown", "ArrowUp", "PageDown", "PageUp"].includes(e.key) || e.altKey || e.ctrlKey || e.metaKey || e.isComposing) return;
+            e.preventDefault();
+            list.focus({ preventScroll: true });
+            list.dispatchEvent(new KeyboardEvent("keydown", { key: e.key, shiftKey: e.shiftKey, bubbles: true, cancelable: true }));
+        });
         this.querySelector("#locked-pill").addEventListener("click", () => this._unlockOpenNote());
         const contentEl = this.querySelector("#content");
         // sac-md-editor re-dispatches `input` on every keystroke and `change`
@@ -870,6 +877,8 @@ class FbNotesView extends HTMLElement {
 
         strip.querySelectorAll("sac-chip").forEach(chip => {
             chip.addEventListener("click", async () => {
+                // A chip takes no focus: the list keeps the keys, so the arrows go on from the open note.
+                this.querySelector("#note-list")?.focus({ preventScroll: true });
                 const name = chip.getAttribute("label");
                 if (selected.has(name)) {
                     this.tagFilter.tags = this.tagFilter.tags.filter(t => t !== name);

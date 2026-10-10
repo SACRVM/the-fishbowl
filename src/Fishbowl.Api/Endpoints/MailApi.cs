@@ -29,10 +29,12 @@ namespace Fishbowl.Api.Endpoints;
 //                                          form, nothing remote; remote images only with images=1
 //   PUT    …/threads/{threadId}/tags       { tags }
 //   POST   …/threads/{threadId}/seen       { seen } — here at once, on the server in the background
+//   POST   …/read-all                      { archived? } — every unread conversation of the list (or archive) read
 //   POST   …/threads/{threadId}/flagged    { flagged } — its latest message; off = every flag
 //   POST   …/threads/{threadId}/archive    { archived } — on the server first, then here
 //   GET    …/spam                          each account's newest spam, read live, never stored (cookie only)
 //   GET    …/spam/{accountId}/{uid}        one as text; POST …/not-spam { uidValidity } → into the inbox on the server
+//   POST   …/spam/read-all                 every account's spam folder read on the server (cookie only)
 //   GET    …/drafts                        the caller's drafts (each draft is its writer's own)
 //   POST   …/drafts                        { kind?, messageId?, accountId? } — a reply / forward filled from its message
 //   GET|PATCH|DELETE …/drafts/{id}         { accountId?, to?, cc?, bcc?, subject?, body? } (markdown)
@@ -130,6 +132,7 @@ public static partial class MailApi
     public sealed record AccountPatch(string? Name, string? DisplayName, List<string>? Aliases, string? Password);
     public sealed record TagsRequest(List<string>? Tags);
     public sealed record SeenRequest(bool Seen);
+    public sealed record ReadAllRequest(bool? Archived);
     public sealed record FlaggedRequest(bool Flagged);
     public sealed record ArchiveRequest(bool Archived);
     public sealed record DraftRequest(string? Kind, string? MessageId, string? AccountId);
@@ -509,6 +512,26 @@ public static partial class MailApi
             return Results.Ok(new { changed = places.Count });
         }).WithName($"Mark{tag}MailThreadSeen").WithSummary("Marks the conversation read or unread — here at once, on the server in the background.");
 
+        // A tab's "Mark all as read": the whole list (or archive), not what is
+        // loaded — here at once, on the servers in the background, like seen.
+        g.MapPost("/read-all", async (ReadAllRequest? body, HttpContext http, IMailRepository repo,
+            IServiceScopeFactory scopes, CancellationToken ct) =>
+        {
+            var (t, err) = await ResolveAsync(http, space, Need.Write, ct);
+            if (err is not null) return err;
+            var (conversations, places) = await repo.MarkAllSeenAsync(t!.Ctx, body?.Archived == true, ct);
+            if (places.Count > 0)
+            {
+                var ctx = t.Ctx;
+                _ = Task.Run(async () =>
+                {
+                    using var scope = scopes.CreateScope();
+                    await scope.ServiceProvider.GetRequiredService<MailServer>().MarkAsync(ctx, places, true, null, CancellationToken.None);
+                });
+            }
+            return Results.Ok(new { conversations });
+        }).WithName($"MarkAll{tag}MailRead").WithSummary("Marks every unread conversation of the list (or the archive) read — here at once, on the server in the background.");
+
         // A flag sits on a message: flagging a conversation flags its latest,
         // unflagging takes every flag off — here at once, on the server in the
         // background, like seen.
@@ -638,6 +661,7 @@ public static partial class MailApi
             i.FromAddress,
             i.Subject,
             date = i.Date.UtcDateTime,
+            i.Seen,
         };
 
         g.MapGet("/spam", async (HttpContext http, MailServer server, IMemoryCache cache, CancellationToken ct) =>
@@ -705,6 +729,16 @@ public static partial class MailApi
             queue.Request(accountId);
             return Results.Ok(new { moved = true });
         }).WithName($"NotSpam{tag}Mail").WithSummary("Moves a message out of spam into the inbox on the server; the sync brings it in (cookie only).");
+
+        g.MapPost("/spam/read-all", async (HttpContext http, MailServer server, IMemoryCache cache, CancellationToken ct) =>
+        {
+            if (Bearer(http)) return Results.Forbid();
+            var (t, err) = await ResolveAsync(http, space, Need.Write, ct);
+            if (err is not null) return err;
+            var (messages, failed) = await server.SpamReadAllAsync(t!.Ctx, ct);
+            cache.Remove($"mail-spam:{t.Ctx.Type}:{t.Ctx.Id}");
+            return Results.Ok(new { messages, failed });
+        }).WithName($"MarkAll{tag}MailSpamRead").WithSummary("Marks every account's whole spam folder read on the server (cookie only).");
 
         // ---- writing (decision 12): drafts here, each its writer's own ----
 

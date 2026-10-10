@@ -364,6 +364,137 @@ public class MailTests
         }
     }
 
+    // A right-click on the Inbox tab reads the whole tab: the dots and the
+    // count go; with nothing unread left the tab has no menu.
+    [Fact]
+    public async Task Mail_TabMenu_MarksAllRead_Test()
+    {
+        var (context, page, slug, _) = await SpaceWithMailAsync();
+        try
+        {
+            await page.GotoAsync($"{_fixture.BaseUrl}/#/space/{slug}/mail");
+            var rows = page.Locator("fb-mail-view .mv-item");
+            var unread = page.Locator("fb-mail-view .mv-item.unread");
+            await Assertions.Expect(rows).ToHaveCountAsync(3, new() { Timeout = 15000 });
+            await Assertions.Expect(unread).Not.ToHaveCountAsync(0);
+            var inbox = page.Locator("fb-mail-view #mv-tabs sac-tab[name='list']");
+            var count = inbox.Locator(".mv-tab-count");
+            await Assertions.Expect(count).ToBeVisibleAsync();
+
+            var menu = page.Locator("sac-menu.sac-context-menu[open]");
+            await inbox.ClickAsync(new() { Button = MouseButton.Right });
+            await page.WaitForTimeoutAsync(250);
+            await menu.Locator("button[data-action]", new() { HasText = "Mark all as read" }).ClickAsync();
+            await Assertions.Expect(unread).ToHaveCountAsync(0, new() { Timeout = 5000 });
+            await Assertions.Expect(count).ToBeHiddenAsync();
+            await Assertions.Expect(page.Locator("#sac-toast-stack").GetByText("conversations marked read").First).ToBeVisibleAsync();
+
+            await inbox.ClickAsync(new() { Button = MouseButton.Right });
+            await page.WaitForTimeoutAsync(250);
+            await Assertions.Expect(menu).ToHaveCountAsync(0);
+
+            // Spam: the spam folders read on the server, its count gone.
+            var spam = page.Locator("fb-mail-view #mv-tabs sac-tab[name='spam']");
+            await Assertions.Expect(spam.Locator(".mv-tab-count")).ToBeVisibleAsync(new() { Timeout = 15000 });
+            await spam.ClickAsync(new() { Button = MouseButton.Right });
+            await page.WaitForTimeoutAsync(250);
+            await menu.Locator("button[data-action]", new() { HasText = "Mark all as read" }).ClickAsync();
+            await Assertions.Expect(page.Locator("#sac-toast-stack").GetByText("2 messages marked read").First).ToBeVisibleAsync();
+            await Assertions.Expect(spam.Locator(".mv-tab-count")).ToBeHiddenAsync();
+            await spam.ClickAsync(new() { Button = MouseButton.Right });
+            await page.WaitForTimeoutAsync(250);
+            await Assertions.Expect(menu).ToHaveCountAsync(0);
+        }
+        finally
+        {
+            await page.APIRequest.DeleteAsync($"{_fixture.BaseUrl}/api/v1/spaces/{slug}?archive=false");
+            await context.CloseAsync();
+        }
+    }
+
+    // A tag is the workspace's: Mail manages it too, and the window says
+    // where each one is used.
+    [Fact]
+    public async Task Mail_ManageTags_SaysWhereATagIsUsed_Test()
+    {
+        var (context, page, slug, api) = await SpaceWithMailAsync();
+        try
+        {
+            var invoice = (await (await page.APIRequest.GetAsync($"{api}/threads?q=invoice")).JsonAsync())!.Value[0].GetProperty("threadId").GetString();
+            Assert.True((await page.APIRequest.PutAsync($"{api}/threads/{invoice}/tags", new() { DataObject = new { tags = new[] { "bills" } } })).Ok);
+            // Its own colour, not the one its name would give.
+            Assert.True((await page.APIRequest.PutAsync($"{_fixture.BaseUrl}/api/v1/spaces/{slug}/tags/bills", new() { DataObject = new { color = "teal" } })).Ok);
+
+            await page.GotoAsync($"{_fixture.BaseUrl}/#/space/{slug}/mail");
+            await Assertions.Expect(page.Locator("fb-mail-view .mv-item")).ToHaveCountAsync(3, new() { Timeout = 15000 });
+            // From the first paint on: in the row and in the filter strip.
+            await Assertions.Expect(page.Locator("fb-mail-view .mv-item sac-chip[label='bills']")).ToHaveAttributeAsync("color", "teal");
+            await Assertions.Expect(page.Locator("fb-mail-view #mv-tag-filter sac-chip[label='bills']")).ToHaveAttributeAsync("color", "teal");
+            await page.Locator("#fb-nav [title='Manage tags']").ClickAsync();
+            var win = page.Locator("sac-window#fb-tag-manager[open]");
+            await Assertions.Expect(win.Locator(".fb-tags-count [aria-label='1 conversation']")).ToHaveCountAsync(1);
+            await page.ScreenshotAsync(new() { Path = Shot("manage-tags") });
+        }
+        finally
+        {
+            await page.APIRequest.DeleteAsync($"{_fixture.BaseUrl}/api/v1/spaces/{slug}?archive=false");
+            await context.CloseAsync();
+        }
+    }
+
+    // A filter or a search that still shows the open conversation keeps it the
+    // list's: its row stays highlighted and the arrows go on from it.
+    [Fact]
+    public async Task Mail_FilterOrSearch_KeepsTheOpenOneSelected_Test()
+    {
+        var (context, page, slug, api) = await SpaceWithMailAsync();
+        try
+        {
+            var invoice = (await (await page.APIRequest.GetAsync($"{api}/threads?q=invoice")).JsonAsync())!.Value[0].GetProperty("threadId").GetString();
+            Assert.True((await page.APIRequest.PutAsync($"{api}/threads/{invoice}/tags", new() { DataObject = new { tags = new[] { "bills" } } })).Ok);
+
+            await page.GotoAsync($"{_fixture.BaseUrl}/#/space/{slug}/mail");
+            var rows = page.Locator("fb-mail-view .mv-item");
+            var selected = new System.Text.RegularExpressions.Regex(@"\bselected\b");
+            await Assertions.Expect(rows).ToHaveCountAsync(3, new() { Timeout = 15000 });
+            var open = rows.Filter(new() { HasText = "Your invoice" });
+            await open.ClickAsync();
+            await Assertions.Expect(open).ToHaveClassAsync(selected);
+
+            var bills = page.Locator("fb-mail-view #mv-tag-filter sac-chip[label='bills']");
+            await bills.ClickAsync();
+            await Assertions.Expect(rows).ToHaveCountAsync(1);
+            await Assertions.Expect(open).ToHaveClassAsync(selected);
+            await bills.ClickAsync();
+            await Assertions.Expect(rows).ToHaveCountAsync(3);
+            await Assertions.Expect(open).ToHaveClassAsync(selected);
+
+            // The arrows go on from the open one, wherever the filter left the focus.
+            var at = await rows.EvaluateAllAsync<int>("(rs) => rs.findIndex((r) => r.classList.contains('selected'))");
+            var step = at == 0 ? "ArrowDown" : "ArrowUp";
+            var next = at == 0 ? 1 : at - 1;
+            await page.Keyboard.PressAsync(step);
+            await Assertions.Expect(rows.Nth(next)).ToHaveClassAsync(selected, new() { Timeout = 5000 });
+            await Assertions.Expect(open).Not.ToHaveClassAsync(selected);
+
+            // A search that still finds the open one: the same.
+            await rows.Filter(new() { HasText = "Your invoice" }).ClickAsync();
+            await page.Locator("fb-mail-view #mv-search").FillAsync("invoice");
+            await Assertions.Expect(rows).ToHaveCountAsync(1, new() { Timeout = 5000 });
+            await Assertions.Expect(open).ToHaveClassAsync(selected);
+            await page.Locator("fb-mail-view #mv-search").FillAsync("");
+            await Assertions.Expect(rows).ToHaveCountAsync(3, new() { Timeout = 5000 });
+            await Assertions.Expect(open).ToHaveClassAsync(selected);
+            await page.Keyboard.PressAsync(step);
+            await Assertions.Expect(rows.Nth(next)).ToHaveClassAsync(selected, new() { Timeout = 5000 });
+        }
+        finally
+        {
+            await page.APIRequest.DeleteAsync($"{_fixture.BaseUrl}/api/v1/spaces/{slug}?archive=false");
+            await context.CloseAsync();
+        }
+    }
+
     // Phase 2: a conversation is flagged from its head (the star stays on) and
     // archived from its row's menu — it leaves the list, waits under Archived,
     // and the toast's Undo brings it back.

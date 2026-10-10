@@ -306,6 +306,8 @@ label.fb-quota-field input { width: 6em; }
     padding: 8px 4px;
 }
 .fb-tags-row + .fb-tags-row { border-top: 1px solid var(--border); }
+/* A system tag has no delete button: its room stays, so the swatches line up. */
+.fb-tags-row:not(:has(.fb-tags-delete))::after { content: ""; flex: none; width: var(--icon-btn-size); }
 .fb-tags-name { flex: 1; min-width: 8em; }
 .fb-tags-name.invalid { border-color: var(--danger); }
 .fb-tags-name[readonly] {
@@ -316,13 +318,18 @@ label.fb-quota-field input { width: 6em; }
 }
 /* The grid's cells fill its width; in a row it needs one. */
 .fb-tags-row sac-swatch-grid { flex-shrink: 0; width: 17rem; }
+/* Where it is used — an icon and a number per kind, before the palette so
+   the swatches line up from row to row. */
 .fb-tags-count {
     flex-shrink: 0;
-    width: 28px;
-    text-align: right;
+    display: flex;
+    gap: 10px;
     font-size: 10px;
     color: var(--text-muted);
+    font-variant-numeric: tabular-nums;
 }
+.fb-tags-count > span { display: inline-flex; align-items: center; gap: 3px; }
+.fb-tags-count sac-icon { --icon-size: 12px; }
 
 /* ───── Workspace switcher (shell.js, kit <sac-menu> in the nav) ─────
    The trigger is the kit's labeled ribbon button; a space is shared data,

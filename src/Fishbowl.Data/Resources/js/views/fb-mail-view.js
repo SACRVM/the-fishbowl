@@ -96,6 +96,11 @@ class FbMailView extends HTMLElement {
             selection: this.writable ? this.sel : undefined,
             items: (row) => this.rowItems(row),
         });
+        // A tab's own menu: Inbox and Archive read whole at once, Spam lets its count go.
+        this._tabMenu = sac.contextMenu(this.querySelector("#mv-tabs"), {
+            targets: "sac-tab",
+            items: (tab) => this.tabItems(tab.getAttribute("name")),
+        });
         this._schedule();
     }
 
@@ -103,6 +108,7 @@ class FbMailView extends HTMLElement {
         if (this._onIntent) window.removeEventListener("fb:intent", this._onIntent);
         if (this._onVisible) document.removeEventListener("visibilitychange", this._onVisible);
         this._rowMenu?.destroy();
+        this._tabMenu?.destroy();
         this.sel?.destroy();
         this._compose?.leave();
         clearTimeout(this._poll);
@@ -139,8 +145,12 @@ class FbMailView extends HTMLElement {
     }
 
     async reload({ keep = false } = {}) {
+        // A chip's colour comes from the tag registry (fb.tags.colorFor reads
+        // it synchronously), so it is in before the first chip is painted.
+        const tags = fb.tags.all().catch(() => null);
         try { this.accounts = await this.api.accounts(); }
         catch (err) { console.warn("[fb-mail-view] accounts failed:", err?.status); this.accounts = []; }
+        await tags;
         await this.loadThreads({ keep });
         this.paintStatus();
         this.loadCounts();
@@ -246,6 +256,8 @@ class FbMailView extends HTMLElement {
             chip.addEventListener("click", () => {
                 this.tags = picked.has(name) ? this.tags.filter((n) => n !== name) : [...this.tags, name];
                 if (local) { this.renderList(); this.renderTagFilter(); } else this.loadThreads();
+                // A chip takes no focus: the list keeps the keys, so the arrows go on from the open row.
+                this.querySelector("#mv-items")?.focus({ preventScroll: true });
             });
             return chip;
         }));
@@ -514,6 +526,13 @@ class FbMailView extends HTMLElement {
             }, 250);
         });
         const items = this.querySelector("#mv-items");
+        // ↑/↓ in the search field go on in the list, from the open row.
+        this.querySelector("#mv-search").addEventListener("keydown", (e) => {
+            if (!["ArrowDown", "ArrowUp", "PageDown", "PageUp"].includes(e.key) || e.altKey || e.ctrlKey || e.metaKey || e.isComposing) return;
+            e.preventDefault();
+            items.focus({ preventScroll: true });
+            items.dispatchEvent(new KeyboardEvent("keydown", { key: e.key, shiftKey: e.shiftKey, bubbles: true, cancelable: true }));
+        });
         items.addEventListener("scroll", () => {
             if (items.scrollTop + items.clientHeight > items.scrollHeight - 200) this.loadMore();
         });
@@ -567,6 +586,61 @@ class FbMailView extends HTMLElement {
         count("list", this.unreadCount);
         count("drafts", this.draftCount);
         count("spam", this.spamFresh());
+    }
+
+    /** A tab's menu: what goes for everything it holds at once (none for Drafts). */
+    tabItems(name) {
+        if (!this.accounts.length) return null;
+        const readAll = (onClick) => [{ id: "read-all", label: this.t("read-all", "Mark all as read"), icon: "eye", onClick }];
+        if ((name === "list" && this.unreadCount > 0 || name === "archived") && this.writable)
+            return readAll(() => this.readAll(name === "archived"));
+        if (name === "spam" && this.writable && (this.spamFresh() > 0 || this.spam.items.some((i) => !i.seen)))
+            return readAll(() => this.spamReadAll());
+        if (name === "spam" && this.spamFresh() > 0)
+            return [{ id: "spam-seen", label: this.t("spam-seen-all", "Mark all as seen"), icon: "eye", onClick: () => this.spamSeenAll() }];
+        return null;
+    }
+
+    /** Every unread conversation of the tab read — the whole tab, not what is
+     *  loaded; here at once, on the servers behind. */
+    async readAll(archived) {
+        let res;
+        try { res = await this.api.readAll(archived); }
+        catch (err) { sac.toast?.(fb.errors.text(err, this.t("failed", "That didn't work.")), { kind: "error" }); return; }
+        const n = res.conversations || 0;
+        sac.toast?.(n === 0 ? this.t("read-all-none", "Nothing was unread")
+            : n === 1 ? this.t("read-all-done-1", "1 conversation marked read")
+            : this.t("read-all-done", "{n} conversations marked read", { n }));
+        if (this.view === (archived ? "archived" : "list")) {
+            for (const th of this.threads) th.unread = 0;
+            this.loadThreads({ keep: true });
+        }
+        this.loadCounts();
+    }
+
+    /** Spam's count goes, as if it had been looked at. */
+    /** The spam folders read on the servers — the whole folders — and their
+     *  count gone, as after a look. */
+    async spamReadAll() {
+        this.spamSeenAll();
+        let res;
+        try { res = await this.api.spamReadAll(); }
+        catch (err) { sac.toast?.(fb.errors.text(err, this.t("failed", "That didn't work.")), { kind: "error" }); return; }
+        for (const i of this.spam.items) i.seen = true;
+        const n = res.messages || 0;
+        sac.toast?.(n === 0 ? this.t("read-all-none", "Nothing was unread")
+            : n === 1 ? this.t("spam-read-done-1", "1 message marked read")
+            : this.t("spam-read-done", "{n} messages marked read", { n }));
+        if (res.failed?.length) {
+            const names = res.failed.map((id) => this.accounts.find((a) => a.id === id)?.name || id).join(", ");
+            sac.toast?.(this.t("spam-read-unreached", "Not reached: {names}", { names }), { kind: "error" });
+        }
+    }
+
+    spamSeenAll() {
+        const newest = this.spam.items.reduce((a, i) => (i.date > a ? i.date : a), "");
+        if (newest) { try { localStorage.setItem(this._spamSeenKey(), newest); } catch { /* storage off */ } }
+        this.paintTabs();
     }
 
     /** The Inbox's unread and the caller's drafts, for the tabs. */
@@ -812,7 +886,7 @@ class FbMailView extends HTMLElement {
         try {
             input.suggestions = (await fb.tags.all())
                 .filter((x) => x.userAssignable !== false && !this.sourceTags().has(x.name))
-                .map((x) => ({ name: x.name, color: x.color, count: x.usageCount }));
+                .map((x) => ({ name: x.name, color: x.color, count: x.mailCount }));
         } catch { /* no suggestions */ }
         const save = async () => {
             try {
@@ -1538,8 +1612,19 @@ class FbMailView extends HTMLElement {
         });
     }
 
+    /** The workspace's tags — the same window as in Notes; what changed shows here at once. */
+    openTags() {
+        fb.tagManager.open({
+            onChanged: async () => {
+                await this.reload({ keep: true });
+                if (this.selectedId && !this._compose && (this.view === "list" || this.view === "archived")) this.open(this.selectedId);
+            },
+        });
+    }
+
     paintToolbar() {
         if (this.isConnected) fb.toolbar.set([
+            ...(this.writable ? [{ id: "mv-tags", icon: "tag", title: fb.t("fb.notes.manage-tags", "Manage tags"), onClick: () => this.openTags() }] : []),
             { id: "mv-rules", icon: "fb-rule", title: this.t("rules", "Mail rules"), onClick: () => this.openRules() },
             { id: "mv-accounts", icon: "settings", title: this.t("accounts", "Mail accounts"), onClick: () => this.openAccounts() },
         ]);

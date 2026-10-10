@@ -356,6 +356,7 @@
             thread:  (tid)         => request(p(`/mail/threads/${id(tid)}`)),
             setTags: (tid, tags)   => request(p(`/mail/threads/${id(tid)}/tags`), { method: "PUT", body: JSON.stringify({ tags }) }),
             setSeen: (tid, seen)   => request(p(`/mail/threads/${id(tid)}/seen`), { method: "POST", body: JSON.stringify({ seen }) }),
+            readAll: (archived)    => request(p("/mail/read-all"), { method: "POST", body: JSON.stringify({ archived: !!archived }) }),
             setFlagged: (tid, flagged) => request(p(`/mail/threads/${id(tid)}/flagged`), { method: "POST", body: JSON.stringify({ flagged }) }),
             archive: (tid, archived)   => request(p(`/mail/threads/${id(tid)}/archive`), { method: "POST", body: JSON.stringify({ archived }) }),
             // mode "fishbowl" (only here — the server keeps it) or "everywhere"
@@ -370,6 +371,7 @@
             spamMessage: (aid, uid)  => request(p(`/mail/spam/${id(aid)}/${uid}`)),
             // Out of spam into the inbox on the server; the sync brings it in.
             notSpam: (aid, uid, uidValidity) => request(p(`/mail/spam/${id(aid)}/${uid}/not-spam`), { method: "POST", body: JSON.stringify({ uidValidity }) }),
+            spamReadAll: ()          => request(p("/mail/spam/read-all"), { method: "POST" }),
             // Writing (decision 12): drafts here, each its writer's own.
             drafts:      ()          => request(p("/mail/drafts")),
             draft:       (did)       => request(p(`/mail/drafts/${id(did)}`)),

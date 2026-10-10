@@ -27,6 +27,9 @@ public interface IMailRepository
     /// <summary>Marks the thread's incoming messages (un)read here and returns
     /// where they lie on the server, for the write-back.</summary>
     Task<IReadOnlyList<MailLocationRef>> SetThreadSeenAsync(ContextRef ctx, string threadId, bool seen, CancellationToken ct = default);
+    /// <summary>Marks every unread conversation of the list (or the archive)
+    /// read here; how many, and where their messages lie for the write-back.</summary>
+    Task<(int Conversations, IReadOnlyList<MailLocationRef> Places)> MarkAllSeenAsync(ContextRef ctx, bool archived, CancellationToken ct = default);
     /// <summary>Sets seen and / or flagged on these messages here (null leaves
     /// it) and returns where the changed ones lie, for the write-back.</summary>
     Task<IReadOnlyList<MailLocationRef>> SetFlagsAsync(ContextRef ctx, IReadOnlyList<string> ids, bool? seen, bool? flagged, CancellationToken ct = default);
