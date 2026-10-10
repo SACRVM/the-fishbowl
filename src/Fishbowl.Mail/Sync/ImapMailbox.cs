@@ -272,6 +272,45 @@ public sealed class ImapMailbox : IMailbox
     }
 
     /// <summary>Runs <paramref name="op"/> with the folder opened read-only, closed after.</summary>
+    /// <summary>How long one IDLE runs before it is renewed: servers end an
+    /// idle connection after some minutes (Gmail about ten, the RFC 29).</summary>
+    public static readonly TimeSpan IdleRenew = TimeSpan.FromMinutes(9);
+
+    public Task<bool> WatchAsync(string folder, Action changed, CancellationToken ct)
+    {
+        var runs = 0;
+        return _session.RunAsync(async (c, t) =>
+        {
+            if (!c.Capabilities.HasFlag(ImapCapabilities.Idle)) return false;
+            var f = await MailboxSession.ResolveFolderAsync(c, folder, t).ConfigureAwait(false);
+            await f.OpenAsync(FolderAccess.ReadOnly, t).ConfigureAwait(false);
+            // Connected again after the link dropped: what came meanwhile is news too.
+            if (runs++ > 0) changed();
+            EventHandler<EventArgs> count = (_, _) => changed();
+            EventHandler<MessageEventArgs> expunged = (_, _) => changed();
+            EventHandler<MessageFlagsChangedEventArgs> flags = (_, _) => changed();
+            f.CountChanged += count;
+            f.MessageExpunged += expunged;
+            f.MessageFlagsChanged += flags;
+            try
+            {
+                while (!t.IsCancellationRequested)
+                {
+                    using var done = CancellationTokenSource.CreateLinkedTokenSource(t);
+                    done.CancelAfter(IdleRenew);
+                    await c.IdleAsync(done.Token, t).ConfigureAwait(false);
+                }
+            }
+            finally
+            {
+                f.CountChanged -= count;
+                f.MessageExpunged -= expunged;
+                f.MessageFlagsChanged -= flags;
+            }
+            return true;
+        }, ct);
+    }
+
     private Task<T> InFolder<T>(string folder, Func<IMailFolder, ImapClient, CancellationToken, Task<T>> op, CancellationToken ct) =>
         _session.RunAsync(async (c, t) =>
         {

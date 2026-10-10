@@ -24,6 +24,7 @@ public static class ServiceCollectionExtensions
         services.AddHostedService<FilesMaintenanceService>();
         // Needs the mail services (registered by the host).
         services.AddHostedService<MailSyncService>();
+        services.AddHostedService<MailPushService>();
         return services;
     }
 }

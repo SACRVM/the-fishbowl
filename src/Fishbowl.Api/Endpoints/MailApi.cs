@@ -44,6 +44,7 @@ namespace Fishbowl.Api.Endpoints;
 //   POST   …/threads/delete                { threadIds, mode } — several conversations, one trip to each server
 //   GET    …/tags                          the tags mail carries, each account's source tag (system-given) first
 //   GET    …/unread-count
+//   GET    …/stamp                         moves on when a sync pass changed the mail — the app's cue to look again
 //   GET    …/rules                         the workspace's rules (decision 11)
 //   POST   …/rules                         { name, enabled?, matchAll?, conditions: [{ field, value }], addTags?, archive?, markRead? }
 //   PUT|DELETE …/rules/{id}                the whole rule again / gone; cookie, space Admin+
@@ -876,6 +877,13 @@ public static partial class MailApi
             if (err is not null) return err;
             return Results.Ok(new { unread = await repo.UnreadCountAsync(t!.Ctx, ct) });
         }).WithName($"Count{tag}UnreadMail").WithSummary("Conversations in the list with an unread incoming message.");
+
+        g.MapGet("/stamp", async (HttpContext http, MailSyncQueue queue, CancellationToken ct) =>
+        {
+            var (t, err) = await ResolveAsync(http, space, Need.Read, ct);
+            if (err is not null) return err;
+            return Results.Ok(new { stamp = queue.Stamp(t!.Ctx) });
+        }).WithName($"Get{tag}MailStamp").WithSummary("A number that moves on whenever the sync changed this workspace's mail — ask it often, load again when it moved.");
 
         // Rules (decision 11): every reader sees them; whoever manages the
         // accounts — personal: the owner; a space: its Admins — writes them.

@@ -132,22 +132,32 @@ class FbMailView extends HTMLElement {
         try { return localStorage.getItem("fb.mail.split") || "34%"; } catch { return "34%"; }
     }
 
-    // While an account still reads its history the list fills: look again
-    // soon; otherwise every two minutes (and when the tab comes back).
+    // Every 10 s while the page is seen, the sync's stamp (in memory, cheap):
+    // when it moved — mail the server pushed (IDLE) or the poll found — the
+    // list loads again. It loads anyway while an account still reads its
+    // history, every two minutes, and when the tab comes back.
     _schedule() {
         clearTimeout(this._poll);
-        const busy = this.accounts.some((a) => a.state === "new" || !a.backfillDone);
         this._poll = setTimeout(async () => {
             if (!this.isConnected) return;
-            await this.reload({ keep: true });
+            if (document.visibilityState === "visible") {
+                let stamp = null;
+                try { stamp = (await this.api.stamp()).stamp; } catch { /* the next look */ }
+                const moved = stamp !== null && this._stamp !== undefined && stamp !== this._stamp;
+                if (stamp !== null) this._stamp = stamp;
+                const busy = this.accounts.some((a) => a.state === "new" || !a.backfillDone);
+                if (this.isConnected && (moved || busy || Date.now() - (this._loadedAt || 0) >= 120000))
+                    await this.reload({ keep: true });
+            }
             this._schedule();
-        }, busy ? 10000 : 120000);
+        }, 10000);
     }
 
     async reload({ keep = false } = {}) {
         // A chip's colour comes from the tag registry (fb.tags.colorFor reads
         // it synchronously), so it is in before the first chip is painted.
         const tags = fb.tags.all().catch(() => null);
+        this._loadedAt = Date.now();
         try { this.accounts = await this.api.accounts(); }
         catch (err) { console.warn("[fb-mail-view] accounts failed:", err?.status); this.accounts = []; }
         await tags;

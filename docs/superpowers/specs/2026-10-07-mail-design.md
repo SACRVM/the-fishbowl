@@ -168,7 +168,8 @@ connected over MCP can search, read, tag, file, delete, set expiry, draft and
       - Deletions are found by comparing UID sets: the recent window on every
         poll, everything once a day.
       - When `UIDVALIDITY` changes, messages are re-mapped by Message-ID.
-    - It polls every `Mail:PollMinutes` (default 5). IDLE on INBOX comes later.
+    - It polls every `Mail:PollMinutes` (default 5), and IDLE on INBOX asks
+      for a pass at once when the server reports news (built 2026-10-10).
     - **The first sync** takes the newest mail first, then the whole history
       in the background in batches. The list fills as it goes, and the account
       shows its progress.
@@ -279,7 +280,7 @@ User/space schema **v22**:
    - `context.space.mail`.
    - Save an attachment to Files.
    - Google OAuth for Workspace accounts.
-   - IDLE push.
+   - IDLE push (built 2026-10-10: `MailPushService`).
 
 ## Decided on 2026-10-07
 

@@ -744,6 +744,19 @@ public class MailApiTests : IClassFixture<WebApplicationFactory<Program>>, IDisp
         Assert.Equal(1, (await Bills()).GetProperty("ruleCount").GetInt32());
     }
 
+    [Fact]
+    public async Task Stamp_MovesOn_WhenASyncPassWasAskedFor()
+    {
+        var c = Fresh();
+        var accountId = await SyncedAccountAsync(c, P);
+        async Task<long> Stamp() => (await Json(await c.GetAsync($"{P}/stamp", Ct))).GetProperty("stamp").GetInt64();
+        var before = await Stamp();
+        Assert.Equal(before, await Stamp());
+        // The server's push (IDLE) or the app's fetch asks for a pass: the app looks again.
+        await SyncNowAsync(c, accountId);
+        Assert.NotEqual(before, await Stamp());
+    }
+
     // ---- 6. seen ----
 
     [Fact]

@@ -79,6 +79,13 @@ public interface IMailbox : IAsyncDisposable
     /// <summary>Moves messages to another folder (out of spam into the inbox).</summary>
     Task<MailTransfer> MoveAsync(string folder, IReadOnlyList<uint> uids, string target, CancellationToken ct) =>
         throw new NotSupportedException("This mailbox can't move.");
+    /// <summary>
+    /// Waits on a folder (IMAP IDLE) and calls <paramref name="changed"/>
+    /// whenever the server says something in it changed — new mail, a delete,
+    /// a flag. Runs until <paramref name="ct"/> and then returns true; false at
+    /// once when the server can't push. A dropped connection is thrown.
+    /// </summary>
+    Task<bool> WatchAsync(string folder, Action changed, CancellationToken ct) => Task.FromResult(false);
     /// <summary>Sends a message over the account's SMTP server and files a
     /// copy in <paramref name="sent"/> (the server's Sent folder) unless the
     /// provider does that itself (Gmail). Returns the copy's UID there when it

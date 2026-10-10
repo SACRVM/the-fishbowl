@@ -68,7 +68,7 @@ public class MailSyncService : BackgroundService
         var poll = TimeSpan.FromMinutes(int.TryParse(await system.GetConfigAsync(PollMinutesConfig, ct), out var m) && m >= 1 ? m : DefaultPollMinutes);
 
         var synced = 0;
-        foreach (var ctx in Workspaces())
+        foreach (var ctx in Workspaces(_db))
         {
             ct.ThrowIfCancellationRequested();
             IReadOnlyList<(MailAccount Account, byte[] Secret)> accounts;
@@ -88,6 +88,8 @@ public class MailSyncService : BackgroundService
 
                 var result = await syncer.SyncAsync(ctx, account, secret, ct);
                 synced++;
+                // Asked for (the server's push, the app's fetch) or something came or went: the app looks again.
+                if (asked || result.Added > 0 || result.Trashed > 0) _queue.Changed(ctx);
                 if (!result.Ok && account.State != MailAccountStates.Failed && messages is not null && account.CreatedBy is { } owner)
                 {
                     try
@@ -103,12 +105,12 @@ public class MailSyncService : BackgroundService
     }
 
     /// <summary>Workspaces with a database on disk — the sync never creates one.</summary>
-    private IEnumerable<ContextRef> Workspaces()
+    internal static IEnumerable<ContextRef> Workspaces(DatabaseFactory db)
     {
         foreach (var (root, file, make) in new (string, string, Func<string, ContextRef>)[]
                  {
-                     (_db.UsersRoot, "personal.db", ContextRef.User),
-                     (_db.SpacesRoot, "space.db", ContextRef.Space),
+                     (db.UsersRoot, "personal.db", ContextRef.User),
+                     (db.SpacesRoot, "space.db", ContextRef.Space),
                  })
         {
             if (!Directory.Exists(root)) continue;

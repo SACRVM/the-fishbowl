@@ -386,6 +386,7 @@
             // { timeZone, language } — the quote's time and words → { id, threadId }
             send: (did, body)        => request(p(`/mail/drafts/${id(did)}/send`), { method: "POST", body: JSON.stringify(body || {}) }),
             unreadCount: ()        => request(p("/mail/unread-count")),
+            stamp:       ()        => request(p("/mail/stamp")),
             // The tags mail carries: [{ name, count, source }] — each account's
             // source tag (system-given) first.
             tags: ()               => request(p("/mail/tags")),
