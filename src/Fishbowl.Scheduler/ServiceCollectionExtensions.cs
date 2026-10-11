@@ -25,6 +25,8 @@ public static class ServiceCollectionExtensions
         // Needs the mail services (registered by the host).
         services.AddHostedService<MailSyncService>();
         services.AddHostedService<MailPushService>();
+        // Needs VectorBackfill (registered by the host).
+        services.AddHostedService<EmbeddingBackfillService>();
         return services;
     }
 }

@@ -85,12 +85,12 @@ else
 }
 
 // Embedding service wired up like Program.cs does it. The downloader uses
-// the same data path, so if the host has already downloaded MiniLM once,
+// the same data path, so if the host has already downloaded the model once,
 // this tool reads straight from that cache — no second download.
 var downloader = new ModelDownloader(dataPath);
 if (!downloader.IsReady())
 {
-    Console.Error.WriteLine($"error: MiniLM model not on disk at {Path.GetDirectoryName(downloader.ModelPath)} — start the host once so it downloads.");
+    Console.Error.WriteLine($"error: embedding model not on disk at {Path.GetDirectoryName(downloader.ModelPath)} — start the host once so it downloads.");
     return 9;
 }
 using var embeddings = new EmbeddingService(downloader);

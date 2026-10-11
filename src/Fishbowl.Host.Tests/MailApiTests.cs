@@ -884,6 +884,13 @@ public class MailApiTests : IClassFixture<WebApplicationFactory<Program>>, IDisp
         var noMail = await KeyAsync(user, ContextRef.User(user), "read:notes");
         Assert.Equal(HttpStatusCode.Forbidden, (await noMail.GetAsync(P + "/threads", Ct)).StatusCode);
 
+        // The search reads too — best first; by its words alone while there
+        // is no model (test hosts never fetch it), and it says so.
+        var found = await Json(await read.GetAsync(P + "/search?q=invoice&all=true", Ct));
+        Assert.True(found.GetProperty("degraded").GetBoolean());
+        Assert.Equal("Your invoice", found.GetProperty("threads")[0].GetProperty("subject").GetString());
+        Assert.Equal(HttpStatusCode.Forbidden, (await noMail.GetAsync(P + "/search?q=invoice", Ct)).StatusCode);
+
         // Writing scope organises, but accounts are cookie-only for any Bearer.
         var write = await KeyAsync(user, ContextRef.User(user), "read:mail", "write:mail");
         Assert.Equal(HttpStatusCode.OK, (await write.PutAsJsonAsync($"{P}/threads/{id}/tags", new { tags = new[] { "x" } }, Ct)).StatusCode);
@@ -935,6 +942,7 @@ public class MailApiTests : IClassFixture<WebApplicationFactory<Program>>, IDisp
 
         var search = ToolPayload(await RpcAsync(key, "tools/call", new { query = "engine" }, "mail_search"));
         Assert.True(search.GetProperty("untrusted").GetBoolean());
+        Assert.True(search.GetProperty("degraded").GetBoolean());   // no model in a test host
         var conversations = search.GetProperty("conversations").EnumerateArray().ToList();
         Assert.Contains(conversations, c => c.GetProperty("subject").GetString() == "Analytical engine notes");
         var threadId = conversations.Single(c => c.GetProperty("subject").GetString() == "Analytical engine notes").GetProperty("threadId").GetString();

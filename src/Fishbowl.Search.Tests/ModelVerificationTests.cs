@@ -34,7 +34,7 @@ public class ModelVerificationTests : IDisposable
         var dl = new ModelDownloader(_tempRoot, new HttpClient(handler));
         Directory.CreateDirectory(Path.GetDirectoryName(dl.ModelPath)!);
         File.WriteAllBytes(dl.ModelPath, new byte[] { 1, 2, 3 });   // truncated
-        File.WriteAllText(dl.VocabPath, "[PAD]\n");
+        File.WriteAllBytes(dl.TokenizerPath, new byte[] { 0 });
         return dl;
     }
 

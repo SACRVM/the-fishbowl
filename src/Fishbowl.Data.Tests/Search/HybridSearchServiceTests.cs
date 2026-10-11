@@ -12,7 +12,7 @@ namespace Fishbowl.Data.Tests.Search;
 
 // Integration-ish tests against a real SQLite DB (user-scoped context).
 // The embedding service is a deterministic Fake so the ranking logic is
-// tested without a model download; semantic parity with MiniLM-L6-v2 is
+// tested without a model download; the real model (multilingual-e5-small) is
 // exercised separately in Fishbowl.Search.Tests.
 public class HybridSearchServiceTests : IDisposable
 {

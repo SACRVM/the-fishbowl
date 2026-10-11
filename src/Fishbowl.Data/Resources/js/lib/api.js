@@ -324,6 +324,17 @@
     const contacts = contactsIn(null);
     contacts.in = contactsIn;
 
+    /** A mail list's filters as a query string; tag=a&tag=b means all of them. */
+    function mailQuery(opts) {
+        const qs = new URLSearchParams();
+        for (const [k, v] of Object.entries(opts)) {
+            if (Array.isArray(v)) for (const x of v) qs.append(k, String(x));
+            else if (v != null && v !== "" && v !== false) qs.set(k, String(v));
+        }
+        const s = qs.toString();
+        return s ? `?${s}` : "";
+    }
+
     // Mail (MailApi): the workspace's accounts and the synced conversations.
     // Adding / changing / removing an account is cookie-only and, in a
     // space, for its Admins.
@@ -344,15 +355,10 @@
             // → { conversations, archived, archiveFolderMissing }
             applyRule:  (rid)       => request(p(`/mail/rules/${id(rid)}/apply`), { method: "POST" }),
             // { q, account, tag, unread, archived, address, before, limit }
-            threads: (opts = {}) => {
-                const qs = new URLSearchParams();
-                for (const [k, v] of Object.entries(opts)) {
-                    if (Array.isArray(v)) for (const x of v) qs.append(k, String(x));   // tag=a&tag=b (all of them)
-                    else if (v != null && v !== "" && v !== false) qs.set(k, String(v));
-                }
-                const s = qs.toString();
-                return request(p("/mail/threads") + (s ? `?${s}` : ""));
-            },
+            threads: (opts = {}) => request(p("/mail/threads") + mailQuery(opts)),
+            // By words and meaning, best first: { q, account, tag, unread,
+            // archived, all (list and archive alike), limit } → { threads, degraded }
+            search: (opts = {}) => request(p("/mail/search") + mailQuery(opts)),
             thread:  (tid)         => request(p(`/mail/threads/${id(tid)}`)),
             setTags: (tid, tags)   => request(p(`/mail/threads/${id(tid)}/tags`), { method: "PUT", body: JSON.stringify({ tags }) }),
             setSeen: (tid, seen)   => request(p(`/mail/threads/${id(tid)}/seen`), { method: "POST", body: JSON.stringify({ seen }) }),

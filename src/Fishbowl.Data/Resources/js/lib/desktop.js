@@ -267,6 +267,40 @@
         });
     }
 
+    // Mail: the active workspace's conversations by their words and their
+    // meaning (MailApi /search, decision 15), the list and the archive
+    // alike; picking one opens it in Mail.
+    function registerMailSearch() {
+        if (!window.sac?.commands?.registerSource) return;
+        sac.commands.registerSource({
+            id: "fb-mail",
+            group: () => fb.t("fb.palette.mail", "Mail"),
+            minLength: 2,
+            debounce: 250,
+            async search(q, { signal }) {
+                const res = await fb.api.mail.search({ q, all: true, limit: 6 });
+                if (signal?.aborted) return [];
+                return (res?.threads || []).map((th) => ({
+                    id: `fb-mail:${th.threadId}`,
+                    label: (th.subject || "").trim() || fb.t("fb.mail.no-subject", "(no subject)"),
+                    icon: th.latestDirection === "out" ? "fb-mail-out" : "fb-mail-in",
+                    hint: mailHint(th),
+                    run: () => go("mail", "open", th.threadId),
+                }));
+            },
+        });
+    }
+
+    /** Who a conversation is with, when, and Archive when it's there. */
+    function mailHint(th) {
+        const who = (th.participants || []).map((p) => p.name || p.address).filter(Boolean);
+        return [
+            who.slice(0, 2).join(", ") + (who.length > 2 ? " …" : ""),
+            fb.format.date(new Date(th.latestAt)),
+            th.archived ? fb.t("fb.mail.tab-archive", "Archive") : "",
+        ].filter(Boolean).join(" · ");
+    }
+
     /** A few plain words from the note around the first query term —
      *  what makes a full-text hit recognisable. Never secret content:
      *  markers (the only form the server has) show as a lock. */
@@ -303,6 +337,7 @@
     window.addEventListener("fb:spaces-changed", loadSpaces);
     window.addEventListener("DOMContentLoaded", () => {
         registerNoteSearch();
+        registerMailSearch();
         loadSpaces();
     });
 

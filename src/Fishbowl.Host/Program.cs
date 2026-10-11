@@ -240,11 +240,17 @@ builder.Services.AddSingleton<IEmbeddingService, EmbeddingService>();
 // connection — no state to share across requests, but keeping it scoped
 // matches the surrounding repository registrations.
 builder.Services.AddScoped<ISearchService, Fishbowl.Data.Search.HybridSearchService>();
+// Vectors made after the fact: a model change, and mail (EmbeddingBackfillService).
+builder.Services.AddScoped<Fishbowl.Data.Search.VectorBackfill>();
 
-// Background download on first start. Detached so a 90MB pull over slow
+// Background download on first start. Detached so a 470 MB pull over slow
 // bandwidth doesn't block app startup — callers degrade gracefully via
-// EmbeddingUnavailableException until the model lands.
-builder.Services.AddHostedService<EmbeddingInitializer>();
+// EmbeddingUnavailableException until the model lands. Not under Testing:
+// every test host would fetch (or hash) 470 MB; their search runs on its
+// words, as a fresh install's does until the model is in — the model itself
+// is Fishbowl.Search.Tests' to test.
+if (!builder.Environment.IsEnvironment("Testing"))
+    builder.Services.AddHostedService<EmbeddingInitializer>();
 
 // MCP tools — thin adapters around existing repositories. Scoped because
 // they depend on scoped repositories; the registry re-materialises them

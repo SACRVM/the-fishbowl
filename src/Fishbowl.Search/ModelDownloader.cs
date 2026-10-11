@@ -4,39 +4,35 @@ using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Fishbowl.Search;
 
-// First-run download of the MiniLM-L6-v2 ONNX model and vocab file. Pinned
-// by SHA-256 — a mismatch aborts the download and deletes the partial file
-// so the next start retries. Files live under `{dataRoot}/models/MiniLmL6V2/`.
-//
-// The HuggingFace URLs below point at the `onnx` subfolder of the upstream
-// repo; those artefacts haven't moved since mid-2023 and the SHA-256 hashes
-// are pinned so a silent upload swap would be caught.
+// First-run download of the embedding model (intfloat/multilingual-e5-small,
+// MIT) and its SentencePiece tokenizer. Pinned to a revision and by SHA-256 —
+// a mismatch aborts the download and deletes the partial file so the next
+// start retries. Files live under `{dataRoot}/models/MultilingualE5Small/`;
+// the folder of the model before it (`MiniLmL6V2/`) is left as it was.
 public sealed class ModelDownloader
 {
-    // sentence-transformers/all-MiniLM-L6-v2 @ main, pinned by content hash.
-    private const string BaseUrl = "https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2/resolve/main";
+    /// <summary>What the vectors are made with — stored beside them, so a
+    /// workspace embedded with another model is embedded again.</summary>
+    public const string ModelName = "intfloat/multilingual-e5-small";
 
-    // Upstream filenames on HuggingFace → local filenames we read back.
-    // `model.onnx` is the FP32 export (~90MB); `vocab.txt` is the WordPiece
-    // vocabulary BertTokenizer expects.
-    //
-    // Only `model.onnx` has a pinned SHA-256 — it's stored in git-LFS so
-    // HuggingFace publishes the content hash. `vocab.txt` is a regular git
-    // blob (231KB) and the API only exposes the git SHA-1 of the wrapped
-    // object, not a hash of the raw contents. Leaving its hash null means
-    // we skip verification; the risk is bounded — a tampered vocab file
-    // breaks tokenisation immediately rather than silently corrupting
-    // embeddings.
+    // The repo at a fixed commit, so a change upstream can't move under us.
+    private const string BaseUrl = "https://huggingface.co/intfloat/multilingual-e5-small/resolve/614241f622f53c4eeff9890bdc4f31cfecc418b3";
+
+    // Upstream filenames on HuggingFace → local filenames we read back:
+    // `onnx/model.onnx` is the FP32 export (~470 MB — quantised exports
+    // lose accuracy on CPUs without VNNI), `sentencepiece.bpe.model` the
+    // tokenizer. Both are git-LFS objects, so HuggingFace publishes their
+    // SHA-256 and both are pinned.
     private static readonly ModelFile[] Files =
     {
         new(
             UpstreamPath: "onnx/model.onnx",
             LocalName: "model.onnx",
-            Sha256: "6fd5d72fe4589f189f8ebc006442dbb529bb7ce38f8082112682524616046452"),
+            Sha256: "ca456c06b3a9505ddfd9131408916dd79290368331e7d76bb621f1cba6bc8665"),
         new(
-            UpstreamPath: "vocab.txt",
-            LocalName: "vocab.txt",
-            Sha256: null),
+            UpstreamPath: "sentencepiece.bpe.model",
+            LocalName: "sentencepiece.bpe.model",
+            Sha256: "cfc8146abe2a0488e9e2a0c56de7952f7c11ab059eca145a0a727afce0db2865"),
     };
 
     private readonly string _modelsDir;
@@ -45,13 +41,13 @@ public sealed class ModelDownloader
 
     public ModelDownloader(string dataRoot, HttpClient? http = null, ILogger<ModelDownloader>? logger = null)
     {
-        _modelsDir = Path.Combine(dataRoot, "models", "MiniLmL6V2");
+        _modelsDir = Path.Combine(dataRoot, "models", "MultilingualE5Small");
         _http = http ?? new HttpClient { Timeout = TimeSpan.FromMinutes(15) };
         _logger = logger ?? NullLogger<ModelDownloader>.Instance;
     }
 
     public string ModelPath => Path.Combine(_modelsDir, "model.onnx");
-    public string VocabPath => Path.Combine(_modelsDir, "vocab.txt");
+    public string TokenizerPath => Path.Combine(_modelsDir, "sentencepiece.bpe.model");
 
     // True once both files are on disk. A file only gets its final name after
     // it was downloaded completely and verified (written as .part, then
@@ -108,8 +104,8 @@ public sealed class ModelDownloader
         }
     }
 
-    // Null expected hash means "verification not pinned" — see the comment on
-    // Files[] for the vocab.txt rationale.
+    // Null expected hash means "verification not pinned" (a plain git blob,
+    // whose raw-content hash HuggingFace doesn't publish).
     private static async Task<bool> IsVerifiedAsync(string path, string? expected, CancellationToken ct)
     {
         if (expected is null) return true;

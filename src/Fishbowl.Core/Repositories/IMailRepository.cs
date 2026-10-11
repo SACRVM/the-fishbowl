@@ -16,6 +16,11 @@ public interface IMailRepository
     Task<bool> DeleteAccountAsync(ContextRef ctx, string id, CancellationToken ct = default);
 
     Task<IReadOnlyList<MailThread>> ListThreadsAsync(ContextRef ctx, MailListQuery query, CancellationToken ct = default);
+
+    // Conversations by how well they answer query.Text — its words (full
+    // text) and its meaning (vectors) — best first, at most query.Limit; the
+    // other filters apply, Before doesn't.
+    Task<MailSearchResult> SearchThreadsAsync(ContextRef ctx, MailListQuery query, CancellationToken ct = default);
     /// <summary>A thread's messages, oldest first (one per Message-ID).</summary>
     Task<IReadOnlyList<MailMessage>> GetThreadAsync(ContextRef ctx, string threadId, CancellationToken ct = default);
     Task<MailMessage?> GetMessageAsync(ContextRef ctx, string id, CancellationToken ct = default);

@@ -78,7 +78,7 @@ public sealed class HybridSearchService : ISearchService
         bool degraded;
         try
         {
-            var vec = await _embeddings.EmbedAsync(query, ct);
+            var vec = await _embeddings.EmbedQueryAsync(query, ct);
             vecHits = await RunVectorAsync(db, vec, ct);
             degraded = false;
         }

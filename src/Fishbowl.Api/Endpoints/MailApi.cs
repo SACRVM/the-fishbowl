@@ -392,6 +392,27 @@ public static partial class MailApi
             return Results.Ok(threads);
         }).WithName($"List{tag}MailThreads").WithSummary("Conversations, newest activity first.");
 
+        // The search (decision 15): words and meaning, best first — the Mail
+        // app's best matches over its list, and the palette (all: the list
+        // and the archive alike).
+        g.MapGet("/search", async (HttpContext http, IMailRepository repo, string? q, string? account, string[]? tag,
+            bool? unread, bool? archived, bool? all, int? limit, CancellationToken ct) =>
+        {
+            var (t, err) = await ResolveAsync(http, space, Need.Read, ct);
+            if (err is not null) return err;
+            var found = await repo.SearchThreadsAsync(t!.Ctx, new MailListQuery
+            {
+                Text = q,
+                AccountId = account,
+                Tags = (tag ?? []).ToList(),
+                UnreadOnly = unread == true,
+                Archived = archived == true,
+                AnyState = all == true,
+                Limit = limit ?? 20,
+            }, ct);
+            return Results.Ok(new { threads = found.Threads, degraded = found.Degraded });
+        }).WithName($"Search{tag}Mail").WithSummary("Conversations by how well they answer q — its words and its meaning — best first.");
+
         g.MapGet("/threads/{threadId}", async (string threadId, HttpContext http, IMailRepository repo, CancellationToken ct) =>
         {
             var (t, err) = await ResolveAsync(http, space, Need.Read, ct);

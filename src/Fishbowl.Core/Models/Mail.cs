@@ -133,6 +133,10 @@ public class MailThread
     public List<string> AccountIds { get; set; } = new();
 }
 
+/// <summary>Conversations best first (a search) — and whether only their
+/// words counted because the model wasn't ready.</summary>
+public record MailSearchResult(IReadOnlyList<MailThread> Threads, bool Degraded);
+
 public class MailListQuery
 {
     public string? Text { get; set; }          // full text
@@ -141,6 +145,8 @@ public class MailListQuery
     public List<string> Tags { get; set; } = new();   // all of them (AND); a source tag means its account
     public bool UnreadOnly { get; set; }
     public bool Archived { get; set; }         // the archived threads instead of the list
+    public bool AnyState { get; set; }         // the list and the archived alike (Archived is ignored)
+    public IReadOnlyCollection<string>? ThreadIds { get; set; }   // only these (a search's candidates)
     public string? Address { get; set; }       // threads with this person (contacts)
     public DateTime? Before { get; set; }      // paging: threads whose latest is older
     public int Limit { get; set; } = 50;

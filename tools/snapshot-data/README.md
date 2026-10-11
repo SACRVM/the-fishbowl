@@ -24,7 +24,7 @@ Flags:
 | ------------------- | ------------------ | ------------------------------------------------------------ |
 | `--data <path>`     | `fishbowl-data`    | Source data directory.                                       |
 | `--out <path>`      | `fishbowl-backups` | Parent of `snapshot-<timestamp>/`.                           |
-| `--include-models`  | off                | Bundle the ONNX MiniLM weights (~90 MB). Off by default — models re-download from HuggingFace on next host start. |
+| `--include-models`  | off                | Bundle the ONNX embedding model (~470 MB). Off by default — models re-download from HuggingFace on next host start. |
 | `--quiet`           | off                | Suppress per-file logs. Final summary still goes to stderr.  |
 
 stdout gets the absolute snapshot path on success — pipe-friendly for scripts.

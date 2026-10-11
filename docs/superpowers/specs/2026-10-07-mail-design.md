@@ -181,6 +181,13 @@ connected over MCP can search, read, tag, file, delete, set expiry, draft and
     - `GET …/mail/search` and the palette get a Mail source.
     - Embeddings (`vec_mail`, the notes' model) come in phase 3; mail is
       many times the volume of notes.
+    - Built 2026-10-11: the model became `intfloat/multilingual-e5-small`
+      for all of search (the English one found next to nothing by meaning in
+      German mail); vectors are made in the background after the mail is
+      stored, newest first (`VectorBackfill`), and a search blends words and
+      meaning like notes. The Mail app shows up to five best matches over
+      the date-ordered matches; the palette searches the list and the
+      archive; MCP `mail_search` ranks when it has a query.
 16. **Roles.**
     - In the personal workspace the owner does everything.
     - In a space:
@@ -275,7 +282,7 @@ User/space schema **v22**:
    - `write:mail`, `send:mail` and the MCP write tools.
 3. **Rules and expiry.**
    - Rules, expiry and the maintenance pass.
-   - The palette source, embeddings.
+   - The palette source, embeddings (built 2026-10-11).
 4. **Space apps and the rest.**
    - `context.space.mail`.
    - Save an attachment to Files.

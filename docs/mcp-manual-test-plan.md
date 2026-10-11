@@ -11,7 +11,7 @@ Hand-execute after shipping Phase 5. Run top-to-bottom; each section stands alon
 ## 0. Prerequisites
 
 - Fishbowl host running on `https://localhost:7180` (`dotnet run --project src/Fishbowl.Host`).
-- MiniLM-L6-v2 model present under `{dataRoot}/models/MiniLmL6V2/` (first run downloads it; subsequent runs log `MiniLM-L6-v2 already present`).
+- The embedding model (multilingual-e5-small) present under `{dataRoot}/models/MultilingualE5Small/` (the first run downloads it, ~470 MB).
 - An API key minted with `read:notes` + `write:notes` for the personal context (see `tools/mint-dev-key` or UI → Settings → API Keys).
 - Claude Code configured with Fishbowl in its MCP config (`.mcp.json` at repo root is the easiest path).
 - Browser window logged into Fishbowl for side-by-side verification.
@@ -132,7 +132,7 @@ Hand-execute after shipping Phase 5. Run top-to-bottom; each section stands alon
 ## 6. Degraded mode (model unavailable)
 
 **6.1 Missing model → FTS-only results, service still works.**
-- Action: stop host, delete `{dataRoot}/models/MiniLmL6V2/`, restart.
+- Action: stop host, delete `{dataRoot}/models/MultilingualE5Small/`, restart.
 - During the re-download window, call `search_memory`.
 - Expected: response has `degraded: true`, hits come from keyword match only.
 - If not: `EmbeddingService.EmbedAsync` isn't throwing `EmbeddingUnavailableException`, or `HybridSearchService` isn't catching it.

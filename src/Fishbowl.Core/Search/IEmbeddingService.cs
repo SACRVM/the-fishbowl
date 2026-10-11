@@ -10,11 +10,28 @@ namespace Fishbowl.Core.Search;
 // contract here keeps both sides clean.
 public interface IEmbeddingService
 {
-    // 384 for all-MiniLM-L6-v2. Exposed as a property so callers sizing
+    // 384 for multilingual-e5-small. Exposed as a property so callers sizing
     // buffers don't have to hard-code it.
     int Dimensions { get; }
 
+    // Which model the vectors come from. A workspace keeps it beside its
+    // vectors and embeds everything again when it changes.
+    string Model => "unknown";
+
+    // A text that is searched: a note, a table row, a mail.
     Task<float[]> EmbedAsync(string text, CancellationToken ct = default);
+
+    // What someone searches with. A model trained for search embeds the two
+    // sides differently; one that isn't needs nothing else.
+    Task<float[]> EmbedQueryAsync(string query, CancellationToken ct = default) => EmbedAsync(query, ct);
+
+    // Several texts in one model run — what a backfill wants.
+    async Task<IReadOnlyList<float[]>> EmbedManyAsync(IReadOnlyList<string> texts, CancellationToken ct = default)
+    {
+        var list = new List<float[]>(texts.Count);
+        foreach (var t in texts) list.Add(await EmbedAsync(t, ct));
+        return list;
+    }
 }
 
 // Thrown when the embedding model hasn't finished downloading yet. Callers

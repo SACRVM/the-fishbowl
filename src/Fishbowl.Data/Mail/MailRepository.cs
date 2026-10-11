@@ -4,6 +4,7 @@ using Dapper;
 using Fishbowl.Core;
 using Fishbowl.Core.Models;
 using Fishbowl.Core.Repositories;
+using Fishbowl.Core.Search;
 using Fishbowl.Core.Util;
 using Fishbowl.Data.Repositories;
 using Microsoft.Extensions.Logging;
@@ -18,19 +19,22 @@ namespace Fishbowl.Data.Mail;
 /// messages with their thread, flags, and messages the server no longer has
 /// (to the trash, decision 9).
 /// </summary>
-public class MailRepository : IMailRepository
+public partial class MailRepository : IMailRepository
 {
     private readonly DatabaseFactory _db;
     private readonly MailCredentials _credentials;
     private readonly ILogger<MailRepository> _logger;
     private readonly ITagRepository _tags;
+    private readonly IEmbeddingService? _embeddings;
 
-    public MailRepository(DatabaseFactory db, MailCredentials credentials, ILogger<MailRepository>? logger = null, ITagRepository? tags = null)
+    public MailRepository(DatabaseFactory db, MailCredentials credentials, ILogger<MailRepository>? logger = null, ITagRepository? tags = null,
+        IEmbeddingService? embeddings = null)
     {
         _db = db;
         _credentials = credentials;
         _logger = logger ?? NullLogger<MailRepository>.Instance;
         _tags = tags ?? new TagRepository(db);
+        _embeddings = embeddings;
     }
 
     private static string Iso(DateTime d) => TimeUtil.AsUtc(d).ToString("o");
@@ -259,7 +263,12 @@ public class MailRepository : IMailRepository
             where.Add("m.thread_id IN (SELECT t.thread_id FROM mail_messages t WHERE t.rowid IN (SELECT rowid FROM mail_fts WHERE mail_fts MATCH @match))");
             p.Add("match", match);
         }
-        var having = new List<string> { q.Archived ? "active = 0" : "active = 1" };
+        if (q.ThreadIds is { } only)
+        {
+            where.Add("m.thread_id IN @only");
+            p.Add("only", only.ToArray());
+        }
+        var having = new List<string> { q.AnyState ? "1" : q.Archived ? "active = 0" : "active = 1" };
         if (q.UnreadOnly) having.Add("unread > 0");
         if (q.Before is { } before) { having.Add("latest < @before"); p.Add("before", Iso(before)); }
         p.Add("limit", Math.Clamp(q.Limit, 1, 200));
@@ -967,6 +976,9 @@ public class MailRepository : IMailRepository
     private static async Task RemoveRowsAsync(IDbConnection db, IDbTransaction tx, IReadOnlyCollection<string> ids, CancellationToken ct)
     {
         if (ids.Count == 0) return;
+        // One by one: vec0 finds a row by its key, not by a list of them.
+        await db.ExecuteAsync(new CommandDefinition("DELETE FROM vec_mail WHERE id = @id",
+            ids.Select(id => new { id }).ToArray(), tx, cancellationToken: ct));
         await db.ExecuteAsync(new CommandDefinition(@"
             DELETE FROM mail_fts WHERE rowid IN (SELECT rowid FROM mail_messages WHERE id IN @ids);
             DELETE FROM mail_refs WHERE message_id IN @ids;
@@ -997,6 +1009,9 @@ public class MailRepository : IMailRepository
         await db.ExecuteAsync(new CommandDefinition(
             "DELETE FROM mail_fts WHERE rowid = (SELECT rowid FROM mail_messages WHERE id = @id)", new { id }, tx, cancellationToken: ct));
         await IndexAsync(db, tx, m, ct);
+        // Its vector went with it: the backfill makes it again.
+        await db.ExecuteAsync(new CommandDefinition(
+            "UPDATE mail_messages SET embedded = 0 WHERE id = @id", new { id }, tx, cancellationToken: ct));
         await RestateAsync(db, tx, [id], ct);
     }
 }

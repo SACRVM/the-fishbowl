@@ -11,7 +11,7 @@ using Microsoft.Data.Sqlite;
 //   acme/**                                → file copy (cert state; small, portable)
 //
 // What's deliberately excluded:
-//   models/**                              → ONNX MiniLM (re-downloads on next boot)
+//   models/**                              → the ONNX embedding model (re-downloads on next boot)
 //                                            Add `--include-models` if you need a
 //                                            self-contained restore on an air-gapped
 //                                            box.
@@ -140,7 +140,7 @@ if (Directory.Exists(modelsRoot))
     }
     else
     {
-        Log("  - models/ skipped (use --include-models to bundle ~90MB of ONNX weights)");
+        Log("  - models/ skipped (use --include-models to bundle ~470MB of ONNX weights)");
     }
 }
 

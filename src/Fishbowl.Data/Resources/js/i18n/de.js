@@ -156,6 +156,7 @@ window.sac?.i18n?.add?.("de", {
     "fb.palette.switch-to": "Zu {name} wechseln",
     "fb.palette.notes": "Notizen",
     "fb.palette.untitled": "Notiz ohne Titel",
+    "fb.palette.mail": "Mail",
     "fb.go.desktop": "Desktop",
 
     // --- Installed apps: install, review, update, remove ----------------------

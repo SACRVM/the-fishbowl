@@ -13,7 +13,7 @@ public class DatabaseFactory
 {
     /// <summary>The user/space schema head: the PRAGMA user_version a context
     /// DB has once it is open. Raise it with every ApplyUserVN.</summary>
-    public const int UserSchemaHead = 26;
+    public const int UserSchemaHead = 27;
 
     private readonly string _dataRoot;
     private readonly string _usersPath;
@@ -578,9 +578,39 @@ public class DatabaseFactory
         if (version < 26)
         {
             ApplyUserV26(connection);
-            connection.Execute($"PRAGMA user_version = {UserSchemaHead}");
+            connection.Execute("PRAGMA user_version = 26");
             _logger.LogInformation("Applied user schema v26 to {DbPath}", ((SqliteConnection)connection).DataSource);
+            version = 26;
         }
+
+        if (version < 27)
+        {
+            ApplyUserV27(connection);
+            connection.Execute($"PRAGMA user_version = {UserSchemaHead}");
+            _logger.LogInformation("Applied user schema v27 to {DbPath}", ((SqliteConnection)connection).DataSource);
+        }
+    }
+
+    // Mail found by meaning (mail spec, decision 15): a vector per message in
+    // vec_mail, keyed by its id, made in the background (EmbeddingBackfill) —
+    // `embedded` marks the messages that have one, the partial index finds the
+    // rest without a scan. `search_meta` says which model a workspace's
+    // vectors come from: another model means all of them are made again.
+    private static void ApplyUserV27(IDbConnection connection)
+    {
+        var cols = connection.Query<string>("SELECT name FROM pragma_table_info('mail_messages')").ToList();
+        if (!cols.Contains("embedded"))
+            connection.Execute("ALTER TABLE mail_messages ADD COLUMN embedded INTEGER NOT NULL DEFAULT 0;");
+        connection.Execute(@"
+            CREATE INDEX IF NOT EXISTS ix_mail_messages_unembedded ON mail_messages (sent_at) WHERE embedded = 0;
+            CREATE VIRTUAL TABLE IF NOT EXISTS vec_mail USING vec0(
+                id TEXT PRIMARY KEY,
+                embedding FLOAT[384]
+            );
+            CREATE TABLE IF NOT EXISTS search_meta (
+                key TEXT PRIMARY KEY,
+                value TEXT
+            );");
     }
 
     // Mail rules (mail spec, decision 11): conditions and actions as JSON;

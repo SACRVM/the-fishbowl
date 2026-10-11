@@ -6,7 +6,7 @@ namespace Fishbowl.Search.Tests;
 
 // Two flavours:
 //   * Always-on contract tests — no model needed.
-//   * Model-dependent semantic tests — skip when the MiniLM-L6-v2 files
+//   * Model-dependent semantic tests — skip when the embedding model's files
 //     aren't on disk at the shared cache path below. The cache survives
 //     across runs so a developer (or CI job) runs `EnsureModelAsync` once
 //     and subsequent runs exercise the semantic properties.
@@ -99,12 +99,65 @@ public class EmbeddingServiceTests : IDisposable
         var closeSim = Dot(cat, kitten);
         var farSim = Dot(cat, motorcycle);
 
-        // The expected gap with MiniLM-L6-v2 on this triple is comfortably
-        // positive (~0.3+). A tight inequality is enough to catch a model
-        // swap or a broken pipeline, without being fragile to minor model
-        // updates.
-        Assert.True(closeSim > farSim + 0.05,
-            $"Expected cat↔kitten similarity > cat↔motorcycle + 0.05, got {closeSim} vs {farSim}");
+        // e5's similarities sit close together (most pairs land above 0.7),
+        // so the gap is small but steady. A tight inequality is enough to
+        // catch a broken pipeline without being fragile to model updates.
+        Assert.True(closeSim > farSim + 0.02,
+            $"Expected cat↔kitten similarity > cat↔motorcycle + 0.02, got {closeSim} vs {farSim}");
+    }
+
+    // The reason for the model: a German question finds the German text it
+    // is about by meaning — none of its words are in the text.
+    [Fact]
+    public async Task EmbedQueryAsync_FindsAGermanText_ByMeaning()
+    {
+        SkipIfModelMissing();
+        using var service = BuildService();
+        var ct = TestContext.Current.CancellationToken;
+
+        var query = await service.EmbedQueryAsync("Wann kommt mein Paket?", ct);
+        var parcel = await service.EmbedAsync("Ihre Sendung wird morgen zwischen 10 und 14 Uhr zugestellt.", ct);
+        var bill = await service.EmbedAsync("Ihre Stromrechnung für März beträgt 84,20 Euro.", ct);
+
+        Assert.True(Dot(query, parcel) > Dot(query, bill) + 0.02,
+            $"Expected the delivery text first, got {Dot(query, parcel)} vs {Dot(query, bill)}");
+    }
+
+    // A batch gives each text the vector it gets alone (padding is masked).
+    [Fact]
+    public async Task EmbedManyAsync_MatchesOneAtATime()
+    {
+        SkipIfModelMissing();
+        using var service = BuildService();
+        var ct = TestContext.Current.CancellationToken;
+        string[] texts = ["kurz", "Ein etwas längerer Satz über das Wetter in Köln und die Bahn."];
+
+        var many = await service.EmbedManyAsync(texts, ct);
+        for (var i = 0; i < texts.Length; i++)
+        {
+            var one = await service.EmbedAsync(texts[i], ct);
+            Assert.True(Dot(one, many[i]) > 0.9999f, $"text {i}: {Dot(one, many[i])}");
+        }
+    }
+
+    // The tokenizer matches HuggingFace's own (the `tokenizers` library over
+    // the repo's tokenizer.json) — fairseq's id shift, an unknown piece (the
+    // emoji) and NFKC included; the ids below come from it.
+    [Theory]
+    [InlineData("query: Rechnung für die Stromkosten im März",
+        new long[] { 0, 41, 1294, 12, 122035, 643, 68, 77185, 33357, 566, 58409, 2 })]
+    [InlineData("passage: Ihre Bestellung bei Amazon.de ist unterwegs — Lieferung Dienstag 14.10.",
+        new long[] { 0, 46692, 12, 8309, 102193, 1079, 15075, 5, 112, 443, 101893, 292, 143692, 120913, 616, 10179, 2 })]
+    [InlineData("passage: Grüße aus Köln!  Ein   Test\twith ÄÖÜß, emoji 🐟 and https://example.com/a?b=1",
+        new long[] { 0, 46692, 12, 184191, 1312, 77399, 38, 2991, 8647, 678, 20056, 8655, 8047, 20036, 4, 28, 121505, 6, 3, 136, 3975, 696, 3355, 11, 33209, 5, 277, 64, 11, 32, 275, 33000, 2 })]
+    [InlineData("query: ①②③ ﬁne Ｆｕｌｌｗｉｄｔｈ",
+        new long[] { 0, 41, 1294, 12, 37638, 5885, 9312, 146984, 2 })]
+    public void Tokenizer_MatchesTheReference(string text, long[] expected)
+    {
+        SkipIfModelMissing();
+        var dl = new ModelDownloader(SharedModelCache);
+        using var pipeline = new E5Pipeline(dl.ModelPath, dl.TokenizerPath);
+        Assert.Equal(expected, pipeline.Ids(text));
     }
 
     private EmbeddingService BuildService()
@@ -116,7 +169,7 @@ public class EmbeddingServiceTests : IDisposable
         if (!downloader.IsReady())
         {
             Assert.Skip(
-                $"MiniLM-L6-v2 model not present at {Path.GetDirectoryName(downloader.ModelPath)}. " +
+                $"Embedding model not present at {Path.GetDirectoryName(downloader.ModelPath)}. " +
                 "Run `dotnet run --project src/Fishbowl.Host` once to populate, " +
                 "or copy an existing download into the shared cache.");
         }

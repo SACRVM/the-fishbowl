@@ -711,7 +711,7 @@ public class TableRepository : ITableRepository
         {
             try
             {
-                var q = await _embeddings.EmbedAsync(query, ct);
+                var q = await _embeddings.EmbedQueryAsync(query, ct);
                 var blob = new byte[q.Length * sizeof(float)];
                 Buffer.BlockCopy(q, 0, blob, 0, blob.Length);
                 // vec0's k-nearest search can't be narrowed to a key prefix;

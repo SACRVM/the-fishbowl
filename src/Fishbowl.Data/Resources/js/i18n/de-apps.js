@@ -630,6 +630,8 @@ window.sac?.i18n?.add?.("de", {
     "fb.mail.no-archived": "Nichts archiviert",
     "fb.mail.no-mail": "Keine Mail",
     "fb.mail.no-match": "Nichts gefunden",
+    "fb.mail.best-matches": "Beste Treffer",
+    "fb.mail.by-date": "Nach Datum",
     "fb.mail.no-subject": "(kein Betreff)",
     "fb.mail.no-unread": "Nichts ungelesen",
     "fb.mail.nobody": "(niemand)",

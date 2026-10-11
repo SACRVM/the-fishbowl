@@ -40,6 +40,8 @@ class FbMailView extends HTMLElement {
     constructor() {
         super();
         this.threads = [];
+        this.best = [];          // a search's best matches, over the list (decision 15)
+        this._loadSeq = 0;
         this.accounts = [];
         this.selectedId = null;
         this.view = "list";        // the tab: list (Inbox) | archived | drafts | spam
@@ -184,6 +186,7 @@ class FbMailView extends HTMLElement {
             // The servers take seconds: what was read last (or "Reading…")
             // shows at once, the fresh read when it's in.
             this.threads = [];
+            this.best = [];
             this.more = false;
             this.renderList();
             this.renderTagFilter();
@@ -196,14 +199,24 @@ class FbMailView extends HTMLElement {
             this.draftCount = this.drafts.length;
             this.paintTabs();
             this.threads = [];
+            this.best = [];
             this.more = false;
             this.renderList();
             this.renderTagFilter();
             return;
         }
+        // A search shows its best matches first — by words and by meaning,
+        // so also mail none of the words are in — then every match by date.
+        const seq = ++this._loadSeq;
+        const best = this.query && this.accounts.length
+            ? this.api.search({ ...this.query_(), limit: 5 }).then((r) => r.threads || []).catch(() => [])
+            : Promise.resolve([]);
         let page = [];
         try { page = this.accounts.length ? await this.api.threads(this.query_()) : []; }
         catch (err) { console.warn("[fb-mail-view] threads failed:", err?.status); }
+        const found = await best;
+        // A later keystroke's answer wins.
+        if (seq !== this._loadSeq) return;
         // A refresh keeps what was scrolled in beyond the first page.
         if (keep && this.threads.length > page.length) {
             const ids = new Set(page.map((x) => x.threadId));
@@ -212,6 +225,9 @@ class FbMailView extends HTMLElement {
         // Conversations on their way out stay out while their servers answer.
         if (this._deleting?.size) page = page.filter((x) => !this._deleting.has(x.threadId));
         this.threads = page;
+        // One object per conversation, so a change shows in both places.
+        this.best = found.filter((x) => !this._deleting?.has(x.threadId))
+            .map((x) => page.find((p) => p.threadId === x.threadId) ?? x);
         this.more = page.length >= 50;
         this.renderList();
         this.renderTagFilter();
@@ -219,6 +235,15 @@ class FbMailView extends HTMLElement {
 
     /** The accounts' source tags (their names, system-given). */
     sourceTags() { return new Set(this.accounts.map((a) => a.sourceTag)); }
+
+    /** A conversation the list shows — a best match too. */
+    thread(id) { return this.threads.find((x) => x.threadId === id) ?? this.best.find((x) => x.threadId === id); }
+
+    /** What the list shows, in its order: the best matches, then the rest by date. */
+    shown() {
+        const best = new Set(this.best.map((x) => x.threadId));
+        return this.best.concat(this.threads.filter((x) => !best.has(x.threadId)));
+    }
 
     /** A row's chips: the source only when there is more than one account to tell apart. */
     shownTags(tags) {
@@ -251,7 +276,7 @@ class FbMailView extends HTMLElement {
             let all = [];
             try { all = this.accounts.length ? await this.api.tags() : []; } catch { all = []; }
             if (!this.isConnected) return;
-            const reachable = new Set(this.threads.flatMap((th) => th.tags));
+            const reachable = new Set(this.shown().flatMap((th) => th.tags));
             visible = all.filter((x) => (picked.size === 0 ? x.count > 0 : reachable.has(x.name)) || picked.has(x.name))
                 .sort((a, b) => (b.source - a.source) || (b.count - a.count) || a.name.localeCompare(b.name))
                 .map((x) => x.name);
@@ -355,6 +380,12 @@ class FbMailView extends HTMLElement {
                 fb-mail-view .mv-items { flex: 1; min-height: 0; overflow-y: auto; padding: 2px 12px 12px; }
                 fb-mail-view .mv-items:focus { outline: none; }
                 fb-mail-view .mv-none { padding: 8px 12px; color: var(--text-muted); }
+                /* A search's two groups, labelled like the list head, on the rows' text edge. */
+                fb-mail-view .mv-group {
+                    padding: 10px 12px 4px; font-family: 'Outfit', sans-serif; font-weight: 700; font-size: 11px;
+                    text-transform: uppercase; letter-spacing: 0.1em; color: var(--text-muted);
+                }
+                fb-mail-view .mv-group:first-child { padding-top: 4px; }
                 fb-mail-view .mv-item {
                     position: relative;
                     display: flex; gap: 10px; padding: 9px 12px; margin-bottom: 2px; cursor: pointer;
@@ -622,7 +653,7 @@ class FbMailView extends HTMLElement {
             : n === 1 ? this.t("read-all-done-1", "1 conversation marked read")
             : this.t("read-all-done", "{n} conversations marked read", { n }));
         if (this.view === (archived ? "archived" : "list")) {
-            for (const th of this.threads) th.unread = 0;
+            for (const th of this.shown()) th.unread = 0;
             this.loadThreads({ keep: true });
         }
         this.loadCounts();
@@ -708,7 +739,7 @@ class FbMailView extends HTMLElement {
         if (!box) return;
         if (this.view === "drafts") { this.renderDrafts(box); return; }
         if (this.view === "spam") { this.renderSpam(box); return; }
-        if (!this.threads.length) {
+        if (!this.threads.length && !this.best.length) {
             const text = !this.accounts.length ? this.t("no-mail", "No mail")
                 : this.query ? this.t("no-match", "Nothing matches")
                 : this.unreadOnly ? this.t("no-unread", "Nothing unread")
@@ -718,40 +749,56 @@ class FbMailView extends HTMLElement {
             box.firstElementChild.textContent = text;
             return;
         }
-        box.replaceChildren(...this.threads.map((th) => {
-            const row = document.createElement("div");
-            row.className = "mv-item" + (th.unread ? " unread" : "") + (th.threadId === this.selectedId ? " selected" : "");
-            row.dataset.id = th.threadId;
-            row.innerHTML = `
-                <sac-icon class="mv-dir"></sac-icon>
-                <div class="mv-item-text">
-                    <div class="mv-line"><span class="mv-who"></span><span class="mv-count"></span><span class="mv-when"></span></div>
-                    <div class="mv-line"><span class="mv-subject"></span><span class="mv-marks"></span></div>
-                    <div class="mv-snippet"></div>
-                    <div class="mv-item-tags"></div>
-                </div>`;
-            const dir = row.querySelector(".mv-dir");
-            dir.setAttribute("name", th.latestDirection === "out" ? "fb-mail-out" : "fb-mail-in");
-            dir.setAttribute("title", th.latestDirection === "out" ? this.t("sent", "Sent") : this.t("received", "Received"));
-            row.querySelector(".mv-who").textContent = this.who(th);
-            row.querySelector(".mv-count").textContent = th.count > 1 ? String(th.count) : "";
-            row.querySelector(".mv-when").textContent = this.when(th.latestAt);
-            row.querySelector(".mv-subject").textContent = th.subject || this.t("no-subject", "(no subject)");
-            row.querySelector(".mv-snippet").textContent = th.snippet || "";
-            const marks = row.querySelector(".mv-marks");
-            if (th.hasAttachments) marks.innerHTML += `<sac-icon name="attachment" title="${this.t("has-attachments", "Attachments")}"></sac-icon>`;
-            if (th.flagged) marks.innerHTML += `<sac-icon name="star" title="${this.t("flagged", "Flagged")}"></sac-icon>`;
-            const tags = row.querySelector(".mv-item-tags");
-            for (const name of this.shownTags(th.tags)) {
-                const chip = document.createElement("sac-chip");
-                chip.setAttribute("label", name);
-                chip.setAttribute("color", fb.tags.colorFor(name));
-                tags.appendChild(chip);
-            }
-            if (!tags.childElementCount) tags.remove();
-            row.addEventListener("click", () => this.open(th.threadId));
-            return row;
-        }));
+        const group = (label) => {
+            const head = document.createElement("div");
+            head.className = "mv-group";
+            head.textContent = label;
+            return head;
+        };
+        const best = new Set(this.best.map((x) => x.threadId));
+        const rest = this.threads.filter((x) => !best.has(x.threadId));
+        const rows = this.best.map((th) => this.threadRow(th));
+        if (rows.length) {
+            rows.unshift(group(this.t("best-matches", "Best matches")));
+            if (rest.length) rows.push(group(this.t("by-date", "By date")));
+        }
+        box.replaceChildren(...rows, ...rest.map((th) => this.threadRow(th)));
+    }
+
+    /** A conversation's row in the list. */
+    threadRow(th) {
+        const row = document.createElement("div");
+        row.className = "mv-item" + (th.unread ? " unread" : "") + (th.threadId === this.selectedId ? " selected" : "");
+        row.dataset.id = th.threadId;
+        row.innerHTML = `
+            <sac-icon class="mv-dir"></sac-icon>
+            <div class="mv-item-text">
+                <div class="mv-line"><span class="mv-who"></span><span class="mv-count"></span><span class="mv-when"></span></div>
+                <div class="mv-line"><span class="mv-subject"></span><span class="mv-marks"></span></div>
+                <div class="mv-snippet"></div>
+                <div class="mv-item-tags"></div>
+            </div>`;
+        const dir = row.querySelector(".mv-dir");
+        dir.setAttribute("name", th.latestDirection === "out" ? "fb-mail-out" : "fb-mail-in");
+        dir.setAttribute("title", th.latestDirection === "out" ? this.t("sent", "Sent") : this.t("received", "Received"));
+        row.querySelector(".mv-who").textContent = this.who(th);
+        row.querySelector(".mv-count").textContent = th.count > 1 ? String(th.count) : "";
+        row.querySelector(".mv-when").textContent = this.when(th.latestAt);
+        row.querySelector(".mv-subject").textContent = th.subject || this.t("no-subject", "(no subject)");
+        row.querySelector(".mv-snippet").textContent = th.snippet || "";
+        const marks = row.querySelector(".mv-marks");
+        if (th.hasAttachments) marks.innerHTML += `<sac-icon name="attachment" title="${this.t("has-attachments", "Attachments")}"></sac-icon>`;
+        if (th.flagged) marks.innerHTML += `<sac-icon name="star" title="${this.t("flagged", "Flagged")}"></sac-icon>`;
+        const tags = row.querySelector(".mv-item-tags");
+        for (const name of this.shownTags(th.tags)) {
+            const chip = document.createElement("sac-chip");
+            chip.setAttribute("label", name);
+            chip.setAttribute("color", fb.tags.colorFor(name));
+            tags.appendChild(chip);
+        }
+        if (!tags.childElementCount) tags.remove();
+        row.addEventListener("click", () => this.open(th.threadId));
+        return row;
     }
 
     // ---------------------------------------------------------- thread --
@@ -796,7 +843,7 @@ class FbMailView extends HTMLElement {
         await this.contactsByAddress();
         this.paintThread(threadId, messages);
 
-        const th = this.threads.find((x) => x.threadId === threadId);
+        const th = this.thread(threadId);
         if (this.writable && messages.some((m) => m.direction === "in" && !m.seen)) {
             try {
                 await this.api.setSeen(threadId, true);
@@ -864,7 +911,7 @@ class FbMailView extends HTMLElement {
         pane.querySelector("#mv-unread").addEventListener("click", async () => {
             try {
                 await this.api.setSeen(threadId, false);
-                const th = this.threads.find((x) => x.threadId === threadId);
+                const th = this.thread(threadId);
                 if (th) { th.unread = Math.max(1, th.unread); this.renderList(); }
                 this.loadCounts();
                 sac.toast?.(this.t("marked-unread", "Marked unread."));
@@ -901,7 +948,7 @@ class FbMailView extends HTMLElement {
         const save = async () => {
             try {
                 const res = await this.api.setTags(threadId, input.value);
-                const th = this.threads.find((x) => x.threadId === threadId);
+                const th = this.thread(threadId);
                 if (th) { const src = this.sourceTags(); th.tags = th.tags.filter((x) => src.has(x)).concat(res.tags); this.renderList(); }
                 fb.tags.invalidate();
                 this.renderTagFilter();
@@ -995,7 +1042,7 @@ class FbMailView extends HTMLElement {
                     : { id: "discard", label: this.t("discard", "Discard"), icon: "trash", danger: true, onClick: () => this.discardDrafts([id]) },
             ];
         }
-        const th = this.threads.find((x) => x.threadId === row.dataset.id);
+        const th = this.thread(row.dataset.id);
         if (!th) return null;
         const items = [{ id: "open", label: fb.t("fb.common.open", "Open"), icon: "mail", onClick: () => this.open(th.threadId) }];
         if (!this.writable) return items;
@@ -1348,7 +1395,7 @@ class FbMailView extends HTMLElement {
             return;
         }
         await this.loadThreads();
-        if (draft.threadId && this.threads.some((x) => x.threadId === draft.threadId)) this.open(draft.threadId);
+        if (draft.threadId && this.thread(draft.threadId)) this.open(draft.threadId);
         else { this.selectedId = null; this.showNone(); }
     }
 
@@ -1377,7 +1424,7 @@ class FbMailView extends HTMLElement {
     async flag(threadId, flagged) {
         try { await this.api.setFlagged(threadId, flagged); }
         catch (err) { sac.toast?.(fb.errors.text(err, this.t("failed", "That didn't work.")), { kind: "error" }); return; }
-        const th = this.threads.find((x) => x.threadId === threadId);
+        const th = this.thread(threadId);
         if (th) { th.flagged = flagged; this.renderList(); }
         if (this.selectedId === threadId) this.open(threadId);
     }
@@ -1394,7 +1441,7 @@ class FbMailView extends HTMLElement {
         sac.toast?.(text, undo ? { action: { label: "Undo", labelKey: "fb.common.undo", onClick: () => this.archive(threadId, !archived, false) } } : undefined);
         await this.loadThreads();
         if (this.selectedId !== threadId) return;
-        if (this.threads.some((x) => x.threadId === threadId)) this.open(threadId);
+        if (this.thread(threadId)) this.open(threadId);
         else { this.selectedId = null; this.showNone(); }
     }
 
@@ -1424,7 +1471,7 @@ class FbMailView extends HTMLElement {
             ? this.t("deleted-everywhere", "Deleted — in the trash here and on the server.")
             : this.t("deleted-here", "Deleted here — it's in the trash. Your mail server keeps it."));
         await this.loadThreads();
-        if (this.threads.some((x) => x.threadId === threadId)) this.open(threadId);
+        if (this.thread(threadId)) this.open(threadId);
         else if (this.selectedId === threadId) { this.selectedId = null; this.showNone(); }
     }
 
@@ -1449,13 +1496,14 @@ class FbMailView extends HTMLElement {
         for (const id of ids) this._deleting.add(id);
         // The open one went: the next conversation takes its place, as in any
         // mail app — the one below the last that went, else the one above.
-        const order = this.threads.map((x) => x.threadId);
+        const order = this.shown().map((x) => x.threadId);
         const at = ids.map((id) => order.indexOf(id)).filter((i) => i >= 0);
         const next = !gone.has(this.selectedId) || !at.length ? undefined
             : order.slice(Math.max(...at) + 1).find((id) => !gone.has(id))
                 ?? order.slice(0, Math.min(...at)).reverse().find((id) => !gone.has(id))
                 ?? null;
         this.threads = this.threads.filter((x) => !gone.has(x.threadId));
+        this.best = this.best.filter((x) => !gone.has(x.threadId));
         this.sel?.clear();
         this.renderList();
         if (next) {

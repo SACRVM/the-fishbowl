@@ -412,6 +412,62 @@ public class MailTests
         }
     }
 
+    // A search (decision 15) shows its best matches first, then every match
+    // by date, each conversation once; the arrows walk both. The palette
+    // finds mail too — the archive's as well — and opens it in Mail.
+    [Fact]
+    public async Task Mail_Search_BestMatchesFirst_AndThePaletteOpensMail_Test()
+    {
+        var (context, page, slug, api) = await SpaceWithMailAsync();
+        try
+        {
+            await page.GotoAsync($"{_fixture.BaseUrl}/#/space/{slug}/mail");
+            var view = page.Locator("fb-mail-view");
+            var rows = view.Locator(".mv-item");
+            await Assertions.Expect(rows).ToHaveCountAsync(3, new() { Timeout = 15000 });
+            await view.Locator("#mv-tabs sac-tab[name='archived']").ClickAsync();
+            await view.Locator("#mv-search").FillAsync("digest");
+
+            var groups = view.Locator(".mv-group");
+            await Assertions.Expect(groups).ToHaveTextAsync(["Best matches", "By date"], new() { Timeout = 5000 });
+            await Assertions.Expect(rows).ToHaveCountAsync(30);
+            var ids = await rows.EvaluateAllAsync<string[]>("(rs) => rs.map((r) => r.dataset.id)");
+            Assert.Equal(30, ids.Distinct().Count());
+            // The best five come before the "By date" label.
+            Assert.Equal(5, await view.Locator("#mv-items").EvaluateAsync<int>(@"(box) => {
+                const kids = [...box.children];
+                const second = kids.findIndex((k, i) => i > 0 && k.classList.contains('mv-group'));
+                return kids.slice(0, second).filter((k) => k.classList.contains('mv-item')).length;
+            }"));
+
+            // ↓ from the search field opens the first best match, then the next.
+            var selected = new System.Text.RegularExpressions.Regex(@"\bselected\b");
+            await view.Locator("#mv-search").PressAsync("ArrowDown");
+            await Assertions.Expect(rows.Nth(0)).ToHaveClassAsync(selected, new() { Timeout = 5000 });
+            await page.Keyboard.PressAsync("ArrowDown");
+            await Assertions.Expect(rows.Nth(1)).ToHaveClassAsync(selected, new() { Timeout = 5000 });
+            await page.ScreenshotAsync(new PageScreenshotOptions { Path = Path.Combine(Path.GetTempPath(), "fishbowl_ui_mail_best_matches.png") });
+
+            // The palette, from the desktop: an archived conversation, said so, opened in Mail.
+            await page.GotoAsync($"{_fixture.BaseUrl}/#/space/{slug}/");
+            await Assertions.Expect(page.Locator("fb-hub-view a.tile[data-key='builtin:mail']")).ToBeVisibleAsync(new() { Timeout = 10000 });
+            await page.Keyboard.PressAsync("Control+k");
+            var palette = page.Locator("sac-command-palette");
+            await palette.Locator("input").FillAsync("old project");
+            var hit = palette.Locator("[role='option']").Filter(new() { HasText = "Old project" });
+            await Assertions.Expect(hit).ToHaveCountAsync(1, new() { Timeout = 8000 });
+            await Assertions.Expect(hit).ToContainTextAsync("Archive");
+            await hit.ClickAsync();
+            await page.WaitForURLAsync(u => u.EndsWith($"#/space/{slug}/mail"));
+            await Assertions.Expect(view.Locator("#mv-pane h2")).ToHaveTextAsync("Old project", new() { Timeout = 10000 });
+        }
+        finally
+        {
+            await page.APIRequest.DeleteAsync($"{_fixture.BaseUrl}/api/v1/spaces/{slug}?archive=false");
+            await context.CloseAsync();
+        }
+    }
+
     // The page never scrolls in Mail either: the list, an open conversation,
     // Spam, Drafts and a new mail keep to the viewport.
     [Fact]

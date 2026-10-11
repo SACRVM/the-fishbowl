@@ -31,8 +31,8 @@ public class ModelDownloaderTests : IDisposable
         var modelsDir = Path.GetDirectoryName(dl.ModelPath)!;
         Directory.CreateDirectory(modelsDir);
 
-        // Only vocab.txt present → incomplete setup, not ready.
-        File.WriteAllText(dl.VocabPath, "[PAD]\n[CLS]\n");
+        // Only the tokenizer present → incomplete setup, not ready.
+        File.WriteAllBytes(dl.TokenizerPath, new byte[] { 0 });
         Assert.False(dl.IsReady());
     }
 
@@ -45,22 +45,22 @@ public class ModelDownloaderTests : IDisposable
 
         // Stand-in bytes — we only care about presence for IsReady, not shape.
         File.WriteAllBytes(dl.ModelPath, new byte[] { 0 });
-        File.WriteAllText(dl.VocabPath, "[PAD]\n");
+        File.WriteAllBytes(dl.TokenizerPath, new byte[] { 0 });
         Assert.True(dl.IsReady());
     }
 
     [Fact]
-    public void ModelPath_AndVocabPath_AreInDataRootModelsSubfolder()
+    public void ModelPath_AndTokenizerPath_AreInDataRootModelsSubfolder()
     {
         var dl = new ModelDownloader(_tempRoot);
         // Embedding callers and re-index endpoints rely on the fixed layout —
         // keep it surfaced as part of the contract.
         Assert.StartsWith(
-            Path.Combine(_tempRoot, "models", "MiniLmL6V2"),
+            Path.Combine(_tempRoot, "models", "MultilingualE5Small"),
             dl.ModelPath);
         Assert.StartsWith(
-            Path.Combine(_tempRoot, "models", "MiniLmL6V2"),
-            dl.VocabPath);
+            Path.Combine(_tempRoot, "models", "MultilingualE5Small"),
+            dl.TokenizerPath);
     }
 
     public void Dispose()

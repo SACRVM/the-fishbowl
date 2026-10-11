@@ -18,10 +18,6 @@ public class PlaywrightFixture : IAsyncLifetime
     // outlived the run — a vault or notes from one run leaked into the next.
     private readonly string _dataDir = Path.Combine(Path.GetTempPath(), "fishbowl_ui_" + Path.GetRandomFileName());
 
-    // The host fetches the ~90 MB embedding model into <data>/models on
-    // first start. A fresh data dir per run would re-download it every time,
-    // so a completed download is kept here and seeded into the next run.
-    private static readonly string ModelCache = Path.Combine(Path.GetTempPath(), "fishbowl_ui_model_cache");
     public string BaseUrl { get; private set; } = string.Empty;
 
     // The host's data folder, for tests that seed state the UI can't create
@@ -63,8 +59,6 @@ public class PlaywrightFixture : IAsyncLifetime
         // This is the magic marker that enables auto-auth in the Host's middleware
         psi.Environment["FISHBOWL_PLAYWRIGHT_TEST"] = "true";
 
-        if (Directory.Exists(ModelCache)) CopyDirectory(ModelCache, Path.Combine(_dataDir, "models"));
-
         _hostProcess = new Process { StartInfo = psi };
         // Drain stdout/stderr continuously. Redirected but unread, the pipe
         // buffer fills up after enough logging and every host thread that
@@ -102,23 +96,6 @@ public class PlaywrightFixture : IAsyncLifetime
             await _hostProcess.WaitForExitAsync();
             _hostProcess.Dispose();
         }
-        // Refresh the cache when this run's model is newer than the cached
-        // one — i.e. the host downloaded it because the cache was missing or
-        // failed ModelDownloader's SHA-256 check. A half-finished download
-        // that lands here fails that check next run and heals the same way.
-        var models = Path.Combine(_dataDir, "models");
-        var model = Directory.Exists(models)
-            ? Directory.EnumerateFiles(models, "model.onnx", SearchOption.AllDirectories).FirstOrDefault()
-            : null;
-        var cached = Directory.Exists(ModelCache)
-            ? Directory.EnumerateFiles(ModelCache, "model.onnx", SearchOption.AllDirectories).FirstOrDefault()
-            : null;
-        if (model is not null && Directory.EnumerateFiles(models, "vocab.txt", SearchOption.AllDirectories).Any()
-            && (cached is null || File.GetLastWriteTimeUtc(model) > File.GetLastWriteTimeUtc(cached)))
-        {
-            try { CopyDirectory(models, ModelCache); }
-            catch (IOException) { /* next run downloads again */ }
-        }
         try { if (Directory.Exists(_dataDir)) Directory.Delete(_dataDir, recursive: true); }
         catch (IOException) { /* a straggling file handle — the OS temp cleaner gets it */ }
     }
@@ -139,15 +116,6 @@ public class PlaywrightFixture : IAsyncLifetime
     public string HostLogTail()
     {
         lock (_hostLog) return string.Join(Environment.NewLine, _hostLog);
-    }
-
-    private static void CopyDirectory(string from, string to)
-    {
-        foreach (var dir in Directory.EnumerateDirectories(from, "*", SearchOption.AllDirectories))
-            Directory.CreateDirectory(Path.Combine(to, Path.GetRelativePath(from, dir)));
-        Directory.CreateDirectory(to);
-        foreach (var file in Directory.EnumerateFiles(from, "*", SearchOption.AllDirectories))
-            File.Copy(file, Path.Combine(to, Path.GetRelativePath(from, file)), overwrite: true);
     }
 
     private static int FindFreePort()

@@ -23,9 +23,11 @@ public class MailSearchTool : IMcpTool
 
     public string Name => "mail_search";
     public string Description =>
-        "Lists mail conversations in the current workspace (personal or space), newest activity first: subject, " +
-        "participants, the latest snippet, unread count, tags, direction of the latest message (in/out). " +
-        "Filter by full text, tag, a person's address, unread, or archived." + MailToolText.Untrusted;
+        "Lists mail conversations in the current workspace (personal or space): subject, participants, the latest " +
+        "snippet, unread count, tags, direction of the latest message (in/out). Without a query, newest activity " +
+        "first; with one, best match first — by its words and by its meaning (any language), in the list and the " +
+        "archive unless `archived` says which (`degraded: true` when only the words counted). Filter by tag, " +
+        "a person's address, unread, or archived." + MailToolText.Untrusted;
     public string RequiredScope => ScopeCatalog.ReadMail;
 
     public object InputSchema => new
@@ -33,11 +35,11 @@ public class MailSearchTool : IMcpTool
         type = "object",
         properties = new
         {
-            query = new { type = "string", description = "Words to find in subject, people or text (all must match)." },
+            query = new { type = "string", description = "What to find: words in subject, people or text, or what the mail is about." },
             tag = new { type = "string", description = "Only conversations with this tag." },
             address = new { type = "string", description = "Only conversations with this email address." },
             unread = new { type = "boolean", @default = false, description = "Only conversations with unread incoming mail." },
-            archived = new { type = "boolean", @default = false, description = "The archived conversations instead of the list." },
+            archived = new { type = "boolean", description = "true: only archived conversations; false: only the list. Without a query the default is false; with one, both." },
             limit = new { type = "integer", @default = 20, description = "At most this many conversations (1–100)." },
         },
     };
@@ -48,7 +50,7 @@ public class MailSearchTool : IMcpTool
         bool Flag(string name) => arguments.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.True;
         var limit = arguments.TryGetProperty("limit", out var l) && l.ValueKind == JsonValueKind.Number
             ? Math.Clamp(McpArgs.Int(l, "limit"), 1, 100) : 20;
-        var threads = await _mail.ListThreadsAsync(ctx, new MailListQuery
+        var query = new MailListQuery
         {
             Text = Str("query"),
             Tag = Str("tag"),
@@ -56,10 +58,21 @@ public class MailSearchTool : IMcpTool
             UnreadOnly = Flag("unread"),
             Archived = Flag("archived"),
             Limit = limit,
-        }, ct);
+        };
+        IReadOnlyList<MailThread> threads;
+        var degraded = false;
+        if (string.IsNullOrWhiteSpace(query.Text))
+            threads = await _mail.ListThreadsAsync(ctx, query, ct);
+        else
+        {
+            query.AnyState = !arguments.TryGetProperty("archived", out var a) || a.ValueKind is not (JsonValueKind.True or JsonValueKind.False);
+            var found = await _mail.SearchThreadsAsync(ctx, query, ct);
+            (threads, degraded) = (found.Threads, found.Degraded);
+        }
         return new
         {
             untrusted = true,
+            degraded,
             conversations = threads.Select(t => new
             {
                 threadId = t.ThreadId,

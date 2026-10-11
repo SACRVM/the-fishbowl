@@ -1,6 +1,6 @@
 # reindex-dev
 
-Dev utility. Re-runs the MiniLM embedding pass for every note in a context and prints `{ processed, failed }` — same behaviour as `POST /api/v1/search/reindex`, but driven directly against the disk so no cookie session is required.
+Dev utility. Re-runs the embedding pass for every note in a context and prints `{ processed, failed }` — same behaviour as `POST /api/v1/search/reindex`, but driven directly against the disk so no cookie session is required.
 
 The HTTP endpoint stays the production path (cookie-auth only); this tool exists so local iteration — running the host, minting Bearer tokens, sanity-checking hybrid ranking — doesn't force you into a browser every time.
 
@@ -39,7 +39,7 @@ stdout: a single JSON line, e.g. `{"processed":16,"failed":0}`. Stderr carries p
 | 5 | `--context space` without `--context-id` |
 | 6 | space slug/id not found |
 | 8 | unknown `--context` value |
-| 9 | MiniLM model isn't on disk yet — start the host once so it downloads |
+| 9 | The embedding model isn't on disk yet — start the host once so it downloads |
 | 10 | finished, but at least one note failed (inspect host logs for the `Re-embed failed for note {Id}` warning) |
 
 ## Concurrency
