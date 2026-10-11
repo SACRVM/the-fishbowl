@@ -412,6 +412,48 @@ public class MailTests
         }
     }
 
+    // The page never scrolls in Mail either: the list, an open conversation,
+    // Spam, Drafts and a new mail keep to the viewport.
+    [Fact]
+    public async Task Mail_NeverScrollsThePage_Test()
+    {
+        const int width = 1400;
+        var (context, page, slug, _) = await SpaceWithMailAsync(width, 900);
+        try
+        {
+            await page.GotoAsync($"{_fixture.BaseUrl}/#/space/{slug}/mail");
+            var rows = page.Locator("fb-mail-view .mv-item");
+            await Assertions.Expect(rows).ToHaveCountAsync(3, new() { Timeout = 15000 });
+            var problems = new List<string>();
+            async Task Measure(string what)
+            {
+                await page.WaitForTimeoutAsync(800);
+                var o = await page.EvaluateAsync<System.Text.Json.JsonElement>(PageScrollTests.Overflow);
+                if (o.GetProperty("h").GetInt32() > 0 || o.GetProperty("w").GetInt32() > 0)
+                    problems.Add($"{what}: page scrolls {o.GetProperty("h")}px down, {o.GetProperty("w")}px across — {o.GetProperty("over")}");
+            }
+            await Measure("list");
+            for (var i = 0; i < 3; i++)
+            {
+                await Assertions.Expect(rows).ToHaveCountAsync(3, new() { Timeout = 15000 });
+                var subject = await rows.Nth(i).Locator(".mv-subject").InnerTextAsync();
+                await rows.Nth(i).ClickAsync();
+                await Measure($"open '{subject}'");
+            }
+            await page.Locator("fb-mail-view #mv-tabs sac-tab[name='spam']").ClickAsync();
+            await Measure("spam");
+            await page.Locator("fb-mail-view #mv-tabs sac-tab[name='drafts']").ClickAsync();
+            await Measure("drafts");
+            Assert.True(problems.Count == 0, string.Join(Environment.NewLine, problems));
+            await page.ScreenshotAsync(new() { Path = Shot("page") });
+        }
+        finally
+        {
+            await page.APIRequest.DeleteAsync($"{_fixture.BaseUrl}/api/v1/spaces/{slug}?archive=false");
+            await context.CloseAsync();
+        }
+    }
+
     // A tag is the workspace's: Mail manages it too, and the window says
     // where each one is used.
     [Fact]

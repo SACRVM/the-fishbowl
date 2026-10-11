@@ -164,6 +164,12 @@ class FbContactsView extends HTMLElement {
                 fb-contacts-view .cv-list { margin: 8px 0 12px; display: grid; gap: 8px; }
                 fb-contacts-view .cv-list:empty { display: none; }
                 fb-contacts-view .cv-row { display: grid; grid-template-columns: 120px 1fr auto; gap: 8px; align-items: end; }
+                /* A row's remove button on its input's middle: the labels end the
+                   kit's 0.4rem below their input, which is --cv-field-h tall
+                   (measured — the kit has no token for it). */
+                fb-contacts-view .cv-row > .icon-btn, fb-contacts-view .cv-addr > .icon-btn {
+                    margin-bottom: calc(0.4rem + (var(--cv-field-h, 2.5rem) - var(--icon-btn-size)) / 2);
+                }
                 /* An address on two lines: label and street (and Remove), then
                    postal code, city, region and country under the street. Children:
                    1 label, 2 street, 3 postal code, 4 city, 5 region, 6 country, 7 Remove. */
@@ -336,8 +342,9 @@ class FbContactsView extends HTMLElement {
         }
     }
 
-    /** A contact row's context menu: Open and Delete — the marked ones when
-     *  the row is one of several marked. */
+    /** A contact row's context menu: Open, a person turned into an
+     *  organisation or back, and Delete — the marked ones when the row is one
+     *  of several marked. */
     _rowItems(row) {
         const c = this.contacts.find((x) => x.id === row.dataset.id);
         if (!c) return null;
@@ -345,6 +352,11 @@ class FbContactsView extends HTMLElement {
         if (!this.writable) return items;
         const marked = this.sel?.marked || [];
         const many = marked.length > 1 && marked.includes(c.id);
+        // An organisation people belong to stays one (the server refuses it).
+        if (!many && c.kind === "person")
+            items.push({ id: "to-organisation", label: this.t("to-organisation", "Turn into an organisation"), icon: "users", onClick: () => this.convert(c.id, "organisation") });
+        else if (!many && !this.contacts.some((p) => p.organisationId === c.id))
+            items.push({ id: "to-person", label: this.t("to-person", "Turn into a person"), icon: "user", onClick: () => this.convert(c.id, "person") });
         items.push("-", many
             ? { id: "delete", label: this.t("delete-marked", "Delete selected"), icon: "trash", danger: true, onClick: () => this.removeMany(marked) }
             : { id: "delete", label: this.t("delete", "Delete contact"), icon: "trash", danger: true, onClick: () => this.removeMany([c.id]) });
@@ -490,6 +502,9 @@ class FbContactsView extends HTMLElement {
             + `<label>${t("city", "City")}<input data-f="city" ${ro}/></label>`
             + `<label>${t("region", "Region")}<input data-f="region" ${ro}/></label>`
             + `<label>${t("country", "Country")}<input data-f="country" ${ro}/></label>`);
+        const field = ed.querySelector(".cv-list input");
+        const h = field?.getBoundingClientRect().height;
+        if (h) ed.style.setProperty("--cv-field-h", `${h}px`);
     }
 
     // An organisation's people and the table rows that link here.
@@ -616,6 +631,26 @@ class FbContactsView extends HTMLElement {
 
     remove() {
         if (this.selectedId) return this.removeMany([this.selectedId]);
+    }
+
+    /** A person becomes an organisation or back — a card imported as the wrong
+     *  kind. Only the kind changes (and an organisation belongs to none); the
+     *  other fields stay, so turning it back loses nothing. */
+    async convert(id, kind) {
+        await this.flush();
+        const c = this.byId(id);
+        if (!c) return;
+        try {
+            await this.api.update(id, { ...c, kind, organisationId: kind === "organisation" ? null : c.organisationId, email: null, phone: null });
+        } catch (err) {
+            sac.toast?.(fb.errors.text(err, this.t("save-failed", "Couldn't save the contact.")), { kind: "error" });
+            return;
+        }
+        const fresh = await this.api.get(id);
+        const i = this.contacts.findIndex((x) => x.id === id);
+        if (i >= 0) this.contacts[i] = fresh;
+        if (this.selectedId === id) this.open(id);
+        else this.renderList();
     }
 
     // One delete for the toolbar, a row's trash and the marked contacts: asked

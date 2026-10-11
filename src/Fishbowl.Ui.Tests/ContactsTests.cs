@@ -56,6 +56,15 @@ public class ContactsTests
             await view.Locator("#cv-org [role='option']", new() { HasText = "Acme GmbH" }).ClickAsync();
             await view.Locator("#cv-editor button[data-add='emails']").ClickAsync();
             await view.Locator("#cv-emails input[data-f='value']").FillAsync("ada@acme.test");
+            // Its remove button sits on the input's middle.
+            var offset = await page.EvaluateAsync<double>(@"() => {
+                const row = document.querySelector('#cv-emails .cv-row');
+                const i = row.querySelector('input[data-f=value]').getBoundingClientRect();
+                const b = row.querySelector('button').getBoundingClientRect();
+                return Math.abs((i.top + i.bottom) / 2 - (b.top + b.bottom) / 2);
+            }");
+            Assert.True(offset < 1, $"remove button {offset:0.0}px off the input's middle");
+            await view.Locator("#cv-emails").ScreenshotAsync(new() { Path = Path.Combine(Path.GetTempPath(), "contacts-email-row.png") });
             await Assertions.Expect(view.Locator(".cv-item.selected")).ToContainTextAsync("Ada Lovelace", new() { Timeout = 5000 });
             await Assertions.Expect(view.Locator(".cv-item.selected")).ToContainTextAsync("Acme GmbH");
 
@@ -99,6 +108,59 @@ public class ContactsTests
     // Marking like Files: Ctrl+click (the open contact comes along), Shift+click
     // a range, Esc lets go; the header deletes the marked ones after asking —
     // an organisation together with its person — and a row's own trash deletes one.
+    // A card imported as the wrong kind: its row's menu turns a person into an
+    // organisation and back; an organisation people belong to offers nothing.
+    [Fact]
+    public async Task Contacts_TurnAPersonIntoAnOrganisation_AndBack_Test()
+    {
+        var context = await _fixture.Browser!.NewContextAsync(new BrowserNewContextOptions
+        {
+            IgnoreHTTPSErrors = true,
+            BypassCSP = true,
+            ViewportSize = new ViewportSize { Width = 1400, Height = 900 },
+        });
+        var page = await context.NewPageAsync();
+        string? slug = null;
+        try
+        {
+            var res = await page.APIRequest.PostAsync($"{_fixture.BaseUrl}/api/v1/spaces", new() { DataObject = new { name = "Kinds " + Guid.NewGuid().ToString("N")[..6] } });
+            slug = (await res.JsonAsync())!.Value.GetProperty("slug").GetString();
+            var api = $"{_fixture.BaseUrl}/api/v1/spaces/{slug}/contacts";
+            var acme = (await (await page.APIRequest.PostAsync(api, new() { DataObject = new { kind = "organisation", name = "Acme" } })).JsonAsync())!.Value.GetProperty("id").GetString();
+            await page.APIRequest.PostAsync(api, new() { DataObject = new { kind = "person", firstName = "Bob", lastName = "Test", organisationId = acme } });
+            var wrong = (await (await page.APIRequest.PostAsync(api, new() { DataObject = new { kind = "person", name = "Globex GmbH", organisationId = acme } })).JsonAsync())!.Value.GetProperty("id").GetString();
+
+            await page.GotoAsync($"{_fixture.BaseUrl}/#/space/{slug}/contacts");
+            var view = page.Locator("fb-contacts-view");
+            ILocator Row(string name) => view.Locator(".cv-item").Filter(new() { Has = page.Locator(".cv-item-name", new() { HasTextString = name }) });
+            await Assertions.Expect(view.Locator(".cv-item")).ToHaveCountAsync(3, new() { Timeout = 15000 });
+            var menu = page.Locator("sac-menu.sac-context-menu[open]");
+            async Task<string> Kind() => (await (await page.APIRequest.GetAsync($"{api}/{wrong}")).JsonAsync())!.Value.GetProperty("kind").GetString()!;
+
+            await Row("Globex GmbH").ClickAsync(new() { Button = MouseButton.Right });
+            await menu.Locator("button[data-action]", new() { HasText = "Turn into an organisation" }).ClickAsync();
+            await Assertions.Expect(Row("Globex GmbH").Locator("sac-icon[name='users']")).ToHaveCountAsync(1, new() { Timeout = 5000 });
+            Assert.Equal("organisation", await Kind());
+            // An organisation belongs to none.
+            Assert.Equal(System.Text.Json.JsonValueKind.Null, (await (await page.APIRequest.GetAsync($"{api}/{wrong}")).JsonAsync())!.Value.GetProperty("organisationId").ValueKind);
+
+            await Row("Globex GmbH").ClickAsync(new() { Button = MouseButton.Right });
+            await menu.Locator("button[data-action]", new() { HasText = "Turn into a person" }).ClickAsync();
+            await Assertions.Expect(Row("Globex GmbH").Locator("sac-icon[name='user']")).ToHaveCountAsync(1, new() { Timeout = 5000 });
+            Assert.Equal("person", await Kind());
+
+            // Acme has Bob: it stays an organisation.
+            await Row("Acme").ClickAsync(new() { Button = MouseButton.Right });
+            await Assertions.Expect(menu.Locator("button[data-action]", new() { HasText = "Open" })).ToHaveCountAsync(1);
+            await Assertions.Expect(menu.Locator("button[data-action]", new() { HasText = "Turn into a person" })).ToHaveCountAsync(0);
+        }
+        finally
+        {
+            if (slug is not null) await page.APIRequest.DeleteAsync($"{_fixture.BaseUrl}/api/v1/spaces/{slug}?archive=false");
+            await context.CloseAsync();
+        }
+    }
+
     [Fact]
     public async Task Contacts_MarkSeveral_AndDelete_Test()
     {

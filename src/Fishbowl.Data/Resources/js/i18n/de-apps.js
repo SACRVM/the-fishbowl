@@ -433,6 +433,8 @@ window.sac?.i18n?.add?.("de", {
     "fb.contacts.duplicates": "Dubletten finden",
     "fb.contacts.delete": "Kontakt löschen",
     "fb.contacts.delete-marked": "Ausgewählte löschen",
+    "fb.contacts.to-organisation": "In Organisation umwandeln",
+    "fb.contacts.to-person": "In Person umwandeln",
     "fb.contacts.clear-marks": "Auswahl aufheben",
     "fb.contacts.marked-1": "1 ausgewählt",
     "fb.contacts.marked": "{n} ausgewählt",
