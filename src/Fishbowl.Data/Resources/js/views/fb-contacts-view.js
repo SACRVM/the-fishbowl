@@ -442,7 +442,8 @@ class FbContactsView extends HTMLElement {
             org.options = [{ value: "", label: t("no-organisation", "—") },
                 ...this.contacts.filter((x) => x.kind === "organisation").map((o) => ({ value: o.id, label: o.name }))];
             org.value = c.organisationId || "";
-            org.addEventListener("change", () => { this.editing.organisationId = org.value || null; this.changed(); });
+            // The kit's select says sac:change (never a native change).
+            org.addEventListener("sac:change", (e) => { this.editing.organisationId = e.detail.value || null; this.changed(); });
             const bday = ed.querySelector("#cv-birthday");
             bday.value = c.birthday || "";
             bday.addEventListener("change", () => { this.editing.birthday = bday.value || null; this.changed(); });

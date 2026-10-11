@@ -51,8 +51,9 @@ public class ContactsTests
             await New("person");
             await view.Locator("#cv-editor input[data-key='firstName']").FillAsync("Ada");
             await view.Locator("#cv-editor input[data-key='lastName']").FillAsync("Lovelace");
-            await view.Locator("#cv-org").EvaluateAsync("(s, v) => { s.value = v; s.dispatchEvent(new Event('change', { bubbles: true })); }",
-                await page.EvaluateAsync<string>("() => document.querySelector('fb-contacts-view').contacts.find(c => c.kind === 'organisation').id"));
+            // Picked as a person picks it: open the select, click the organisation.
+            await view.Locator("#cv-org").ClickAsync();
+            await view.Locator("#cv-org [role='option']", new() { HasText = "Acme GmbH" }).ClickAsync();
             await view.Locator("#cv-editor button[data-add='emails']").ClickAsync();
             await view.Locator("#cv-emails input[data-f='value']").FillAsync("ada@acme.test");
             await Assertions.Expect(view.Locator(".cv-item.selected")).ToContainTextAsync("Ada Lovelace", new() { Timeout = 5000 });

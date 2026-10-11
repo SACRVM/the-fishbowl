@@ -47,11 +47,12 @@ namespace Fishbowl.Api.Endpoints;
 //   GET    …/stamp                         moves on when a sync pass changed the mail — the app's cue to look again
 //   GET    …/rules                         the workspace's rules (decision 11)
 //   POST   …/rules                         { name, enabled?, matchAll?, conditions: [{ field, value }], addTags?, archive?, markRead? }
-//   PUT|DELETE …/rules/{id}                the whole rule again / gone; cookie, space Admin+
+//   PUT|DELETE …/rules/{id}                the whole rule again / gone; space Admin+ (a key: write:mail)
 //   POST   …/rules/{id}/apply              the rule over the mail already here → { conversations, archived, archiveFolderMissing }
-// Scopes read:mail / write:mail; adding, changing and removing accounts and
-// rules is cookie-only. A space Reader reads; a Member organises; an Admin
-// manages the accounts and the rules (they speak for the whole space).
+// Scopes read:mail / write:mail; adding, changing and removing accounts is
+// cookie-only (their passwords); the rules take a key with write:mail too. A
+// space Reader reads; a Member organises; an Admin manages the accounts and
+// the rules (they speak for the whole space) — a key as far as its owner.
 public static partial class MailApi
 {
     // An <img src> or CSS url() that leaves this page: what "Show images" is for.
@@ -173,7 +174,10 @@ public static partial class MailApi
 
     // Send needs its own scope (decision 18): a key that reads mail and sends
     // it can be steered by a crafted mail — a deliberate grant, never implied.
-    private enum Need { Read, Write, Send, Manage }
+    // Manage (the accounts and their passwords) is a person's only; Rules is
+    // Manage's role (a space's Admins) open to a key with write:mail — the
+    // agent can do what a person can (decision 18).
+    private enum Need { Read, Write, Send, Manage, Rules }
 
     public static IEndpointRouteBuilder MapMailApi(this IEndpointRouteBuilder routes)
     {
@@ -211,7 +215,7 @@ public static partial class MailApi
         if (bearer && (need == Need.Manage
             || !user.HasClaim(McpContextClaims.Scope, need switch
             {
-                Need.Write => ScopeCatalog.WriteMail,
+                Need.Write or Need.Rules => ScopeCatalog.WriteMail,
                 Need.Send => ScopeCatalog.SendMail,
                 _ => ScopeCatalog.ReadMail,
             })))
@@ -226,7 +230,7 @@ public static partial class MailApi
         if (resolved.Error is not null) return (null, resolved.Error);
         var role = resolved.Role!.Value;
         if (need is Need.Write or Need.Send && !role.CanWrite()) return (null, Results.Forbid());
-        if (need == Need.Manage && !role.CanInvite()) return (null, Results.Forbid());
+        if (need is Need.Manage or Need.Rules && !role.CanInvite()) return (null, Results.Forbid());
         return (new Target(ContextRef.Space(resolved.Space!.Id), userId), null);
     }
 
@@ -896,7 +900,7 @@ public static partial class MailApi
 
         g.MapPost("/rules", async (RuleRequest body, HttpContext http, MailRuleRepository rules, CancellationToken ct) =>
         {
-            var (t, err) = await ResolveAsync(http, space, Need.Manage, ct);
+            var (t, err) = await ResolveAsync(http, space, Need.Rules, ct);
             if (err is not null) return err;
             var (rule, bad) = ToRule(body);
             if (bad is not null) return bad;
@@ -907,7 +911,7 @@ public static partial class MailApi
 
         g.MapPut("/rules/{id}", async (string id, RuleRequest body, HttpContext http, MailRuleRepository rules, CancellationToken ct) =>
         {
-            var (t, err) = await ResolveAsync(http, space, Need.Manage, ct);
+            var (t, err) = await ResolveAsync(http, space, Need.Rules, ct);
             if (err is not null) return err;
             var (rule, bad) = ToRule(body);
             if (bad is not null) return bad;
@@ -917,14 +921,14 @@ public static partial class MailApi
 
         g.MapDelete("/rules/{id}", async (string id, HttpContext http, MailRuleRepository rules, CancellationToken ct) =>
         {
-            var (t, err) = await ResolveAsync(http, space, Need.Manage, ct);
+            var (t, err) = await ResolveAsync(http, space, Need.Rules, ct);
             if (err is not null) return err;
             return await rules.DeleteAsync(t!.Ctx, id, ct) ? Results.NoContent() : Results.NotFound();
         }).WithName($"Delete{tag}MailRule").WithSummary("Removes the rule; what it did stays.");
 
         g.MapPost("/rules/{id}/apply", async (string id, HttpContext http, MailRuleRepository rules, MailRuleRunner runner, CancellationToken ct) =>
         {
-            var (t, err) = await ResolveAsync(http, space, Need.Manage, ct);
+            var (t, err) = await ResolveAsync(http, space, Need.Rules, ct);
             if (err is not null) return err;
             var rule = await rules.GetAsync(t!.Ctx, id, ct);
             if (rule is null) return Results.NotFound();

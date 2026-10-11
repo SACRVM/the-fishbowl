@@ -266,6 +266,7 @@ builder.Services.AddScoped<IMcpTool, Fishbowl.Mcp.Tools.Mail.MailDeleteTool>();
 builder.Services.AddScoped<IMcpTool, Fishbowl.Mcp.Tools.Mail.MailDraftTool>();
 builder.Services.AddScoped<IMcpTool, Fishbowl.Mcp.Tools.Mail.MailSendTool>();
 builder.Services.AddScoped<IMcpTool, Fishbowl.Mcp.Tools.Mail.MailAssignContactTool>();
+builder.Services.AddScoped<IMcpTool, Fishbowl.Mcp.Tools.Mail.MailRulesTool>();
 // Space tables (space-apps spec, phase 3).
 builder.Services.AddScoped<IMcpTool, Fishbowl.Mcp.Tools.Tables.TableListTool>();
 builder.Services.AddScoped<IMcpTool, Fishbowl.Mcp.Tools.Apps.AppErrorsTool>();

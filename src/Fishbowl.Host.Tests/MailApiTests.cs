@@ -1115,7 +1115,7 @@ public class MailApiTests : IClassFixture<WebApplicationFactory<Program>>, IDisp
     }
 
     [Fact]
-    public async Task Rules_AreManagedByTheOwnerOrASpaceAdmin_ByCookie()
+    public async Task Rules_AreManagedByTheOwnerOrASpaceAdmin_AndTheirKeys()
     {
         var c = Fresh();
         // What a rule must have.
@@ -1123,19 +1123,46 @@ public class MailApiTests : IClassFixture<WebApplicationFactory<Program>>, IDisp
         Assert.Equal("rule_incomplete", await ErrorOf(await c.PostAsJsonAsync(P + "/rules", RuleBody("body", "x", ["t"]), Ct)));
         Assert.Equal("invalid_tag", await ErrorOf(await c.PostAsJsonAsync(P + "/rules", RuleBody("from", "x", ["no spaces"]), Ct)));
 
-        // A key reads them, never writes them.
+        // A key reads them; with write:mail it writes them too (the agent can do what a person can).
+        var reading = await KeyAsync(Owner, ContextRef.User(Owner), "read:mail");
+        Assert.Equal(HttpStatusCode.OK, (await reading.GetAsync(P + "/rules", Ct)).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await reading.PostAsJsonAsync(P + "/rules", RuleBody("from", "x", ["t"]), Ct)).StatusCode);
         var key = await KeyAsync(Owner, ContextRef.User(Owner), "read:mail", "write:mail");
-        Assert.Equal(HttpStatusCode.OK, (await key.GetAsync(P + "/rules", Ct)).StatusCode);
-        Assert.Equal(HttpStatusCode.Forbidden, (await key.PostAsJsonAsync(P + "/rules", RuleBody("from", "x", ["t"]), Ct)).StatusCode);
+        var byKey = await key.PostAsJsonAsync(P + "/rules", RuleBody("from", "x", ["t"]), Ct);
+        Assert.Equal(HttpStatusCode.OK, byKey.StatusCode);
+        var keyRule = (await Json(byKey)).GetProperty("id").GetString();
+        Assert.Equal(HttpStatusCode.OK, (await key.PostAsync($"{P}/rules/{keyRule}/apply", null, Ct)).StatusCode);
+        Assert.Equal(HttpStatusCode.NoContent, (await key.DeleteAsync($"{P}/rules/{keyRule}", Ct)).StatusCode);
 
         // In a space: everyone reads, an Admin writes, a Member doesn't.
-        var (_, sp) = await SpaceAsync();
+        var (inSpace, sp) = await SpaceAsync();
         var made = await As(Admin).PostAsJsonAsync(sp + "/rules", RuleBody("from", "x", ["t"]), Ct);
         Assert.Equal(HttpStatusCode.OK, made.StatusCode);
         var id = (await Json(made)).GetProperty("id").GetString();
         Assert.Single((await Json(await As(Reader).GetAsync(sp + "/rules", Ct))).EnumerateArray());
         Assert.Equal(HttpStatusCode.Forbidden, (await As(Member).PostAsJsonAsync(sp + "/rules", RuleBody("from", "y", ["t"]), Ct)).StatusCode);
         Assert.Equal(HttpStatusCode.Forbidden, (await As(Member).DeleteAsync($"{sp}/rules/{id}", Ct)).StatusCode);
+        // A key goes as far as its owner's role: a Member's key can't, an Admin's can — over REST and MCP alike.
+        var memberKey = await KeyAsync(Member, ContextRef.Space(inSpace.Slug), "read:mail", "write:mail");
+        Assert.Equal(HttpStatusCode.Forbidden, (await memberKey.PostAsJsonAsync(sp + "/rules", RuleBody("from", "y", ["t"]), Ct)).StatusCode);
+        var refused = (await RpcAsync(memberKey, "tools/call", new { action = "delete", id }, "mail_rules")).GetProperty("error");
+        Assert.Contains("Admins", refused.GetProperty("message").GetString() ?? "");
+        var adminKey = await KeyAsync(Admin, ContextRef.Space(inSpace.Slug), "read:mail", "write:mail");
+        var listed = ToolPayload(await RpcAsync(memberKey, "tools/call", new { action = "list" }, "mail_rules"));
+        Assert.Single(listed.GetProperty("rules").EnumerateArray());
+        var made2 = ToolPayload(await RpcAsync(adminKey, "tools/call", new
+        {
+            action = "create",
+            name = "Invoices",
+            matchAll = false,
+            conditions = new[] { new { field = "from", value = "billing" }, new { field = "subject", value = "invoice" } },
+            addTags = new[] { "Rechnung" },
+        }, "mail_rules"));
+        Assert.Equal(new[] { "rechnung" }, made2.GetProperty("addTags").EnumerateArray().Select(x => x.GetString()));
+        Assert.False(made2.GetProperty("matchAll").GetBoolean());
+        var incomplete = (await RpcAsync(adminKey, "tools/call", new { action = "create", name = "Nothing", conditions = new[] { new { field = "from", value = "x" } } }, "mail_rules")).GetProperty("error");
+        Assert.Contains("actions", incomplete.GetProperty("message").GetString() ?? "");
+        Assert.True(ToolPayload(await RpcAsync(adminKey, "tools/call", new { action = "delete", id = made2.GetProperty("id").GetString() }, "mail_rules")).GetProperty("deleted").GetBoolean());
         Assert.Equal(HttpStatusCode.NoContent, (await As(Owner).DeleteAsync($"{sp}/rules/{id}", Ct)).StatusCode);
         Assert.Equal(HttpStatusCode.NotFound, (await As(Owner).DeleteAsync($"{sp}/rules/{id}", Ct)).StatusCode);
     }

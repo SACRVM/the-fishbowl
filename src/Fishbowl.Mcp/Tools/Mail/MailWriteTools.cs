@@ -365,3 +365,120 @@ public class MailAssignContactTool : IMcpTool
         return new { contactId, address, added = true };
     }
 }
+
+/// <summary>The workspace's mail rules (decision 11) for an agent, as the
+/// Mail rules window has them: list, create, update, delete, apply. In a
+/// space only its Admins manage them (the key owner's role, as in the app).</summary>
+public class MailRulesTool : IMcpTool
+{
+    private readonly MailRuleRepository _rules;
+    private readonly MailRuleRunner _runner;
+    private readonly ISpaceRepository _spaces;
+
+    public MailRulesTool(MailRuleRepository rules, MailRuleRunner runner, ISpaceRepository spaces)
+    {
+        _rules = rules;
+        _runner = runner;
+        _spaces = spaces;
+    }
+
+    public string Name => "mail_rules";
+    public string Description =>
+        "The workspace's mail rules: what the sync does to mail when it first stores it (the history too) — add tags, mark read, archive. " +
+        "Every rule that matches applies; actions add up, there is no order. action: list | create | update (the whole rule again) | delete | " +
+        "apply (runs one rule over the mail already here). A condition is a field and a value: from, to (To, Cc or Bcc), anyone (from or to), " +
+        "subject, list (List-Id) — each \"contains\", any case, a name or an address — or account (an account id, equal). matchAll: all " +
+        "conditions (default) or any. In a space only its Admins manage rules.";
+    public string RequiredScope => ScopeCatalog.WriteMail;
+
+    public object InputSchema => new
+    {
+        type = "object",
+        required = new[] { "action" },
+        properties = new
+        {
+            action = new { type = "string", @enum = new[] { "list", "create", "update", "delete", "apply" } },
+            id = new { type = "string", description = "The rule's id (update, delete, apply)." },
+            name = new { type = "string", description = "What the rule is for, as the person reads it." },
+            enabled = new { type = "boolean", description = "Off keeps the rule but lets mail pass (default on)." },
+            matchAll = new { type = "boolean", description = "true: all conditions must meet (default); false: any." },
+            conditions = new
+            {
+                type = "array",
+                items = new
+                {
+                    type = "object",
+                    required = new[] { "field", "value" },
+                    properties = new
+                    {
+                        field = new { type = "string", @enum = MailRuleFields.All.ToArray() },
+                        value = new { type = "string" },
+                    },
+                },
+            },
+            addTags = new { type = "array", items = new { type = "string" }, description = "Tags to give a matching mail's conversation (a–z, 0–9, _ : -)." },
+            markRead = new { type = "boolean" },
+            archive = new { type = "boolean", description = "Archive the conversation (on the server first)." },
+        },
+    };
+
+    public async Task<object> InvokeAsync(ContextRef ctx, string actor, JsonElement arguments, ClaimsPrincipal principal, CancellationToken ct)
+    {
+        var action = MailArgs.Required(arguments, "action");
+        if (action == "list") return new { rules = await _rules.ListAsync(ctx, ct) };
+        if (ctx.Type == ContextType.Space && (await _spaces.GetMembershipAsync(ctx.Id, actor, ct))?.CanInvite() != true)
+            throw new ArgumentException("In a space only its Admins manage mail rules.");
+        switch (action)
+        {
+            case "create":
+                var rule = Build(arguments);
+                if (await _rules.CountAsync(ctx, ct) >= MailRules.MaxRules)
+                    throw new ArgumentException($"A workspace has at most {MailRules.MaxRules} mail rules.");
+                return await _rules.CreateAsync(ctx, rule, actor, ct);
+            case "update":
+                return await _rules.UpdateAsync(ctx, MailArgs.Required(arguments, "id"), Build(arguments), ct)
+                    ?? throw new ArgumentException("No such rule.");
+            case "delete":
+                return await _rules.DeleteAsync(ctx, MailArgs.Required(arguments, "id"), ct)
+                    ? new { deleted = true }
+                    : throw new ArgumentException("No such rule.");
+            case "apply":
+                var found = await _rules.GetAsync(ctx, MailArgs.Required(arguments, "id"), ct) ?? throw new ArgumentException("No such rule.");
+                MailRuleRunner.Result r;
+                try { r = await _runner.ApplyAsync(ctx, found, ct); }
+                catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
+                catch (Exception ex) when (ex is not ArgumentException) { throw MailArgs.ServerRefused(ex); }
+                return new { conversations = r.Conversations, archived = r.Archived, archiveFolderMissing = r.ArchiveFolderMissing };
+            default:
+                throw new ArgumentException("action is list, create, update, delete or apply.");
+        }
+    }
+
+    /// <summary>The rule the arguments describe — the same checks as the app's.</summary>
+    private static MailRule Build(JsonElement a)
+    {
+        var tags = (MailArgs.List(a, "addTags") ?? []).Where(x => !string.IsNullOrWhiteSpace(x)).ToList();
+        if (tags.FirstOrDefault(x => !TagName.IsValid(x)) is { } bad)
+            throw new ArgumentException($"Tag '{bad}' is invalid: 1–{TagName.MaxLength} characters of a–z, 0–9, _ : -.");
+        var conditions = new List<MailRuleCondition>();
+        if (a.TryGetProperty("conditions", out var cs) && cs.ValueKind == JsonValueKind.Array)
+            foreach (var c in cs.EnumerateArray())
+            {
+                if (c.ValueKind != JsonValueKind.Object) throw new ArgumentException("A condition is { field, value }.");
+                conditions.Add(new MailRuleCondition(MailArgs.Str(c, "field") ?? "", MailArgs.Str(c, "value") ?? ""));
+            }
+        var rule = new MailRule
+        {
+            Name = MailArgs.Str(a, "name")?.Trim() ?? "",
+            Enabled = MailArgs.Bool(a, "enabled") ?? true,
+            MatchAll = MailArgs.Bool(a, "matchAll") ?? true,
+            Conditions = conditions,
+            AddTags = tags,
+            Archive = MailArgs.Bool(a, "archive") == true,
+            MarkRead = MailArgs.Bool(a, "markRead") == true,
+        };
+        if (MailRules.Problem(rule) is { } missing)
+            throw new ArgumentException($"A rule needs a name, at least one condition (field and value) and an action — {missing} is missing or invalid.");
+        return rule;
+    }
+}
