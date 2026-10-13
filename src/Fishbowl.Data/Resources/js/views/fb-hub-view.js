@@ -176,8 +176,6 @@ class FbHubView extends HTMLElement {
         } catch {
             fb.version = null;
         }
-        const footer = this.querySelector("sac-footer");
-        if (footer && fb.version) footer.setAttribute("version", fb.version);
         this._paintCover();
     }
 
@@ -527,9 +525,7 @@ class FbHubView extends HTMLElement {
             <div class="hub-container">
                 <main class="grid" id="fb-tiles" aria-label="${fb.t("fb.desk.apps", "Apps")}"></main>
             </div>
-            <sac-footer brand="THE FISHBOWL"></sac-footer>
         `;
-        if (fb.version) this.querySelector("sac-footer").setAttribute("version", fb.version);
         this._grid = this.querySelector("#fb-tiles");
         // The cover is built once per mount and kept across tile renders (a
         // repaint must not restart the fish).
