@@ -365,9 +365,14 @@ class SacSelect extends HTMLElement {
                 .opt[aria-disabled="true"] { color: var(--text-dim); cursor: not-allowed; }
                 .opt[aria-disabled="true"].hl { background: transparent; }
                 .empty { padding: 8px; color: var(--text-muted); cursor: default; }
-                .list::-webkit-scrollbar { width: 6px; }
+                .list::-webkit-scrollbar { width: var(--scrollbar-size); }
                 .list::-webkit-scrollbar-track { background: transparent; }
-                .list::-webkit-scrollbar-thumb { background: var(--scrollbar-thumb); border-radius: 999px; }
+                .list::-webkit-scrollbar-thumb {
+                    background: var(--scrollbar-thumb);
+                    background-clip: content-box;
+                    border: var(--scrollbar-gap) solid transparent;
+                    border-radius: 999px;
+                }
 
                 @media (pointer: coarse) {
                     .field, :host([size="regular"]) .field { min-height: 44px; font-size: max(16px, 1rem); }

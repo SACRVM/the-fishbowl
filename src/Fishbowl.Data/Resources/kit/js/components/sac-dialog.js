@@ -415,12 +415,12 @@ class SacDialog extends HTMLElement {
                 /* Scrollbar — the kit recipe (ui.css §5), re-stated because
                    ::-webkit-scrollbar does not pierce a shadow root. Firefox, which has
                    no ::-webkit-scrollbar, gets the standard pair instead. */
-                .body::-webkit-scrollbar { width: 10px; height: 10px; }
+                .body::-webkit-scrollbar { width: var(--scrollbar-size); height: var(--scrollbar-size); }
                 .body::-webkit-scrollbar-track { background: transparent; }
                 .body::-webkit-scrollbar-thumb {
                     background: var(--scrollbar-thumb);
                     background-clip: content-box;
-                    border: 2px solid transparent;
+                    border: var(--scrollbar-gap) solid transparent;
                     border-radius: 999px;
                 }
                 .body::-webkit-scrollbar-thumb:hover {

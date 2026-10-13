@@ -327,12 +327,12 @@ class SacShortcutSheet extends HTMLElement {
                     font-size: 0.85rem;
                     line-height: 1.4;
                 }
-                .body::-webkit-scrollbar { width: 10px; height: 10px; }
+                .body::-webkit-scrollbar { width: var(--scrollbar-size); height: var(--scrollbar-size); }
                 .body::-webkit-scrollbar-track { background: transparent; }
                 .body::-webkit-scrollbar-thumb {
                     background: var(--scrollbar-thumb);
                     background-clip: content-box;
-                    border: 2px solid transparent;
+                    border: var(--scrollbar-gap) solid transparent;
                     border-radius: 999px;
                 }
                 .body::-webkit-scrollbar-thumb:hover {

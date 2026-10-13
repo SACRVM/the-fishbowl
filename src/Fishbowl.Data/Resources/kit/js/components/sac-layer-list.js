@@ -241,8 +241,25 @@
                         min-height: 0;
                         overflow-y: auto;
                         overscroll-behavior-y: contain;
-                        scrollbar-width: thin;
-                        scrollbar-color: var(--scrollbar-thumb) transparent;
+                    }
+                    /* Scrollbar — the kit recipe (ui.css §5), re-stated because
+                       ::-webkit-scrollbar does not pierce a shadow root. Firefox, which has
+                       no ::-webkit-scrollbar, gets the standard pair instead. */
+                    .list::-webkit-scrollbar { width: var(--scrollbar-size); height: var(--scrollbar-size); }
+                    .list::-webkit-scrollbar-track { background: transparent; }
+                    .list::-webkit-scrollbar-thumb {
+                        background: var(--scrollbar-thumb);
+                        background-clip: content-box;
+                        border: var(--scrollbar-gap) solid transparent;
+                        border-radius: 999px;
+                    }
+                    .list::-webkit-scrollbar-thumb:hover {
+                        background: var(--scrollbar-thumb-hover);
+                        background-clip: content-box;
+                    }
+                    .list::-webkit-scrollbar-corner { background: transparent; }
+                    @supports not selector(::-webkit-scrollbar) {
+                        .list { scrollbar-width: thin; scrollbar-color: var(--scrollbar-thumb) transparent; }
                     }
                     .row {
                         display: flex;

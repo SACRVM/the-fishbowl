@@ -186,10 +186,12 @@ class SacLog extends HTMLElement {
 
                 /* Scrollbar theme — duplicated because the global rule in
                    ui.css doesn't pierce Shadow DOM. */
-                .body::-webkit-scrollbar { width: 6px; }
+                .body::-webkit-scrollbar { width: var(--scrollbar-size); }
                 .body::-webkit-scrollbar-track { background: transparent; }
                 .body::-webkit-scrollbar-thumb {
                     background: var(--scrollbar-thumb);
+                    background-clip: content-box;
+                    border: var(--scrollbar-gap) solid transparent;
                     border-radius: 999px;
                 }
             </style>

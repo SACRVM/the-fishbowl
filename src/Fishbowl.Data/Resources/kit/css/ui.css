@@ -133,6 +133,12 @@
        properties cross shadow roots; a class does not. 14/26 ≈ the kit's
        ~56% icon-to-box ratio. */
     --icon-btn-size: 26px;
+
+    /* Scrollbar measure — the kit bar's track and the air on each side of
+       its thumb (thumb = size − 2 × gap = 6px). Custom properties cross
+       shadow roots, so every shadow copy of the §5 recipe reads this pair. */
+    --scrollbar-size: 12px;
+    --scrollbar-gap:  3px;
     --icon-btn-icon: 14px;
 
     /* Tool button — ONE measure for <sac-toolbox>'s tools and the light-DOM
@@ -383,8 +389,8 @@ sac-window,
    with scrollable shadow content must duplicate these rules inside.
 
    Chromium and Safari draw the KIT's bar (::-webkit-scrollbar below): a
-   6px thumb with 2px of air on both sides, no arrow buttons, the same on
-   every OS. The standard pair (scrollbar-width/-color) is for Firefox ONLY:
+   6px thumb with 3px of air on every side (--scrollbar-size / -gap), no
+   arrow buttons, the same on every OS. The standard pair (scrollbar-width/-color) is for Firefox ONLY:
    since Chrome 121 a set scrollbar-color — which is INHERITED, even into
    shadow roots — makes Chrome ignore every ::-webkit-scrollbar rule and
    paint its native bar (on Windows: arrow buttons, the thumb off-centre in
@@ -396,12 +402,12 @@ sac-window,
         scrollbar-color: var(--scrollbar-thumb) transparent;
     }
 }
-*::-webkit-scrollbar { width: 10px; height: 10px; }
+*::-webkit-scrollbar { width: var(--scrollbar-size); height: var(--scrollbar-size); }
 *::-webkit-scrollbar-track { background: transparent; }
 *::-webkit-scrollbar-thumb {
     background: var(--scrollbar-thumb);
     background-clip: content-box;
-    border: 2px solid transparent;
+    border: var(--scrollbar-gap) solid transparent;
     border-radius: 999px;   /* a pill — the one rounded exception to the shape scale */
 }
 *::-webkit-scrollbar-thumb:hover {
@@ -817,10 +823,13 @@ a.nav-icon-btn { text-decoration: none; }
 /* sac.selection — rows of a list that marks several (kit/js/lib/selection.js).
    No text selection or touch callout (Shift+click and a long-press would
    start one); a marked row is the --accent-tint ground, its swapped icon
-   the accent. */
+   the accent. The keyboard cursor, where the open row doesn't show it (the
+   moving end of a Shift range), is a quiet --accent ring while the list
+   has focus. */
 [data-sac-row] { user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
 [data-sac-row].marked { background: var(--accent-tint); }
 [data-sac-row].marked [data-sac-mark-icon] { color: var(--accent); }
+[data-sac-selection]:focus-within [data-sac-row][data-sac-cursor] { box-shadow: inset 0 0 0 1px var(--accent); }
 
 /* About window content — rendered by sac.about.open() into a <sac-window>.
    The one shared credits/licence surface: a host and an app both use it, so

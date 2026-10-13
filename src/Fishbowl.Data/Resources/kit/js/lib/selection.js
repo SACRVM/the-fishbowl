@@ -68,7 +68,10 @@
  *
  * What it sets: `marked` + aria-selected on marked rows, `marking` on the
  * list while anything is marked, data-sac-row on every row (ui.css: no text
- * selection, no touch callout, the marked tint). With `icon`, that element
+ * selection, no touch callout, the marked tint). With `keyboard`,
+ * data-sac-cursor on the cursor row while the open row doesn't show it —
+ * while marking (the moving end of a Shift range), or once Shift moved it
+ * off the open row (ui.css: a 1px --accent ring while the list has focus). With `icon`, that element
  * of a marked row shows "check" in --accent (its own name comes back after).
  * Fires sac:mark { ids } on the list (bubbles, composed) — like the file
  * browser's — and calls onChange(ids). The app keeps its own header ("3
@@ -138,9 +141,19 @@
                 }
             }
             list.classList.toggle("marking", marks.size > 0);
+            paintCursor();
             // The observer's records for our own writes are dropped.
             mo.takeRecords();
             syncing = false;
+        }
+
+        /** data-sac-cursor on the cursor row where the open row doesn't show it. */
+        function paintCursor() {
+            if (!keyboard) return;
+            const k = cursorNow();
+            const row = k != null && (marks.size > 0 || k !== openNow()) ? rowById(k) : null;
+            for (const r of list.querySelectorAll("[data-sac-cursor]")) if (r !== row) r.removeAttribute("data-sac-cursor");
+            if (row) row.setAttribute("data-sac-cursor", "");
         }
 
         /** The cursor: the app's open row whenever that changed, else where the keys left it. */
@@ -237,6 +250,7 @@
                 list.dispatchEvent(new CustomEvent("sac:cursor", { detail: { id: k }, bubbles: true, composed: true }));
                 if (typeof onCursor === "function") onCursor(k, row);
             }
+            paintCursor();
         }
 
         function changed() {
@@ -446,6 +460,7 @@
                 list.removeEventListener("focusout", onFocusOut);
                 marks.clear();
                 paint();
+                for (const r of list.querySelectorAll("[data-sac-cursor]")) r.removeAttribute("data-sac-cursor");
                 list.removeAttribute("data-sac-selection");
                 if (addedTabindex) list.removeAttribute("tabindex");
             },

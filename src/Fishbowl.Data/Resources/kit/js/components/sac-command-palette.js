@@ -896,14 +896,17 @@
 
                     /* Scrollbar theme — duplicated because the global rule in
                        ui.css doesn't pierce Shadow DOM. */
-                    .list::-webkit-scrollbar { width: 8px; }
+                    .list::-webkit-scrollbar { width: calc(8px + 2 * var(--scrollbar-gap)); }
                     .list::-webkit-scrollbar-track { background: transparent; }
                     .list::-webkit-scrollbar-thumb {
                         background: var(--scrollbar-thumb);
+                        background-clip: content-box;
+                        border: var(--scrollbar-gap) solid transparent;
                         border-radius: 999px;
                     }
                     .list::-webkit-scrollbar-thumb:hover {
                         background: var(--scrollbar-thumb-hover);
+                        background-clip: content-box;
                     }
 
                     /* Compact: a full-width sheet hanging from the top edge,

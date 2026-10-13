@@ -58,6 +58,8 @@ public class WebManifestTests : IClassFixture<WebApplicationFactory<Program>>, I
         Assert.Equal("The Fishbowl", root.GetProperty("name").GetString());
         Assert.Equal("/", root.GetProperty("start_url").GetString());
         Assert.Equal("standalone", root.GetProperty("display").GetString());
+        // The header (the kit's sac-nav) can be the window's title bar.
+        Assert.Contains(root.GetProperty("display_override").EnumerateArray(), m => m.GetString() == "window-controls-overlay");
         // Every icon it names is there, as what it says it is: a browser
         // that can't load one doesn't offer the install.
         var icons = root.GetProperty("icons").EnumerateArray().ToList();
