@@ -22,6 +22,12 @@
  * Attributes:
  *   placeholder - shown when the document is empty.
  *   readonly    - disables editing and hides the formatting toolbar.
+ *   bare        - for an editor that IS the pane (a notes app): no frame,
+ *                 radius, background or focus ring, and the writing surface
+ *                 fills the host's height (give the host one: a height, or
+ *                 flex: 1 in a column) instead of the 60vh minimum. A click
+ *                 in the empty area below the text puts the caret at the end.
+ *                 Without a host height the surface is as tall as its text.
  *
  * Properties:
  *   value - string; markdown source (getter + setter).
@@ -278,6 +284,13 @@ class SacMdEditor extends HTMLElement {
         }
         if (this._offLang) { this._offLang(); this._offLang = null; }
         LIVE_EDITORS.delete(this);
+        // Removed with the table dialog open: no close event comes, and a
+        // pending _td would keep selectionchange shut out after a reconnect.
+        // Drop it like a Cancel.
+        if (this._td) {
+            this._td = null;
+            this._tdlg.close();
+        }
     }
 
     /** Kit value events: detail { value }, bubbles, not composed. */
@@ -734,6 +747,16 @@ class SacMdEditor extends HTMLElement {
     _handleSelectionChange() {
         if (this._suppressSelect) return;
         if (!this._editor) return;
+        // Focus has left the editor (for an input on the page, say): leave
+        // the caret alone. Firefox keeps the document selection in our lines
+        // after the focus moves on, and the blur's re-render shifts it onto
+        // the editor root - placing the caret from there pulls the focus
+        // straight back in (#4). Read-only takes no focus and keeps its path.
+        if (!this.hasAttribute("readonly") &&
+            !this._editor.contains(this.shadowRoot.activeElement)) return;
+        // The table dialog is open, or closing the native way and its close
+        // event not yet in: _tdClosed puts the caret back, not the browser.
+        if (this._td) return;
         const sel = this._currentSelection();
         if (!sel || !sel.rangeCount) return;
         const range = sel.getRangeAt(0);
@@ -1677,10 +1700,34 @@ class SacMdEditor extends HTMLElement {
             if (i.dataset && i.dataset.r !== undefined) this._td.data[Number(i.dataset.r)][Number(i.dataset.c)] = i.value;
         });
         d.addEventListener("change", (e) => e.stopPropagation());
-        // Esc cancels the dialog (native) and goes no further.
-        d.addEventListener("keydown", (e) => { if (e.key === "Escape") e.stopPropagation(); });
-        // Enter in a cell submits the form = Apply; so does the button.
+        // Esc cancels and goes no further. Enter in a cell submits the form
+        // = Apply; so does the button. Both close through _tdClose, not the
+        // native way: see there.
+        d.addEventListener("keydown", (e) => {
+            if (e.key !== "Escape" || e.isComposing) return;
+            e.stopPropagation();
+            e.preventDefault();
+            this._tdClose("cancel");
+        });
+        d.querySelector("form").addEventListener("submit", (e) => {
+            e.preventDefault();
+            this._tdClose("apply");
+        });
+        // Anything else that closes it (a native close request that got
+        // through): same clean-up, a task later.
         d.addEventListener("close", () => this._tdClosed());
+    }
+
+    /** Close the dialog and put the editor back in the same task. close()
+     *  hands the focus back to the editor at once, with the caret on the
+     *  first line; the close event follows a task (in a throttled page,
+     *  much) later. Waiting for it let our selectionchange take that caret
+     *  for a move out of the table - line 1 activated, the table re-aligned
+     *  (an edit, on Cancel) and typing landing there until the event came. */
+    _tdClose(returnValue) {
+        if (!this._tdlg.open) return;
+        this._tdlg.close(returnValue);
+        this._tdClosed();
     }
 
     _tdLabels() {
@@ -1740,7 +1787,7 @@ class SacMdEditor extends HTMLElement {
         const swap = (arr, i, j) => { [arr[i], arr[j]] = [arr[j], arr[i]]; };
         let focus = null;
         switch (kind) {
-            case "cancel": this._tdlg.close("cancel"); return;
+            case "cancel": this._tdClose("cancel"); return;
             case "add-row":
                 data.push(aligns.map(() => ""));
                 focus = `input[data-r="${data.length - 1}"][data-c="0"]`;
@@ -2811,6 +2858,27 @@ const TEMPLATE = `
         background: transparent;
         border-color: transparent;
     }
+    /* bare: the editor IS the pane (a notes app), not a field in a form -
+       a sheet of paper. No frame, and the writing surface fills the height
+       the host is given instead of the 60vh minimum, so the empty area
+       below a short note is still the editor. */
+    :host([bare]), :host([bare]:focus-within) {
+        display: flex;
+        flex-direction: column;
+        background: transparent;
+        border: 0;
+        border-radius: 0;
+        box-shadow: none;
+    }
+    :host([bare]) .toolbar {
+        flex: none;
+        background: transparent;
+        border-radius: 0;
+    }
+    :host([bare]) .editor {
+        flex: 1 0 auto;
+        min-height: 0;
+    }
 
     .toolbar {
         display: flex;
@@ -2942,17 +3010,17 @@ const TEMPLATE = `
     .line.h6 { font-size: 0.88em; color: var(--text-muted, #888); }
     .line.heading:not(.active) .block-marker { display: none; }
 
-    /* Blockquote. A continuous left bar across a run of quote lines, plus
-       a very soft tint. No per-line rounded corners - they break up the
-       block visually when you stack multiple lines. The left bar sits at
-       the inside edge of the line's negative margin so it reads flush
-       with the gutter instead of hanging inside the padding. The angle-
-       bracket marker is hidden when inactive; the left bar is the cue. */
+    /* Blockquote. A continuous soft tint across a run of quote lines,
+       pulled out into the gutter by the negative margin. No colored left
+       stripe (kit rule: never a >=2px colored border on a rounded
+       surface) and no per-line rounded corners - they break up the block
+       visually when you stack multiple lines. The angle-bracket marker is
+       hidden when inactive; the tint plus the muted italic are the cue.
+       padding-left keeps the text where the old 3px stripe left it. */
     .line.quote {
-        background: color-mix(in srgb, var(--fg, #fff) 2.5%, transparent);
-        padding-left: 18px;
+        background: color-mix(in srgb, var(--fg, #fff) 6%, transparent);
+        padding-left: 21px;
         margin: 0 -10px;
-        border-left: 3px solid color-mix(in srgb, var(--fg, #fff) 28%, transparent);
         border-radius: 0;
         color: var(--text-muted, #bbb);
         font-style: italic;
@@ -3272,17 +3340,20 @@ const TEMPLATE = `
        colour (--mdb-color on the line, warm by default) across the opening
        line, the body lines and the closing line, so a multi-line block
        reads as one shape. When a boundary line goes active the card stays
-       and its raw marker chars come back (like a fence). */
+       and its raw marker chars come back (like a fence). The tint alone
+       draws the card - no colored left stripe (kit rule: never a >=2px
+       colored border on a rounded surface); the label pill and the
+       boundary text carry the colour. padding-left keeps the text where
+       the old 3px stripe left it. */
     .line.block-open,
     .line.block-close,
     .line.block-body,
     .line.block-line {
         --mdb-c: var(--mdb-color, var(--accent-warm, #f59e0b));
-        background: color-mix(in srgb, var(--mdb-c) 4.5%, transparent);
+        background: color-mix(in srgb, var(--mdb-c) 7%, transparent);
         margin: 0 -10px;
-        padding-left: 14px;
+        padding-left: 17px;
         padding-right: 14px;
-        border-left: 3px solid color-mix(in srgb, var(--mdb-c) 35%, transparent);
         border-radius: 0;
     }
     .line.block-open,
