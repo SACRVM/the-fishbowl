@@ -1069,6 +1069,7 @@ static string GetContentType(string path)
         ".css" => "text/css",
         ".js" => "application/javascript",
         ".json" => "application/json",
+        ".webmanifest" => "application/manifest+json",
         ".txt" => "text/plain; charset=utf-8",
         ".png" => "image/png",
         ".jpg" => "image/jpeg",

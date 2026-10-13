@@ -1,0 +1,326 @@
+#!/usr/bin/env bash
+# Fishbowl on this machine: the one host on the repo's data as a systemd user
+# service, a daily snapshot to a backup share, and an app window around the
+# web UI. See README.md beside this file.
+set -euo pipefail
+
+repo=$(cd "$(dirname "$(readlink -f "$0")")/../.." && pwd)
+self="$repo/tools/local-host/fishbowl-local"
+host_dir="$repo/src/Fishbowl.Host"
+data_home=${XDG_DATA_HOME:-$HOME/.local/share}
+config_home=${XDG_CONFIG_HOME:-$HOME/.config}
+root="$data_home/fishbowl"            # app/, app.old/, browser/
+units="$config_home/systemd/user"
+conf="$config_home/fishbowl/local.conf"
+
+# The ports `dotnet run` uses (launchSettings.json), so the Google sign-in's
+# redirect and the MCP clients' address stay as they are.
+urls="https://localhost:7180;http://localhost:7181"
+health="http://localhost:7181/api/v1/version"
+
+# Defaults; local.conf overrides them.
+FISHBOWL_URL=https://localhost:7180
+FISHBOWL_BACKUP_DIR=/mnt/nas/backup/Fishbowl
+FISHBOWL_BROWSER=chromium
+if [[ -f $conf ]]; then . "$conf"; fi
+
+say() { printf '%s\n' "$*" >&2; }
+die() { say "fishbowl-local: $*"; exit 1; }
+
+usage() {
+    say "usage: fishbowl-local <command>
+
+  install    write the services, the backup timer and the app launcher
+  deploy     build the working tree; if that works, swap it in and restart
+  rollback   back to the build before the last deploy (again: undo)
+  backup     snapshot the data to FISHBOWL_BACKUP_DIR (what the timer runs)
+  app        open the app window (what the launcher runs)"
+    exit 2
+}
+
+cmd_install() {
+    mkdir -p "$units" "$root" "$(dirname "$conf")" \
+        "$data_home/applications" "$data_home/icons/hicolor/scalable/apps"
+
+    if [[ ! -f $conf ]]; then
+        cat > "$conf" <<EOF
+# Fishbowl on this machine (tools/local-host in the repo).
+
+# The address the app window opens. Once Fishbowl runs on its own server,
+# put that address here and turn the local host off:
+#   systemctl --user disable --now fishbowl.service
+FISHBOWL_URL=$FISHBOWL_URL
+
+# Where the daily snapshot goes: another disk than the data's.
+FISHBOWL_BACKUP_DIR=$FISHBOWL_BACKUP_DIR
+
+# A Chromium-based browser for the app window.
+FISHBOWL_BROWSER=$FISHBOWL_BROWSER
+EOF
+    fi
+
+    # The working directory is the repo's host folder: the data is its
+    # fishbowl-data/, and fishbowl-mods/ links to the UI's sources, so UI
+    # edits are live on reload. The program itself is the deployed copy.
+    cat > "$units/fishbowl.service" <<EOF
+[Unit]
+Description=Fishbowl (this machine's host)
+Documentation=file://$repo/tools/local-host/README.md
+
+[Service]
+WorkingDirectory=$host_dir
+ExecStart=$root/app/Fishbowl.Host
+Environment=ASPNETCORE_ENVIRONMENT=Development
+Environment="ASPNETCORE_URLS=$urls"
+SyslogIdentifier=fishbowl
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=60
+
+[Install]
+WantedBy=default.target
+EOF
+
+    cat > "$units/fishbowl-backup.service" <<EOF
+[Unit]
+Description=Fishbowl: snapshot of the data to the backup share
+Documentation=file://$repo/tools/local-host/README.md
+
+[Service]
+Type=oneshot
+ExecStart=$self backup
+Nice=10
+IOSchedulingClass=idle
+EOF
+
+    # Persistent: a day the machine was off at 03:00 is caught up on the
+    # next start.
+    cat > "$units/fishbowl-backup.timer" <<EOF
+[Unit]
+Description=Fishbowl: daily snapshot of the data
+
+[Timer]
+OnCalendar=*-*-* 03:00
+Persistent=true
+RandomizedDelaySec=10min
+
+[Install]
+WantedBy=timers.target
+EOF
+
+    install -m 644 "$repo/src/Fishbowl.Data/Resources/img/fishbowl.svg" \
+        "$data_home/icons/hicolor/scalable/apps/fishbowl.svg"
+    write_launcher "$(window_class)"
+
+    systemctl --user daemon-reload
+    systemctl --user enable fishbowl.service
+    systemctl --user enable --now fishbowl-backup.timer
+
+    if [[ -d $root/app ]]; then
+        say "Installed."
+    else
+        say "Installed. Build and start the host with: $self deploy"
+    fi
+}
+
+# The app as installed in the browser profile: one "<url> <app id>" line per
+# address it was installed from.
+app_ids="$root/app-ids"
+
+# The installed app's id for FISHBOWL_URL; fails when it isn't installed.
+installed_app_id() {
+    local url id
+    [[ -f $app_ids ]] || return 1
+    while read -r url id; do
+        if [[ $url == "$FISHBOWL_URL" &&
+            -d "$root/browser/Default/Web Applications/Manifest Resources/$id" ]]; then
+            printf '%s\n' "$id"
+            return 0
+        fi
+    done < "$app_ids"
+    return 1
+}
+
+# What Chromium names the window, which is how the desktop puts it under the
+# launcher's icon. An installed app's is chrome-<app id>-<profile>; a plain
+# --app window's chrome-<host>_<path, / as _>-<profile>, without the port.
+# --class is ignored for both (Wayland's app id and X11's class).
+window_class() {
+    local id rest host path=/
+    if id=$(installed_app_id); then
+        printf 'chrome-%s-Default\n' "$id"
+        return
+    fi
+    rest=${FISHBOWL_URL#*://}
+    rest=${rest%%[?#]*}
+    host=${rest%%/*}
+    host=${host%%:*}
+    if [[ $rest == */* ]]; then path=/${rest#*/}; fi
+    printf 'chrome-%s_%s-Default\n' "$host" "${path//\//_}"
+}
+
+launcher="$data_home/applications/fishbowl.desktop"
+
+# The launcher, for the window named $1.
+write_launcher() {
+    cat > "$launcher" <<EOF
+[Desktop Entry]
+Type=Application
+Name=Fishbowl
+GenericName=Personal memory
+GenericName[de]=Persönliches Gedächtnis
+Comment=Notes, mail, calendar and contacts in one place
+Comment[de]=Notizen, Mail, Kalender und Kontakte an einem Ort
+Exec="$self" app
+Icon=fishbowl
+Terminal=false
+Categories=Office;
+StartupNotify=true
+StartupWMClass=$1
+EOF
+    if command -v update-desktop-database >/dev/null; then
+        update-desktop-database -q "$(dirname "$launcher")" || true
+    fi
+    if command -v kbuildsycoca6 >/dev/null; then kbuildsycoca6 >/dev/null 2>&1 || true; fi
+}
+
+# Restarts the service and waits until it answers.
+restart_and_wait() {
+    systemctl --user restart fishbowl.service
+    for _ in $(seq 60); do
+        if curl -fs -o /dev/null --max-time 2 "$health"; then return 0; fi
+        sleep 1
+    done
+    journalctl --user -u fishbowl.service -n 30 --no-pager >&2 || true
+    return 1
+}
+
+lock_deploys() {
+    mkdir -p "$root"
+    exec 9>"$root/.deploy.lock"
+    flock -n 9 || die "another deploy is running"
+}
+
+cmd_deploy() {
+    lock_deploys
+    local rid
+    case $(uname -m) in
+        x86_64) rid=linux-x64 ;;
+        aarch64|arm64) rid=linux-arm64 ;;
+        *) die "no .NET runtime id for $(uname -m)" ;;
+    esac
+
+    # Built into its own folder: the running host's files are never
+    # written under it, and a failed build leaves it as it is.
+    rm -rf "$root/app.new"
+    say "Building $(git -C "$repo" describe --tags --always --dirty) …"
+    if ! dotnet publish "$host_dir" -c Release -r "$rid" --self-contained false \
+            -o "$root/app.new" --nologo -v quiet; then
+        rm -rf "$root/app.new"
+        die "the build failed; the running host is unchanged"
+    fi
+
+    rm -rf "$root/app.old"
+    if [[ -d $root/app ]]; then mv "$root/app" "$root/app.old"; fi
+    mv "$root/app.new" "$root/app"
+
+    restart_and_wait || die "the new build doesn't answer; '$self rollback' brings the previous one back"
+    say "Deployed; Fishbowl answers on ${urls//;/ and }."
+}
+
+cmd_rollback() {
+    lock_deploys
+    [[ -d $root/app.old ]] || die "there is no previous build"
+    mv "$root/app" "$root/app.swap"
+    mv "$root/app.old" "$root/app"
+    mv "$root/app.swap" "$root/app.old"
+    restart_and_wait || die "the previous build doesn't answer either"
+    say "Back on the previous build ('$self rollback' again undoes it)."
+}
+
+# The device a path lives on, without btrfs' [/subvolume] suffix.
+device_of() {
+    local source
+    source=$(findmnt -n -o SOURCE --target "$1" | tail -n 1)
+    printf '%s\n' "${source%%\[*}"
+}
+
+cmd_backup() {
+    local data="$host_dir/fishbowl-data" target=$FISHBOWL_BACKUP_DIR
+    [[ -d $data ]] || die "no data at $data"
+    # Looking at it mounts an automounted share; a share that's away fails.
+    [[ -d $target ]] || die "the backup target isn't reachable: $target"
+    # A share that isn't mounted can leave its mount point as an empty folder
+    # on the system disk — a snapshot there is no backup.
+    if [[ $(device_of "$data") == "$(device_of "$target")" ]]; then
+        die "the backup target is on the data's own disk: $target"
+    fi
+    cd "$repo"
+    dotnet run --project tools/snapshot-data -- --data "$data" --out "$target" --quiet
+}
+
+cmd_app() {
+    case $FISHBOWL_URL in
+        http://localhost[:/]*|https://localhost[:/]*|http://localhost|https://localhost)
+            # This machine's host: start it if it isn't running, and give it
+            # a moment, so the window doesn't open on an error page.
+            systemctl --user start fishbowl.service || true
+            for _ in $(seq 30); do
+                if curl -fs -o /dev/null --max-time 2 "$health"; then break; fi
+                sleep 1
+            done
+            ;;
+    esac
+    mkdir -p "$root/browser"
+    local id class
+    if ! id=$(installed_app_id); then
+        id=""
+        if install_app; then id=$(installed_app_id); fi
+    fi
+    # A new address (the move to a server) or the first install renames the
+    # window; the launcher follows.
+    class=$(window_class)
+    if [[ -f $launcher ]] && ! grep -qxF "StartupWMClass=$class" "$launcher"; then
+        write_launcher "$class"
+    fi
+    if [[ -n $id ]]; then
+        exec "$FISHBOWL_BROWSER" --user-data-dir="$root/browser" --profile-directory=Default \
+            --app-id="$id" --no-first-run --no-default-browser-check "$@"
+    fi
+    # Not installed (its browser was open, or the address didn't answer):
+    # a plain app window, and another try next time.
+    exec "$FISHBOWL_BROWSER" --app="$FISHBOWL_URL" --user-data-dir="$root/browser" \
+        --no-first-run --no-default-browser-check "$@"
+}
+
+# Whether the app's browser runs: its profile lock is a link to
+# <host>-<pid>, and a browser that was killed leaves it behind.
+browser_running() {
+    local lock
+    lock=$(readlink "$root/browser/SingletonLock" 2>/dev/null) || return 1
+    kill -0 "${lock##*-}" 2>/dev/null
+}
+
+# Installs the app from FISHBOWL_URL into the browser profile, once per
+# address, and records its id. Fails when that can't be done now.
+install_app() {
+    local id desktop
+    # Its browser runs: the profile is taken.
+    if browser_running; then return 1; fi
+    id=$(python3 -I "$repo/tools/local-host/install-app.py" \
+        "$FISHBOWL_BROWSER" "$root/browser" "$FISHBOWL_URL") || return 1
+    printf '%s %s\n' "$FISHBOWL_URL" "$id" >> "$app_ids"
+    # Chromium adds launchers of its own (menu and desktop): this is the one.
+    desktop=$(xdg-user-dir DESKTOP 2>/dev/null || printf '%s' "$HOME/Desktop")
+    rm -f "$data_home/applications/chrome-$id-Default.desktop" \
+        "$desktop/chrome-$id-Default.desktop"
+}
+
+case ${1:-} in
+    install) cmd_install ;;
+    deploy) cmd_deploy ;;
+    rollback) cmd_rollback ;;
+    backup) cmd_backup ;;
+    app) shift; cmd_app "$@" ;;
+    *) usage ;;
+esac
