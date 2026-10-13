@@ -24,7 +24,13 @@ tools/local-host/fishbowl-local deploy    # build and start
 
 ## The app window
 
-The launcher (Fishbowl in the app menu) runs `fishbowl-local app`. That starts the service when the address is local and waits until it answers. The first time, it installs Fishbowl as an app in a browser profile of its own (`~/.local/share/fishbowl/browser`, through `install-app.py`) and from then on opens it by its app id. Installing it this way, rather than opening a plain `--app` window, gives the window the manifest's name and icon and the browser's own frame instead of the desktop's title bar.
+The launcher (Fishbowl in the app menu) runs `fishbowl-local app`. That starts the service when the address is local and waits until it answers. The first time, it installs Fishbowl as an app in a browser profile of its own (`~/.local/share/fishbowl/browser`, through `install-app.py`) and from then on opens it by its app id. Installing it this way, rather than opening a plain `--app` window, gives the window the manifest's name and icon and the browser's own frame instead of the desktop's title bar. The profile runs without extensions, so the title bar has no extensions (puzzle) button.
+
+The launcher is named after the window's app id (`chrome-<app id>-Default.desktop`), replacing the one Chromium writes, and carries the logo as the icon `fishbowl` in PNG sizes. Plasma's taskbar first matches a window's process name, which is `chromium` for every Chromium app window, against the launchers' `StartupWMClass`. Chromium's own launcher claims `chromium`, so the app window would show Chromium's icon. To prevent that, `fishbowl-local` keeps a copy of the browser's launcher in `~/.local/share/applications` without that one line, and renews it when the system's launcher is updated. Chromium's own windows are still found by their launcher's name. Delete the copy to undo.
+
+The window's own icon, which the window switcher (Alt+Tab) shows, is the one Chromium hands over. Chromium uses the smallest stored app icon of at least 32px, which is the 32px one, and the switcher blows it up. Before each start, the launcher puts the 256px picture into the profile under that name, so the switcher's icon stays sharp.
+
+The `^` button in the title bar switches on the window-controls overlay (`⌄` switches it off again); Chromium keeps that per app. The header (the kit's `<sac-nav>`) then becomes the title bar. The window buttons sit at its right end, and dragging its free space moves the window.
 
 Settings are in `~/.config/fishbowl/local.conf`:
 

@@ -108,8 +108,7 @@ RandomizedDelaySec=10min
 WantedBy=timers.target
 EOF
 
-    install -m 644 "$repo/src/Fishbowl.Data/Resources/img/fishbowl.svg" \
-        "$data_home/icons/hicolor/scalable/apps/fishbowl.svg"
+    install_icon
     write_launcher "$(window_class)"
 
     systemctl --user daemon-reload
@@ -159,10 +158,69 @@ window_class() {
     printf 'chrome-%s_%s-Default\n' "$host" "${path//\//_}"
 }
 
-launcher="$data_home/applications/fishbowl.desktop"
+applications="$data_home/applications"
 
-# The launcher, for the window named $1.
+# The logo as the icon "fishbowl", as PNGs in the usual sizes: panels and
+# menus draw those more reliably than an SVG. Needs rsvg-convert (librsvg).
+install_icon() {
+    local icons="$data_home/icons/hicolor" logo="$repo/src/Fishbowl.Data/Resources/img/fishbowl.svg" size
+    command -v rsvg-convert >/dev/null || die "rsvg-convert is missing (librsvg)"
+    for size in 16 22 24 32 48 64 128 256 512; do
+        mkdir -p "$icons/${size}x${size}/apps"
+        rsvg-convert -w "$size" -h "$size" "$logo" -o "$icons/${size}x${size}/apps/fishbowl.png"
+    done
+    rm -f "$icons/scalable/apps/fishbowl.svg"
+    touch "$icons"
+}
+
+# Plasma's taskbar matches a window's process name against the launchers'
+# StartupWMClass before its app id. For every Chromium app window that name
+# is "chromium", which Chromium's own launcher claims — so the window would
+# sit under Chromium's icon, whatever its app id says. A copy of that launcher
+# in the user's applications without that one line hands the match on to the
+# app id; Chromium's own windows are still found by their launcher's name.
+# Renewed whenever the system's launcher is newer (an update).
+shadow_browser_launcher() {
+    local exe system copy wrote=1
+    exe=$(basename "$(readlink -f "$(command -v "$FISHBOWL_BROWSER")")")
+    for system in /usr/share/applications/*.desktop /usr/local/share/applications/*.desktop; do
+        [[ -f $system ]] || continue
+        grep -qix "StartupWMClass=$exe" "$system" || continue
+        copy="$applications/$(basename "$system")"
+        if [[ ! -f $copy || $system -nt $copy ]]; then
+            mkdir -p "$applications"
+            { printf '# %s without its StartupWMClass, by tools/local-host/fishbowl-local:\n' "$system"
+              printf '# app windows of this browser would sit under its icon. Delete to undo.\n'
+              grep -vix "StartupWMClass=$exe" "$system"; } > "$copy"
+            wrote=0
+        fi
+    done
+    return "$wrote"
+}
+
+# Rebuilds the desktop's launcher index after launchers changed.
+refresh_launchers() {
+    if command -v update-desktop-database >/dev/null; then
+        update-desktop-database -q "$applications" || true
+    fi
+    if command -v kbuildsycoca6 >/dev/null; then kbuildsycoca6 >/dev/null 2>&1 || true; fi
+}
+
+# The launcher, for the window named $1. Its file is named after the window
+# too: the desktop finds a window's launcher by that name first. (Plasma
+# would otherwise go by the process: Chromium puts itself in a systemd scope
+# named after Chromium, and the window would sit under Chromium's icon.)
+# The same name is Chromium's own launcher for the app, which this replaces.
 write_launcher() {
+    local launcher="$applications/$1.desktop" old
+    mkdir -p "$applications"
+    # Launchers this wrote for another window name (an earlier address, the
+    # plain window before the install).
+    for old in "$applications"/*.desktop; do
+        if [[ $old != "$launcher" ]] && grep -qxF "Exec=\"$self\" app" "$old" 2>/dev/null; then
+            rm -f "$old"
+        fi
+    done
     cat > "$launcher" <<EOF
 [Desktop Entry]
 Type=Application
@@ -178,10 +236,8 @@ Categories=Office;
 StartupNotify=true
 StartupWMClass=$1
 EOF
-    if command -v update-desktop-database >/dev/null; then
-        update-desktop-database -q "$(dirname "$launcher")" || true
-    fi
-    if command -v kbuildsycoca6 >/dev/null; then kbuildsycoca6 >/dev/null 2>&1 || true; fi
+    shadow_browser_launcher || true
+    refresh_launchers
 }
 
 # Restarts the service and waits until it answers.
@@ -278,19 +334,29 @@ cmd_app() {
         if install_app; then id=$(installed_app_id); fi
     fi
     # A new address (the move to a server) or the first install renames the
-    # window; the launcher follows.
+    # window, and Chromium writes its own launcher under that name on an
+    # install: this one follows.
     class=$(window_class)
-    if [[ -f $launcher ]] && ! grep -qxF "StartupWMClass=$class" "$launcher"; then
+    if ! grep -qxF "Exec=\"$self\" app" "$applications/$class.desktop" 2>/dev/null; then
         write_launcher "$class"
+    elif shadow_browser_launcher; then
+        refresh_launchers
     fi
+    # Plasma's taskbar finds a window's launcher through its process first:
+    # this hint in the environment, else the command line — which is
+    # Chromium's, and would put the window under Chromium's icon.
+    export BAMF_DESKTOP_FILE_HINT="$applications/$class.desktop"
+    # No extensions in the app's profile: without them the window's title bar
+    # (or its controls overlay) loses the extensions' puzzle button.
+    local flags=(--user-data-dir="$root/browser" --no-first-run --no-default-browser-check
+        --disable-extensions)
     if [[ -n $id ]]; then
-        exec "$FISHBOWL_BROWSER" --user-data-dir="$root/browser" --profile-directory=Default \
-            --app-id="$id" --no-first-run --no-default-browser-check "$@"
+        sharpen_window_icon "$id"
+        exec "$FISHBOWL_BROWSER" "${flags[@]}" --profile-directory=Default --app-id="$id" "$@"
     fi
     # Not installed (its browser was open, or the address didn't answer):
     # a plain app window, and another try next time.
-    exec "$FISHBOWL_BROWSER" --app="$FISHBOWL_URL" --user-data-dir="$root/browser" \
-        --no-first-run --no-default-browser-check "$@"
+    exec "$FISHBOWL_BROWSER" "${flags[@]}" --app="$FISHBOWL_URL" "$@"
 }
 
 # Whether the app's browser runs: its profile lock is a link to
@@ -299,6 +365,21 @@ browser_running() {
     local lock
     lock=$(readlink "$root/browser/SingletonLock" 2>/dev/null) || return 1
     kill -0 "${lock##*-}" 2>/dev/null
+}
+
+# Chromium gives an app's window the smallest of the app's stored icons from
+# 32px up — the 32px one, which the window switcher (Alt+Tab) blows up into
+# pixels. The 256px picture under that name gives the window a sharp icon.
+# Chromium writes the icons again when the app's change, so this runs before
+# every start; while its browser runs, the next start does it.
+sharpen_window_icon() {
+    local dir="$root/browser/Default/Web Applications/Manifest Resources/$1" icons
+    if browser_running; then return 0; fi
+    for icons in "$dir/Icons" "$dir/Trusted Icons/Icons"; do
+        if [[ -f $icons/256.png ]] && ! cmp -s "$icons/256.png" "$icons/32.png"; then
+            cp "$icons/256.png" "$icons/32.png"
+        fi
+    done
 }
 
 # Installs the app from FISHBOWL_URL into the browser profile, once per
@@ -310,10 +391,10 @@ install_app() {
     id=$(python3 -I "$repo/tools/local-host/install-app.py" \
         "$FISHBOWL_BROWSER" "$root/browser" "$FISHBOWL_URL") || return 1
     printf '%s %s\n' "$FISHBOWL_URL" "$id" >> "$app_ids"
-    # Chromium adds launchers of its own (menu and desktop): this is the one.
+    # Chromium adds launchers of its own: the menu's is replaced under its
+    # name (cmd_app), the one on the desktop goes.
     desktop=$(xdg-user-dir DESKTOP 2>/dev/null || printf '%s' "$HOME/Desktop")
-    rm -f "$data_home/applications/chrome-$id-Default.desktop" \
-        "$desktop/chrome-$id-Default.desktop"
+    rm -f "$desktop/chrome-$id-Default.desktop"
 }
 
 case ${1:-} in
