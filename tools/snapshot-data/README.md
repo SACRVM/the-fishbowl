@@ -30,6 +30,11 @@ Flags:
 stdout gets the absolute snapshot path on success — pipe-friendly for scripts.
 Per-file progress and errors go to stderr.
 
+`--out` may be a network share. Off Windows the copies are written without
+SQLite file locks (the `unix-none` VFS) — a Linux CIFS mount refuses them, so
+every write there failed with "database is locked". Nothing else writes into a
+new snapshot folder, so no lock is lost.
+
 ## Scheduling
 
 Windows Task Scheduler, daily at 03:00:
@@ -41,6 +46,12 @@ $action  = New-ScheduledTaskAction `
     -WorkingDirectory "C:\fishbowl"
 $trigger = New-ScheduledTaskTrigger -Daily -At 03:00
 Register-ScheduledTask -TaskName "Fishbowl daily snapshot" -Action $action -Trigger $trigger
+```
+
+Linux, daily at 03:00 (`crontab -e`; paths are examples):
+
+```bash
+0 3 * * * cd /home/me/the-fishbowl && dotnet run --project tools/snapshot-data -- --data src/Fishbowl.Host/fishbowl-data --out /mnt/nas/backup/Fishbowl --quiet
 ```
 
 For pruning: keep the last 7 daily + 4 weekly snapshots with a tiny

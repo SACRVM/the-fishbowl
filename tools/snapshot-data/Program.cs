@@ -267,6 +267,16 @@ static string FormatBytes(long bytes)
 // when we dispose it the OS handle closes immediately — otherwise the pool
 // holds a lock on the snapshot file and a subsequent integrity-check would
 // fail on Windows. Mirrors the pattern in ExportApi.BackupContextAsync.
+//
+// Off Windows the destination is opened through SQLite's `unix-none` VFS (no
+// file locks): snapshots usually go to a network share, and a Linux CIFS
+// mount refuses SQLite's byte-range locks — every write there failed with
+// "database is locked". The copy is a new file in a new folder that only this
+// process writes, so the locks guard nothing. Not the `nolock=1` parameter:
+// it also turns WAL off, and the copy carries its source's WAL flag, so the
+// switch to DELETE below could no longer open it. The source keeps its normal
+// locks: it may be a live host's database. Windows stays on the plain path,
+// which works against its shares.
 static void Exec(SqliteConnection c, string sql)
 {
     using var cmd = c.CreateCommand();
@@ -286,7 +296,9 @@ static void BackupSqliteFile(string sourcePath, string destPath)
 
     using var dest = new SqliteConnection(new SqliteConnectionStringBuilder
     {
-        DataSource = destPath,
+        DataSource = OperatingSystem.IsWindows()
+            ? destPath
+            : new Uri(Path.GetFullPath(destPath)).AbsoluteUri + "?vfs=unix-none",
         Mode = SqliteOpenMode.ReadWriteCreate,
         Pooling = false,
     }.ToString());
