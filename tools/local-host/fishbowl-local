@@ -110,6 +110,7 @@ EOF
 
     install_icon
     write_launcher "$(window_class)"
+    install_link_handoff
 
     systemctl --user daemon-reload
     systemctl --user enable fishbowl.service
@@ -346,10 +347,13 @@ cmd_app() {
     # this hint in the environment, else the command line — which is
     # Chromium's, and would put the window under Chromium's icon.
     export BAMF_DESKTOP_FILE_HINT="$applications/$class.desktop"
-    # No extensions in the app's profile: without them the window's title bar
-    # (or its controls overlay) loses the extensions' puzzle button.
+    # The profile's only extension is link-handoff (links to other sites open
+    # in the system's browser); with the extensions menu folded into the app
+    # menu, the title bar (or its controls overlay) has no puzzle button.
+    install_link_handoff
     local flags=(--user-data-dir="$root/browser" --no-first-run --no-default-browser-check
-        --disable-extensions)
+        --disable-extensions-except="$link_handoff" --load-extension="$link_handoff"
+        --enable-features=DesktopPWAsElidedExtensionsMenu)
     if [[ -n $id ]]; then
         sharpen_window_icon "$id"
         exec "$FISHBOWL_BROWSER" "${flags[@]}" --profile-directory=Default --app-id="$id" "$@"
@@ -357,6 +361,27 @@ cmd_app() {
     # Not installed (its browser was open, or the address didn't answer):
     # a plain app window, and another try next time.
     exec "$FISHBOWL_BROWSER" "${flags[@]}" --app="$FISHBOWL_URL" "$@"
+}
+
+link_handoff="$repo/tools/local-host/link-handoff"
+
+# The native host the link-handoff extension hands links to (open-link), for
+# that extension only. Its id comes from the public key in its manifest.
+install_link_handoff() {
+    local key id hosts="$root/browser/NativeMessagingHosts"
+    key=$(python3 -I -c 'import json, sys; print(json.load(open(sys.argv[1]))["key"])' \
+        "$link_handoff/manifest.json")
+    id=$(printf '%s' "$key" | base64 -d | sha256sum | cut -c1-32 | tr 0-9a-f a-p)
+    mkdir -p "$hosts"
+    cat > "$hosts/fishbowl.open_link.json" <<EOF
+{
+  "name": "fishbowl.open_link",
+  "description": "Opens a link from the Fishbowl app in the system's browser",
+  "path": "$repo/tools/local-host/open-link",
+  "type": "stdio",
+  "allowed_origins": ["chrome-extension://$id/"]
+}
+EOF
 }
 
 # Whether the app's browser runs: its profile lock is a link to

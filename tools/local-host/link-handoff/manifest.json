@@ -1,0 +1,9 @@
+{
+  "manifest_version": 3,
+  "name": "Fishbowl: links to the system's browser",
+  "description": "Loaded only into the Fishbowl app's own profile by tools/local-host/fishbowl-local.",
+  "version": "1.0",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAx4FYPGF98uMRaf1bYF0CkB/YktgjtBlYsJI0OJMVaya9a2b1O9IWGkcvs/U6Z31PJO3Rs8MgmzEdyx6Xi6D5CFHQ2MYAfWL4LdG3+r/n6XkbSKx3DK2jtq3G/znwA3AnNHYj7D0fXBF12v99vnPGyR8Olzihg91HqPIWK8i6PhyhI9jkbUWtyyXbHS8cF+MoQXVtEs+dKwhJsmBCDijxdjBN8DX4yUS2klU12OkYq0k8ZeZsfPLIMYDxPP27gRzACSem2/JgerI+/3eMp3Z9ejcfam9d1TGchl9xZ5GJqbXRZicDpiYEeqXvPstfUqXoEFDvWKnZPkFEWcP3tptRQwIDAQAB",
+  "permissions": ["webNavigation", "tabs", "nativeMessaging"],
+  "background": { "service_worker": "background.js" }
+}

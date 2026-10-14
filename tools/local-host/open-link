@@ -1,0 +1,35 @@
+#!/usr/bin/env -S python3 -I
+"""Native messaging host of link-handoff/: opens one link in the system's
+default browser (xdg-open). Chromium starts it per message; it reads one
+length-prefixed JSON message ({"url": …}) and answers {"ok": …}. Only
+http, https and mailto addresses are opened.
+"""
+import json
+import struct
+import subprocess
+import sys
+from urllib.parse import urlsplit
+
+
+def read_message():
+    header = sys.stdin.buffer.read(4)
+    if len(header) < 4:
+        return None
+    (length,) = struct.unpack("=I", header)
+    return json.loads(sys.stdin.buffer.read(length))
+
+
+def reply(message):
+    data = json.dumps(message).encode()
+    sys.stdout.buffer.write(struct.pack("=I", len(data)) + data)
+    sys.stdout.buffer.flush()
+
+
+message = read_message()
+url = str((message or {}).get("url", ""))
+if urlsplit(url).scheme not in ("http", "https", "mailto"):
+    reply({"ok": False})
+    sys.exit(0)
+subprocess.Popen(["xdg-open", url], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                 stderr=subprocess.DEVNULL, start_new_session=True)
+reply({"ok": True})
