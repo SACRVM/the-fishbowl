@@ -1,26 +1,30 @@
 {
   "version": 1,
   "id": "the-fishbowl",
+  "quickLinks": [],
   "mcpActivations": [
-    { "id": "firepit" }
-  ],
-  "quickLinks": [
+    {
+      "id": "firepit"
+    }
   ],
   "commands": [
     {
-      "name": "Run Host",
+      "name": "Deploy Host",
       "type": "Shell",
       "icon": "play",
-      "command": "dotnet",
+      "command": "tools/local-host/fishbowl-local",
       "args": [
-        "run",
-        "--project",
-        "src/Fishbowl.Host"
+        "deploy"
       ],
+      "cwd": ".",
       "window": "reuse:fishbowl-host",
-      "longRunning": true
+      "longRunning": false
+    },
+    {
+      "name": "GitHub",
+      "type": "Url",
+      "icon": "\uD83D\uDC19",
+      "url": "https://github.com/SACRVM/the-fishbowl"
     }
-  ,
-    { "name": "GitHub", "type": "url", "url": "https://github.com/SACRVM/the-fishbowl", "icon": "🐙" }
   ]
 }
