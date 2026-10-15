@@ -26,6 +26,17 @@ public static class McpEndpoint
             .WithSummary("MCP Streamable HTTP endpoint (JSON-RPC 2.0).")
             .RequireAuthorization();
 
+        // No server-sent stream and no sessions: the spec's answer to a GET
+        // (the stream a client may open) and a DELETE (ending a session) is
+        // 405. Without it a GET fell through to the UI's fallback, got the
+        // index page with a 200, and the client opened it again every second.
+        routes.MapMethods("/mcp", ["GET", "DELETE"], (HttpContext ctx) =>
+            {
+                ctx.Response.Headers.Allow = "POST";
+                return Results.StatusCode(StatusCodes.Status405MethodNotAllowed);
+            })
+            .ExcludeFromDescription();
+
         return routes;
     }
 

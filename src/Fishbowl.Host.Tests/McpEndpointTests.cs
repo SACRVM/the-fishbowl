@@ -154,6 +154,24 @@ public class McpEndpointTests : IClassFixture<WebApplicationFactory<Program>>, I
         Assert.True(string.IsNullOrEmpty(body), $"expected empty body, got: {body}");
     }
 
+    [Theory]
+    [InlineData("GET")]
+    [InlineData("DELETE")]
+    public async Task Mcp_GetAndDelete_Answer405_NotTheUi(string method)
+    {
+        // No server-sent stream, no sessions: the Streamable HTTP spec's
+        // answer is 405. Before, a GET fell through to the UI's index page
+        // with a 200, and the client opened it again every second.
+        var client = await BearerClientAsync();
+        var request = new HttpRequestMessage(new HttpMethod(method), "/mcp");
+        request.Headers.Accept.ParseAdd("text/event-stream");
+        var resp = await client.SendAsync(request, TestContext.Current.CancellationToken);
+
+        Assert.Equal(HttpStatusCode.MethodNotAllowed, resp.StatusCode);
+        Assert.Contains("POST", resp.Content.Headers.Allow);
+        Assert.NotEqual("text/html", resp.Content.Headers.ContentType?.MediaType);
+    }
+
     [Fact]
     public async Task Mcp_UnknownMethod_ReturnsMethodNotFound()
     {
