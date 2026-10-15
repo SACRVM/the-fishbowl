@@ -527,7 +527,7 @@ public class MailApiTests : IClassFixture<WebApplicationFactory<Program>>, IDisp
         Assert.Equal("engine-3@example.org", sent.InReplyTo);
         Assert.Equal(new[] { "engine-1@example.org", "engine-2@fishbowl.test", "engine-3@example.org" }, sent.References.ToArray());
         Assert.Contains("Thanks, **Ada**.", sent.TextBody);
-        Assert.True(sent.TextBody.Contains("schrieb Ada Lovelace <ada@example.org>:"), sent.TextBody);
+        Assert.True(sent.TextBody!.Contains("schrieb Ada Lovelace <ada@example.org>:"), sent.TextBody);
         Assert.Contains("> The variables live in the store, column by column.", sent.TextBody);
         Assert.Contains("<strong>Ada</strong>", sent.HtmlBody);
         Assert.Contains("<br", sent.HtmlBody);   // a line break is a line break
@@ -589,7 +589,7 @@ public class MailApiTests : IClassFixture<WebApplicationFactory<Program>>, IDisp
         var parts = sent.Attachments.OfType<MimeKit.MimePart>().ToList();
         Assert.Equal(new[] { "invoice.pdf", "notes.txt" }, parts.Select(p => p.FileName).ToArray());
         using var pdf = new MemoryStream();
-        await parts[0].Content.DecodeToAsync(pdf, Ct);
+        await parts[0].Content!.DecodeToAsync(pdf, Ct);
         Assert.StartsWith("%PDF", Encoding.ASCII.GetString(pdf.ToArray()));
     }
 

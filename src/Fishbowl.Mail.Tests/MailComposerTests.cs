@@ -18,7 +18,7 @@ public class MailComposerTests
     public void Markdown_is_the_text_part_and_its_rendering_the_html_part()
     {
         var msg = MailComposer.Build(Request("A **bold** line\nand the next"));
-        Assert.Equal("A **bold** line\nand the next", msg.TextBody.Replace("\r\n", "\n"));
+        Assert.Equal("A **bold** line\nand the next", msg.TextBody!.Replace("\r\n", "\n"));
         Assert.Contains("<strong>bold</strong>", msg.HtmlBody);
         Assert.Contains("line<br />", msg.HtmlBody);
         Assert.EndsWith("@example.org>", "<" + msg.MessageId + ">");
@@ -38,7 +38,7 @@ public class MailComposerTests
     {
         var quote = new ComposeQuote(["On 2026-10-08 14:37, Ada <ada@example.org> wrote:"], "First\n<script>x</script>", Quoted: true);
         var msg = MailComposer.Build(Request("Thanks", quote));
-        var text = msg.TextBody.Replace("\r\n", "\n");
+        var text = msg.TextBody!.Replace("\r\n", "\n");
         Assert.Contains("Thanks\n\nOn 2026-10-08 14:37, Ada <ada@example.org> wrote:\n> First\n> <script>x</script>", text);
         Assert.Contains("<blockquote", msg.HtmlBody);
         Assert.Contains("First<br>&lt;script&gt;", msg.HtmlBody);

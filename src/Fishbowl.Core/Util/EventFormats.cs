@@ -96,7 +96,7 @@ public static class EventFormats
         {
             foreach (var ev in cal.Events)
             {
-                if (ev.RecurrenceId is not null || ev.DtStart is null) { skipped++; continue; }
+                if (ev.RecurrenceIdentifier is not null || ev.DtStart is null) { skipped++; continue; }
                 list.Add(ToEvent(ev, floating));
             }
         }
