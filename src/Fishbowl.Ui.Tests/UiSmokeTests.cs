@@ -452,8 +452,10 @@ public class UiSmokeTests
             await prow.Locator(".tv-item-title").ClickAsync();
             var titleEl = pp.Locator("fb-todos-view #title");
             await Assertions.Expect(titleEl).ToHaveValueAsync(longTitle);
-            var wraps = await titleEl.EvaluateAsync<bool>("e => e.scrollWidth <= e.clientWidth + 1 && e.clientHeight > parseFloat(getComputedStyle(e).lineHeight) * 1.5");
-            Assert.True(wraps, "the editor title should wrap on a phone");
+            // It sizes itself once the editor shows — a frame after it was filled.
+            await pp.WaitForFunctionAsync(
+                "() => { const e = document.querySelector('fb-todos-view #title'); return e.scrollWidth <= e.clientWidth + 1 && e.clientHeight > parseFloat(getComputedStyle(e).lineHeight) * 1.5; }",
+                null, new PageWaitForFunctionOptions { Timeout = 5000 });
             await phone.CloseAsync();
         }
         finally

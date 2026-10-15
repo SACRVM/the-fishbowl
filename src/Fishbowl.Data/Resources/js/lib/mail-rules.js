@@ -284,7 +284,10 @@
                 form.querySelector('[name="archive"]').checked = rule.archive;
                 // A new rule is usually wanted for what is already here too.
                 form.querySelector('[name="applyNow"]').checked = isNew;
-                requestAnimationFrame(() => conds.querySelector("input[data-value]")?.focus());
+                // The first condition's text takes the focus as the dialog
+                // opens (the kit's autofocus) — not a frame later, which raced
+                // the dialog focusing its default button.
+                conds.querySelector("input[data-value]")?.setAttribute("autofocus", "");
             },
             submit: async (dlg) => {
                 const form = dlg.querySelector(".fb-mail-form");

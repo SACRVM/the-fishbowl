@@ -66,6 +66,7 @@ class FbTodosView extends HTMLElement {
         this._sortable?.destroy();
         this.sel?.destroy();
         this._rowMenu?.destroy();
+        this._fieldSizer?.disconnect();
         this.flushSave();
         if (window.fb?.toolbar) fb.toolbar.clear();
     }
@@ -532,6 +533,20 @@ class FbTodosView extends HTMLElement {
             this.autosizeDesc();
             this.scheduleAutoSave();
         });
+        // Their height follows their width too: on a phone the editor turns
+        // narrow only after it was filled (the split shows it then), and a
+        // long title measured wide stayed one line, cut off.
+        const widths = new WeakMap();
+        this._fieldSizer = new ResizeObserver((entries) => {
+            for (const e of entries) {
+                const width = e.contentRect.width;
+                if (widths.get(e.target) === width) continue;   // a height we set ourselves
+                widths.set(e.target, width);
+                if (e.target === titleEl) this.autosizeTitle(); else this.autosizeDesc();
+            }
+        });
+        this._fieldSizer.observe(titleEl);
+        this._fieldSizer.observe(descEl);
 
         const dueEl = fb.format.attachInput(this.querySelector("#due-at"), { time: true });
         // Clear sits in the field row, after the time.
@@ -557,14 +572,16 @@ class FbTodosView extends HTMLElement {
 
     autosizeTitle() {
         const el = this.querySelector("#title");
-        if (!el) return;
+        // Hidden (a phone's editor before the split shows it): nothing to
+        // measure — the size observer sizes it once it shows.
+        if (!el?.offsetParent) return;
         el.style.height = "auto";
         el.style.height = el.scrollHeight + "px";
     }
 
     autosizeDesc() {
         const el = this.querySelector("#description");
-        if (!el) return;
+        if (!el?.offsetParent) return;
         el.style.height = "auto";
         el.style.height = el.scrollHeight + "px";
     }
