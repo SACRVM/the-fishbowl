@@ -1,14 +1,42 @@
 #!/usr/bin/env -S python3 -I
-"""Native messaging host of link-handoff/: opens one link in the system's
-default browser (xdg-open). Chromium starts it per message; it reads one
-length-prefixed JSON message ({"url": …}) and answers {"ok": …}. Only
-http, https and mailto addresses are opened.
+"""Native messaging host of link-handoff/: opens one link with the system's
+default program for it (xdg-open) and brings that program's window forward.
+Chromium starts it per message; it reads one length-prefixed JSON message
+({"url": …}) and answers {"ok": …}. Only http, https and mailto addresses
+are opened.
+
+On Wayland no program may raise another's window without an activation
+token, and Chromium gives this host none: the link would open in a browser
+left behind the app. On KDE Plasma a KWin script brings it forward instead;
+elsewhere the link opens as before.
 """
 import json
+import os
+import re
+import shutil
 import struct
 import subprocess
 import sys
+import tempfile
+import time
 from urllib.parse import urlsplit
+
+SCHEMES = ("http", "https", "mailto")
+
+# The window of the program the link went to, by its desktop file name: the
+# top one of them (the window list runs bottom to top), brought forward.
+RAISE = """
+const windows = workspace.windowList();
+let target = null;
+for (let i = 0; i < windows.length; i++) {
+    const w = windows[i];
+    if (w.normalWindow && w.desktopFileName === %s) target = w;
+}
+if (target) {
+    if (target.minimized) target.minimized = false;
+    workspace.activeWindow = target;
+}
+"""
 
 
 def read_message():
@@ -25,11 +53,69 @@ def reply(message):
     sys.stdout.buffer.flush()
 
 
+def handler(scheme):
+    """The desktop file name (without .desktop) of the default program for the scheme."""
+    try:
+        found = subprocess.run(["xdg-mime", "query", "default", f"x-scheme-handler/{scheme}"],
+                               capture_output=True, text=True, timeout=5).stdout.strip()
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    name = found.removesuffix(".desktop")
+    return name if re.fullmatch(r"[A-Za-z0-9._-]+", name) else None
+
+
+def bring_forward(name):
+    """KWin (KDE Plasma) brings the program's window forward; nothing elsewhere."""
+    qdbus = shutil.which("qdbus6") or shutil.which("qdbus")
+    if not qdbus:
+        return
+    fd, path = tempfile.mkstemp(prefix="fishbowl-raise-", suffix=".js", dir=os.environ.get("XDG_RUNTIME_DIR"))
+    with os.fdopen(fd, "w") as script:
+        script.write(RAISE % json.dumps(name))
+    plugin = os.path.basename(path)
+
+    def kwin(*args):
+        subprocess.run([qdbus, "org.kde.KWin", "/Scripting", *args],
+                       stdin=subprocess.DEVNULL, capture_output=True, timeout=5)
+    try:
+        kwin("org.kde.kwin.Scripting.loadScript", path, plugin)
+        kwin("org.kde.kwin.Scripting.start")
+        time.sleep(0.3)
+        kwin("org.kde.kwin.Scripting.unloadScript", plugin)
+    except (OSError, subprocess.TimeoutExpired):
+        pass
+    finally:
+        os.unlink(path)
+
+
+def open_and_bring_forward(url):
+    name = handler(urlsplit(url).scheme)
+    opener = subprocess.Popen(["xdg-open", url], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                              stderr=subprocess.DEVNULL)
+    try:
+        opener.wait(timeout=3)
+    except subprocess.TimeoutExpired:
+        pass
+    if name:
+        # Once the program has the link — and once more for one that was
+        # still starting and had no window yet.
+        time.sleep(0.4)
+        bring_forward(name)
+        time.sleep(1.5)
+        bring_forward(name)
+
+
+# The second step, on its own: Chromium ends the host once it has answered.
+if len(sys.argv) == 3 and sys.argv[1] == "--open":
+    open_and_bring_forward(sys.argv[2])
+    sys.exit(0)
+
 message = read_message()
 url = str((message or {}).get("url", ""))
-if urlsplit(url).scheme not in ("http", "https", "mailto"):
+if urlsplit(url).scheme not in SCHEMES:
     reply({"ok": False})
     sys.exit(0)
-subprocess.Popen(["xdg-open", url], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
-                 stderr=subprocess.DEVNULL, start_new_session=True)
+subprocess.Popen([sys.executable, "-I", os.path.abspath(__file__), "--open", url],
+                 stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                 start_new_session=True)
 reply({"ok": True})

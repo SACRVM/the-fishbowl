@@ -83,6 +83,9 @@ public class PlaywrightFixture : IAsyncLifetime
         {
             Headless = true,
             Args = new[] { "--lang=en-US", "--accept-lang=en-US,en" },
+            // A machine without Playwright's own browsers can name a Chromium
+            // it has (CI installs Playwright's; null keeps that one).
+            ExecutablePath = Environment.GetEnvironmentVariable("FISHBOWL_UI_TEST_CHROMIUM"),
         });
     }
 
