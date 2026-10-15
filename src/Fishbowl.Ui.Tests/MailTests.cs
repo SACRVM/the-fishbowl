@@ -393,13 +393,13 @@ public class MailTests
             await page.WaitForTimeoutAsync(250);
             await Assertions.Expect(menu).ToHaveCountAsync(0);
 
-            // Spam: the spam folders read on the server, its count gone.
+            // Spam has no unread: "Mark all as seen" only lets its count go.
             var spam = page.Locator("fb-mail-view #mv-tabs sac-tab[name='spam']");
             await Assertions.Expect(spam.Locator(".mv-tab-count")).ToBeVisibleAsync(new() { Timeout = 15000 });
             await spam.ClickAsync(new() { Button = MouseButton.Right });
             await page.WaitForTimeoutAsync(250);
-            await menu.Locator("button[data-action]", new() { HasText = "Mark all as read" }).ClickAsync();
-            await Assertions.Expect(page.Locator("#sac-toast-stack").GetByText("2 messages marked read").First).ToBeVisibleAsync();
+            await Assertions.Expect(menu.Locator("button[data-action]", new() { HasText = "Mark all as read" })).ToHaveCountAsync(0);
+            await menu.Locator("button[data-action]", new() { HasText = "Mark all as seen" }).ClickAsync();
             await Assertions.Expect(spam.Locator(".mv-tab-count")).ToBeHiddenAsync();
             await spam.ClickAsync(new() { Button = MouseButton.Right });
             await page.WaitForTimeoutAsync(250);
@@ -650,6 +650,54 @@ public class MailTests
         }
     }
 
+    // A pinned conversation stands on top of the list, a thin line under the
+    // pinned, until it is unpinned — from its menu or its head; it stays
+    // pinned when the page comes again.
+    [Fact]
+    public async Task Mail_Pin_KeepsAConversationOnTop_UnderALine_Test()
+    {
+        var (context, page, slug, _) = await SpaceWithMailAsync();
+        try
+        {
+            await page.GotoAsync($"{_fixture.BaseUrl}/#/space/{slug}/mail");
+            var rows = page.Locator("fb-mail-view .mv-item");
+            await Assertions.Expect(rows).ToHaveCountAsync(3, new() { Timeout = 15000 });
+            var line = page.Locator("fb-mail-view .mv-sep");
+            await Assertions.Expect(line).ToHaveCountAsync(0);
+            // The oldest of the three, so pinning moves it.
+            var last = await rows.Last.Locator(".mv-subject").TextContentAsync();
+            var pinnedRow = rows.Filter(new() { HasText = last! });
+
+            var menu = page.Locator("sac-menu.sac-context-menu[open]");
+            await pinnedRow.ClickAsync(new() { Button = MouseButton.Right });
+            await page.WaitForTimeoutAsync(250);
+            await menu.Locator("button[data-action]", new() { HasText = "Pin to top" }).ClickAsync();
+            var children = page.Locator("fb-mail-view #mv-items > *");
+            await Assertions.Expect(children.First.Locator(".mv-subject")).ToHaveTextAsync(last!);
+            await Assertions.Expect(children.Nth(1)).ToHaveClassAsync("mv-sep");
+            await Assertions.Expect(pinnedRow.Locator("sac-icon[name='pin']")).ToHaveCountAsync(1);
+            await Assertions.Expect(rows).ToHaveCountAsync(3);
+            await page.ScreenshotAsync(new() { Path = Shot("pinned") });
+
+            // Kept: the page comes again with it on top; its head says so.
+            await page.ReloadAsync();
+            await Assertions.Expect(children.First.Locator(".mv-subject")).ToHaveTextAsync(last!, new() { Timeout = 15000 });
+            await Assertions.Expect(children.Nth(1)).ToHaveClassAsync("mv-sep");
+            await pinnedRow.ClickAsync();
+            var pin = page.Locator("fb-mail-view #mv-pin");
+            await Assertions.Expect(pin).ToHaveAttributeAsync("aria-pressed", "true");
+            await pin.ClickAsync();
+            await Assertions.Expect(page.Locator("fb-mail-view #mv-pin")).ToHaveAttributeAsync("aria-pressed", "false");
+            await Assertions.Expect(line).ToHaveCountAsync(0);
+            await Assertions.Expect(rows.Last.Locator(".mv-subject")).ToHaveTextAsync(last!);
+        }
+        finally
+        {
+            await page.APIRequest.DeleteAsync($"{_fixture.BaseUrl}/api/v1/spaces/{slug}?archive=false");
+            await context.CloseAsync();
+        }
+    }
+
     // Phase 2, writing: a reply is filled from its message and shows the
     // original under the text; sent, it stands in its conversation. A new mail
     // left half-written waits under Drafts, opens again and can be discarded.
@@ -769,6 +817,49 @@ public class MailTests
                 await page.Locator("fb-mail-view #mv-search").FillAsync(i % 2 == 0 ? " " : "");
             }
             await Assertions.Expect(renewal).ToBeVisibleAsync(new() { Timeout = 5000 });
+        }
+        finally
+        {
+            await page.APIRequest.DeleteAsync($"{_fixture.BaseUrl}/api/v1/spaces/{slug}?archive=false");
+            await context.CloseAsync();
+        }
+    }
+
+    // Spam has no unread: what came since the last look stands above a thin
+    // line while the view is open; the next look starts from there.
+    [Fact]
+    public async Task Mail_Spam_NewSinceTheLastLook_StandsAboveALine_Test()
+    {
+        var (context, page, slug, _) = await SpaceWithMailAsync();
+        try
+        {
+            await page.GotoAsync($"{_fixture.BaseUrl}/#/space/{slug}/mail");
+            var rows = page.Locator("fb-mail-view .mv-item");
+            await Assertions.Expect(rows).ToHaveCountAsync(3, new() { Timeout = 15000 });
+            // The last look between the sample's two spam mails (1 h and 2 h old).
+            var lastLook = DateTime.UtcNow.AddMinutes(-90).ToString("yyyy-MM-ddTHH:mm:ss") + "Z";
+            await page.EvaluateAsync("([key, value]) => localStorage.setItem(key, value)", new[] { $"fb.mail.spam-seen.space:{slug}", lastLook });
+            await page.ReloadAsync();
+            var spam = page.Locator("fb-mail-view #mv-tabs sac-tab[name='spam']");
+            await Assertions.Expect(spam.Locator(".mv-tab-count")).ToHaveTextAsync("1", new() { Timeout = 15000 });
+
+            await spam.ClickAsync();
+            await Assertions.Expect(rows).ToHaveCountAsync(2);
+            var children = page.Locator("fb-mail-view #mv-items > *");
+            await Assertions.Expect(children).ToHaveCountAsync(3);
+            await Assertions.Expect(children.First).ToContainTextAsync("Contract renewal");
+            await Assertions.Expect(children.Nth(1)).ToHaveClassAsync("mv-sep");
+            await Assertions.Expect(children.Nth(2)).ToContainTextAsync("You have won!!!");
+            await Assertions.Expect(page.Locator("fb-mail-view .mv-item.unread")).ToHaveCountAsync(0);
+            await Assertions.Expect(spam.Locator(".mv-tab-count")).ToBeHiddenAsync();
+            await page.ScreenshotAsync(new() { Path = Shot("spam-line") });
+
+            // Looked at: the next visit has nothing new, so no line.
+            await page.Locator("fb-mail-view #mv-tabs sac-tab[name='list']").ClickAsync();
+            await Assertions.Expect(rows).ToHaveCountAsync(3);
+            await spam.ClickAsync();
+            await Assertions.Expect(rows).ToHaveCountAsync(2);
+            await Assertions.Expect(page.Locator("fb-mail-view .mv-sep")).ToHaveCountAsync(0);
         }
         finally
         {

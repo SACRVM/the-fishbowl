@@ -663,29 +663,44 @@ public class MailApiTests : IClassFixture<WebApplicationFactory<Program>>, IDisp
         Assert.Equal(HttpStatusCode.Forbidden, (await key.PostAsJsonAsync($"{P}/spam/{accountId}/1/not-spam", new { uidValidity = 1u }, Ct)).StatusCode);
     }
 
+    // A pin keeps a conversation on top of the list until it is unpinned:
+    // the list can be asked for the pinned ones and for the others, and every
+    // row says whether it is pinned. Fishbowl's own — nothing goes to the server.
     [Fact]
-    public async Task SpamReadAll_MarksTheWholeSpamFolderRead_OnTheServer()
+    public async Task Pin_KeepsAConversationApart_UntilUnpinned()
     {
-        const string user = "mail_spam_read";
+        const string user = "mail_pin";
         using (var db = _db.CreateSystemConnection())
-            db.Execute("INSERT OR IGNORE INTO users(id, name, email, created_at) VALUES (@id, 'S', 'spr@example.com', @now)",
+            db.Execute("INSERT OR IGNORE INTO users(id, name, email, created_at) VALUES (@id, 'P', 'pin@example.com', @now)",
                 new { id = user, now = DateTime.UtcNow.ToString("o") });
         var c = As(user);
         await SyncedAccountAsync(c, P);
-        async Task<bool[]> Seen() => (await Json(await c.GetAsync($"{P}/spam", Ct))).GetProperty("items").EnumerateArray()
-            .Select(i => i.GetProperty("seen").GetBoolean()).ToArray();
-        Assert.Equal(new[] { false, false }, await Seen());
+        var all = await Threads(c, P);
+        var invoice = ThreadIdOf(all, "Your invoice");
+        Assert.All(all, t => Assert.False(t.GetProperty("pinned").GetBoolean()));
 
-        // A key never does it, whatever its scopes.
-        var key = await KeyAsync(user, ContextRef.User(user), "read:mail", "write:mail", "send:mail");
-        Assert.Equal(HttpStatusCode.Forbidden, (await key.PostAsync($"{P}/spam/read-all", null, Ct)).StatusCode);
+        var pin = await c.PostAsJsonAsync($"{P}/threads/{invoice}/pinned", new { pinned = true }, Ct);
+        Assert.Equal(HttpStatusCode.OK, pin.StatusCode);
+        var pinned = await Threads(c, P, "?pinned=true");
+        Assert.Equal(invoice, Assert.Single(pinned).GetProperty("threadId").GetString());
+        Assert.True(pinned[0].GetProperty("pinned").GetBoolean());
+        var others = await Threads(c, P, "?pinned=false");
+        Assert.Equal(all.Count - 1, others.Count);
+        Assert.DoesNotContain(others, t => t.GetProperty("threadId").GetString() == invoice);
+        Assert.True((await Threads(c, P)).Single(t => t.GetProperty("threadId").GetString() == invoice).GetProperty("pinned").GetBoolean());
 
-        var r = await Json(await c.PostAsync($"{P}/spam/read-all", null, Ct));
-        Assert.Equal(2, r.GetProperty("messages").GetInt32());
-        Assert.Empty(r.GetProperty("failed").EnumerateArray());
-        // Read on the server: the next look (no cached read) says so; again, nothing is left.
-        Assert.Equal(new[] { true, true }, await Seen());
-        Assert.Equal(0, (await Json(await c.PostAsync($"{P}/spam/read-all", null, Ct))).GetProperty("messages").GetInt32());
+        // Pinning twice keeps one pin; a conversation that isn't there is a 404.
+        Assert.Equal(HttpStatusCode.OK, (await c.PostAsJsonAsync($"{P}/threads/{invoice}/pinned", new { pinned = true }, Ct)).StatusCode);
+        Assert.Single(await Threads(c, P, "?pinned=true"));
+        Assert.Equal(HttpStatusCode.NotFound, (await c.PostAsJsonAsync($"{P}/threads/nope/pinned", new { pinned = true }, Ct)).StatusCode);
+
+        // A key pins with write:mail, not with read:mail alone.
+        var reader = await KeyAsync(user, ContextRef.User(user), "read:mail");
+        Assert.Equal(HttpStatusCode.Forbidden, (await reader.PostAsJsonAsync($"{P}/threads/{invoice}/pinned", new { pinned = false }, Ct)).StatusCode);
+        var writer = await KeyAsync(user, ContextRef.User(user), "read:mail", "write:mail");
+        Assert.Equal(HttpStatusCode.OK, (await writer.PostAsJsonAsync($"{P}/threads/{invoice}/pinned", new { pinned = false }, Ct)).StatusCode);
+        Assert.Empty(await Threads(c, P, "?pinned=true"));
+        Assert.Equal(all.Count, (await Threads(c, P, "?pinned=false")).Count);
     }
 
     // ---- 4. attachment ----
@@ -986,8 +1001,12 @@ public class MailApiTests : IClassFixture<WebApplicationFactory<Program>>, IDisp
 
         var tagged = ToolPayload(await RpcAsync(key, "tools/call", new { threadId = engine, add = new[] { "project" } }, "mail_tag"));
         Assert.Contains("project", tagged.GetProperty("tags").EnumerateArray().Select(x => x.GetString()));
-        ToolPayload(await RpcAsync(key, "tools/call", new { threadId = engine, seen = true, flagged = true }, "mail_mark"));
-        Assert.True((await Threads(cookie, P)).Single(t => t.GetProperty("threadId").GetString() == engine).GetProperty("flagged").GetBoolean());
+        ToolPayload(await RpcAsync(key, "tools/call", new { threadId = engine, seen = true, flagged = true, pinned = true }, "mail_mark"));
+        var marked = (await Threads(cookie, P)).Single(t => t.GetProperty("threadId").GetString() == engine);
+        Assert.True(marked.GetProperty("flagged").GetBoolean());
+        Assert.True(marked.GetProperty("pinned").GetBoolean());
+        ToolPayload(await RpcAsync(key, "tools/call", new { threadId = engine, pinned = false }, "mail_mark"));
+        Assert.Empty(await Threads(cookie, P, "?pinned=true"));
 
         // A reply drafted for the person: theirs in Drafts; sending needs send:mail.
         var draft = ToolPayload(await RpcAsync(key, "tools/call", new { kind = "reply", messageId = latest, body = "On it." }, "mail_draft"));

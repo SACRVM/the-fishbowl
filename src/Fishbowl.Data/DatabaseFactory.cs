@@ -13,7 +13,7 @@ public class DatabaseFactory
 {
     /// <summary>The user/space schema head: the PRAGMA user_version a context
     /// DB has once it is open. Raise it with every ApplyUserVN.</summary>
-    public const int UserSchemaHead = 27;
+    public const int UserSchemaHead = 28;
 
     private readonly string _dataRoot;
     private readonly string _usersPath;
@@ -586,10 +586,27 @@ public class DatabaseFactory
         if (version < 27)
         {
             ApplyUserV27(connection);
-            connection.Execute($"PRAGMA user_version = {UserSchemaHead}");
+            connection.Execute("PRAGMA user_version = 27");
             _logger.LogInformation("Applied user schema v27 to {DbPath}", ((SqliteConnection)connection).DataSource);
+            version = 27;
+        }
+
+        if (version < 28)
+        {
+            ApplyUserV28(connection);
+            connection.Execute($"PRAGMA user_version = {UserSchemaHead}");
+            _logger.LogInformation("Applied user schema v28 to {DbPath}", ((SqliteConnection)connection).DataSource);
         }
     }
+
+    // Pinned conversations: kept on top of the list until unpinned. A
+    // conversation has no row of its own (it is its messages' thread_id), so
+    // the pin is one; threads that merge keep it (MailRepository.InsertAsync).
+    private static void ApplyUserV28(IDbConnection connection) => connection.Execute(@"
+        CREATE TABLE IF NOT EXISTS mail_pins (
+            thread_id TEXT PRIMARY KEY,
+            pinned_at TEXT NOT NULL
+        );");
 
     // Mail found by meaning (mail spec, decision 15): a vector per message in
     // vec_mail, keyed by its id, made in the background (EmbeddingBackfill) —

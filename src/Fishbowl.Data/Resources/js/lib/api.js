@@ -354,7 +354,8 @@
             removeRule: (rid)       => request(p(`/mail/rules/${id(rid)}`), { method: "DELETE" }),
             // → { conversations, archived, archiveFolderMissing }
             applyRule:  (rid)       => request(p(`/mail/rules/${id(rid)}/apply`), { method: "POST" }),
-            // { q, account, tag, unread, archived, address, before, limit }
+            // { q, account, tag, unread, archived, pinned, address, before, limit }
+            // — pinned "true" (only those) or "false" (the others): a false is left out.
             threads: (opts = {}) => request(p("/mail/threads") + mailQuery(opts)),
             // By words and meaning, best first: { q, account, tag, unread,
             // archived, all (list and archive alike), limit } → { threads, degraded }
@@ -364,6 +365,8 @@
             setSeen: (tid, seen)   => request(p(`/mail/threads/${id(tid)}/seen`), { method: "POST", body: JSON.stringify({ seen }) }),
             readAll: (archived)    => request(p("/mail/read-all"), { method: "POST", body: JSON.stringify({ archived: !!archived }) }),
             setFlagged: (tid, flagged) => request(p(`/mail/threads/${id(tid)}/flagged`), { method: "POST", body: JSON.stringify({ flagged }) }),
+            // On top of the list until unpinned — Fishbowl's own, nothing goes to the server.
+            setPinned: (tid, pinned)   => request(p(`/mail/threads/${id(tid)}/pinned`), { method: "POST", body: JSON.stringify({ pinned }) }),
             archive: (tid, archived)   => request(p(`/mail/threads/${id(tid)}/archive`), { method: "POST", body: JSON.stringify({ archived }) }),
             // mode "fishbowl" (only here — the server keeps it) or "everywhere"
             // (also to the server's Trash); either way into the trash here.
@@ -377,7 +380,6 @@
             spamMessage: (aid, uid)  => request(p(`/mail/spam/${id(aid)}/${uid}`)),
             // Out of spam into the inbox on the server; the sync brings it in.
             notSpam: (aid, uid, uidValidity) => request(p(`/mail/spam/${id(aid)}/${uid}/not-spam`), { method: "POST", body: JSON.stringify({ uidValidity }) }),
-            spamReadAll: ()          => request(p("/mail/spam/read-all"), { method: "POST" }),
             // Writing (decision 12): drafts here, each its writer's own.
             drafts:      ()          => request(p("/mail/drafts")),
             draft:       (did)       => request(p(`/mail/drafts/${id(did)}`)),

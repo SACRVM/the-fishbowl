@@ -268,6 +268,8 @@ public partial class MailRepository : IMailRepository
             where.Add("m.thread_id IN @only");
             p.Add("only", only.ToArray());
         }
+        if (q.Pinned is { } pinned)
+            where.Add($"m.thread_id {(pinned ? "IN" : "NOT IN")} (SELECT thread_id FROM mail_pins)");
         var having = new List<string> { q.AnyState ? "1" : q.Archived ? "active = 0" : "active = 1" };
         if (q.UnreadOnly) having.Add("unread > 0");
         if (q.Before is { } before) { having.Add("latest < @before"); p.Add("before", Iso(before)); }
@@ -293,10 +295,13 @@ public partial class MailRepository : IMailRepository
             $"SELECT {LightColumns} FROM mail_messages WHERE thread_id IN @ids ORDER BY sent_at",
             new { ids }, cancellationToken: ct))).Select(Fix).ToList();
         var byThread = messages.GroupBy(m => m.ThreadId).ToDictionary(g => g.Key, g => Distinct(g).ToList());
+        var pins = (await db.QueryAsync<string>(new CommandDefinition(
+            "SELECT thread_id FROM mail_pins WHERE thread_id IN @ids", new { ids }, cancellationToken: ct))).ToHashSet();
         var source = accounts.ToDictionary(a => a.Id, a => a.SourceTag);
         return heads.Where(h => byThread.ContainsKey(h.ThreadId)).Select(h =>
         {
             var thread = ToThread(byThread[h.ThreadId], h.Active == 0);
+            thread.Pinned = pins.Contains(h.ThreadId);
             // Where it came from first, then what was given to it.
             thread.Tags = thread.AccountIds.Select(id => source.GetValueOrDefault(id)).Where(s => s is not null).Select(s => s!)
                 .Distinct().Concat(thread.Tags).ToList();
@@ -408,6 +413,19 @@ public partial class MailRepository : IMailRepository
                 new { tags = clean, now = Iso(DateTime.UtcNow), threadId }, tx, cancellationToken: token));
             return n == 0 ? null : clean;
         }, ct);
+
+    public async Task<bool> SetThreadPinnedAsync(ContextRef ctx, string threadId, bool pinned, CancellationToken ct = default)
+    {
+        using var db = _db.CreateContextConnection(ctx);
+        if (await db.ExecuteScalarAsync<long>(new CommandDefinition(
+                "SELECT COUNT(*) FROM mail_messages WHERE thread_id = @threadId", new { threadId }, cancellationToken: ct)) == 0)
+            return false;
+        await db.ExecuteAsync(new CommandDefinition(pinned
+            ? "INSERT OR IGNORE INTO mail_pins (thread_id, pinned_at) VALUES (@threadId, @now)"
+            : "DELETE FROM mail_pins WHERE thread_id = @threadId",
+            new { threadId, now = Iso(DateTime.UtcNow) }, cancellationToken: ct));
+        return true;
+    }
 
     /// <summary>Every message with what a rule looks at — the people, the
     /// subject, the list, the account — and its thread, state and tags; no text.</summary>
@@ -699,9 +717,18 @@ public partial class MailRepository : IMailRepository
 
         m.ThreadId = threads.Count > 0 ? threads[0] : m.Id;
         if (threads.Count > 1)
+        {
+            var others = threads.Skip(1).ToArray();
             await db.ExecuteAsync(new CommandDefinition(
                 "UPDATE mail_messages SET thread_id = @into WHERE thread_id IN @others",
-                new { into = m.ThreadId, others = threads.Skip(1).ToArray() }, tx, cancellationToken: token));
+                new { into = m.ThreadId, others }, tx, cancellationToken: token));
+            // A pin on any of them stays on the one they became.
+            await db.ExecuteAsync(new CommandDefinition(@"
+                INSERT OR IGNORE INTO mail_pins (thread_id, pinned_at)
+                    SELECT @into, pinned_at FROM mail_pins WHERE thread_id IN @others ORDER BY pinned_at LIMIT 1;
+                DELETE FROM mail_pins WHERE thread_id IN @others;",
+                new { into = m.ThreadId, others }, tx, cancellationToken: token));
+        }
 
         await db.ExecuteAsync(new CommandDefinition(@"
                 INSERT INTO mail_messages (id, account_id, message_key, thread_id, in_reply_to, refs, direction, state,

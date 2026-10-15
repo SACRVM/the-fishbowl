@@ -92,8 +92,9 @@ public class MailMarkTool : IMcpTool
 
     public string Name => "mail_mark";
     public string Description =>
-        "Marks a mail conversation read or unread, and flags or unflags it (a flag goes on its latest message; " +
-        "unflagging takes every flag off). Written back to the mail server.";
+        "Marks a mail conversation read or unread, flags or unflags it (a flag goes on its latest message; " +
+        "unflagging takes every flag off) — both written back to the mail server — and pins it on top of the " +
+        "Mail app's list or unpins it (Fishbowl's own, until unpinned).";
     public string RequiredScope => ScopeCatalog.WriteMail;
 
     public object InputSchema => new
@@ -105,6 +106,7 @@ public class MailMarkTool : IMcpTool
             threadId = new { type = "string", description = "A conversation's id from mail_search." },
             seen = new { type = "boolean", description = "true = read, false = unread; leave out to keep." },
             flagged = new { type = "boolean", description = "true = flag, false = unflag; leave out to keep." },
+            pinned = new { type = "boolean", description = "true = pin on top of the list, false = unpin; leave out to keep." },
         },
     };
 
@@ -113,7 +115,8 @@ public class MailMarkTool : IMcpTool
         var threadId = MailArgs.Required(arguments, "threadId");
         var seen = MailArgs.Bool(arguments, "seen");
         var flagged = MailArgs.Bool(arguments, "flagged");
-        if (seen is null && flagged is null) throw new ArgumentException("Name seen, flagged or both.");
+        var pinned = MailArgs.Bool(arguments, "pinned");
+        if (seen is null && flagged is null && pinned is null) throw new ArgumentException("Name seen, flagged or pinned.");
         var messages = await _mail.GetThreadAsync(ctx, threadId, ct);
         if (messages.Count == 0) throw new ArgumentException("No such conversation.");
         if (seen is { } s)
@@ -123,7 +126,8 @@ public class MailMarkTool : IMcpTool
             var ids = f ? [messages[^1].Id] : messages.Where(m => m.Flagged).Select(m => m.Id).ToList();
             await _server.MarkAsync(ctx, await _mail.SetFlagsAsync(ctx, ids, null, f, ct), null, f, ct);
         }
-        return new { threadId, seen, flagged };
+        if (pinned is { } p) await _mail.SetThreadPinnedAsync(ctx, threadId, p, ct);
+        return new { threadId, seen, flagged, pinned };
     }
 }
 

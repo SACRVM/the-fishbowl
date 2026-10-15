@@ -133,6 +133,50 @@ public class MailSyncTests : MailFixture
     }
 
     [Fact]
+    public async Task MergedThreads_KeepAPin()
+    {
+        var acc = await AddAccountAsync();
+        var s = Connector.For(acc.Id);
+        s.AddMessage("inbox", "<a@x>", "Alpha", from: "a@one.test", date: D(1));
+        s.AddMessage("inbox", "<b@x>", "Beta", from: "b@two.test", date: D(2));
+        await SyncAsync(acc);
+        // Each of the two in turn, so the pin is on the thread that goes as well as the one that stays.
+        Assert.True(await Repo.SetThreadPinnedAsync(Ctx, (await ByKeyAsync("b@x")).ThreadId, true, Ct));
+        Assert.True(await Repo.SetThreadPinnedAsync(Ctx, (await ByKeyAsync("a@x")).ThreadId, true, Ct));
+
+        s.AddMessage("inbox", "<c@x>", "Gamma", references: ["<a@x>", "<b@x>"], date: D(3));
+        await SyncAsync(acc);
+
+        var merged = Assert.Single(await Repo.ListThreadsAsync(Ctx, new MailListQuery(), Ct));
+        Assert.True(merged.Pinned);
+        Assert.Equal(1, Scalar("SELECT COUNT(*) FROM mail_pins"));
+        Assert.Single(await Repo.ListThreadsAsync(Ctx, new MailListQuery { Pinned = true }, Ct));
+        Assert.Empty(await Repo.ListThreadsAsync(Ctx, new MailListQuery { Pinned = false }, Ct));
+    }
+
+    [Fact]
+    public async Task MergedThreads_TakeThePinOfTheOneThatGoes()
+    {
+        var acc = await AddAccountAsync();
+        var s = Connector.For(acc.Id);
+        s.AddMessage("inbox", "<a@x>", "Alpha", from: "a@one.test", date: D(1));
+        s.AddMessage("inbox", "<b@x>", "Beta", from: "b@two.test", date: D(2));
+        await SyncAsync(acc);
+        var ta = (await ByKeyAsync("a@x")).ThreadId;
+        var tb = (await ByKeyAsync("b@x")).ThreadId;
+        Assert.True(await Repo.SetThreadPinnedAsync(Ctx, tb, true, Ct));
+
+        s.AddMessage("inbox", "<c@x>", "Gamma", references: ["<a@x>", "<b@x>"], date: D(3));
+        await SyncAsync(acc);
+
+        // Whichever thread the three ended up in, it carries the pin — and only it.
+        var merged = Assert.Single(await Repo.ListThreadsAsync(Ctx, new MailListQuery(), Ct));
+        Assert.Contains(merged.ThreadId, new[] { ta, tb });
+        Assert.True(merged.Pinned);
+        Assert.Equal(1, Scalar("SELECT COUNT(*) FROM mail_pins"));
+    }
+
+    [Fact]
     public async Task HeaderlessReply_JoinsBySubject_WhenAnAddressIsShared()
     {
         var acc = await AddAccountAsync();

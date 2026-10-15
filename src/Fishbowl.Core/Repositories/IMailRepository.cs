@@ -29,6 +29,9 @@ public interface IMailRepository
 
     /// <summary>Gives every message of the thread exactly these tags; null when there is no such thread.</summary>
     Task<IReadOnlyList<string>?> SetThreadTagsAsync(ContextRef ctx, string threadId, IReadOnlyList<string> tags, CancellationToken ct = default);
+    /// <summary>Pins the conversation on top of the list, or unpins it — here
+    /// only, the mail server has no such thing; false when there is no such thread.</summary>
+    Task<bool> SetThreadPinnedAsync(ContextRef ctx, string threadId, bool pinned, CancellationToken ct = default);
     /// <summary>Marks the thread's incoming messages (un)read here and returns
     /// where they lie on the server, for the write-back.</summary>
     Task<IReadOnlyList<MailLocationRef>> SetThreadSeenAsync(ContextRef ctx, string threadId, bool seen, CancellationToken ct = default);

@@ -41,6 +41,7 @@ class FbMailView extends HTMLElement {
         super();
         this.threads = [];
         this.best = [];          // a search's best matches, over the list (decision 15)
+        this.pinned = [];        // pinned conversations, on top of the list until unpinned
         this._loadSeq = 0;
         this.accounts = [];
         this.selectedId = null;
@@ -50,6 +51,7 @@ class FbMailView extends HTMLElement {
         this.draftCount = 0;       // the Drafts tab's
         this.spam = { items: [], failed: [], loaded: false };
         this.spamOpen = null;      // "<accountId>:<uid>" of the spam message shown
+        this.spamLine = null;      // the Spam view's last look before this one: newer spam stands above a line
         this.drafts = [];          // the Drafts view: the caller's own
         this._compose = null;      // the mail being written in the right pane
         this.tags = [];            // the filter strip's picks (all of them)
@@ -164,6 +166,7 @@ class FbMailView extends HTMLElement {
         catch (err) { console.warn("[fb-mail-view] accounts failed:", err?.status); this.accounts = []; }
         await tags;
         await this.loadThreads({ keep });
+        await this.refreshOpen();
         this.paintStatus();
         this.loadCounts();
         this.checkSpam();
@@ -176,6 +179,8 @@ class FbMailView extends HTMLElement {
             q: this.query || null,
             unread: this.unreadOnly || null,
             archived: this.view === "archived" || null,
+            // Without a search the pinned stand apart on top (loadThreads).
+            pinned: this.query ? null : "false",
             tag: this.tags,
             limit: 50,
         };
@@ -187,6 +192,7 @@ class FbMailView extends HTMLElement {
             // shows at once, the fresh read when it's in.
             this.threads = [];
             this.best = [];
+            this.pinned = [];
             this.more = false;
             this.renderList();
             this.renderTagFilter();
@@ -200,6 +206,7 @@ class FbMailView extends HTMLElement {
             this.paintTabs();
             this.threads = [];
             this.best = [];
+            this.pinned = [];
             this.more = false;
             this.renderList();
             this.renderTagFilter();
@@ -211,10 +218,17 @@ class FbMailView extends HTMLElement {
         const best = this.query && this.accounts.length
             ? this.api.search({ ...this.query_(), limit: 5 }).then((r) => r.threads || []).catch(() => [])
             : Promise.resolve([]);
+        // Pinned conversations stand apart on top, under the same filters —
+        // not in a search, which ranks every match.
+        const apart = !this.query && this.accounts.length;
+        const pins = apart
+            ? this.api.threads({ ...this.query_(), pinned: "true", limit: 200 }).catch(() => [])
+            : Promise.resolve([]);
         let page = [];
         try { page = this.accounts.length ? await this.api.threads(this.query_()) : []; }
         catch (err) { console.warn("[fb-mail-view] threads failed:", err?.status); }
         const found = await best;
+        const pinned = await pins;
         // A later keystroke's answer wins.
         if (seq !== this._loadSeq) return;
         // A refresh keeps what was scrolled in beyond the first page.
@@ -224,7 +238,9 @@ class FbMailView extends HTMLElement {
         }
         // Conversations on their way out stay out while their servers answer.
         if (this._deleting?.size) page = page.filter((x) => !this._deleting.has(x.threadId));
-        this.threads = page;
+        const pinnedIds = new Set(pinned.map((x) => x.threadId));
+        this.threads = page.filter((x) => !pinnedIds.has(x.threadId));
+        this.pinned = pinned;
         // One object per conversation, so a change shows in both places.
         this.best = found.filter((x) => !this._deleting?.has(x.threadId))
             .map((x) => page.find((p) => p.threadId === x.threadId) ?? x);
@@ -237,12 +253,15 @@ class FbMailView extends HTMLElement {
     sourceTags() { return new Set(this.accounts.map((a) => a.sourceTag)); }
 
     /** A conversation the list shows — a best match too. */
-    thread(id) { return this.threads.find((x) => x.threadId === id) ?? this.best.find((x) => x.threadId === id); }
+    thread(id) {
+        return this.pinned.find((x) => x.threadId === id) ?? this.threads.find((x) => x.threadId === id)
+            ?? this.best.find((x) => x.threadId === id);
+    }
 
     /** What the list shows, in its order: the best matches, then the rest by date. */
     shown() {
         const best = new Set(this.best.map((x) => x.threadId));
-        return this.best.concat(this.threads.filter((x) => !best.has(x.threadId)));
+        return this.pinned.concat(this.best, this.threads.filter((x) => !best.has(x.threadId)));
     }
 
     /** A row's chips: the source only when there is more than one account to tell apart. */
@@ -386,6 +405,8 @@ class FbMailView extends HTMLElement {
                     text-transform: uppercase; letter-spacing: 0.1em; color: var(--text-muted);
                 }
                 fb-mail-view .mv-group:first-child { padding-top: 4px; }
+                /* A thin line across the list: under the pinned, under the new spam. */
+                fb-mail-view .mv-sep { height: 1px; margin: 6px 12px 8px; background: var(--border); }
                 fb-mail-view .mv-item {
                     position: relative;
                     display: flex; gap: 10px; padding: 9px 12px; margin-bottom: 2px; cursor: pointer;
@@ -585,6 +606,12 @@ class FbMailView extends HTMLElement {
         if (this.view === view) return;
         this.view = view;
         this.spamOpen = null;
+        // Entering Spam: what came since the last look stands above a line
+        // until the view is left (looking moves the last look on).
+        this.spamLine = null;
+        if (view === "spam") {
+            try { this.spamLine = localStorage.getItem(this._spamSeenKey()) || null; } catch { /* storage off */ }
+        }
         this.paintHead();
         this.loadThreads();
     }
@@ -635,8 +662,6 @@ class FbMailView extends HTMLElement {
         const readAll = (onClick) => [{ id: "read-all", label: this.t("read-all", "Mark all as read"), icon: "eye", onClick }];
         if ((name === "list" && this.unreadCount > 0 || name === "archived") && this.writable)
             return readAll(() => this.readAll(name === "archived"));
-        if (name === "spam" && this.writable && (this.spamFresh() > 0 || this.spam.items.some((i) => !i.seen)))
-            return readAll(() => this.spamReadAll());
         if (name === "spam" && this.spamFresh() > 0)
             return [{ id: "spam-seen", label: this.t("spam-seen-all", "Mark all as seen"), icon: "eye", onClick: () => this.spamSeenAll() }];
         return null;
@@ -660,24 +685,6 @@ class FbMailView extends HTMLElement {
     }
 
     /** Spam's count goes, as if it had been looked at. */
-    /** The spam folders read on the servers — the whole folders — and their
-     *  count gone, as after a look. */
-    async spamReadAll() {
-        this.spamSeenAll();
-        let res;
-        try { res = await this.api.spamReadAll(); }
-        catch (err) { sac.toast?.(fb.errors.text(err, this.t("failed", "That didn't work.")), { kind: "error" }); return; }
-        for (const i of this.spam.items) i.seen = true;
-        const n = res.messages || 0;
-        sac.toast?.(n === 0 ? this.t("read-all-none", "Nothing was unread")
-            : n === 1 ? this.t("spam-read-done-1", "1 message marked read")
-            : this.t("spam-read-done", "{n} messages marked read", { n }));
-        if (res.failed?.length) {
-            const names = res.failed.map((id) => this.accounts.find((a) => a.id === id)?.name || id).join(", ");
-            sac.toast?.(this.t("spam-read-unreached", "Not reached: {names}", { names }), { kind: "error" });
-        }
-    }
-
     spamSeenAll() {
         const newest = this.spam.items.reduce((a, i) => (i.date > a ? i.date : a), "");
         if (newest) { try { localStorage.setItem(this._spamSeenKey(), newest); } catch { /* storage off */ } }
@@ -739,7 +746,7 @@ class FbMailView extends HTMLElement {
         if (!box) return;
         if (this.view === "drafts") { this.renderDrafts(box); return; }
         if (this.view === "spam") { this.renderSpam(box); return; }
-        if (!this.threads.length && !this.best.length) {
+        if (!this.threads.length && !this.best.length && !this.pinned.length) {
             const text = !this.accounts.length ? this.t("no-mail", "No mail")
                 : this.query ? this.t("no-match", "Nothing matches")
                 : this.unreadOnly ? this.t("no-unread", "Nothing unread")
@@ -762,7 +769,20 @@ class FbMailView extends HTMLElement {
             rows.unshift(group(this.t("best-matches", "Best matches")));
             if (rest.length) rows.push(group(this.t("by-date", "By date")));
         }
-        box.replaceChildren(...rows, ...rest.map((th) => this.threadRow(th)));
+        // The pinned on top, a thin line under them, then everything else.
+        const pinned = this.pinned.map((th) => this.threadRow(th));
+        if (pinned.length && (rows.length || rest.length)) pinned.push(this.separator(this.t("pinned-end", "End of pinned")));
+        box.replaceChildren(...pinned, ...rows, ...rest.map((th) => this.threadRow(th)));
+    }
+
+    /** A thin line across the list: under the pinned, or where the spam
+     *  that came since the last look ends. */
+    separator(label) {
+        const line = document.createElement("div");
+        line.className = "mv-sep";
+        line.setAttribute("role", "separator");
+        line.setAttribute("aria-label", label);
+        return line;
     }
 
     /** A conversation's row in the list. */
@@ -789,6 +809,7 @@ class FbMailView extends HTMLElement {
         const marks = row.querySelector(".mv-marks");
         if (th.hasAttachments) marks.innerHTML += `<sac-icon name="attachment" title="${this.t("has-attachments", "Attachments")}"></sac-icon>`;
         if (th.flagged) marks.innerHTML += `<sac-icon name="star" title="${this.t("flagged", "Flagged")}"></sac-icon>`;
+        if (th.pinned) marks.innerHTML += `<sac-icon name="pin" title="${this.t("pinned", "Pinned")}"></sac-icon>`;
         const tags = row.querySelector(".mv-item-tags");
         for (const name of this.shownTags(th.tags)) {
             const chip = document.createElement("sac-chip");
@@ -827,6 +848,7 @@ class FbMailView extends HTMLElement {
     async open(threadId) {
         await this.leaveCompose();
         this.selectedId = threadId;
+        this._shownThread = null;
         for (const row of this.querySelectorAll(".mv-item")) row.classList.toggle("selected", row.dataset.id === threadId);
         const split = this.querySelector("#split");
         if (split) split.show = "end";
@@ -863,6 +885,7 @@ class FbMailView extends HTMLElement {
                     <button type="button" class="icon-btn mv-write" id="mv-reply"><sac-icon name="fb-reply"></sac-icon></button>
                     <button type="button" class="icon-btn mv-write" id="mv-reply-all"><sac-icon name="fb-reply-all"></sac-icon></button>
                     <button type="button" class="icon-btn mv-write" id="mv-forward"><sac-icon name="fb-forward"></sac-icon></button>
+                    <button type="button" class="icon-btn mv-write" id="mv-pin"><sac-icon name="pin"></sac-icon></button>
                     <button type="button" class="icon-btn mv-write" id="mv-flag"><sac-icon name="star"></sac-icon></button>
                     <button type="button" class="icon-btn mv-write" id="mv-archive"><sac-icon></sac-icon></button>
                     <button type="button" class="icon-btn mv-write" id="mv-unread" title="${this.t("mark-unread", "Mark unread")}" aria-label="${this.t("mark-unread", "Mark unread")}"><sac-icon name="eye-off"></sac-icon></button>
@@ -874,24 +897,18 @@ class FbMailView extends HTMLElement {
                 <div class="mv-msgs"></div>
             </div>`;
         pane.querySelector("h2").textContent = subject;
-        // A flag sits on a message; the conversation shows one when any has it.
-        const flagged = messages.some((m) => m.flagged);
+        // The conversation as shown, which the head's buttons act on and
+        // refreshOpen keeps current when new mail comes into it.
+        const th = this.thread(threadId);
+        const state = this._shownThread = { threadId, messages, latestAt: th?.latestAt, count: th?.count };
+        const shown = () => state.messages;
+        const pin = pane.querySelector("#mv-pin");
+        pin.addEventListener("click", () => this.pin(threadId, !this.thread(threadId)?.pinned));
         const flag = pane.querySelector("#mv-flag");
-        flag.classList.toggle("active", flagged);
-        flag.setAttribute("aria-pressed", String(flagged));
-        flag.title = flagged ? this.t("unflag", "Remove flag") : this.t("flag", "Flag");
-        flag.setAttribute("aria-label", flag.title);
-        flag.addEventListener("click", () => this.flag(threadId, !flagged));
-        // Archived: nothing of it in an inbox, nothing in Sent left in the list.
-        const archived = !messages.some((m) => m.state === "inbox" || m.state === "sent");
+        flag.addEventListener("click", () => this.flag(threadId, !shown().some((m) => m.flagged)));
         const arch = pane.querySelector("#mv-archive");
-        arch.querySelector("sac-icon").setAttribute("name", archived ? "fb-inbox" : "archive");
-        arch.title = archived ? this.t("unarchive", "Move to inbox") : this.t("archive", "Archive");
-        arch.setAttribute("aria-label", arch.title);
-        arch.addEventListener("click", () => this.archive(threadId, !archived));
-        // Reply, reply to all, forward: the latest message (reply to all only
-        // when it went to more than one).
-        const latest = messages[messages.length - 1];
+        arch.addEventListener("click", () => this.archive(threadId, !this.isArchived(shown())));
+        // Reply, reply to all, forward: the latest message.
         const buttons = [
             ["#mv-reply", "reply", this.t("reply", "Reply")],
             ["#mv-reply-all", "reply-all", this.t("reply-all", "Reply all")],
@@ -900,11 +917,11 @@ class FbMailView extends HTMLElement {
             const b = pane.querySelector(sel);
             b.title = label;
             b.setAttribute("aria-label", label);
-            b.addEventListener("click", () => this.compose(kind, latest));
+            b.addEventListener("click", () => this.compose(kind, shown()[shown().length - 1]));
             return b;
         });
-        for (const b of [...buttons, flag, arch]) b.hidden = !this.writable;
-        if ((latest.toList?.length || 0) + (latest.ccList?.length || 0) < 2) buttons[1].hidden = true;
+        for (const b of [...buttons, pin, flag, arch]) b.hidden = !this.writable;
+        this.paintThreadHead(pane);
         pane.querySelector("#mv-unread").hidden = !this.writable;
         pane.querySelector("#mv-delete").hidden = !this.writable;
         pane.querySelector("#mv-delete").addEventListener("click", () => this.deleteMail(threadId, null));
@@ -926,6 +943,90 @@ class FbMailView extends HTMLElement {
         const single = messages.length < 2;
         messages.forEach((m, i) => list.appendChild(this.messageEl(m, i === messages.length - 1 || (m.direction === "in" && !m.seen), threadId, single)));
         pane.scrollTop = 0;
+    }
+
+    /** The head's states, from the conversation as shown: pin, flag, archive, reply to all. */
+    paintThreadHead(pane) {
+        const messages = this._shownThread.messages;
+        const pinned = !!this.thread(this._shownThread.threadId)?.pinned;
+        const pin = pane.querySelector("#mv-pin");
+        pin.classList.toggle("active", pinned);
+        pin.setAttribute("aria-pressed", String(pinned));
+        pin.title = pinned ? this.t("unpin", "Unpin") : this.t("pin", "Pin to top");
+        pin.setAttribute("aria-label", pin.title);
+        // A flag sits on a message; the conversation shows one when any has it.
+        const flagged = messages.some((m) => m.flagged);
+        const flag = pane.querySelector("#mv-flag");
+        flag.classList.toggle("active", flagged);
+        flag.setAttribute("aria-pressed", String(flagged));
+        flag.title = flagged ? this.t("unflag", "Remove flag") : this.t("flag", "Flag");
+        flag.setAttribute("aria-label", flag.title);
+        const archived = this.isArchived(messages);
+        const arch = pane.querySelector("#mv-archive");
+        arch.querySelector("sac-icon").setAttribute("name", archived ? "fb-inbox" : "archive");
+        arch.title = archived ? this.t("unarchive", "Move to inbox") : this.t("archive", "Archive");
+        arch.setAttribute("aria-label", arch.title);
+        // Reply to all only when the latest went to more than one.
+        const latest = messages[messages.length - 1];
+        pane.querySelector("#mv-reply-all").hidden = !this.writable
+            || (latest.toList?.length || 0) + (latest.ccList?.length || 0) < 2;
+    }
+
+    /** Archived: nothing of it in an inbox, nothing in Sent left in the list. */
+    isArchived(messages) {
+        return !messages.some((m) => m.state === "inbox" || m.state === "sent");
+    }
+
+    /**
+     * New mail in the open conversation shows there too. When a refresh finds
+     * the conversation grown (or shrunk), it reads it again and puts the new
+     * messages in their place, open. What is already shown stays as it is:
+     * the folds, the images let in, the scroll. The new messages are read, as
+     * opening the conversation would make them.
+     */
+    async refreshOpen() {
+        const shown = this._shownThread;
+        const threadId = this.selectedId;
+        if (!shown || shown.threadId !== threadId || this._compose) return;
+        const th = this.thread(threadId);
+        if (!th || (th.latestAt === shown.latestAt && th.count === shown.count)) return;
+        let messages;
+        try { messages = await this.api.thread(threadId); } catch { return; }
+        // Moved on meanwhile: another conversation, a mail being written, a repaint.
+        if (this._shownThread !== shown || this.selectedId !== threadId || this._compose) return;
+        if (!messages.length) return;
+        const pane = this.querySelector("#mv-pane");
+        const known = new Set(shown.messages.map((m) => m.id));
+        if (shown.messages.length < 2 || messages.length < 2) {
+            // One message has no delete of its own: painted anew, at the same scroll.
+            const top = pane.scrollTop;
+            this.paintThread(threadId, messages);
+            pane.scrollTop = top;
+        } else {
+            const ids = new Set(messages.map((m) => m.id));
+            for (const el of pane.querySelectorAll(".mv-msg")) if (!ids.has(el.dataset.id)) el.remove();
+            const list = pane.querySelector(".mv-msgs");
+            let after = null;
+            for (const m of messages) {
+                if (known.has(m.id)) {
+                    after = [...list.children].find((el) => el.dataset.id === m.id) ?? after;
+                    continue;
+                }
+                const el = this.messageEl(m, true, threadId, false);
+                if (after) after.after(el); else list.prepend(el);
+                after = el;
+            }
+            Object.assign(shown, { messages, latestAt: th.latestAt, count: th.count });
+            this.paintThreadHead(pane);
+        }
+        if (this.writable && messages.some((m) => !known.has(m.id) && m.direction === "in" && !m.seen)) {
+            try {
+                await this.api.setSeen(threadId, true);
+                th.unread = 0;
+                this.renderList();
+                this.loadCounts();
+            } catch (err) { console.warn("[fb-mail-view] seen failed:", err?.status); }
+        }
     }
 
     async paintTags(input, threadId, messages) {
@@ -965,6 +1066,7 @@ class FbMailView extends HTMLElement {
     messageEl(m, open, threadId, single) {
         const el = document.createElement("article");
         el.className = "mv-msg" + (open ? " open" : "");
+        el.dataset.id = m.id;
         el.innerHTML = `
             <header class="mv-msg-head reveal-on-hover">
                 <sac-icon class="mv-dir"></sac-icon>
@@ -1052,6 +1154,9 @@ class FbMailView extends HTMLElement {
         items.push(th.flagged
             ? { id: "unflag", label: this.t("unflag", "Remove flag"), icon: "star", onClick: () => this.flag(th.threadId, false) }
             : { id: "flag", label: this.t("flag", "Flag"), icon: "star", onClick: () => this.flag(th.threadId, true) });
+        items.push(th.pinned
+            ? { id: "unpin", label: this.t("unpin", "Unpin"), icon: "pin", onClick: () => this.pin(th.threadId, false) }
+            : { id: "pin", label: this.t("pin", "Pin to top"), icon: "pin", onClick: () => this.pin(th.threadId, true) });
         items.push(th.archived
             ? { id: "unarchive", label: this.t("unarchive", "Move to inbox"), icon: "fb-inbox", onClick: () => this.archive(th.threadId, false) }
             : { id: "archive", label: this.t("archive", "Archive"), icon: "archive", onClick: () => this.archive(th.threadId, true) });
@@ -1225,6 +1330,13 @@ class FbMailView extends HTMLElement {
             row.addEventListener("click", () => this.openSpam(item));
             return row;
         });
+        // Spam since the last look on top, a thin line under it: no unread
+        // here — a glance over what is new is what Spam needs.
+        if (this.spamLine) {
+            const items = this.narrowed(this.spam.items);
+            const fresh = items.filter((i) => i.date > this.spamLine).length;
+            if (fresh > 0 && fresh < items.length) rows.splice(fresh, 0, this.separator(this.t("spam-new-end", "End of the spam since your last look")));
+        }
         if (!rows.length) {
             const none = document.createElement("div");
             none.className = "mv-none";
@@ -1419,6 +1531,15 @@ class FbMailView extends HTMLElement {
         this.sel?.clear();
         if (firstError) sac.toast?.(fb.errors.text(firstError, this.t("failed", "That didn't work.")), { kind: "error" });
         this.loadThreads();
+    }
+
+    /** On top of the list until unpinned — Fishbowl's own, nothing goes to the server. */
+    async pin(threadId, pinned) {
+        try { await this.api.setPinned(threadId, pinned); }
+        catch (err) { sac.toast?.(fb.errors.text(err, this.t("failed", "That didn't work.")), { kind: "error" }); return; }
+        await this.loadThreads({ keep: true });
+        if (this.selectedId === threadId && this._shownThread?.threadId === threadId)
+            this.paintThreadHead(this.querySelector("#mv-pane"));
     }
 
     async flag(threadId, flagged) {

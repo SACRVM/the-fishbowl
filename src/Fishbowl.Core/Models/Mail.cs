@@ -127,6 +127,7 @@ public class MailThread
     public int Unread { get; set; }
     public bool Flagged { get; set; }
     public bool Archived { get; set; }                        // no message in the inbox or sent
+    public bool Pinned { get; set; }                          // kept on top of the list until unpinned
     public bool HasAttachments { get; set; }
     public List<MailPerson> Participants { get; set; } = new();
     public List<string> Tags { get; set; } = new();
@@ -147,6 +148,7 @@ public class MailListQuery
     public bool Archived { get; set; }         // the archived threads instead of the list
     public bool AnyState { get; set; }         // the list and the archived alike (Archived is ignored)
     public IReadOnlyCollection<string>? ThreadIds { get; set; }   // only these (a search's candidates)
+    public bool? Pinned { get; set; }          // only the pinned (true), only the others (false), or all
     public string? Address { get; set; }       // threads with this person (contacts)
     public DateTime? Before { get; set; }      // paging: threads whose latest is older
     public int Limit { get; set; } = 50;

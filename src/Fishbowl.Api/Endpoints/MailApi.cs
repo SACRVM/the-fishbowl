@@ -23,7 +23,7 @@ namespace Fishbowl.Api.Endpoints;
 //   PATCH  …/accounts/{id}                 { name?, displayName?, aliases?, password? }; cookie, space Admin+
 //   DELETE …/accounts/{id}                 the account and its mail leave Fishbowl (the server keeps it)
 //   POST   …/accounts/{id}/sync            sync now
-//   GET    …/threads?q&account&tag&unread&archived&address&before&limit
+//   GET    …/threads?q&account&tag&unread&archived&pinned&address&before&limit
 //   GET    …/threads/{threadId}            its messages, oldest first, with their text (the HTML has its own address)
 //   GET    …/messages/{id}/html?images=    the HTML body as a page of its own — sandboxed, no script, no
 //                                          form, nothing remote; remote images only with images=1
@@ -31,10 +31,10 @@ namespace Fishbowl.Api.Endpoints;
 //   POST   …/threads/{threadId}/seen       { seen } — here at once, on the server in the background
 //   POST   …/read-all                      { archived? } — every unread conversation of the list (or archive) read
 //   POST   …/threads/{threadId}/flagged    { flagged } — its latest message; off = every flag
+//   POST   …/threads/{threadId}/pinned     { pinned } — on top of the list until unpinned (Fishbowl's own)
 //   POST   …/threads/{threadId}/archive    { archived } — on the server first, then here
 //   GET    …/spam                          each account's newest spam, read live, never stored (cookie only)
 //   GET    …/spam/{accountId}/{uid}        one as text; POST …/not-spam { uidValidity } → into the inbox on the server
-//   POST   …/spam/read-all                 every account's spam folder read on the server (cookie only)
 //   GET    …/drafts                        the caller's drafts (each draft is its writer's own)
 //   POST   …/drafts                        { kind?, messageId?, accountId? } — a reply / forward filled from its message
 //   GET|PATCH|DELETE …/drafts/{id}         { accountId?, to?, cc?, bcc?, subject?, body? } (markdown)
@@ -136,6 +136,7 @@ public static partial class MailApi
     public sealed record SeenRequest(bool Seen);
     public sealed record ReadAllRequest(bool? Archived);
     public sealed record FlaggedRequest(bool Flagged);
+    public sealed record PinnedRequest(bool Pinned);
     public sealed record ArchiveRequest(bool Archived);
     public sealed record DraftRequest(string? Kind, string? MessageId, string? AccountId);
     public sealed record DraftFromFilesRequest(string? Path);
@@ -374,7 +375,7 @@ public static partial class MailApi
         }).WithName($"Sync{tag}MailAccount").WithSummary("Syncs the account now.");
 
         g.MapGet("/threads", async (HttpContext http, IMailRepository repo, string? q, string? account, string[]? tag,
-            bool? unread, bool? archived, string? address, DateTime? before, int? limit, CancellationToken ct) =>
+            bool? unread, bool? archived, bool? pinned, string? address, DateTime? before, int? limit, CancellationToken ct) =>
         {
             var (t, err) = await ResolveAsync(http, space, Need.Read, ct);
             if (err is not null) return err;
@@ -385,6 +386,7 @@ public static partial class MailApi
                 Tags = (tag ?? []).ToList(),
                 UnreadOnly = unread == true,
                 Archived = archived == true,
+                Pinned = pinned,
                 Address = address,
                 Before = before,
                 Limit = limit ?? 50,
@@ -582,6 +584,18 @@ public static partial class MailApi
             return Results.Ok(new { changed = ids.Count });
         }).WithName($"Flag{tag}MailThread").WithSummary("Flags the conversation's latest message, or takes every flag off.");
 
+        // Pinned on top of the list until unpinned: Fishbowl's own, the mail
+        // server has no such thing, so nothing is written back.
+        g.MapPost("/threads/{threadId}/pinned", async (string threadId, PinnedRequest body, HttpContext http, IMailRepository repo,
+            CancellationToken ct) =>
+        {
+            var (t, err) = await ResolveAsync(http, space, Need.Write, ct);
+            if (err is not null) return err;
+            return await repo.SetThreadPinnedAsync(t!.Ctx, threadId, body.Pinned, ct)
+                ? Results.Ok(new { pinned = body.Pinned })
+                : Results.NotFound();
+        }).WithName($"Pin{tag}MailThread").WithSummary("Pins the conversation on top of the list, or unpins it.");
+
         // Decision 3: archived on the server first — what lies in an inbox
         // moves to the archive folder (Gmail: the Inbox label comes off) —
         // then here; back to the inbox the same way.
@@ -755,16 +769,6 @@ public static partial class MailApi
             queue.Request(accountId);
             return Results.Ok(new { moved = true });
         }).WithName($"NotSpam{tag}Mail").WithSummary("Moves a message out of spam into the inbox on the server; the sync brings it in (cookie only).");
-
-        g.MapPost("/spam/read-all", async (HttpContext http, MailServer server, IMemoryCache cache, CancellationToken ct) =>
-        {
-            if (Bearer(http)) return Results.Forbid();
-            var (t, err) = await ResolveAsync(http, space, Need.Write, ct);
-            if (err is not null) return err;
-            var (messages, failed) = await server.SpamReadAllAsync(t!.Ctx, ct);
-            cache.Remove($"mail-spam:{t.Ctx.Type}:{t.Ctx.Id}");
-            return Results.Ok(new { messages, failed });
-        }).WithName($"MarkAll{tag}MailSpamRead").WithSummary("Marks every account's whole spam folder read on the server (cookie only).");
 
         // ---- writing (decision 12): drafts here, each its writer's own ----
 
