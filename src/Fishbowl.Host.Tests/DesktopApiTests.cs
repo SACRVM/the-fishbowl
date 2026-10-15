@@ -427,7 +427,9 @@ public class DesktopApiTests : IClassFixture<WebApplicationFactory<Program>>, ID
         var sig = bas.TrimEnd('/').Split('/')[^1];
         Assert.Equal(HttpStatusCode.NotFound, (await anon.GetAsync(bas + "page.html", Ct)).StatusCode);       // never HTML
         Assert.Equal(HttpStatusCode.NotFound, (await anon.GetAsync(bas + "nope.js", Ct)).StatusCode);
-        Assert.Equal(HttpStatusCode.NotFound, (await anon.GetAsync(bas.Replace(sig, "x" + sig[1..]) + "app.js", Ct)).StatusCode);
+        // Another first character — never the one it has (a signature starting with "x" stayed valid).
+        var forged = (sig[0] == 'x' ? 'y' : 'x') + sig[1..];
+        Assert.Equal(HttpStatusCode.NotFound, (await anon.GetAsync(bas.Replace(sig, forged) + "app.js", Ct)).StatusCode);
         Assert.Equal(HttpStatusCode.NotFound, (await anon.GetAsync(bas.Replace("/hello/", "/broken/") + "app.json", Ct)).StatusCode);
         Assert.Equal(HttpStatusCode.NotFound, (await anon.GetAsync(bas + "..%2Fbroken%2Fapp.json", Ct)).StatusCode);
 

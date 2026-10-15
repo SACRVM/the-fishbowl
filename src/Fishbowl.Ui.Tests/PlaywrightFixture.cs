@@ -28,10 +28,15 @@ public class PlaywrightFixture : IAsyncLifetime
 
     public async ValueTask InitializeAsync()
     {
-        // Install chromium (no-op if already cached)
-        var installExit = Microsoft.Playwright.Program.Main(new[] { "install", "chromium" });
-        if (installExit != 0)
-            throw new InvalidOperationException($"Playwright chromium install failed (exit {installExit})");
+        // Playwright's Chromium, installed on first use (a no-op once cached) —
+        // unless FISHBOWL_UI_TEST_CHROMIUM names a Chromium this machine has.
+        var chromium = Environment.GetEnvironmentVariable("FISHBOWL_UI_TEST_CHROMIUM");
+        if (string.IsNullOrEmpty(chromium))
+        {
+            var installExit = Microsoft.Playwright.Program.Main(new[] { "install", "chromium" });
+            if (installExit != 0)
+                throw new InvalidOperationException($"Playwright chromium install failed (exit {installExit})");
+        }
 
         // Pick a free loopback port
         var port = FindFreePort();
@@ -85,7 +90,7 @@ public class PlaywrightFixture : IAsyncLifetime
             Args = new[] { "--lang=en-US", "--accept-lang=en-US,en" },
             // A machine without Playwright's own browsers can name a Chromium
             // it has (CI installs Playwright's; null keeps that one).
-            ExecutablePath = Environment.GetEnvironmentVariable("FISHBOWL_UI_TEST_CHROMIUM"),
+            ExecutablePath = string.IsNullOrEmpty(chromium) ? null : chromium,
         });
     }
 

@@ -421,6 +421,16 @@ public class AppsTests : IAsyncLifetime
                 await page.Locator("sac-window iframe").GetAttributeAsync("sandbox"));
             await page.ScreenshotAsync(new() { Path = Path.Combine(Shots, "desk-5-space-app.png") });
 
+            // The app's three errors go to the store on their own, a moment
+            // later; the Apps window reads the store once, when it opens.
+            var stored = "";
+            for (var i = 0; i < 50; i++)
+            {
+                stored = await (await page.APIRequest.GetAsync($"{_fixture.BaseUrl}/api/v1/spaces/{slug}/apps/errors")).TextAsync();
+                if (stored.Contains("boom from the app") && stored.Contains("describe:") && stored.Contains("uncaught in the frame")) break;
+                await page.WaitForTimeoutAsync(200);
+            }
+
             // The Apps window lists it, with nothing to update or remove.
             await WindowApp.CloseAllAsync(page);
             await WindowApp.OpenAsync(page, _fixture.BaseUrl, "apps", $"#/space/{slug}/");

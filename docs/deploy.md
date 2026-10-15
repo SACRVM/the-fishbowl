@@ -1,10 +1,11 @@
 # Deploying Fishbowl on a server
 
-End-to-end runbook for installing Fishbowl on a Windows server under
+End-to-end runbook for installing Fishbowl on a server under
 [Husky](https://github.com/SACRVM/husky), keeping it updated, and
-recovering from common operational failures. Linux/macOS deployments work
-the same way with the matching per-RID asset and an `executable` override
-in `husky.config.json`.
+recovering from common operational failures. The steps are written for
+Windows; §5b covers a Linux server under systemd (the matching per-RID
+asset, an `executable` override in a local `husky.config.json`, and the
+ports).
 
 The README has the one-paragraph quick start. This document is the long
 version — what to do when something goes wrong, and how to operate Fishbowl
@@ -24,12 +25,11 @@ over time.
 - A DNS A record pointing at the server's public IP (only if using ACME).
 - A scratch dir for the install — Husky doesn't care where; pick somewhere
   with enough space (`fishbowl-data/` starts at a few MB and grows with
-  your notes; the ONNX embedding model is ~90 MB and lives at
-  `fishbowl-data/models/`). Each App also gets its own SQLite file under
-  `fishbowl-data/users/<userId>/apps/<appId>/app.db` (personal apps) or
-  `fishbowl-data/spaces/<spaceId>/apps/<appId>/app.db` (space apps), so an
-  agent's typed-row store doesn't bleed into the global notes DB. Backup
-  strategy: anything under `fishbowl-data/` survives Husky upgrades.
+  your notes, files and mail; the ONNX embedding model is ~470 MB and lives
+  at `fishbowl-data/models/`). Every personal workspace and every space is
+  one folder there — `users/<userId>/` and `spaces/<spaceId>/`, each with
+  its SQLite database and its files. Backup strategy: anything under
+  `fishbowl-data/` survives Husky upgrades.
 
 ---
 
@@ -246,6 +246,77 @@ Husky is rudelfähig — multiple instances coexist as long as each gets:
 
 Husky itself has no global state. Every config, log, downloaded zip,
 and supervised child PID is per-`--dir`.
+
+---
+
+## 5b. Run on Linux (systemd)
+
+A Linux server runs Husky the same way, with three differences.
+
+**1. The launcher and the app's file name.** Take Husky's Linux build
+(`husky-linux-x64.tar.gz` from its releases) and the
+`Fishbowl-{version}-linux-x64.zip` asset. The repository's
+`husky.config.json` names the Windows binary (`app/Fishbowl.Host.exe`), and
+Husky takes the file name as given. Put a local `husky.config.json` in the
+install dir; its fields win over the repository's:
+
+```json
+{ "executable": "app/Fishbowl.Host" }
+```
+
+Releases after v0.5.0 keep the binary's executable bit in the ZIP. With
+v0.5.0 or older, run `chmod +x app/Fishbowl.Host` once after the first
+download.
+
+**2. Ports.** A process that isn't root can't bind ports below 1024, and
+Fishbowl binds 80 (and 443 with ACME) unless told otherwise. Do one of the
+following:
+
+- **Behind a reverse proxy** (Caddy, nginx) on the same machine: give
+  Fishbowl a high port in `app/fishbowl-data/host.config.json`:
+
+  ```json
+  { "Urls": "http://127.0.0.1:8080" }
+  ```
+
+  With `Urls` set, the built-in ACME stays off and HTTPS is the proxy's job.
+  Forwarded headers count only from loopback, so the proxy must sit on the
+  same host.
+- **Fishbowl on 80/443 itself** (built-in ACME): let the service bind them
+  with `AmbientCapabilities=CAP_NET_BIND_SERVICE` (below).
+
+**3. The service.** A systemd unit replaces NSSM. Run it under its own user,
+with the install dir owned by that user:
+
+```ini
+# /etc/systemd/system/fishbowl.service
+[Unit]
+Description=Fishbowl (Husky)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=fishbowl
+WorkingDirectory=/opt/fishbowl
+ExecStart=/opt/fishbowl/Husky --repo SACRVM/the-fishbowl --asset 'Fishbowl-{version}-linux-x64.zip' --dir /opt/fishbowl
+Restart=on-failure
+RestartSec=30
+# Only when Fishbowl itself binds 80/443 (no reverse proxy):
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+
+[Install]
+WantedBy=multi-user.target
+```
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable --now fishbowl
+journalctl -u fishbowl -f
+```
+
+Updates work as in §4. Husky stops the host with a signal, the host drains,
+and Husky swaps `app/` and starts it again. The data under
+`app/fishbowl-data/` stays.
 
 ---
 

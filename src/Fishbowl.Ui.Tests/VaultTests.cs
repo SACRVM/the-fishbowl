@@ -64,7 +64,8 @@ public class VaultTests
             await setup.GetByRole(AriaRole.Button, new() { Name = "Next" }).ClickAsync();
 
             var recovery = page.Locator("sac-dialog[title='Your recovery key']");
-            await recovery.WaitForAsync(new LocatorWaitForOptions { Timeout = 10000 });
+            // PBKDF2 at 600 000 rounds first: seconds on a slow CI runner.
+            await recovery.WaitForAsync(new LocatorWaitForOptions { Timeout = 30000 });
             var words = (await recovery.Locator(".fb-vault-words li").AllTextContentsAsync()).Select(w => w.Trim()).ToArray();
             Assert.Equal(24, words.Length);
             foreach (var name in new[] { "a", "b" })
@@ -300,7 +301,8 @@ public class VaultTests
             await setup.Locator("input[name='confirm']").FillAsync(Passphrase);
             await setup.GetByRole(AriaRole.Button, new() { Name = "Next" }).ClickAsync();
             var recovery = page.Locator("sac-dialog[title='Your recovery key']");
-            await recovery.WaitForAsync(new LocatorWaitForOptions { Timeout = 10000 });
+            // PBKDF2 at 600 000 rounds first: seconds on a slow CI runner.
+            await recovery.WaitForAsync(new LocatorWaitForOptions { Timeout = 30000 });
             var words = (await recovery.Locator(".fb-vault-words li").AllTextContentsAsync()).Select(w => w.Trim()).ToArray();
             foreach (var name in new[] { "a", "b" })
             {
@@ -625,7 +627,8 @@ public class VaultTests
     private static async Task<string[]> ConfirmRecoveryWordsAsync(IPage page)
     {
         var recovery = page.Locator("sac-dialog[title='Your recovery key']");
-        await recovery.WaitForAsync(new LocatorWaitForOptions { Timeout = 10000 });
+        // PBKDF2 at 600 000 rounds first: seconds on a slow CI runner.
+        await recovery.WaitForAsync(new LocatorWaitForOptions { Timeout = 30000 });
         var words = (await recovery.Locator(".fb-vault-words li").AllTextContentsAsync()).Select(w => w.Trim()).ToArray();
         Assert.Equal(24, words.Length);
         foreach (var name in new[] { "a", "b" })
