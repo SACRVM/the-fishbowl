@@ -1560,6 +1560,8 @@ class FbMailView extends HTMLElement {
         catch (err) { sac.toast?.(fb.errors.text(err, this.t("archive-failed", "That couldn't be moved on the mail server.")), { kind: "error" }); return; }
         const text = archived ? this.t("archived-done", "Archived.") : this.t("unarchived-done", "Moved to the inbox.");
         sac.toast?.(text, undo ? { action: { label: "Undo", labelKey: "fb.common.undo", onClick: () => this.archive(threadId, !archived, false) } } : undefined);
+        // The Inbox counts its unread only: an unread conversation leaving or coming back moves it.
+        this.loadCounts();
         await this.loadThreads();
         if (this.selectedId !== threadId) return;
         if (this.thread(threadId)) this.open(threadId);
@@ -1591,6 +1593,7 @@ class FbMailView extends HTMLElement {
         sac.toast?.(answer === "everywhere"
             ? this.t("deleted-everywhere", "Deleted — in the trash here and on the server.")
             : this.t("deleted-here", "Deleted here — it's in the trash. Your mail server keeps it."));
+        this.loadCounts();
         await this.loadThreads();
         if (this.thread(threadId)) this.open(threadId);
         else if (this.selectedId === threadId) { this.selectedId = null; this.showNone(); }
@@ -1647,6 +1650,9 @@ class FbMailView extends HTMLElement {
         else sac.toast?.(answer === "everywhere"
             ? this.t("deleted-n-everywhere", "{n} conversations deleted — in the trash here and on the server.", { n: done })
             : this.t("deleted-n-here", "{n} conversations deleted here — they're in the trash. Your mail server keeps them.", { n: done }));
+        // An unread one may have gone along (marked, never opened): the
+        // Inbox's count follows.
+        this.loadCounts();
         await this.loadThreads({ keep: true });
     }
 

@@ -364,6 +364,45 @@ public class MailTests
         }
     }
 
+    // An unread conversation marked with Shift+↑ — never opened, so still
+    // unread — and deleted with the others: the Inbox's count goes with it.
+    [Fact]
+    public async Task Mail_DeleteMarked_UnreadCountFollows_Test()
+    {
+        var (context, page, slug, _) = await SpaceWithMailAsync();
+        try
+        {
+            await page.GotoAsync($"{_fixture.BaseUrl}/#/space/{slug}/mail");
+            var rows = page.Locator("fb-mail-view .mv-item");
+            var count = page.Locator("fb-mail-view #mv-tabs sac-tab[name='list'] .mv-tab-count");
+            await Assertions.Expect(rows).ToHaveCountAsync(3, new() { Timeout = 15000 });
+            await Assertions.Expect(count).ToHaveTextAsync("2");
+
+            // The engine notes read from their menu: only the news is unread.
+            var menu = page.Locator("sac-menu.sac-context-menu[open]");
+            await rows.Filter(new() { HasText = "Analytical engine notes" }).ClickAsync(new() { Button = MouseButton.Right });
+            await page.WaitForTimeoutAsync(250);
+            await menu.Locator("button[data-action]", new() { HasText = "Mark read" }).ClickAsync();
+            await Assertions.Expect(count).ToHaveTextAsync("1");
+
+            await rows.Filter(new() { HasText = "Your invoice" }).ClickAsync();
+            await page.Keyboard.PressAsync("Shift+ArrowUp");
+            await Assertions.Expect(page.Locator("fb-mail-view #mv-head-title")).ToHaveTextAsync("2 selected");
+            await Assertions.Expect(rows.Filter(new() { HasText = "This week in engines" }))
+                .ToHaveClassAsync(new System.Text.RegularExpressions.Regex(@"\bunread\b"));
+            await page.Keyboard.PressAsync("Delete");
+            await page.Locator("sac-dialog[title='Delete 2 conversations?']")
+                .GetByRole(AriaRole.Button, new() { Name = "Only in Fishbowl", Exact = true }).ClickAsync();
+            await Assertions.Expect(rows).ToHaveCountAsync(1, new() { Timeout = 5000 });
+            await Assertions.Expect(count).ToBeHiddenAsync(new() { Timeout = 5000 });
+        }
+        finally
+        {
+            await page.APIRequest.DeleteAsync($"{_fixture.BaseUrl}/api/v1/spaces/{slug}?archive=false");
+            await context.CloseAsync();
+        }
+    }
+
     // A right-click on the Inbox tab reads the whole tab: the dots and the
     // count go; with nothing unread left the tab has no menu.
     [Fact]
