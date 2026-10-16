@@ -21,11 +21,19 @@ public class I18nSettingsTests
         return dir;
     }
 
-    private async Task SetLanguageAsync(IPage page, string? language) =>
+    private async Task SetLanguageAsync(IPage page, string? language)
+    {
         Assert.True((await page.APIRequest.PatchAsync(_fixture.BaseUrl + "/api/v1/me", new APIRequestContextOptions
         {
             DataObject = new Dictionary<string, object?> { ["language"] = language },
         })).Ok);
+        if (language is null) return;
+        // The page learns the language from /me, after it has started: a
+        // window opened before that is titled in English. Once one page has
+        // switched, the next ones start in it (the kit keeps it per browser).
+        await page.GotoAsync(_fixture.BaseUrl + "/#/");
+        await Assertions.Expect(page.Locator("html")).ToHaveAttributeAsync("lang", language, new() { Timeout = 10000 });
+    }
 
     // A validation refusal from the server (code + arguments) reads German
     // under its row: "0 to 23" comes back as "von 0 bis 23".

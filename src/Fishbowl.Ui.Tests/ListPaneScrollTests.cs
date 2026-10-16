@@ -99,6 +99,8 @@ public class ListPaneScrollTests
             await page.EvaluateAsync("() => fb.windowApps.open('trash')");
             var bar = page.Locator("#fb-win-trash > .wa-bar[slot='toolbar']");
             await Assertions.Expect(bar.Locator("button")).ToHaveCountAsync(1, new() { Timeout = 15000 });
+            // Its button is there before the window shows; a hidden bar has no box.
+            await Assertions.Expect(bar).ToBeVisibleAsync();
             var before = (await bar.BoundingBoxAsync())!.Y;
             await page.Locator("#fb-win-trash fb-trash-view").HoverAsync();
             await page.Mouse.WheelAsync(0, 3000);
