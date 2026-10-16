@@ -80,6 +80,10 @@
             list.innerHTML = `<div class="empty-state"><sac-icon name="fb-rule"></sac-icon><h3>${t("no-rules", "No rules yet")}</h3></div>`;
             return;
         }
+        // Alphabetical as the page's language reads it — any case, Ä with A,
+        // "Rechnung 2" before "Rechnung 10" (the server's order only folds ASCII).
+        const collator = new Intl.Collator(sac.lang?.locale?.() || undefined, { sensitivity: "base", numeric: true });
+        rules.sort((a, b) => collator.compare(a.name, b.name));
         list.replaceChildren(...rules.map(row));
     }
 

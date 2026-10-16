@@ -994,6 +994,9 @@ public class MailTests
             await tags.Locator("input.entry").FillAsync("helvetia");
             await tags.Locator(".opt.create").ClickAsync();
             await tags.Locator(".swatch-btn[data-color='teal']").ClickAsync();
+            // The tags field sits inside its caption, but takes none of the
+            // caption's capitals: a tag reads as everywhere else.
+            Assert.Equal("none", await tags.EvaluateAsync<string>("el => getComputedStyle(el).textTransform"));
             // A new rule also runs over what is already here.
             await Assertions.Expect(form.Locator("input[name='applyNow']")).ToBeCheckedAsync();
             await page.ScreenshotAsync(new() { Path = Shot("rule") });
@@ -1009,6 +1012,20 @@ public class MailTests
             // Escape closes the window.
             await page.Keyboard.PressAsync("Escape");
             await Assertions.Expect(win).ToBeHiddenAsync();
+
+            // The rules stand alphabetically, as a person reads them: any
+            // case, Ä with A, 2 before 10 — not the server's ASCII order.
+            foreach (var name in new[] { "Rechnung 10", "babbage", "Ärzte", "Rechnung 2" })
+            {
+                var res = await page.APIRequest.PostAsync($"{_fixture.BaseUrl}/api/v1/spaces/{slug}/mail/rules", new()
+                {
+                    DataObject = new { name, conditions = new[] { new { field = "subject", value = name } }, markRead = true },
+                });
+                Assert.True(res.Ok, $"rule {name}: {res.Status}");
+            }
+            await page.Locator("#mv-rules").ClickAsync();
+            await Assertions.Expect(win.Locator(".fb-mail-rule .fb-row-name"))
+                .ToHaveTextAsync(new[] { "Ärzte", "babbage", "Lovelace", "Rechnung 2", "Rechnung 10" });
         }
         finally
         {
