@@ -137,6 +137,7 @@ window.sac?.i18n?.add?.("de", {
     "fb.keys.name-placeholder": "z. B. „Claude Code am Laptop“",
     "fb.keys.context": "Arbeitsbereich",
     "fb.keys.scopes": "Berechtigungen",
+    "fb.keys.scope-all": "Alle",
     "fb.keys.create": "Schlüssel anlegen",
     "fb.keys.empty": "Noch keine Schlüssel",
     "fb.keys.empty-hint": "Leg oben einen an.",

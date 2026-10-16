@@ -164,6 +164,8 @@ class FbKeysSettingsView extends HTMLElement {
                     grid-template-columns: repeat(auto-fill, minmax(10rem, 1fr));
                     gap: 6px 16px;
                 }
+                fb-keys-settings-view .scope-all { margin-bottom: 8px; }
+                fb-keys-settings-view .scope-send-note { margin: 8px 0 0; font-size: 0.8125rem; }
                 fb-keys-settings-view .key-ctx { display: inline-flex; align-items: center; gap: 4px; color: var(--text); }
                 fb-keys-settings-view .key-ctx sac-icon { --icon-size: 12px; }
                 fb-keys-settings-view .key-ctx.space { color: var(--accent-warm); }
@@ -241,10 +243,12 @@ class FbKeysSettingsView extends HTMLElement {
             </div>
             <div class="field">
                 <label>${fb.t("fb.keys.scopes", "Scopes")}</label>
+                <label class="fb-check scope-all"><input type="checkbox" id="scope-all"/> ${fb.t("fb.keys.scope-all", "All")}</label>
                 <div class="scopes">
                     ${["read:notes","write:notes","read:tags","write:tags",
                        "read:tasks","write:tasks","read:contacts","write:contacts","read:events","write:events",
-                       "read:files","write:files","read:tables","write:tables","design:tables","design:apps"].map(s => `
+                       "read:files","write:files","read:mail","write:mail","send:mail",
+                       "read:tables","write:tables","design:tables","design:apps"].map(s => `
                         <label class="fb-check">
                             <input type="checkbox" value="${s}"
                                 ${s === "read:notes" || s === "write:notes" ? "checked" : ""}/>
@@ -252,11 +256,25 @@ class FbKeysSettingsView extends HTMLElement {
                         </label>
                     `).join("")}
                 </div>
+                <p class="muted scope-send-note" hidden>${fb.t("fb.keys.guide-send-note", "Only for an agent you watch: one that reads mail and sends it can be steered by what a mail says.")}</p>
             </div>
             <div class="toolbar">
                 <button type="button" class="btn primary" id="create-btn">${fb.t("fb.keys.create", "Create key")}</button>
             </div>
         `;
+
+        // "All" ticks every scope and shows what is ticked: on, off, or some.
+        const boxes = [...this.querySelectorAll(".scopes input")];
+        const all = this.querySelector("#scope-all");
+        const sync = () => {
+            const n = boxes.filter((b) => b.checked).length;
+            all.checked = n === boxes.length;
+            all.indeterminate = n > 0 && n < boxes.length;
+            this.querySelector(".scope-send-note").hidden = !boxes.some((b) => b.value === "send:mail" && b.checked);
+        };
+        all.addEventListener("change", () => { for (const b of boxes) b.checked = all.checked; sync(); });
+        for (const b of boxes) b.addEventListener("change", sync);
+        sync();
 
         this.querySelector("#create-btn").addEventListener("click", () => this._create());
         const nameEl = this.querySelector("#key-name");

@@ -843,6 +843,50 @@ public class UiSmokeTests
         await context.CloseAsync();
     }
 
+    // Every scope can be ticked by hand — mail's three too — and "All" ticks
+    // them at once; sending mail shows its warning while it is ticked.
+    [Fact]
+    public async Task Keys_AllScopes_IncludingMail_Test()
+    {
+        var context = await _fixture.Browser!.NewContextAsync(new BrowserNewContextOptions { IgnoreHTTPSErrors = true, BypassCSP = true });
+        var page = await context.NewPageAsync();
+        var win = await WindowApp.OpenAsync(page, _fixture.BaseUrl, "keys");
+        foreach (var s in new[] { "read:mail", "write:mail", "send:mail" })
+            await Assertions.Expect(win.Locator($".scopes input[value='{s}']")).ToHaveCountAsync(1);
+
+        var all = win.Locator("#scope-all");
+        var note = win.Locator(".scope-send-note");
+        await Assertions.Expect(note).ToBeHiddenAsync();
+        await all.CheckAsync();
+        await Assertions.Expect(win.Locator(".scopes input:not(:checked)")).ToHaveCountAsync(0);
+        await Assertions.Expect(note).ToBeVisibleAsync();
+
+        // One taken off: "All" shows some, the warning goes with send:mail.
+        await win.Locator(".scopes input[value='send:mail']").UncheckAsync();
+        Assert.False(await all.IsCheckedAsync());
+        Assert.True(await all.EvaluateAsync<bool>("el => el.indeterminate"));
+        await Assertions.Expect(note).ToBeHiddenAsync();
+        await all.CheckAsync();
+        await all.UncheckAsync();
+        await Assertions.Expect(win.Locator(".scopes input:checked")).ToHaveCountAsync(0);
+
+        // A key made with all of them carries the mail scopes.
+        await all.CheckAsync();
+        await win.Locator("#key-name").FillAsync("all scopes");
+        await win.Locator("#create-btn").ClickAsync();
+        var dialog = page.Locator("sac-dialog[title='Key created']");
+        await dialog.WaitForAsync(new LocatorWaitForOptions { Timeout = 5000 });
+        await dialog.GetByRole(AriaRole.Button, new() { Name = "I've saved it" }).ClickAsync();
+        var keys = (await (await page.APIRequest.GetAsync(_fixture.BaseUrl + "/api/v1/keys")).JsonAsync())!.Value;
+        var key = keys.EnumerateArray().Single(k => k.GetProperty("name").GetString() == "all scopes");
+        var scopes = key.GetProperty("scopes").EnumerateArray().Select(x => x.GetString()).ToList();
+        Assert.Contains("read:mail", scopes);
+        Assert.Contains("write:mail", scopes);
+        Assert.Contains("send:mail", scopes);
+
+        await context.CloseAsync();
+    }
+
     [Fact]
     public async Task Notes_TitleIsFirstLine_NeverASecret_Test()
     {
