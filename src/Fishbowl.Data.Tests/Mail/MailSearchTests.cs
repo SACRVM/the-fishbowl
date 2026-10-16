@@ -37,6 +37,25 @@ public class MailSearchTests : MailFixture
         Assert.Equal(2, (await repo.SearchThreadsAsync(Ctx, new MailListQuery { Text = "Paket", AnyState = true }, Ct)).Threads.Count);
     }
 
+    // A name means little to the model: the query lands near whatever mail
+    // the model can't place either, and that one took the top of the blend.
+    // A mail that says the name comes first, however far its meaning.
+    [Fact]
+    public async Task Search_MailWithTheWords_ComesBeforeMailFoundByMeaningAlone()
+    {
+        var acc = await AddAccountAsync();
+        var s = Connector.For(acc.Id);
+        s.AddMessage("inbox", "<a@x>", "Du hast Glück gehabt!", text: "Nur heute");                 // meaning only, the nearest
+        s.AddMessage("inbox", "<b@x>", "HAARE:mittmann Terminbestätigung", text: "Rechnung im Salon"); // the word, far by meaning
+        await SyncAsync(acc);
+        var repo = WithModel(new TopicEmbedder());
+        Assert.Equal(2, await repo.EmbedPendingAsync(Ctx, 100, Ct));
+
+        var found = await repo.SearchThreadsAsync(Ctx, new MailListQuery { Text = "Mittmann", Limit = 10 }, Ct);
+
+        Assert.Equal(["HAARE:mittmann Terminbestätigung", "Du hast Glück gehabt!"], found.Threads.Select(t => t.Subject));
+    }
+
     [Fact]
     public async Task Search_WithoutAModel_IsTheFullTextAndSaysSo()
     {

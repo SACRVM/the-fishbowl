@@ -12,8 +12,9 @@ namespace Fishbowl.Data.Mail;
 /// Mail found by meaning (mail spec, decision 15; user/space schema v27): a
 /// vector per message in <c>vec_mail</c>, made in the background
 /// (<see cref="EmbedPendingAsync"/>, newest first), and a search that blends
-/// it with the full text the way notes do — 70 % meaning, 30 % words — and
-/// ranks a conversation by its best message.
+/// it with the full text the way notes do — 70 % meaning, 30 % words — puts
+/// mail with the query's words before mail found by meaning alone, and ranks
+/// a conversation by its best message.
 /// </summary>
 public partial class MailRepository
 {
@@ -45,6 +46,7 @@ public partial class MailRepository
         var fts = new List<(string Id, double Bm25)>();
         var vec = new List<(string Id, double Distance)>();
         var degraded = _embeddings is null;
+        HashSet<string> words;
         Dictionary<string, string> threadOf;
         using (var db = _db.CreateContextConnection(ctx))
         {
@@ -66,7 +68,7 @@ public partial class MailRepository
                 }
                 catch (EmbeddingUnavailableException) { degraded = true; }
             }
-            var words = fts.Select(f => f.Id).ToHashSet();
+            words = fts.Select(f => f.Id).ToHashSet();
             vec = vec.Where(v => v.Distance <= MeaningFloor || words.Contains(v.Id)).ToList();
             var ids = words.Concat(vec.Select(v => v.Id)).Distinct().ToArray();
             threadOf = ids.Length == 0 ? new() : (await db.QueryAsync<(string Id, string ThreadId)>(new CommandDefinition(
@@ -74,10 +76,14 @@ public partial class MailRepository
                 .ToDictionary(r => r.Id, r => r.ThreadId);
         }
 
-        // A conversation is as good as its best message.
+        // A conversation is as good as its best message. A message with every
+        // word of the query comes before one found by meaning alone, the blend
+        // ordering each group: the nearest mail by meaning always scores high
+        // after the min-max, and a name ("Mittmann") means little to the
+        // model — so unrelated mail outranked the one that says it.
         var ranked = new List<string>();
         var seen = new HashSet<string>();
-        foreach (var (id, _) in HybridSearchService.MergeScores(vec, fts, degraded))
+        foreach (var (id, _) in HybridSearchService.MergeScores(vec, fts, degraded).OrderByDescending(m => words.Contains(m.Id)))
             if (threadOf.TryGetValue(id, out var thread) && seen.Add(thread)) ranked.Add(thread);
 
         // The filters (tab, account, tags, unread) through the list's own
