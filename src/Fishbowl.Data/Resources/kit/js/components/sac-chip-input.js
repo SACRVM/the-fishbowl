@@ -201,22 +201,36 @@ class SacChipInput extends HTMLElement {
                     font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
                     font-size: 12px;
                     color: var(--text);
+                    /* The chips, the ghost button and the text entry take
+                       turns in one row, so they share its height: swapping
+                       the ghost for the entry never moves what is below.
+                       22px is a removable sac-chip (its 14px × + 3px
+                       padding + 1px border, twice) — keep in step with it.
+                       middle, not baseline: the baseline would come from
+                       whichever of them is first (11px ghost text, 12px
+                       entry text) and nudge the line by a pixel on the swap. */
+                    --_chip-h: 22px;
+                    --_row-h: 22px;
+                    vertical-align: middle;
                 }
                 .row {
                     display: inline-flex;
                     flex-wrap: wrap;
                     align-items: center;
                     gap: 4px;
+                    min-height: var(--_row-h);
                 }
                 input.entry {
                     flex: 1 1 80px;
                     min-width: 80px;
+                    box-sizing: border-box;
+                    height: var(--_row-h);
                     background: transparent;
                     color: inherit;
                     border: none;
                     outline: none;
                     font: inherit;
-                    padding: 3px 4px;
+                    padding: 0 4px;
                 }
                 input.entry[hidden] { display: none !important; }
 
@@ -226,7 +240,9 @@ class SacChipInput extends HTMLElement {
                     display: inline-flex;
                     align-items: center;
                     gap: 4px;
-                    padding: 3px 9px;
+                    box-sizing: border-box;
+                    height: var(--_chip-h);
+                    padding: 0 9px;
                     border-radius: 999px;
                     border: 1px dashed var(--text-muted);
                     background: transparent;
@@ -234,7 +250,7 @@ class SacChipInput extends HTMLElement {
                     font: inherit;
                     /* sac-chip's type, line by line — after the font reset
                        (which brought back a normal line-height), so the
-                       ghost and the chips beside it share one height. */
+                       ghost reads like the chips that replace it. */
                     font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
                     font-size: 11px;
                     font-weight: 600;
@@ -336,14 +352,13 @@ class SacChipInput extends HTMLElement {
 
                 /* Touch: 44px rows and targets, 16px type in the field (below
                    16px iOS zooms the page on focus), a wider gap so the chips'
-                   × halos do not overlap their neighbours. */
+                   × halos do not overlap their neighbours. The row is the
+                   entry's 44px; the ghost keeps the chips' 32px (sac-chip's
+                   24px touch ×) and a 44px halo, centred in that row. */
                 @media (pointer: coarse) {
+                    :host { --_chip-h: 32px; --_row-h: 44px; }
                     .row { gap: 12px 10px; }
-                    input.entry {
-                        font-size: max(16px, 1rem);
-                        min-height: 44px;
-                        box-sizing: border-box;
-                    }
+                    input.entry { font-size: max(16px, 1rem); }
                     button.add-btn { position: relative; }
                     button.add-btn::after,
                     .swatch-btn::after {
@@ -385,6 +400,7 @@ class SacChipInput extends HTMLElement {
                     width: 100%;
                     height: 100%;
                     padding: 0 var(--cell-padding-inline, 8px);
+                    min-height: 0;
                     box-sizing: border-box;
                     overflow-x: auto;
                     scrollbar-width: none;

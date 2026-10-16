@@ -990,7 +990,12 @@ public class MailTests
             await form.Locator(".fb-rule-cond").Nth(1).Locator("[data-remove]").ClickAsync();
             await Assertions.Expect(match).ToBeHiddenAsync();
             var tags = form.Locator("sac-chip-input[name='tags']");
+            // "Add tag" turns into the text entry without the field — and the
+            // dialog — growing (kit 2.32.1, SACRVM/sacrvm-appkit#44).
+            const string height = "el => el.getBoundingClientRect().height";
+            var ghost = await tags.EvaluateAsync<double>(height);
             await tags.Locator(".add-btn").ClickAsync();
+            Assert.Equal(ghost, await tags.EvaluateAsync<double>(height));
             await tags.Locator("input.entry").FillAsync("helvetia");
             await tags.Locator(".opt.create").ClickAsync();
             await tags.Locator(".swatch-btn[data-color='teal']").ClickAsync();
