@@ -25,8 +25,10 @@ public interface ISearchService
 
 // A single ranked hit. `Score` is the merged vec+FTS rank in [0, 1];
 // useful for the UI to show relevance indicators but callers should treat
-// the order of the list as authoritative.
-public record MemorySearchResult(Note Note, double Score);
+// the order of the list as authoritative. `Words`: every word of the query
+// is in it — such hits come first, ahead of those found by meaning alone,
+// so a lower score can stand above a higher one.
+public record MemorySearchResult(Note Note, double Score, bool Words = false);
 
 // Response envelope. `Degraded` is true when the embedding model wasn't
 // ready and the ranking is FTS-only — UI can surface a "semantic search

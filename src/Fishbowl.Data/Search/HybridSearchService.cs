@@ -16,7 +16,8 @@ namespace Fishbowl.Data.Search;
 // specific identifiers the embedding smears over ("DatabaseFactoryV3"
 // lexical win, semantic miss). 70/30 in favour of semantic reflects the
 // CONCEPT — Fishbowl is memory-first, identifier search is a secondary
-// affordance.
+// affordance. But a hit with every word of the query always ranks before
+// one found by meaning alone (MergeScores): the blend orders each group.
 public sealed class HybridSearchService : ISearchService
 {
     private const double VectorWeight = 0.7;
@@ -107,7 +108,7 @@ public sealed class HybridSearchService : ISearchService
             if (!includePending && (note.Tags?.Contains("review:pending") ?? false)) continue;
             if (tagFilter is not null && !MatchesTagFilter(note.Tags, tagFilter, requireAll)) continue;
 
-            results.Add(new MemorySearchResult(SecretStripper.StripNote(note), candidate.Score));
+            results.Add(new MemorySearchResult(SecretStripper.StripNote(note), candidate.Score, candidate.Words));
         }
 
         return new HybridSearchResult(results, degraded);
@@ -196,7 +197,14 @@ public sealed class HybridSearchService : ISearchService
     // When degraded (no vec hits), FTS carries the full signal; its
     // effective weight becomes 1.0 so the absolute numeric scores stay
     // comparable to the hybrid case at the top of the ranking.
-    internal static IEnumerable<(string Id, double Score)> MergeScores(
+    //
+    // A hit with every word of the query (`Words`: it is in `fts`, whose
+    // query ANDs the words) ranks before one found by meaning alone, the
+    // blend ordering each group. The min-max gives the nearest hit by
+    // meaning the top vector score whatever it is, and a name or an
+    // identifier means little to the model: without the groups a search
+    // for "Mittmann" put unrelated text above the text that says it.
+    internal static IEnumerable<(string Id, double Score, bool Words)> MergeScores(
         List<(string Id, double Distance)> vec,
         List<(string Id, double Bm25)> fts,
         bool degraded)
@@ -214,10 +222,11 @@ public sealed class HybridSearchService : ISearchService
             .Select(id =>
             {
                 var v = vecScore.TryGetValue(id, out var vs) ? vs : 0.0;
-                var f = ftsScore.TryGetValue(id, out var fs) ? fs : 0.0;
-                return (Id: id, Score: wVec * v + wFts * f);
+                var words = ftsScore.TryGetValue(id, out var fs);
+                return (Id: id, Score: wVec * v + wFts * (words ? fs : 0.0), Words: words);
             })
-            .OrderByDescending(x => x.Score);
+            .OrderByDescending(x => x.Words)
+            .ThenByDescending(x => x.Score);
     }
 
     // Given a list of (id, rawScore) where lower raw == better, returns

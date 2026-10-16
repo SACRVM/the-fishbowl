@@ -85,6 +85,7 @@ public class SearchMemoryTool : IMcpTool
                 updated_at = h.Note.UpdatedAt,
                 pinned = h.Note.Pinned,
                 score = h.Score,
+                words = h.Words,
             }).ToList(),
             degraded = result.Degraded,
         };

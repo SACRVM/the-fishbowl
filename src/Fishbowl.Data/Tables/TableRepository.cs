@@ -727,7 +727,7 @@ public class TableRepository : ITableRepository
 
         var hits = new List<RowSearchHit>();
         var defs = new Dictionary<string, TableDef?>(StringComparer.Ordinal);
-        foreach (var (key, score) in HybridSearchService.MergeScores(vec, fts, degraded))
+        foreach (var (key, score, words) in HybridSearchService.MergeScores(vec, fts, degraded))
         {
             if (hits.Count >= limit) break;
             var slash = key.IndexOf('/');
@@ -737,7 +737,7 @@ public class TableRepository : ITableRepository
             if (def is null) continue;
             var rows = await ReadRowsAsync(db, null, $"SELECT * FROM \"{TableNames.Physical(name)}\" WHERE id = @id", new { id = key[(slash + 1)..] }, ct);
             if (rows.Count == 0) continue;
-            hits.Add(new RowSearchHit(name, (await ToJsonAsync(db, null, def, rows, ct))[0], score));
+            hits.Add(new RowSearchHit(name, (await ToJsonAsync(db, null, def, rows, ct))[0], score, words));
         }
         return (hits, degraded);
     }

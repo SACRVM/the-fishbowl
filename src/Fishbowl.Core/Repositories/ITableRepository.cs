@@ -58,4 +58,4 @@ public sealed record TableChange(
 public sealed record ColumnUpdate(string? Description = null, IReadOnlyList<string>? AddOptions = null, bool? Required = null, bool? Searchable = null);
 
 // One hit of a row search: which table, the row, how well it matched.
-public sealed record RowSearchHit(string Table, JsonElement Row, double Score);
+public sealed record RowSearchHit(string Table, JsonElement Row, double Score, bool Words = false);

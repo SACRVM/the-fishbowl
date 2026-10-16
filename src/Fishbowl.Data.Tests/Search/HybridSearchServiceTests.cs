@@ -59,6 +59,33 @@ public class HybridSearchServiceTests : IDisposable
         Assert.Equal("DatabaseFactory refactor", result.Hits[0].Note.Title);
     }
 
+    // A name means little to the model: the query lands nearest to some
+    // unrelated note, which the min-max blend put on top. A note that says
+    // the name comes first, however far its meaning — and says so.
+    [Fact]
+    public async Task HybridSearch_NoteWithTheWords_ComesBeforeMeaningAlone()
+    {
+        var fake = new ScriptedEmbeddingService();
+        fake.Map("Mittmann", new[] { 1.0f, 0, 0 });
+        fake.Map("Glück gehabt Nur heute", new[] { 1.0f, 0, 0 });                 // the nearest, no word
+        fake.Map("Friseur Mittmann Termin am Dienstag", new[] { 0, 1.0f, 0 });  // the word, far by meaning
+
+        var repo = BuildRepo(fake);
+        await repo.CreateAsync(_ctx, UserId, new Note { Title = "Glück gehabt", Content = "Nur heute" },
+            TestContext.Current.CancellationToken);
+        await repo.CreateAsync(_ctx, UserId, new Note { Title = "Friseur Mittmann", Content = "Termin am Dienstag" },
+            TestContext.Current.CancellationToken);
+
+        var result = await BuildService(fake).HybridSearchAsync(_ctx, "Mittmann", 5, true, ct:
+            TestContext.Current.CancellationToken);
+
+        Assert.False(result.Degraded);
+        Assert.Equal(["Friseur Mittmann", "Glück gehabt"], result.Hits.Select(h => h.Note.Title));
+        Assert.Equal([true, false], result.Hits.Select(h => h.Words));
+        // The order is the list's, not the scores': the meaning-only note scores higher.
+        Assert.True(result.Hits[1].Score > result.Hits[0].Score);
+    }
+
     [Fact]
     public async Task HybridSearch_SemanticMatch_RanksInTop5()
     {

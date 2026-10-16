@@ -284,7 +284,7 @@ public sealed class RowSearchTool(ITableRepository t, ISpaceRepository s) : Tabl
     {
         var (hits, degraded) = await Tables.SearchAsync(ctx, AppJsonParsers.RequireString(args, "query"),
             AppJsonParsers.OptionalString(args, "table"), AppJsonParsers.OptionalInt(args, "limit") ?? 10, ct);
-        return new { hits = hits.Select(h => new { table = h.Table, row = h.Row, score = h.Score }), degraded };
+        return new { hits = hits.Select(h => new { table = h.Table, row = h.Row, score = h.Score, words = h.Words }), degraded };
     }
 }
 

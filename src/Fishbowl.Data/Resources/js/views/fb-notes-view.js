@@ -226,18 +226,19 @@ class FbNotesView extends HTMLElement {
      *    1) A note where both title and content came back empty is a
      *       secret-only shell (SecretStripper gutted it) — it still
      *       matched FTS on the pre-strip text but is useless to display.
-     *    2) Score must clear max(topScore * 0.6, 0.3). Relative-to-top
-     *       handles the "top is 0.7, rank 2 is 0.43" semantic case; the
-     *       0.3 floor catches the pathological "top is 0.5, everything
-     *       below is pure noise at 0.4–0.49". */
+     *    2) A note with every word of the query (`words`) always stays —
+     *       the server ranks those first. One found by meaning alone must
+     *       clear max(topMeaning * 0.7, 0.5): relative-to-top handles the
+     *       "top is 0.7, rank 2 is 0.43" semantic case; the 0.5 floor
+     *       catches "top is 0.5, everything below is noise". */
     _applyRelevanceCutoff(results) {
         const nonEmpty = results.filter(n =>
             (n.title && n.title.trim()) || (n.content && n.content.trim())
         );
         if (nonEmpty.length === 0) return [];
-        const top = nonEmpty[0].score ?? 0;
+        const top = nonEmpty.find(n => !n.words)?.score ?? 0;
         const cutoff = Math.max(top * 0.7, 0.5);
-        return nonEmpty.filter(n => (n.score ?? 0) >= cutoff);
+        return nonEmpty.filter(n => n.words || (n.score ?? 0) >= cutoff);
     }
 
     _updateDegradedHint() {

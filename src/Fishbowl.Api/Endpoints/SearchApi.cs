@@ -58,6 +58,7 @@ public static class SearchApi
                     pinned = h.Note.Pinned,
                     archived = h.Note.Archived,
                     score = h.Score,
+                    words = h.Words,
                 }).ToList(),
                 degraded = result.Degraded,
             });

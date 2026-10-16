@@ -46,7 +46,6 @@ public partial class MailRepository
         var fts = new List<(string Id, double Bm25)>();
         var vec = new List<(string Id, double Distance)>();
         var degraded = _embeddings is null;
-        HashSet<string> words;
         Dictionary<string, string> threadOf;
         using (var db = _db.CreateContextConnection(ctx))
         {
@@ -68,7 +67,7 @@ public partial class MailRepository
                 }
                 catch (EmbeddingUnavailableException) { degraded = true; }
             }
-            words = fts.Select(f => f.Id).ToHashSet();
+            var words = fts.Select(f => f.Id).ToHashSet();
             vec = vec.Where(v => v.Distance <= MeaningFloor || words.Contains(v.Id)).ToList();
             var ids = words.Concat(vec.Select(v => v.Id)).Distinct().ToArray();
             threadOf = ids.Length == 0 ? new() : (await db.QueryAsync<(string Id, string ThreadId)>(new CommandDefinition(
@@ -76,14 +75,12 @@ public partial class MailRepository
                 .ToDictionary(r => r.Id, r => r.ThreadId);
         }
 
-        // A conversation is as good as its best message. A message with every
-        // word of the query comes before one found by meaning alone, the blend
-        // ordering each group: the nearest mail by meaning always scores high
-        // after the min-max, and a name ("Mittmann") means little to the
-        // model — so unrelated mail outranked the one that says it.
+        // A conversation is as good as its best message — and a message with
+        // every word of the query comes before one found by meaning alone
+        // (MergeScores).
         var ranked = new List<string>();
         var seen = new HashSet<string>();
-        foreach (var (id, _) in HybridSearchService.MergeScores(vec, fts, degraded).OrderByDescending(m => words.Contains(m.Id)))
+        foreach (var (id, _, _) in HybridSearchService.MergeScores(vec, fts, degraded))
             if (threadOf.TryGetValue(id, out var thread) && seen.Add(thread)) ranked.Add(thread);
 
         // The filters (tab, account, tags, unread) through the list's own
