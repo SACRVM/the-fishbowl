@@ -1,7 +1,6 @@
 {
   "version": 1,
   "id": "the-fishbowl",
-  "quickLinks": [],
   "mcpActivations": [
     {
       "id": "firepit"
@@ -9,21 +8,22 @@
   ],
   "commands": [
     {
-      "name": "Deploy Host",
-      "type": "Shell",
-      "icon": "play",
+      "group": "Tools",
+      "name": "deploy",
+      "description": "Builds the working tree and swaps it into the local Fishbowl service, then checks that it answers.",
+      "type": "shell",
       "command": "tools/local-host/fishbowl-local",
-      "args": [
-        "deploy"
-      ],
+      "args": ["deploy"],
       "cwd": ".",
       "window": "reuse:fishbowl-host",
-      "longRunning": false
+      "keepOpenOnError": true,
+      "confirm": true
     },
     {
-      "name": "GitHub",
-      "type": "Url",
-      "icon": "\uD83D\uDC19",
+      "group": "Git",
+      "name": "repo",
+      "description": "Opens this repository on GitHub.",
+      "type": "url",
       "url": "https://github.com/SACRVM/the-fishbowl"
     }
   ]

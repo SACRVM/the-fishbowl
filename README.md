@@ -62,7 +62,7 @@ Write-Host "Husky started (PID $($proc.Id)). You can close this window." -Foregr
 
 For a permanent install that survives user logoff and restarts at boot, register Husky as a Windows service via NSSM — see [`docs/deploy.md`](docs/deploy.md) §5.
 
-The user-data folder (`fishbowl-data/`, holds `system.db` + per-user/space SQLite files + the embeddings model) lives next to the binary inside `app/` and is preserved across updates because Husky overlays new files without deleting. Linux/macOS deployments use the matching RID asset and override `executable` in a local `husky.config.json` (the repo-root config is Windows-pathed by default).
+The user-data folder (`fishbowl-data/`, holds `system.db` + per-user/space SQLite files + the embeddings model) lives next to the binary inside `app/` and is preserved across updates because Husky overlays new files without deleting. Linux/macOS deployments use the matching RID asset and override `executable` in a local `husky.config.json` (the repo-root config is Windows-pathed by default); [`docs/deploy.md`](docs/deploy.md) §5b runs it on Linux under systemd. On a Linux desktop, [`tools/local-host`](tools/local-host/README.md) runs the repo's own build as a systemd user service instead.
 
 See [`docs/deploy.md`](docs/deploy.md) for the long-form runbook: the recommended ACME-staged sequence, post-lockout config edits via `/api/v1/admin/config`, scheduled backups with `tools/snapshot-data`, and a troubleshooting section for the failure modes the launcher can land in.
 

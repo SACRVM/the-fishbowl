@@ -37,7 +37,17 @@ new snapshot folder, so no lock is lost.
 
 ## Scheduling
 
-Windows Task Scheduler, daily at 03:00:
+On a Linux desktop, `tools/local-host` installs a systemd user timer for this
+(`fishbowl-backup.timer`, daily at 03:00, caught up after a day the machine
+was off) — see its README.
+
+Linux with cron, daily at 03:00 (`crontab -e`; paths are examples):
+
+```bash
+0 3 * * * cd /home/me/the-fishbowl && dotnet run --project tools/snapshot-data -- --data src/Fishbowl.Host/fishbowl-data --out /mnt/nas/backup/Fishbowl --quiet
+```
+
+A Windows server, with the Task Scheduler, daily at 03:00:
 
 ```powershell
 $action  = New-ScheduledTaskAction `
@@ -48,14 +58,18 @@ $trigger = New-ScheduledTaskTrigger -Daily -At 03:00
 Register-ScheduledTask -TaskName "Fishbowl daily snapshot" -Action $action -Trigger $trigger
 ```
 
-Linux, daily at 03:00 (`crontab -e`; paths are examples):
+Snapshots are never deleted by the tool. To keep only the newest seven, run
+after the snapshot — on Linux:
 
 ```bash
-0 3 * * * cd /home/me/the-fishbowl && dotnet run --project tools/snapshot-data -- --data src/Fishbowl.Host/fishbowl-data --out /mnt/nas/backup/Fishbowl --quiet
+ls -1d /mnt/nas/backup/Fishbowl/snapshot-* | sort -r | tail -n +8 | xargs -r rm -rf --
 ```
 
-For pruning: keep the last 7 daily + 4 weekly snapshots with a tiny
-PowerShell oneliner — `Get-ChildItem D:\fishbowl-backups -Directory | Sort-Object Name -Descending | Select-Object -Skip 7 | Remove-Item -Recurse -Force` runs after the snapshot.
+and on Windows:
+
+```powershell
+Get-ChildItem D:\fishbowl-backups -Directory | Sort-Object Name -Descending | Select-Object -Skip 7 | Remove-Item -Recurse -Force
+```
 
 ## Restore
 

@@ -109,10 +109,11 @@ Release v0.2.0 ist getaggt und gepusht.
 - release.yml läuft → https://github.com/SACRVM/the-fishbowl/actions
 - 4 RID-Zips in ~6-8 min auf https://github.com/SACRVM/the-fishbowl/releases/tag/v0.2.0
 - GitHub Release Notes werden automatisch generiert
-- Husky-Server: nächster Launcher-Poll zieht das Update; auf Wunsch run.ps1 erneut ausführen
+- Lokal: `tools/local-host/fishbowl-local deploy` bringt den Stand auf die Instanz auf diesem Rechner
+- Husky-Server (falls einer läuft): der nächste Launcher-Poll zieht das Update
 ```
 
-Then **stop**. Do not poll the CI run. Do not `gh release view` (it crashes on Windows with the go-keyring bug). To verify asset upload later, hit the releases page directly or use `curl` against `https://api.github.com/repos/SACRVM/the-fishbowl/releases/tags/v<NEW>`.
+Then **stop**. Do not poll the CI run. To verify the asset upload later, use `gh release view v<NEW> --repo SACRVM/the-fishbowl`, the releases page, or `curl` against `https://api.github.com/repos/SACRVM/the-fishbowl/releases/tags/v<NEW>`.
 
 ## Hard rules
 
