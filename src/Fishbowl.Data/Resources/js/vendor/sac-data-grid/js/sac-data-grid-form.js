@@ -496,7 +496,10 @@
         const dirty = action == null && this._formDirty();
         const snap = dirty ? this._formSnapshot() : null;
         this._formState = null;
-        setTimeout(() => st.dlg.remove(), 400);
+        // The dialog plays its exit, then says sac:closed (kit ≥ 2.33);
+        // removing it earlier cuts the exit short. An older kit only fades.
+        if (st.dlg.hasAttribute("closing")) st.dlg.addEventListener("sac:closed", () => st.dlg.remove(), { once: true });
+        else setTimeout(() => st.dlg.remove(), 400);
         const dropIfEmpty = () => {
             // A new record that was never filled in does not stay behind.
             const e = this._entryOf(st.row);

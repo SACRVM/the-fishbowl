@@ -151,19 +151,22 @@
             -webkit-user-select: none;
             user-select: none;
         }
-        /* The kit's scrollbar (ui.css §5) — global rules do not pierce a shadow root. */
-        .scroller::-webkit-scrollbar { width: 10px; height: 10px; }
-        .scroller::-webkit-scrollbar-track { background: transparent; }
-        .scroller::-webkit-scrollbar-thumb {
+        /* The kit's scrollbar (ui.css §5) — global rules do not pierce a shadow
+           root — for everything that scrolls in here (the rows, a filter's
+           option list, the long-text editor). The measure is the kit's
+           (kit ≥ 2.32); the fallbacks are the same values for an older kit. */
+        *::-webkit-scrollbar { width: var(--scrollbar-size, 12px); height: var(--scrollbar-size, 12px); }
+        *::-webkit-scrollbar-track { background: transparent; }
+        *::-webkit-scrollbar-thumb {
             background: var(--scrollbar-thumb);
             background-clip: content-box;
-            border: 2px solid transparent;
+            border: var(--scrollbar-gap, 3px) solid transparent;
             border-radius: 999px;
         }
-        .scroller::-webkit-scrollbar-thumb:hover { background: var(--scrollbar-thumb-hover); background-clip: content-box; }
-        .scroller::-webkit-scrollbar-corner { background: transparent; }
+        *::-webkit-scrollbar-thumb:hover { background: var(--scrollbar-thumb-hover); background-clip: content-box; }
+        *::-webkit-scrollbar-corner { background: transparent; }
         @supports not selector(::-webkit-scrollbar) {
-            .scroller { scrollbar-width: thin; scrollbar-color: var(--scrollbar-thumb) transparent; }
+            * { scrollbar-width: thin; scrollbar-color: var(--scrollbar-thumb) transparent; }
         }
 
         .canvas { position: relative; width: var(--row-w); min-width: 100%; }
@@ -512,6 +515,7 @@
             --icon-size: 14px;
         }
         .pager button:hover:not(:disabled) { background: var(--hover); color: var(--text); }
+        .pager button:active:not(:disabled) { background: var(--hover-strong); color: var(--text); }
         .pager button:disabled { opacity: 0.35; cursor: not-allowed; }
         .pager .pg { padding: 0 6px; }
 
@@ -533,12 +537,15 @@
             letter-spacing: 0.02em;
             text-transform: uppercase;
             cursor: pointer;
-            transition: background 0.2s ease, border-color 0.2s ease;
+            transition: background 0.2s ease, border-color 0.2s ease, transform 0.2s var(--ease-smooth);
             --icon-size: 14px;
         }
         .btn:hover:not(:disabled) { background: var(--hover); border-color: var(--accent); }
         .btn.primary { background: var(--accent-fill); color: var(--on-accent); border-color: transparent; }
         .btn.primary:hover:not(:disabled) { background: var(--accent-strong); }
+        /* Press: the button gives the moment the pointer goes down, fast in
+           and back at the normal pace (the kit's .btn). */
+        .btn:active:not(:disabled) { transform: scale(0.97); transition-duration: 0.1s; }
         .btn:disabled { opacity: 0.3; cursor: not-allowed; }
         .btn:focus-visible, .pager button:focus-visible {
             outline: 2px solid var(--accent);
@@ -596,6 +603,7 @@
         .opts { display: flex; flex-direction: column; max-height: 220px; overflow: auto; margin: 0 -4px; }
         .opt { display: flex; align-items: center; gap: 8px; min-height: 30px; padding: 0 4px; border-radius: var(--radius-m); cursor: pointer; }
         .opt:hover { background: var(--hover); }
+        .opt:active { background: var(--hover-strong); }
         .opt input { margin: 0; accent-color: var(--accent); }
         .pop-foot { display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px; }
 
@@ -625,6 +633,21 @@
         @media (prefers-reduced-motion: reduce) {
             .row.skel .cell::after { animation: none; }
             .btn { transition: none; }
+        }
+        /* Reduced transparency / more contrast: the filter popover turns
+           solid (the glass hue, nothing shining through) and drops the blur;
+           under more contrast its edge is a clearly visible line. The kit's
+           surfaces do the same (kit ≥ 2.33; the fallbacks serve an older kit). */
+        @media (prefers-reduced-transparency: reduce) {
+            .pop { background: var(--glass-solid, var(--panel-2)); -webkit-backdrop-filter: none; backdrop-filter: none; }
+        }
+        @media (prefers-contrast: more) {
+            .pop {
+                background: var(--glass-solid, var(--panel-2));
+                -webkit-backdrop-filter: none;
+                backdrop-filter: none;
+                border-color: var(--border-contrast, color-mix(in srgb, var(--fg) 45%, transparent));
+            }
         }
         /* Windows high contrast: shadows and background images are dropped,
            so the cursor, the range and the cell states need system colors. */
