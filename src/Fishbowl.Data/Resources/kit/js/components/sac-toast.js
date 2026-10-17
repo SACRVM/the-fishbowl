@@ -462,6 +462,11 @@ class SacToastStack extends HTMLElement {
                     color: var(--text);
                     background: var(--hover);
                 }
+                /* Press: answers the moment it goes down. */
+                .close:active:not(:disabled) {
+                    background: var(--hover-strong);
+                    transition-duration: 0s;
+                }
                 .close:focus-visible {
                     outline: 2px solid var(--accent);
                     outline-offset: 1px;
@@ -487,6 +492,12 @@ class SacToastStack extends HTMLElement {
                     transition: background 120ms var(--ease-smooth);
                 }
                 .action:hover { background: var(--accent-tint); }
+                /* Press: no box at rest, so the tint deepens the moment it
+                   goes down (16% → 26%) instead of a scale. */
+                .action:active:not(:disabled) {
+                    background: color-mix(in srgb, var(--accent) 26%, transparent);
+                    transition-duration: 0s;
+                }
                 .action:focus-visible {
                     outline: 2px solid var(--accent);
                     outline-offset: 1px;
@@ -573,6 +584,31 @@ class SacToastStack extends HTMLElement {
                     .toast.swiped { transition: none; }
                     .close,
                     .action { transition: none; }
+                }
+
+                /* Reduced transparency / more contrast: the card turns solid
+                   (the glass hue, nothing shining through) and drops the
+                   blur; the kind tint stays, a layer of its own on top. */
+                @media (prefers-reduced-transparency: reduce) {
+                    .toast {
+                        background:
+                            linear-gradient(color-mix(in srgb, var(--kind) 6%, transparent),
+                                            color-mix(in srgb, var(--kind) 6%, transparent)),
+                            var(--glass-solid);
+                        backdrop-filter: none;
+                        -webkit-backdrop-filter: none;
+                    }
+                }
+                @media (prefers-contrast: more) {
+                    .toast {
+                        background:
+                            linear-gradient(color-mix(in srgb, var(--kind) 6%, transparent),
+                                            color-mix(in srgb, var(--kind) 6%, transparent)),
+                            var(--glass-solid);
+                        backdrop-filter: none;
+                        -webkit-backdrop-filter: none;
+                        border-color: var(--border-contrast);
+                    }
                 }
             </style>
             <div class="region" id="region" role="region" aria-live="polite" aria-label="${L.region}"></div>

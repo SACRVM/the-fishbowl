@@ -257,12 +257,18 @@ class SacChipInput extends HTMLElement {
                     letter-spacing: 0.01em;
                     line-height: 1;
                     cursor: pointer;
-                    transition: color 100ms, border-color 100ms, background 100ms;
+                    transition: color 100ms, border-color 100ms, background 100ms,
+                                transform 0.2s var(--ease-smooth);
                 }
                 button.add-btn:hover {
                     color: var(--text);
                     border-color: var(--text);
                     background: color-mix(in srgb, var(--fg) 4%, transparent);
+                }
+                /* Press: answers the moment it goes down. */
+                button.add-btn:active:not(:disabled) {
+                    transform: scale(0.97);
+                    transition-duration: 0.1s;
                 }
                 button.add-btn[hidden] { display: none !important; }
                 button.add-btn .plus { font-weight: 700; }
@@ -304,6 +310,11 @@ class SacChipInput extends HTMLElement {
                 .opt:hover, .opt.hl {
                     background: var(--hover);
                 }
+                /* Press: a pickable row steps to the strong wash at once. */
+                .opt[data-idx]:active {
+                    background: var(--hover-strong);
+                    transition-duration: 0s;
+                }
                 .opt .swatch {
                     width: 10px;
                     height: 10px;
@@ -341,6 +352,12 @@ class SacChipInput extends HTMLElement {
                 .swatch-btn:hover {
                     transform: scale(1.1);
                     border-color: color-mix(in srgb, var(--fg) 50%, transparent);
+                }
+                /* Press replaces the lift. Outranks the (hover: none) reset
+                   below, so a tap still shows it. */
+                .swatch-btn:active:not(:disabled) {
+                    transform: scale(0.95);
+                    transition-duration: 0.1s;
                 }
                 .picker-header {
                     padding: 8px 10px 4px;
@@ -428,6 +445,15 @@ class SacChipInput extends HTMLElement {
                     background-clip: content-box;
                     border: var(--scrollbar-gap) solid transparent;
                     border-radius: 999px;
+                }
+
+                /* Reduced transparency / more contrast: the blurred dropdown
+                   turns solid; under more contrast its edge shows clearly. */
+                @media (prefers-reduced-transparency: reduce) {
+                    .dropdown { background: var(--glass-solid); backdrop-filter: none; -webkit-backdrop-filter: none; }
+                }
+                @media (prefers-contrast: more) {
+                    .dropdown { background: var(--glass-solid); backdrop-filter: none; -webkit-backdrop-filter: none; border-color: var(--border-contrast); }
                 }
             </style>
             <div class="row" id="row">

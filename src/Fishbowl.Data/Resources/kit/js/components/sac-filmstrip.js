@@ -272,10 +272,13 @@
                         color: var(--text-muted);
                         cursor: pointer;
                         font: inherit;
-                        transition: background 0.15s, color 0.15s;
+                        transition: background 0.15s, color 0.15s, transform 0.2s var(--ease-smooth);
                         -webkit-touch-callout: none;
                     }
                     .frame:hover { background: var(--hover); color: var(--text); }
+                    /* Press: answers the moment it goes down (not the frame in
+                       flight — sac.sortable owns its transform). */
+                    .frame:active:not([data-sortable-dragging]) { transform: scale(0.97); transition-duration: 0.1s; }
                     .frame.active {
                         background: var(--accent-tint);
                         color: var(--accent-text);
@@ -325,6 +328,7 @@
                     }
                     .act svg { width: var(--icon-btn-icon); height: var(--icon-btn-icon); }
                     .act:hover { background: var(--hover); color: var(--text); }
+                    .act:active:not(:disabled) { background: var(--hover-strong); transition-duration: 0s; }
                     .act:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
                     .act:disabled { opacity: 0.4; cursor: not-allowed; background: transparent; }
                     .act.danger:hover:not(:disabled) { color: var(--danger-text); }

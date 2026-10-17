@@ -110,7 +110,9 @@ class SacMenu extends HTMLElement {
         this._syncTrigger();
         if (this.hasAttribute("open")) {
             this._raise();                         // top layer first: it must be
-            this._position();                      // measurable before anchoring
+            this._opening = true;                  // measurable before anchoring
+            this._position();
+            this._opening = false;
         } else {
             this._lower();
             this._clearHighlight();
@@ -207,6 +209,8 @@ class SacMenu extends HTMLElement {
                                 transform 120ms var(--ease-smooth),
                                 visibility 120ms var(--ease-smooth);
                 }
+                /* Above its anchor it comes up out of the trigger instead. */
+                .panel[data-up] { transform: translateY(4px); }
                 :host([open]) .panel {
                     opacity: 1;
                     visibility: visible;
@@ -230,6 +234,7 @@ class SacMenu extends HTMLElement {
                         opacity: 0;
                         transform: translateY(-4px);
                     }
+                    :host([open]) .panel[data-up] { transform: translateY(4px); }
                 }
                 @media (prefers-reduced-motion: reduce) {
                     .panel,
@@ -270,6 +275,13 @@ class SacMenu extends HTMLElement {
                     background: color-mix(in srgb, var(--danger) 14%, transparent) !important;
                     color: var(--danger-text) !important;
                 }
+                /* Press: the row answers the moment it goes down. */
+                .panel ::slotted(button:active:not([disabled])) {
+                    background: var(--hover-strong) !important;
+                }
+                .panel ::slotted(button[data-danger]:active:not([disabled])) {
+                    background: color-mix(in srgb, var(--danger) 22%, transparent) !important;
+                }
                 /* The !important display above would otherwise defeat the
                    hidden attribute — a hidden item must stay hidden. */
                 .panel ::slotted([hidden]) { display: none !important; }
@@ -288,6 +300,20 @@ class SacMenu extends HTMLElement {
                    the height grows. */
                 @media (pointer: coarse) {
                     .panel ::slotted(button) { min-height: 44px; }
+                }
+
+                /* Reduced transparency / more contrast: solid glass, no blur,
+                   and under more contrast a clearly visible edge. */
+                @media (prefers-reduced-transparency: reduce) {
+                    .panel { background: var(--glass-solid); backdrop-filter: none; -webkit-backdrop-filter: none; }
+                }
+                @media (prefers-contrast: more) {
+                    .panel {
+                        background: var(--glass-solid);
+                        backdrop-filter: none;
+                        -webkit-backdrop-filter: none;
+                        border-color: var(--border-contrast);
+                    }
                 }
             </style>
             <span class="trigger"><slot name="trigger"></slot></span>
@@ -385,6 +411,25 @@ class SacMenu extends HTMLElement {
 
         this._panel.style.top  = `${top}px`;
         this._panel.style.left = `${left}px`;
+        this._setDirection(openUp);
+    }
+
+    /** Opened above its anchor, the panel unfolds upwards — out of the
+     *  trigger, never towards it — and leaves the same way ([data-up]).
+     *  The entry's start was fixed when the panel was first measured, under
+     *  the last opening's direction: when that differs, start it again. */
+    _setDirection(up) {
+        const p = this._panel;
+        if (p.hasAttribute("data-up") === up) return;
+        p.toggleAttribute("data-up", up);
+        if (!this._opening) return;
+        p.style.transition = "none";
+        p.style.opacity = "0";
+        p.style.transform = `translateY(${up ? 4 : -4}px)`;
+        void p.offsetWidth;                        // commit the start…
+        p.style.transition = "";
+        p.style.opacity = "";
+        p.style.transform = "";                    // …and let it run from there
     }
 
     /** Context-menu placement: top-left at the point, flipped left / up
@@ -398,6 +443,7 @@ class SacMenu extends HTMLElement {
         top  = Math.max(margin, Math.min(top, window.innerHeight - panel.height - margin));
         this._panel.style.top  = `${top}px`;
         this._panel.style.left = `${left}px`;
+        this._setDirection(top < y);
     }
 
     /* -------------------------------------------------------------- items */

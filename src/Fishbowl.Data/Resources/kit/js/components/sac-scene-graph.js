@@ -195,6 +195,11 @@ class SacSceneItem extends HTMLElement {
                 .item-row:hover {
                     background: color-mix(in srgb, var(--fg) 5%, transparent);
                 }
+                /* Press: answers the moment it goes down. */
+                .item-row:active:not(.active) {
+                    background: var(--hover-strong);
+                    transition-duration: 0s;
+                }
                 .item-row.active {
                     background: color-mix(in srgb, var(--accent) 20%, transparent);
                     border-color: color-mix(in srgb, var(--accent) 30%, transparent);
@@ -217,8 +222,10 @@ class SacSceneItem extends HTMLElement {
                     margin: 0;
                     color: inherit;
                     cursor: pointer;
+                    border-radius: var(--radius-s);
                 }
                 .icon:hover { opacity: 1; }
+                button.icon:active { background: var(--hover-strong); transition-duration: 0s; }
                 .item-row:focus-visible,
                 button.icon:focus-visible,
                 input[type="color"]:focus-visible {
@@ -263,6 +270,11 @@ class SacSceneItem extends HTMLElement {
                     transform: scale(1.2);
                     border-color: var(--text);
                 }
+                /* The press gives under the pointer instead of the hover zoom. */
+                input[type="color"]:active {
+                    transform: scale(0.97);
+                    transition-duration: 0.1s;
+                }
                 /* The color input's hit box. Invisible on a mouse (contents),
                    the 44px target on touch. A <label> so a tap anywhere on it
                    opens the picker. */
@@ -289,6 +301,9 @@ class SacSceneItem extends HTMLElement {
                         transform: none;
                         border-color: color-mix(in srgb, var(--fg) 40%, transparent);
                     }
+                    /* …but the press itself still shows (a touch is a hover too). */
+                    .item-row:not(.active):active { background: var(--hover-strong); }
+                    input[type="color"]:active { transform: scale(0.97); }
                 }
                 @media (prefers-reduced-motion: reduce) {
                     .item-row, .icon, .chevron, input[type="color"] { transition: none; }

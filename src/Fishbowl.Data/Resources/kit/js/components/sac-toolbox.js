@@ -220,6 +220,13 @@ class SacToolbox extends HTMLElement {
                     background: var(--accent-fill);
                     color: var(--on-accent);
                 }
+                /* Press: answers the moment it goes down; the active tool
+                   keeps its fill. Out-ranks the (hover: none) reset below.
+                   (A disabled box is pointer-events: none — never pressed.) */
+                button.tool:active:not(.active) {
+                    background: var(--hover-strong);
+                    transition-duration: 0s;
+                }
                 button.tool:focus-visible {
                     outline: 2px solid var(--accent);
                     outline-offset: 1px;

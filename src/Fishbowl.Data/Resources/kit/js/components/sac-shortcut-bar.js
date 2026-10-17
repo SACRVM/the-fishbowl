@@ -294,11 +294,18 @@ class SacShortcutBar extends HTMLElement {
                     letter-spacing: 0.02em;
                     white-space: nowrap;
                     cursor: pointer;
-                    transition: background 0.2s ease, border-color 0.2s ease;
+                    transition: background 0.2s ease, border-color 0.2s ease,
+                                transform 0.2s var(--ease-smooth);
                 }
                 .item:hover:not(:disabled) {
                     background: var(--hover);
                     border-color: var(--accent);
+                }
+                /* Press: the button gives the moment it goes down — fast in
+                   (100ms), back at the normal pace. The "…" trigger too. */
+                .item:active:not(:disabled) {
+                    transform: scale(0.97);
+                    transition-duration: 0.1s;
                 }
                 .item:focus-visible {
                     outline: 2px solid var(--accent);

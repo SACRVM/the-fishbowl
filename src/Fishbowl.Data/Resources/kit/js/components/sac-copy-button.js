@@ -140,6 +140,15 @@ class SacCopyButton extends HTMLElement {
                     button.ok:hover:not(:disabled)  { background: transparent; color: var(--ok-text); }
                     button.err:hover:not(:disabled) { background: transparent; color: var(--danger-text); }
                 }
+                /* Press: answers the moment it goes down — placed after the
+                   (hover: none) reset, which it must beat (a touch is a
+                   hover too). The release eases back at the normal pace. */
+                button:active:not(:disabled),
+                button.ok:active:not(:disabled),
+                button.err:active:not(:disabled) {
+                    background: var(--hover-strong);
+                    transition-duration: 0s;
+                }
                 @media (prefers-reduced-motion: reduce) {
                     button, sac-icon { transition: none; }
                 }

@@ -146,6 +146,7 @@ class SacSlider extends HTMLElement {
                     border-radius: 50%;
                     background: var(--accent);
                     cursor: pointer;
+                    transition: transform 0.2s var(--ease-smooth);
                 }
                 input[type="range"]::-moz-range-thumb {
                     width: 14px; height: 14px;
@@ -153,6 +154,18 @@ class SacSlider extends HTMLElement {
                     background: var(--accent);
                     cursor: pointer;
                     border: none;
+                    transition: transform 0.2s var(--ease-smooth);
+                }
+                /* Press: the thumb swells the moment it is grabbed and stays
+                   so for the drag. One rule per engine — a selector list that
+                   mixes -webkit- and -moz- pseudo-elements is dropped whole. */
+                input[type="range"]:active:not(:disabled)::-webkit-slider-thumb {
+                    transform: scale(1.1);
+                    transition-duration: 0.1s;
+                }
+                input[type="range"]:active:not(:disabled)::-moz-range-thumb {
+                    transform: scale(1.1);
+                    transition-duration: 0.1s;
                 }
                 .ends {
                     display: flex;
@@ -193,6 +206,10 @@ class SacSlider extends HTMLElement {
                     }
                     input[type="range"]::-moz-range-thumb { width: 20px; height: 20px; }
                     .row { margin-bottom: 0; }
+                }
+                @media (prefers-reduced-motion: reduce) {
+                    input[type="range"]::-webkit-slider-thumb { transition: none; }
+                    input[type="range"]::-moz-range-thumb { transition: none; }
                 }
             </style>
             <div class="row">

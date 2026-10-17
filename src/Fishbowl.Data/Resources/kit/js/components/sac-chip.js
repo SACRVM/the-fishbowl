@@ -94,13 +94,18 @@ class SacChip extends HTMLElement {
                     color: var(--chip-color);
                     border: 1px solid color-mix(in srgb, var(--chip-color) 35%, transparent);
                     user-select: none;
-                    transition: background 120ms, border-color 120ms, transform 80ms;
+                    transition: background 120ms, border-color 120ms, transform 0.2s var(--ease-smooth);
                 }
                 :host([disabled]) { opacity: .5; pointer-events: none; }
                 :host([clickable]) { cursor: pointer; }
                 :host([clickable]:hover) {
                     background: color-mix(in srgb, var(--chip-color) 30%, transparent);
                     border-color: color-mix(in srgb, var(--chip-color) 55%, transparent);
+                }
+                /* Press: answers the moment it goes down. */
+                :host([clickable]:not([disabled]):active) {
+                    transform: scale(0.97);
+                    transition-duration: 0.1s;
                 }
                 :host([selected]) {
                     /* Translucent wash, not a solid fill — the ink follows
@@ -133,6 +138,12 @@ class SacChip extends HTMLElement {
                 .x:hover {
                     opacity: 1;
                     background: color-mix(in srgb, var(--chip-color) 40%, transparent);
+                }
+                /* Press: one step stronger than the hover wash, at once. */
+                :host(:not([disabled])) .x:active {
+                    opacity: 1;
+                    background: color-mix(in srgb, var(--chip-color) 55%, transparent);
+                    transition-duration: 0s;
                 }
                 .x svg { width: 10px; height: 10px; }
 

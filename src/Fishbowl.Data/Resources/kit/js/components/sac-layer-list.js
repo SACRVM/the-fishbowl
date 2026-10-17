@@ -274,6 +274,9 @@
                         transition: background 0.15s, color 0.15s;
                     }
                     .row:hover { background: var(--hover); color: var(--text); }
+                    /* Press: answers the moment it goes down (not on the
+                       selected row, nor the one in flight — it keeps its lift). */
+                    .row:active:not(.active):not([data-sortable-dragging]) { background: var(--hover-strong); transition-duration: 0s; }
                     .row.active { background: var(--accent-tint); color: var(--accent-text); }
                     .row:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
                     .row[data-sortable-dragging] { background: var(--panel-2); box-shadow: var(--shadow-2); }
@@ -337,6 +340,11 @@
                     }
                     .tog svg, .act svg { width: var(--icon-btn-icon); height: var(--icon-btn-icon); }
                     .tog:hover, .act:hover { background: var(--hover-strong); color: var(--text); }
+                    /* Already --hover-strong on hover: the press goes one step further. */
+                    .tog:active, .act:active:not(:disabled) {
+                        background: color-mix(in srgb, var(--fg) 20%, transparent);
+                        transition-duration: 0s;
+                    }
                     .tog:focus-visible, .act:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
                     /* An unlocked lock is quiet until the row is looked at. */
                     .tog.lock:not([aria-pressed="true"]) { opacity: 0.35; }

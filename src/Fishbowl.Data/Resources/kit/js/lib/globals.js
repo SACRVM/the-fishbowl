@@ -26,6 +26,7 @@
         apps:     null, // populated by apps.js (app registry, windows, deep links)
         commands: null, // installed by sac-command-palette.js (app command registry)
         palette:  null, // installed by sac-command-palette.js (the connected instance)
+        motion:   null, // populated by motion.js (springs for gesture releases)
 
         /**
          * i18n — every UI string the kit (and any app) shows, per language.
@@ -474,4 +475,9 @@
         formatTime(hhmm, opts) { return formatTime(hhmm, pick(opts, "hourCycle", HOUR_CYCLES, regional.hourCycle)); },
         parseTime(text) { return parseTime(text); },
     };
+
+    // Press states (:active) answer a finger on iOS Safari only where a
+    // touchstart listener exists — this empty one makes every control in
+    // the page show its press feedback the moment it is touched.
+    document.addEventListener("touchstart", () => {}, { passive: true });
 })();

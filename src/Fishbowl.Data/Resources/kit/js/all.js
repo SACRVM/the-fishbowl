@@ -34,6 +34,7 @@
         "lib/globals.js",
         "i18n/de.js",      // the kit's own strings in German (sac.lang)
         "lib/icons.js",
+        "lib/motion.js",  // sac.motion — springs for gesture releases (window, sheet, drawer, split, sortable)
         "lib/router.js",
         "lib/scope.js",
         "lib/dialog.js",

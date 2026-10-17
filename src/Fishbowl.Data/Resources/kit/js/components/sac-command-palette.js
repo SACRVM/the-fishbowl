@@ -836,6 +836,14 @@
                         background: var(--accent-tint);
                         color: var(--accent);
                     }
+                    /* Press: answers the moment it goes down. The row under a
+                       mouse is the selected one (mouseenter selects), so its
+                       tint deepens and it stays the accent row; a row pressed
+                       before it is selected (a finger) gets the wash. */
+                    .row:active:not([aria-selected="true"]) { background: var(--hover-strong); }
+                    .row[aria-selected="true"]:active {
+                        background: color-mix(in srgb, var(--accent) 26%, transparent);
+                    }
 
                     .ico {
                         flex: none;
@@ -938,6 +946,19 @@
                             opacity: 1;
                             transform: none;
                         }
+                    }
+
+                    /* Reduced transparency / more contrast: the panel turns
+                       solid (the glass hue, nothing shining through) and drops
+                       the blur. The backdrop is a scrim — it keeps its dim and
+                       only loses the blur. */
+                    @media (prefers-reduced-transparency: reduce) {
+                        .backdrop { backdrop-filter: none; -webkit-backdrop-filter: none; }
+                        .panel { background: var(--glass-solid); backdrop-filter: none; -webkit-backdrop-filter: none; }
+                    }
+                    @media (prefers-contrast: more) {
+                        .backdrop { backdrop-filter: none; -webkit-backdrop-filter: none; }
+                        .panel { background: var(--glass-solid); backdrop-filter: none; -webkit-backdrop-filter: none; border-color: var(--border-contrast); }
                     }
                 </style>
                 <div class="backdrop" part="backdrop"></div>

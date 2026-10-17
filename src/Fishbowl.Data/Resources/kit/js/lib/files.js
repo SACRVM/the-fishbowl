@@ -401,6 +401,14 @@
                 padding: 4px 0; cursor: pointer;
             }
             .sac-files-device:hover { text-decoration: underline; }
+            /* Press: a ghost wash the moment it goes down. The spread shadow
+               (same colour; never painted under the box) gives the
+               padding-less link a 4px margin of wash. */
+            .sac-files-device:active:not(:disabled) {
+                background: var(--hover-strong);
+                box-shadow: 0 0 0 4px var(--hover-strong);
+                border-radius: var(--radius-s);
+            }
             .sac-files-device:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: var(--radius-s); }
             .sac-files-device svg { width: 14px; height: 14px; }
             .sac-files-progress[hidden] { display: none; }
@@ -601,10 +609,14 @@
                 return true;
             }
 
+            // The exit plays before the element goes (sac:closed).
+            const closed = new Promise((r) => dlg.addEventListener("sac:closed", r, { once: true }));
             dlg.addEventListener("sac:action", async () => {
                 offLang();
                 const answer = writing ? await writing : choice;
-                setTimeout(() => { dlg.remove(); resolve(answer); }, 120);
+                await closed;
+                dlg.remove();
+                resolve(answer);
             }, { once: true });
 
             document.body.appendChild(dlg);

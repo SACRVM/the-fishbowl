@@ -117,6 +117,10 @@
     const t = (key, fallback) =>
         (window.sac && window.sac.t) ? window.sac.t(key, fallback) : fallback;
 
+    /** sac.motion when lib/motion.js is loaded; without it a drag still
+     *  works, only the rubber band and the spring on release are gone. */
+    const motion = () => (window.sac && window.sac.motion) || null;
+
 class SacWindow extends HTMLElement {
     constructor() {
         super();
@@ -156,6 +160,7 @@ class SacWindow extends HTMLElement {
     static MAX_INSET = 8;
     static MIN_VISIBLE = 40;
     static SNAP = 12;             // edge-snapping distance while dragging
+    static FLICK = 400;           // px/s: a release faster than this was a throw (a little bounce)
     static Z_BASE = 10000;        // the window band: above the page …
     static Z_MAX = 18999;         // … below the open nav (19000) and dialogs (20000)
 
@@ -184,8 +189,10 @@ class SacWindow extends HTMLElement {
         if (this._offLang) { this._offLang(); this._offLang = null; }
         window.removeEventListener('resize', this._onViewportResize);
         this._mq.removeEventListener('change', this._onCompactChange);
-        // Drop any in-flight drag/resize listeners on document.
-        if (this.onMouseUp) this.onMouseUp();
+        // A drag or a throw in flight ends where it is.
+        this.isResizing = false;
+        if (this.isDragging) { this.isDragging = false; this._commitDrag(); }
+        this._freezeThrow();
     }
 
     attributeChangedCallback(name, oldValue, newValue) {
@@ -244,6 +251,7 @@ class SacWindow extends HTMLElement {
     }
 
     close() {
+        this._freezeThrow();
         this.removeAttribute('open');
         this.dispatchEvent(new CustomEvent('sac:close', { detail: { window: this }, bubbles: true, composed: true }));
     }
@@ -454,6 +462,8 @@ class SacWindow extends HTMLElement {
                 justify-content: space-between;
                 cursor: grab;
                 user-select: none;
+                /* A finger on the bar drags the window, never the page. */
+                touch-action: none;
             }
 
             .title-bar:active {
@@ -571,6 +581,7 @@ class SacWindow extends HTMLElement {
                 height: 20px;
                 cursor: nwse-resize;
                 z-index: 10;
+                touch-action: none;
             }
             .resize-handle::after {
                 content: '';
@@ -586,6 +597,8 @@ class SacWindow extends HTMLElement {
             /* A 44px hit area per dot on touch: 20px dots, 24px apart, each
                with an invisible halo — the halos meet, never overlap. */
             @media (pointer: coarse) {
+                /* The corner grip: a 44px target for a finger. */
+                .resize-handle::before { content: ''; position: absolute; inset: -12px; }
                 .controls { gap: 24px; }
                 .ctrl-btn { width: 20px; height: 20px; }
                 .ctrl-btn::after { content: ''; position: absolute; inset: -12px; }
@@ -601,6 +614,25 @@ class SacWindow extends HTMLElement {
                 .ctrl-btn:hover {
                     transform: none;
                 }
+            }
+
+            /* Press: the dot gives the moment the pointer goes down — fast
+               in (100ms), back at the normal pace — in place of the hover
+               growth. After the resets above, so a tap (a touch is a hover
+               too) still shows it. */
+            .ctrl-btn:active {
+                transform: scale(0.9);
+                transition-duration: 0.1s;
+            }
+
+            /* Reduced transparency / more contrast: the glass turns solid
+               (same hue, nothing shining through) and drops the blur; under
+               more contrast its edge becomes a clearly visible line. */
+            @media (prefers-reduced-transparency: reduce) {
+                .window-container { background: var(--glass-solid); backdrop-filter: none; -webkit-backdrop-filter: none; }
+            }
+            @media (prefers-contrast: more) {
+                .window-container { background: var(--glass-solid); backdrop-filter: none; -webkit-backdrop-filter: none; border-color: var(--border-contrast); }
             }
         </style>
         <div class="window-container">
@@ -646,24 +678,135 @@ class SacWindow extends HTMLElement {
         return Number.isFinite(v) && v >= 0 ? v : SacWindow.MAX_INSET;
     }
 
-    /** While dragging: pull _dx/_dy onto an edge line within SNAP px. */
-    _snapDrag() {
+    /** A point pulled onto an edge line within SNAP px; remembers which. */
+    _snapPoint(left, top) {
         const T = SacWindow.SNAP;
         const gap = this._snapGap();
         const vw = document.documentElement.clientWidth;
         const vh = document.documentElement.clientHeight;
         const nav = this._navBottom();
         const w = this._dragW, h = this._dragH;
-        let left = this.startLeft + this._dx;
-        let top = this.startTop + this._dy;
         const snap = {};
         if (Math.abs(left - gap) <= T) { left = gap; snap.x = 'left'; }
         else if (Math.abs(left + w - (vw - gap)) <= T) { left = vw - gap - w; snap.x = 'right'; }
         if (Math.abs(top - (nav + gap)) <= T) { top = nav + gap; snap.y = 'top'; }
         else if (Math.abs(top + h - (vh - gap)) <= T) { top = vh - gap - h; snap.y = 'bottom'; }
-        this._dx = left - this.startLeft;
-        this._dy = top - this.startTop;
         this._snapped = snap;
+        return { left, top };
+    }
+
+    /** While dragging: pull _dx/_dy onto an edge line within SNAP px. */
+    _snapDrag() {
+        const p = this._snapPoint(this.startLeft + this._dx, this.startTop + this._dy);
+        this._dx = p.left - this.startLeft;
+        this._dy = p.top - this.startTop;
+    }
+
+    /** Where a window of this width may rest: MIN_VISIBLE px stay in view
+     *  horizontally, the title bar between the nav ribbon and the bottom. */
+    _bounds(width) {
+        const nav = this._navBottom();
+        const vw = document.documentElement.clientWidth;
+        const vh = document.documentElement.clientHeight;
+        const titleBar = this.shadowRoot.querySelector('.title-bar');
+        const titleH = titleBar ? titleBar.offsetHeight : 44;
+        const keep = Math.min(SacWindow.MIN_VISIBLE, width);
+        return { minLeft: keep - width, maxLeft: vw - keep, minTop: nav, maxTop: Math.max(nav, vh - titleH) };
+    }
+
+    /** Past the bounds a dragged window follows less and less (rubber band);
+     *  without sac.motion it follows freely and the clamp catches it. */
+    _resist(value, min, max, size) {
+        const m = motion();
+        if (!m) return value;
+        if (value < min) return min + m.rubberband(value - min, size);
+        if (value > max) return max + m.rubberband(value - max, size);
+        return value;
+    }
+
+    /** The drag offset onto the compositor — no layout per pointer move. */
+    _moveTo() {
+        this.style.transform = `translate3d(${this._dx}px, ${this._dy}px, 0)`;
+    }
+
+    /** Write the dragged offset into the real position and drop the
+     *  transform. Snapped to the right / bottom edge = anchored there again. */
+    _commitDrag() {
+        const snap = this._snapped || {};
+        const gap = `${this._snapGap()}px`;
+        if (snap.x === 'right') { this.style.left = 'auto'; this.style.right = gap; }
+        else { this.style.left = `${Math.round(this.startLeft + (this._dx || 0))}px`; this.style.right = ''; }
+        if (snap.y === 'bottom') { this.style.top = 'auto'; this.style.bottom = gap; }
+        else { this.style.top = `${Math.round(this.startTop + (this._dy || 0))}px`; this.style.bottom = ''; }
+        this._snapped = null;
+        this.style.transform = '';
+        this.style.willChange = '';
+        this._dx = this._dy = 0;
+        this._clampToViewport();
+    }
+
+    /** A throw still in the air stops where it shows and becomes the
+     *  window's real position (it was grabbed again, or the window closed). */
+    _freezeThrow() {
+        const thr = this._throw;
+        if (!thr) return;
+        this._throw = null;
+        thr.stop();
+        this._snapped = null;
+        this._commitDrag();
+    }
+
+    /**
+     * Let go of a drag. A finger or a pen throws the window on at the speed
+     * it moved — never further out than wholly in view, never further in
+     * than where it was let go; a mouse leaves it where it is, as desktop
+     * windows do. Either way it comes to rest inside the bounds, carried
+     * there by a spring instead of a jump. `t` is the release's timestamp
+     * (null = cancelled: no throw).
+     */
+    _release(t) {
+        const m = motion();
+        const w = this._dragW, h = this._dragH;
+        const b = this._bounds(w);
+        const left0 = this.startLeft + this._dx;
+        const top0 = this.startTop + this._dy;
+        const throwing = m && t !== null && this._dragType !== 'mouse';
+        const vx = throwing ? this._trackX.velocity(t) : 0;
+        const vy = throwing ? this._trackY.velocity(t) : 0;
+
+        const vw = document.documentElement.clientWidth;
+        const vh = document.documentElement.clientHeight;
+        const nav = this._navBottom();
+        const inset = this.hasAttribute('snap') ? this._snapGap() : 0;
+        const clamp = (v, lo, hi) => Math.min(Math.max(v, lo), hi);
+        const land = (pos, v, lo, hi, full0, full1) => {
+            const reach = m && v ? m.project(v) : 0;
+            if (!reach) return clamp(pos, lo, hi);
+            const fullHi = Math.max(full0, full1);
+            return clamp(clamp(pos + reach, Math.min(full0, pos), Math.max(fullHi, pos)), lo, hi);
+        };
+        let left = land(left0, vx, b.minLeft, b.maxLeft, inset, vw - inset - w);
+        let top = land(top0, vy, b.minTop, b.maxTop, nav + inset, vh - inset - h);
+        if (this.hasAttribute('snap')) ({ left, top } = this._snapPoint(left, top));
+
+        if (!m || (Math.abs(left - left0) < 0.5 && Math.abs(top - top0) < 0.5)) {
+            this._dx = left - this.startLeft;
+            this._dy = top - this.startTop;
+            this._commitDrag();
+            return;
+        }
+        const fling = Math.hypot(vx, vy) > SacWindow.FLICK;
+        const opts = { damping: fling ? 0.8 : 1, response: 0.4 };
+        const sx = m.spring({ from: left0, to: left, velocity: vx, ...opts,
+            onUpdate: (x) => { this._dx = x - this.startLeft; this._moveTo(); } });
+        const sy = m.spring({ from: top0, to: top, velocity: vy, ...opts,
+            onUpdate: (y) => { this._dy = y - this.startTop; this._moveTo(); } });
+        const thr = this._throw = { stop: () => { sx.stop(); sy.stop(); } };
+        Promise.all([sx.done, sy.done]).then(() => {
+            if (this._throw !== thr) return;     // frozen (grabbed again) meanwhile
+            this._throw = null;
+            this._commitDrag();
+        });
     }
 
     /** Is the window held by its right / bottom edge right now? */
@@ -734,12 +877,21 @@ class SacWindow extends HTMLElement {
             e.stopPropagation();
         }, { passive: true });
 
-        // DRAG — works while minimized, never while maximized.
-        titleBar.addEventListener('mousedown', (e) => {
+        // DRAG — works while minimized, never while maximized. Pointer
+        // events, so a finger or a pen moves a window as a mouse does; the
+        // capture keeps the drag when the pointer outruns the bar.
+        titleBar.addEventListener('pointerdown', (e) => {
             if (e.target.closest('button')) return;
+            if (e.pointerType === 'mouse' && e.button !== 0) return;
             if (this._windowState === 'maximized' || this.hasAttribute('compact')) return;
+            if (this.isDragging || this.isResizing) return;
+            // Caught mid-throw: it stays where it shows, the drag goes on from there.
+            this._freezeThrow();
             this._detachAnchor();
             this.isDragging = true;
+            this._dragPointer = e.pointerId;
+            this._dragType = e.pointerType;
+            titleBar.setPointerCapture(e.pointerId);
             this.startX = e.clientX;
             this.startY = e.clientY;
 
@@ -748,71 +900,68 @@ class SacWindow extends HTMLElement {
             this.startTop = rect.top;
             this._dragW = rect.width;
             this._dragH = rect.height;
+            this._dx = this._dy = 0;
             this._snapped = null;
+            const m = motion();
+            this._trackX = m ? m.tracker() : null;
+            this._trackY = m ? m.tracker() : null;
+            this._trackX?.add(0, e.timeStamp);
+            this._trackY?.add(0, e.timeStamp);
             // A drag is a compositor move: the window rides a transform on
             // its own layer — no layout, no repaint of the glass blur and
-            // the big shadow per mouse event, which is what made it trail
-            // the pointer. left/top are committed once, on release.
+            // the big shadow per pointer event, which is what made it trail
+            // the pointer. left/top are committed once, when it comes to rest.
             this.style.willChange = 'transform';
-
-            document.addEventListener('mousemove', this.onMouseMove);
-            document.addEventListener('mouseup', this.onMouseUp);
             e.preventDefault();
         });
+        titleBar.addEventListener('pointermove', (e) => {
+            if (!this.isDragging || e.pointerId !== this._dragPointer) return;
+            const b = this._bounds(this._dragW);
+            const left = this._resist(this.startLeft + e.clientX - this.startX, b.minLeft, b.maxLeft, this._dragW);
+            const top = this._resist(this.startTop + e.clientY - this.startY, b.minTop, b.maxTop, this._dragH);
+            this._dx = left - this.startLeft;
+            this._dy = top - this.startTop;
+            if (this.hasAttribute('snap')) this._snapDrag();
+            this._moveTo();
+            this._trackX?.add(this._dx, e.timeStamp);
+            this._trackY?.add(this._dy, e.timeStamp);
+        });
+        const endDrag = (e) => {
+            if (!this.isDragging || e.pointerId !== this._dragPointer) return;
+            this.isDragging = false;
+            this._release(e.type === 'pointerup' ? e.timeStamp : null);
+        };
+        titleBar.addEventListener('pointerup', endDrag);
+        titleBar.addEventListener('pointercancel', endDrag);
 
         // RESIZE — the handle is hidden in both states, the guard is belt
         // and braces for a programmatic dispatch.
-        resizeHandle.addEventListener('mousedown', (e) => {
-            if (this._windowState !== 'normal') return;
+        resizeHandle.addEventListener('pointerdown', (e) => {
+            if (e.pointerType === 'mouse' && e.button !== 0) return;
+            if (this._windowState !== 'normal' || this.isDragging || this.isResizing) return;
+            this._freezeThrow();
             this._detachAnchor();
             this.isResizing = true;
+            this._resizePointer = e.pointerId;
+            resizeHandle.setPointerCapture(e.pointerId);
             this.startX = e.clientX;
             this.startY = e.clientY;
             this.startWidth = this.offsetWidth;
             this.startHeight = this.offsetHeight;
-
-            document.addEventListener('mousemove', this.onMouseMove);
-            document.addEventListener('mouseup', this.onMouseUp);
             e.preventDefault();
         });
-
-        this.onMouseMove = (e) => {
-            if (this.isDragging) {
-                this._dx = e.clientX - this.startX;
-                this._dy = e.clientY - this.startY;
-                if (this.hasAttribute('snap')) this._snapDrag();
-                this.style.transform = `translate3d(${this._dx}px, ${this._dy}px, 0)`;
-            }
-            if (this.isResizing) {
-                const dx = e.clientX - this.startX;
-                const dy = e.clientY - this.startY;
-                this.style.width = `${Math.max(200, this.startWidth + dx)}px`;
-                this.style.height = `${Math.max(150, this.startHeight + dy)}px`;
-            }
+        resizeHandle.addEventListener('pointermove', (e) => {
+            if (!this.isResizing || e.pointerId !== this._resizePointer) return;
+            const dx = e.clientX - this.startX;
+            const dy = e.clientY - this.startY;
+            this.style.width = `${Math.max(200, this.startWidth + dx)}px`;
+            this.style.height = `${Math.max(150, this.startHeight + dy)}px`;
+        });
+        const endResize = (e) => {
+            if (e.pointerId === this._resizePointer) this.isResizing = false;
         };
-
-        this.onMouseUp = () => {
-            const wasDragging = this.isDragging;
-            if (wasDragging) {
-                // Commit the transform to the real position, then drop it.
-                // Snapped to the right / bottom edge = anchored there again.
-                const snap = this._snapped || {};
-                const gap = `${this._snapGap()}px`;
-                if (snap.x === 'right') { this.style.left = 'auto'; this.style.right = gap; }
-                else { this.style.left = `${Math.round(this.startLeft + (this._dx || 0))}px`; this.style.right = ''; }
-                if (snap.y === 'bottom') { this.style.top = 'auto'; this.style.bottom = gap; }
-                else { this.style.top = `${Math.round(this.startTop + (this._dy || 0))}px`; this.style.bottom = ''; }
-                this._snapped = null;
-                this.style.transform = '';
-                this.style.willChange = '';
-                this._dx = this._dy = 0;
-            }
-            this.isDragging = false;
-            this.isResizing = false;
-            document.removeEventListener('mousemove', this.onMouseMove);
-            document.removeEventListener('mouseup', this.onMouseUp);
-            if (wasDragging) this._clampToViewport();
-        };
+        resizeHandle.addEventListener('pointerup', endResize);
+        resizeHandle.addEventListener('pointercancel', endResize);
     }
 
     /* ---------------------------------------------------------------------
@@ -959,15 +1108,9 @@ class SacWindow extends HTMLElement {
         const rect = this.getBoundingClientRect();
         if (!rect.width && !rect.height) return;
 
-        const nav = this._navBottom();
-        const vw = document.documentElement.clientWidth;
-        const vh = document.documentElement.clientHeight;
-        const titleBar = this.shadowRoot.querySelector('.title-bar');
-        const titleH = titleBar ? titleBar.offsetHeight : 44;
-        const keep = Math.min(SacWindow.MIN_VISIBLE, rect.width);
-
-        const left = Math.min(Math.max(rect.left, keep - rect.width), vw - keep);
-        const top = Math.min(Math.max(rect.top, nav), Math.max(nav, vh - titleH));
+        const b = this._bounds(rect.width);
+        const left = Math.min(Math.max(rect.left, b.minLeft), b.maxLeft);
+        const top = Math.min(Math.max(rect.top, b.minTop), b.maxTop);
 
         // An anchored axis follows its edge by itself; it is only written
         // (and so released) when the window really left the viewport.

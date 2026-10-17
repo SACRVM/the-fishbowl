@@ -79,6 +79,13 @@ class SacSection extends HTMLElement {
                 :host([collapsible]) .title { cursor: pointer; }
                 :host([collapsible]) .chevron { display: block; }
                 :host([collapsible]) .title:hover .chevron { color: var(--text); }
+                /* Press: a wash the moment it goes down, shaped like a tab
+                   (round on top, square on the underline). */
+                :host([collapsible]) .title:active {
+                    background: var(--hover-strong);
+                    border-radius: var(--radius-m) var(--radius-m) 0 0;
+                    transition-duration: 0s;
+                }
                 :host([collapsible]) .title:focus-visible {
                     outline: 2px solid var(--accent);
                     outline-offset: 2px;

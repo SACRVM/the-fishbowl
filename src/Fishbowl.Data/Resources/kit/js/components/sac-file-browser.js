@@ -912,6 +912,8 @@
                     }
                     .crumb:hover { background: var(--hover); color: var(--text); }
                     .crumb[aria-current] { color: var(--text); cursor: default; background: none; }
+                    /* Press: answers the moment it goes down. */
+                    .crumb:active:not([aria-current]) { background: var(--hover-strong); transition-duration: 0s; }
                     .crumb:focus-visible, .tool:focus-visible, .del:focus-visible, .hcol:focus-visible {
                         outline: 2px solid var(--accent); outline-offset: -2px;
                     }
@@ -949,6 +951,7 @@
                     }
                     .here svg { width: 18px; height: 18px; }
                     .tool:hover:not(:disabled) { background: var(--hover); color: var(--text); }
+                    .tool:active:not(:disabled) { background: var(--hover-strong); transition-duration: 0s; }
                     .tool:disabled { opacity: 0.35; cursor: default; }
 
                     /* Column header — outside the listbox, aligned with the
@@ -984,6 +987,7 @@
                     }
                     .hcol.name, .hcol.type { justify-content: flex-start; }
                     .hcol:hover, .hcol[aria-pressed="true"] { color: var(--text); }
+                    .hcol:active { background: var(--hover-strong); transition-duration: 0s; }
                     .hcol svg { flex: none; width: 12px; height: 12px; }
                     .del-sp { flex: none; width: var(--del-w); }
 
@@ -1047,6 +1051,7 @@
                         height: var(--row-h);
                     }
                     .row:hover { background: var(--hover); color: var(--text); }
+                    .row:active:not(.sel) { background: var(--hover-strong); transition-duration: 0s; }
                     .row.sel { background: var(--accent-tint); color: var(--accent-text); }
                     .row.drop { background: var(--accent-tint); color: var(--accent-text); }
                     .list:focus-visible .row.focus { box-shadow: inset 0 0 0 2px var(--accent); }
@@ -1113,6 +1118,7 @@
                     :host([delete-button="hover"]) .list[data-marks="one"] .row:not(.mark) .del,
                     .list.selecting .del { visibility: hidden; }
                     .del:hover { color: var(--danger-text); background: var(--hover); }
+                    .del:active { background: var(--hover-strong); transition-duration: 0s; }
 
                     /* Mark mode: a check box per row, the bar shows the count. */
                     .check, .check-sp { display: none; flex: none; width: 20px; }

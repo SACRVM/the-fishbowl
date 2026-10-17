@@ -123,6 +123,15 @@ class SacLoader extends HTMLElement {
                     color: var(--text-dim);
                     font-size: 0.85rem;
                 }
+                /* Reduced transparency / more contrast: the overlay carries
+                   the text, so it turns solid (nothing shining through) and
+                   drops the blur. It fills the viewport — no edge to draw. */
+                @media (prefers-reduced-transparency: reduce) {
+                    .overlay { background: var(--glass-solid); backdrop-filter: none; -webkit-backdrop-filter: none; }
+                }
+                @media (prefers-contrast: more) {
+                    .overlay { background: var(--glass-solid); backdrop-filter: none; -webkit-backdrop-filter: none; }
+                }
             </style>
             <div class="overlay">
                 <div class="spinner">

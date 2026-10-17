@@ -77,11 +77,12 @@
     function show(dlg, onOpen) {
         return new Promise((resolve) => {
             dlg.addEventListener("sac:action", (e) => {
-                // Let the fade-out transition run before removal.
-                setTimeout(() => {
+                // The exit plays first (the sheet slides down, the dialog
+                // fades); sac:closed says it is over.
+                dlg.addEventListener("sac:closed", () => {
                     dlg.remove();
                     resolve(e.detail.action);
-                }, 120);
+                }, { once: true });
             }, { once: true });
 
             document.body.appendChild(dlg);

@@ -423,6 +423,17 @@ class SacTooltip extends HTMLElement {
                     .bubble[data-side="right"] { transform: none; }
                     .bubble.shown { transform: none; }
                 }
+
+                /* Reduced transparency / more contrast: the bubble turns
+                   solid (the glass hue, nothing shining through) and drops
+                   the blur; under more contrast its edge becomes a clearly
+                   visible line. */
+                @media (prefers-reduced-transparency: reduce) {
+                    .bubble { background: var(--glass-solid); backdrop-filter: none; -webkit-backdrop-filter: none; }
+                }
+                @media (prefers-contrast: more) {
+                    .bubble { background: var(--glass-solid); backdrop-filter: none; -webkit-backdrop-filter: none; border-color: var(--border-contrast); }
+                }
             </style>
             <slot></slot>
             <div class="bubble" role="tooltip" part="bubble" popover="manual"></div>

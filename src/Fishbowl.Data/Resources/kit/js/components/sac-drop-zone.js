@@ -489,6 +489,13 @@ class SacDropZone extends HTMLElement {
                     background: linear-gradient(var(--hover), var(--hover)), var(--glass);
                 }
                 :host(:not([disabled]):hover) .icon { color: var(--text-muted); }
+                /* Press (a mouse): the wash steps up the moment it goes down.
+                   A wash, not a scale — the surface never moves. Touch keeps
+                   its own press in the (hover: none) block below. */
+                :host(:not([disabled]):active) .zone {
+                    background: linear-gradient(var(--hover-strong), var(--hover-strong)), var(--glass);
+                    transition-duration: 0s;
+                }
 
                 /* Drag-over: an accent WASH plus the icon and label flipping to
                    accent. No thickened border, no scale — the surface must not
@@ -546,6 +553,29 @@ class SacDropZone extends HTMLElement {
 
                 @media (prefers-reduced-motion: reduce) {
                     .zone, .icon, .label { transition: none; }
+                }
+
+                /* Reduced transparency / more contrast: the overlay surface
+                   turns solid (the glass hue, nothing shining through) and
+                   drops the blur; the drag-over tint stays, a layer of its own
+                   on top. (It is only ever seen while a drag is over it.) */
+                @media (prefers-reduced-transparency: reduce) {
+                    :host([overlay]) .zone { background: var(--glass-solid); backdrop-filter: none; -webkit-backdrop-filter: none; }
+                    :host([overlay][over]:not([disabled])) .zone {
+                        background:
+                            linear-gradient(color-mix(in srgb, var(--accent) 8%, transparent),
+                                            color-mix(in srgb, var(--accent) 8%, transparent)),
+                            var(--glass-solid);
+                    }
+                }
+                @media (prefers-contrast: more) {
+                    :host([overlay]) .zone { background: var(--glass-solid); backdrop-filter: none; -webkit-backdrop-filter: none; border-color: var(--border-contrast); }
+                    :host([overlay][over]:not([disabled])) .zone {
+                        background:
+                            linear-gradient(color-mix(in srgb, var(--accent) 8%, transparent),
+                                            color-mix(in srgb, var(--accent) 8%, transparent)),
+                            var(--glass-solid);
+                    }
                 }
             </style>
             <div class="zone" part="zone">

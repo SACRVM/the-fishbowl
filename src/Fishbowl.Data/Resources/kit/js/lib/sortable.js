@@ -59,7 +59,11 @@
     const LONG_PRESS_MS = 250;
     const EDGE = 32;              // px from a scroller's edge where auto-scroll starts
     const MAX_SPEED = 14;         // px per frame at the very edge
-    const SLIDE_MS = 200;         // neighbours sliding aside, the drop settling (tiles)
+    const SLIDE_MS = 200;         // neighbours sliding aside; the drop settling without sac.motion
+    const FLICK = 400;            // px/s: a drop released faster than this lands with a little bounce
+    /** sac.motion when lib/motion.js is loaded: the drop then settles on a
+     *  spring at the speed the pointer let go; else a 200ms transition. */
+    const motion = () => (window.sac && window.sac.motion) || null;
     const PACK = 9;               // small tiles per .tile-pack (3×3, ui.css)
     const IGNORE = "input, textarea, select, [contenteditable], [data-sortable-ignore]";
 
@@ -181,6 +185,9 @@
             if (sel) sel.removeAllRanges();
             s.scroller = scrollParent(container, axis);
             s.raf = requestAnimationFrame(tick);
+            const m = motion();
+            s.trackX = m ? m.tracker() : null;
+            s.trackY = m ? m.tracker() : null;
             place();
         }
 
@@ -192,6 +199,7 @@
             const dx = axis === "y" ? 0 : s.x - s.grabX - r.left;
             const dy = axis === "x" ? 0 : s.y - s.grabY - r.top;
             it.style.transform = `translate(${dx}px, ${dy}px)` + (scale !== 1 ? ` scale(${scale})` : "");
+            return { dx, dy };
         }
 
         /** Move the item to the slot under the pointer, then onto the pointer. */
@@ -237,11 +245,14 @@
                 lift();
             }
             e.preventDefault();
+            s.trackX?.add(s.x, e.timeStamp);
+            s.trackY?.add(s.y, e.timeStamp);
             place();
         }
 
         function onUp(e) {
             if (!state || e.pointerId !== state.id) return;
+            state.upAt = e.timeStamp;           // a real release: the drop keeps its speed
             end(state.dragging);
         }
         function onCancel(e) {
@@ -297,6 +308,33 @@
             if (!settle || reducedMotion()) { done(); return; }
             // Settle: from where the pointer left it into its slot (the slot
             // may have moved — Escape put it back), then hand the item back.
+            const mo = motion();
+            if (mo) {
+                // On a spring, at the speed the pointer let go — no seam
+                // between hand and animation; a flick lands with a little bounce.
+                const { dx, dy } = follow(s);
+                const vx = s.upAt != null && axis !== "y" ? s.trackX.velocity(s.upAt) : 0;
+                const vy = s.upAt != null && axis !== "x" ? s.trackY.velocity(s.upAt) : 0;
+                const damping = Math.hypot(vx, vy) > FLICK ? 0.8 : 1;
+                let x = dx, y = dy, k = scale;
+                const paint = () => {
+                    it.style.transform = `translate(${x}px, ${y}px)` + (scale !== 1 ? ` scale(${k})` : "");
+                };
+                const springs = [
+                    mo.spring({ from: dx, to: 0, velocity: vx, damping, response: 0.3, onUpdate: (v) => { x = v; paint(); } }),
+                    mo.spring({ from: dy, to: 0, velocity: vy, damping, response: 0.3, onUpdate: (v) => { y = v; paint(); } }),
+                ];
+                if (scale !== 1) {
+                    springs.push(mo.spring({ from: scale, to: 1, response: 0.3, restDelta: 0.001, restSpeed: 0.01,
+                        onUpdate: (v) => { k = v; paint(); } }));
+                }
+                const settleNow = () => { springs.forEach((sp) => sp.stop()); done(); };
+                it._sacSettle = settleNow;
+                Promise.all(springs.map((sp) => sp.done)).then((landed) => {
+                    if (it._sacSettle === settleNow && landed.every(Boolean)) done();
+                });
+                return;
+            }
             follow(s);
             void it.offsetWidth;
             it.style.transition = `transform ${SLIDE_MS}ms ease-out`;
@@ -444,9 +482,10 @@
      *             every tile the slot stays; past the last tile = the end.
      *   slide   — displaced tiles (packs re-forming included) slide to their
      *             new cells, 200ms ease-out.
-     *   settle  — on drop the tile glides from the pointer into its slot;
-     *             Escape glides it — and everything else — back to the
-     *             exact DOM from before the drag.
+     *   settle  — on drop the tile glides from the pointer into its slot,
+     *             on a spring at the speed the pointer let go (sac.motion;
+     *             without it a 200ms ease-out); Escape glides it — and
+     *             everything else — back to the exact DOM from before the drag.
      *   reduced motion — the same targeting, nothing animates.
      *
      * Grid children that are neither an item nor a .tile-pack (a cover tile)

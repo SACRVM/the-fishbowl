@@ -351,9 +351,15 @@ class SacColorField extends HTMLElement {
                     background: var(--field);
                     overflow: hidden;
                     cursor: pointer;
-                    transition: border-color 150ms var(--ease-smooth);
+                    transition: border-color 150ms var(--ease-smooth),
+                                transform 0.2s var(--ease-smooth);
                 }
                 .well:hover:not(:disabled) { border-color: var(--accent); }
+                /* Press: answers the moment it goes down. */
+                .well:active:not(:disabled) {
+                    transform: scale(0.97);
+                    transition-duration: 0.1s;
+                }
                 .well:focus-visible {
                     outline: 2px solid var(--accent);
                     outline-offset: 2px;
@@ -528,6 +534,15 @@ class SacColorField extends HTMLElement {
                         transform: none;
                     }
                     .well, .hex { transition: none; }
+                }
+
+                /* Reduced transparency / more contrast: the blurred popover
+                   turns solid; under more contrast its edge shows clearly. */
+                @media (prefers-reduced-transparency: reduce) {
+                    .popover { background: var(--glass-solid); backdrop-filter: none; -webkit-backdrop-filter: none; }
+                }
+                @media (prefers-contrast: more) {
+                    .popover { background: var(--glass-solid); backdrop-filter: none; -webkit-backdrop-filter: none; border-color: var(--border-contrast); }
                 }
             </style>
             <label class="label" for="hex" hidden></label>

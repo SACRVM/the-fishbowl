@@ -135,7 +135,9 @@
  *     [drawer] and makes its burger the one way to open it — one burger, not
  *     two. When the panel also has entries (host nav, routes, sections) they
  *     stack above the rail in one column. The nav owns the drawer's scrim,
- *     Escape, swipe-left-to-close, closing on a link tap (a .sidebar closes
+ *     Escape, swipe-left-to-close (a finger or a pen; panel, rail and scrim
+ *     follow it 1:1, then a spring finishes the close or puts it back),
+ *     closing on a link tap (a .sidebar closes
  *     on a[href] or [data-drawer-close]; <sac-sidebar> on any item) and the
  *     focus trap (everything outside the drawer turns inert while it is out).
  *   - Safe areas: the ribbon grows by env(safe-area-inset-top) and pads its
@@ -190,6 +192,10 @@
 
     /** Kit i18n: sac.t when globals.js is loaded, the English fallback when
      *  the component runs standalone. */
+    /** sac.motion when lib/motion.js is loaded; without it the drawer
+     *  still closes on a swipe, only it does not follow the finger. */
+    const motion = () => (window.sac && window.sac.motion) || null;
+
     const t = (key, fallback) =>
         (window.sac && window.sac.t) ? window.sac.t(key, fallback) : fallback;
 
@@ -575,6 +581,8 @@ class SacNav extends HTMLElement {
                     flex: none;
                 }
                 .menu-btn:hover { background: var(--hover); }
+                /* Press: answers the moment it goes down. */
+                .menu-btn:active { background: var(--hover-strong); transition-duration: 0s; }
                 .menu-btn:focus-visible,
                 .more-btn:focus-visible {
                     outline: 2px solid var(--accent);
@@ -723,6 +731,7 @@ class SacNav extends HTMLElement {
                     transition: background 0.2s var(--ease-smooth), color 0.2s var(--ease-smooth);
                 }
                 .more-btn:hover { background: var(--hover); color: var(--text); }
+                .more-btn:active { background: var(--hover-strong); transition-duration: 0s; }
 
                 .backdrop {
                     position: fixed;
@@ -746,6 +755,9 @@ class SacNav extends HTMLElement {
                     transform: translateX(-110%);
                     visibility: hidden;
                     transition: transform 0.5s var(--ease-swift), visibility 0.5s;
+                    /* Scrolls up and down natively; a sideways finger is the
+                       swipe-to-close (see _swipeStart). */
+                    touch-action: pan-y pinch-zoom;
                     z-index: 2;
                     padding: 1.5rem 0;
                     overflow-y: auto;
@@ -814,6 +826,7 @@ class SacNav extends HTMLElement {
                 }
                 .panel.rail-look .nav-item sac-icon { --icon-size: 16px; }
                 .panel.rail-look .nav-item:hover { background: var(--hover); color: var(--text); }
+                .panel.rail-look .nav-item:active:not(.active) { background: var(--hover-strong); transition-duration: 0s; }
                 .panel.rail-look .nav-item.active {
                     background: var(--accent-tint);
                     color: var(--accent-text);
@@ -847,6 +860,7 @@ class SacNav extends HTMLElement {
                     background: color-mix(in srgb, var(--fg) 5%, transparent);
                     color: var(--text);
                 }
+                .nav-item:active:not(.active) { background: var(--hover-strong); transition-duration: 0s; }
                 .nav-item.active {
                     background: var(--accent-tint);
                     color: var(--accent);
@@ -944,6 +958,7 @@ class SacNav extends HTMLElement {
                     transform: scale(1.1);
                     background: color-mix(in oklab, var(--btn-color) 80%, var(--lift));
                 }
+                .win-btn:active { transform: scale(0.97); transition-duration: 0.1s; }
                 .win-btn:focus-visible {
                     outline: 2px solid var(--accent);
                     outline-offset: 2px;
@@ -1011,11 +1026,26 @@ class SacNav extends HTMLElement {
                 @media (hover: none) {
                     .menu-btn:hover, .more-btn:hover { background: none; }
                     .win-btn:hover { transform: none; background: var(--btn-color); }
+                    /* …but the press itself still shows (a touch is a hover too). */
+                    .menu-btn:active, .more-btn:active { background: var(--hover-strong); }
+                    .win-btn:active { transform: scale(0.97); }
                 }
                 @media (prefers-reduced-motion: reduce) {
                     .menu-btn span, .backdrop, .panel, .more-btn, .right,
                     .cid-home, .cid-icon, .win-btn { transition: none !important; }
                     .win-btn:hover { transform: none; }
+                }
+                /* Reduced transparency / more contrast: the blurred ribbon and
+                   panel turn solid (same hue), the edge a clearly visible line. */
+                @media (prefers-reduced-transparency: reduce) {
+                    .ribbon,
+                    .panel { background: var(--glass-solid); backdrop-filter: none; -webkit-backdrop-filter: none; }
+                }
+                @media (prefers-contrast: more) {
+                    .ribbon,
+                    .panel { background: var(--glass-solid); backdrop-filter: none; -webkit-backdrop-filter: none; }
+                    .ribbon { border-bottom-color: var(--border-contrast); }
+                    .panel { border-right-color: var(--border-contrast); }
                 }
             </style>
             <nav class="ribbon${titled ? " titled" : ""}">
@@ -1374,8 +1404,10 @@ class SacNav extends HTMLElement {
             if (e.target.closest?.("a[href], [data-drawer-close]")) this._setDrawer(false);
         };
         rail.addEventListener("click", this._railClick);
-        rail.addEventListener("touchstart", this._swipeStart, { passive: true });
-        rail.addEventListener("touchend", this._swipeEnd, { passive: true });
+        rail.addEventListener("pointerdown", this._swipeStart);
+        rail.addEventListener("pointermove", this._swipeMove);
+        rail.addEventListener("pointerup", this._swipeEnd);
+        rail.addEventListener("pointercancel", this._swipeEnd);
     }
 
     _releaseRail() {
@@ -1383,8 +1415,10 @@ class SacNav extends HTMLElement {
         if (!rail) return;
         this._railMO?.disconnect();
         rail.removeEventListener("click", this._railClick);
-        rail.removeEventListener("touchstart", this._swipeStart);
-        rail.removeEventListener("touchend", this._swipeEnd);
+        rail.removeEventListener("pointerdown", this._swipeStart);
+        rail.removeEventListener("pointermove", this._swipeMove);
+        rail.removeEventListener("pointerup", this._swipeEnd);
+        rail.removeEventListener("pointercancel", this._swipeEnd);
         rail.removeAttribute("drawer");
         rail.removeAttribute("open");
         rail.style.removeProperty("--drawer-top");
@@ -1483,23 +1517,104 @@ class SacNav extends HTMLElement {
         this._setDrawer(false);
     }
 
-    /* Swipe left to close the drawer — never from a control that drags. */
+    /* Swipe left to close — a finger or a pen, never from a control that
+       drags, never from the scrim (a tap there closes anyway). After 10px
+       that are clearly sideways the panel, the rail drawer and the scrim
+       follow the finger 1:1 (resisting rightwards); let go and a spring
+       closes it — when it was pushed past half its width or flicked shut —
+       or puts it back. Caught again mid-flight, it carries on from there. */
     _swipeStart = (e) => {
-        this._swipe = null;
-        if (!(this.isOpen || this._drawerOpen) || e.touches.length !== 1) return;
-        const drags = e.composedPath().some((n) => n.matches?.(
-            'input, textarea, select, sac-slider, [role="slider"], [role="separator"], [data-no-swipe]'));
+        if (e.pointerType === "mouse" || this._swipe) return;
+        if (!(this.isOpen || this._drawerOpen)) return;
+        const path = e.composedPath();
+        if (path.some((n) => n.classList?.contains("backdrop") && n.getRootNode() === this.shadowRoot)) return;
+        // Never from a control that drags, nor from a surface that takes the
+        // finger itself (touch-action: none — a canvas, a pan-zoom viewport).
+        const drags = path.some((n) => n.nodeType === 1 && (n.matches(
+            'input, textarea, select, sac-slider, [role="slider"], [role="separator"], [data-no-swipe]')
+            || getComputedStyle(n).touchAction === "none"));
         if (drags) return;
-        this._swipe = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+        const caught = this._swipeSpring;
+        if (caught) { caught.stop(); this._swipeSpring = null; }
+        const m = motion();
+        this._swipe = {
+            id: e.pointerId, x0: e.clientX, y0: e.clientY,
+            // Caught mid-flight: already sideways, carrying on from its offset.
+            decided: !!caught, dx: caught ? this._swipeDx : 0, base: caught ? this._swipeDx : 0,
+            track: m ? m.tracker() : null,
+        };
+    };
+    _swipeMove = (e) => {
+        const s = this._swipe;
+        if (!s || e.pointerId !== s.id) return;
+        const dx = e.clientX - s.x0, dy = e.clientY - s.y0;
+        if (!s.decided) {
+            if (Math.hypot(dx, dy) < 10) return;
+            if (Math.abs(dx) <= Math.abs(dy) * 1.2) { this._swipe = null; return; }   // a scroll
+            s.decided = true;
+            s.x0 = e.clientX;            // from here on 1:1 — no jump by the slop
+            if (motion()) this._holdDrawer(true);
+        }
+        const m = motion();
+        if (!m) { s.dx = e.clientX - s.x0; return; }
+        const raw = s.base + e.clientX - s.x0;
+        s.dx = raw > 0 ? m.rubberband(raw, this._drawerWidth()) : raw;
+        this._placeDrawer(s.dx);
+        s.track.add(s.dx, e.timeStamp);
     };
     _swipeEnd = (e) => {
         const s = this._swipe;
+        if (!s || e.pointerId !== s.id) return;
         this._swipe = null;
-        if (!s || !e.changedTouches.length) return;
-        const dx = e.changedTouches[0].clientX - s.x;
-        const dy = e.changedTouches[0].clientY - s.y;
-        if (dx < -60 && Math.abs(dx) > Math.abs(dy) * 1.5) this._closeAll();
+        if (!s.decided) return;
+        const m = motion();
+        if (!m) { if (s.dx < -60) this._closeAll(); return; }
+        const w = this._drawerWidth();
+        const v = e.type === "pointerup" ? s.track.velocity(e.timeStamp) : 0;
+        const close = s.dx + m.project(v) < -w / 2;
+        const spring = this._swipeSpring = m.spring({
+            from: s.dx, to: close ? -1.1 * w : 0, velocity: v,
+            damping: !close && Math.abs(v) > 400 ? 0.8 : 1,
+            response: 0.3,
+            onUpdate: (x) => this._placeDrawer(x),
+            onDone: () => {
+                if (this._swipeSpring !== spring) return;
+                this._swipeSpring = null;
+                if (close) this._closeAll();
+                this._holdDrawer(false);
+            },
+        });
     };
+
+    /** The width that is out: the panel's, the rail drawer's, the wider. */
+    _drawerWidth() {
+        const panel = this.shadowRoot.querySelector(".panel");
+        return Math.max(this.isOpen && panel ? panel.offsetWidth : 0,
+            this._drawerOpen && this._rail ? this._rail.offsetWidth : 0) || 300;
+    }
+
+    /** Take the panel, the rail and the scrim off their CSS transitions for
+     *  a finger to move them (true), or hand them back to the stylesheet. */
+    _holdDrawer(hold) {
+        const els = [this.shadowRoot.querySelector(".panel"), this._rail,
+            this.shadowRoot.querySelector(".backdrop")].filter(Boolean);
+        for (const el of els) {
+            el.style.transition = hold ? "none" : "";
+            if (!hold) { el.style.transform = ""; el.style.translate = ""; el.style.opacity = ""; }
+        }
+        if (!hold) this._swipeDx = 0;
+    }
+
+    /** Everything that is out, dx px off its open place; the scrim fades
+     *  with the distance. */
+    _placeDrawer(dx) {
+        this._swipeDx = dx;
+        const panel = this.shadowRoot.querySelector(".panel");
+        if (this.isOpen && panel) panel.style.transform = `translateX(${dx}px)`;
+        if (this._drawerOpen && this._rail) this._rail.style.translate = `${dx}px 0`;
+        const backdrop = this.shadowRoot.querySelector(".backdrop");
+        if (backdrop) backdrop.style.opacity = String(Math.min(1, Math.max(0, 1 + dx / this._drawerWidth())));
+    }
 
     /* ------------------------------------------------- toolbar overflow */
 
@@ -1690,8 +1805,10 @@ class SacNav extends HTMLElement {
         };
         document.addEventListener("keydown", this._escHandler);
         // Swipe-left closes the panel too (the rail carries its own listeners).
-        this.addEventListener("touchstart", this._swipeStart, { passive: true });
-        this.addEventListener("touchend", this._swipeEnd, { passive: true });
+        this.addEventListener("pointerdown", this._swipeStart);
+        this.addEventListener("pointermove", this._swipeMove);
+        this.addEventListener("pointerup", this._swipeEnd);
+        this.addEventListener("pointercancel", this._swipeEnd);
 
         // These three handlers re-render the whole panel, deliberately: unlike
         // the form components (which update in place to protect a live drag),

@@ -315,6 +315,9 @@ class SacSelect extends HTMLElement {
                 }
                 .clear { cursor: pointer; }
                 .clear:hover { color: var(--text); background: var(--hover); }
+                /* Press: answers the moment it goes down (outranks the
+                   (hover: none) reset below, so a tap shows it too). */
+                .clear:active:not(:disabled) { color: var(--text); background: var(--hover-strong); transition-duration: 0s; }
                 .clear[hidden] { display: none; }
                 .chev { transition: transform 150ms var(--ease-smooth); }
                 :host([open]) .chev { transform: rotate(180deg); }
@@ -362,6 +365,8 @@ class SacSelect extends HTMLElement {
                 .opt[aria-selected="true"] { color: var(--accent-text); font-weight: 600; }
                 .opt[aria-selected="true"] .tick { visibility: visible; }
                 .opt.hl { background: var(--hover); }
+                /* Press: the row steps to the strong wash at once. */
+                .opt:not([aria-disabled="true"]):active { background: var(--hover-strong); transition-duration: 0s; }
                 .opt[aria-disabled="true"] { color: var(--text-dim); cursor: not-allowed; }
                 .opt[aria-disabled="true"].hl { background: transparent; }
                 .empty { padding: 8px; color: var(--text-muted); cursor: default; }
@@ -409,6 +414,15 @@ class SacSelect extends HTMLElement {
                     :host([size="cell"]) .field { font-size: max(16px, 1em); }
                 }
                 @media (prefers-reduced-motion: reduce) { .field, .chev { transition: none; } }
+
+                /* Reduced transparency / more contrast: the blurred list turns
+                   solid; under more contrast its edge shows clearly. */
+                @media (prefers-reduced-transparency: reduce) {
+                    .list { background: var(--glass-solid); backdrop-filter: none; -webkit-backdrop-filter: none; }
+                }
+                @media (prefers-contrast: more) {
+                    .list { background: var(--glass-solid); backdrop-filter: none; -webkit-backdrop-filter: none; border-color: var(--border-contrast); }
+                }
             </style>
             <label class="label" part="label" for="text" hidden></label>
             <div class="field" part="field">

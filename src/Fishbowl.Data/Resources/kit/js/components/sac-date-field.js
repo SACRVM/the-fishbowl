@@ -497,11 +497,17 @@ class SacDateField extends HTMLElement {
                     cursor: pointer;
                     --icon-size: 15px;
                     transition: border-color 150ms var(--ease-smooth),
-                                color 150ms var(--ease-smooth);
+                                color 150ms var(--ease-smooth),
+                                transform 0.2s var(--ease-smooth);
                 }
                 .well:hover:not(:disabled) {
                     border-color: var(--accent);
                     color: var(--accent);
+                }
+                /* Press: answers the moment it goes down. */
+                .well:active:not(:disabled) {
+                    transform: scale(0.97);
+                    transition-duration: 0.1s;
                 }
                 .well:focus-visible {
                     outline: 2px solid var(--accent);
@@ -626,6 +632,15 @@ class SacDateField extends HTMLElement {
                         transform: none;
                     }
                     .date, .well { transition: none; }
+                }
+
+                /* Reduced transparency / more contrast: the blurred popover
+                   turns solid; under more contrast its edge shows clearly. */
+                @media (prefers-reduced-transparency: reduce) {
+                    .popover { background: var(--glass-solid); backdrop-filter: none; -webkit-backdrop-filter: none; }
+                }
+                @media (prefers-contrast: more) {
+                    .popover { background: var(--glass-solid); backdrop-filter: none; -webkit-backdrop-filter: none; border-color: var(--border-contrast); }
                 }
             </style>
             <label class="label" part="label" for="date" hidden></label>

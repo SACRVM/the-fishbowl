@@ -313,6 +313,8 @@ class SacShortcutSheet extends HTMLElement {
                     --icon-size: var(--icon-btn-icon, 14px);
                 }
                 .close:hover { background: var(--hover); color: var(--text); }
+                /* Press: answers the moment it goes down. */
+                .close:active { background: var(--hover-strong); }
                 .close:focus-visible, .body:focus-visible {
                     outline: 2px solid var(--accent);
                     outline-offset: 2px;
@@ -405,6 +407,18 @@ class SacShortcutSheet extends HTMLElement {
                 }
                 @media (prefers-reduced-motion: reduce) {
                     .backdrop, .panel { animation-duration: 1ms; }
+                }
+                /* Reduced transparency / more contrast: the panel turns
+                   solid (same hue, nothing shining through) and drops the
+                   blur. The backdrop is a scrim — it keeps its dim and only
+                   loses the blur. */
+                @media (prefers-reduced-transparency: reduce) {
+                    .backdrop { backdrop-filter: none; -webkit-backdrop-filter: none; }
+                    .panel { background: var(--glass-solid); backdrop-filter: none; -webkit-backdrop-filter: none; }
+                }
+                @media (prefers-contrast: more) {
+                    .backdrop { backdrop-filter: none; -webkit-backdrop-filter: none; }
+                    .panel { background: var(--glass-solid); backdrop-filter: none; -webkit-backdrop-filter: none; border-color: var(--border-contrast); }
                 }
             </style>
             <div class="backdrop" part="backdrop"></div>

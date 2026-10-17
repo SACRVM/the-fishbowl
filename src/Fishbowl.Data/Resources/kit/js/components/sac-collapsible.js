@@ -195,11 +195,17 @@ class SacCollapsible extends HTMLElement {
                     font-size: 11px;
                     line-height: 1.3;
                     cursor: pointer;
-                    transition: color 0.1s, border-color 0.1s;
+                    transition: color 0.1s, border-color 0.1s, transform 0.2s var(--ease-smooth);
+                    transform-origin: top;   /* the press keeps it on the line */
                 }
                 .toggle:hover {
                     color: var(--text);
                     border-color: var(--text-muted);
+                }
+                /* Press: the tab gives under the pointer the moment it goes down. */
+                .toggle:active {
+                    transform: scale(0.97);
+                    transition-duration: 0.1s;
                 }
                 .toggle[hidden] { display: none !important; }
 
@@ -218,6 +224,9 @@ class SacCollapsible extends HTMLElement {
                 @media (hover: none) {
                     .divider:has(.toggle:hover) { border-top-color: var(--border); }
                     .toggle:hover { color: var(--text-muted); border-color: var(--border); }
+                }
+                @media (prefers-reduced-motion: reduce) {
+                    .toggle { transition: none; }
                 }
             </style>
             <div class="content"><slot></slot></div>
