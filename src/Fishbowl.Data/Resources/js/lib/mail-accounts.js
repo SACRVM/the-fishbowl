@@ -206,7 +206,7 @@
                 done = true;
                 return true;
             };
-            dlg.addEventListener("sac:action", () => setTimeout(() => { dlg.remove(); resolve(done); }, 120), { once: true });
+            dlg.addEventListener("sac:closed", () => { dlg.remove(); resolve(done); }, { once: true });
             document.body.appendChild(dlg);
             setTimeout(() => dlg.open(), 0);
         });

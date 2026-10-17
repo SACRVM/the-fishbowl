@@ -137,7 +137,7 @@
             dlg.querySelector(".fb-temp-pw").textContent = tempPassword;
             dlg.querySelector("sac-copy-button").setAttribute("value", tempPassword);
             dlg.addEventListener("sac:action", (e) => {
-                setTimeout(() => { dlg.remove(); resolve(e.detail.action); }, 120);
+                dlg.addEventListener("sac:closed", () => { dlg.remove(); resolve(e.detail.action); }, { once: true });
             }, { once: true });
             document.body.appendChild(dlg);
             setTimeout(() => dlg.open(), 0);
@@ -190,7 +190,7 @@
             dlg.querySelector("#fb-add-name").addEventListener("keydown", (e) => { if (e.key === "Enter") dlg.trigger("create"); });
             dlg.querySelector("#fb-add-username").addEventListener("keydown", (e) => { if (e.key === "Enter") dlg.trigger("create"); });
             dlg.addEventListener("sac:action", async (e) => {
-                setTimeout(() => dlg.remove(), 120);
+                dlg.addEventListener("sac:closed", () => dlg.remove(), { once: true });
                 if (e.detail.action !== "create" || !created) { resolve(false); return; }
                 await revealPassword({ title: fb.t("fb.admin.user-added", "User added"), username: created.username, tempPassword: created.tempPassword });
                 window.sac?.toast?.(fb.t("fb.admin.can-sign-in-now", "{who} can sign in now.", { who: created.username }), { kind: "success" });
@@ -368,7 +368,7 @@
             dlg.addEventListener("sac:action", (e) => {
                 const action = e.detail?.action;
                 const archive = body.querySelector("input[name=archive]")?.checked ?? false;
-                setTimeout(() => dlg.remove(), 120);
+                dlg.addEventListener("sac:closed", () => dlg.remove(), { once: true });
                 resolve(action === "delete" ? { archive } : null);
             }, { once: true });
             document.body.appendChild(dlg);

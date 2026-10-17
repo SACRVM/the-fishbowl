@@ -461,7 +461,7 @@ class FbKeysSettingsView extends HTMLElement {
             dlg.querySelector(".fb-token-block").textContent = text;
             dlg.querySelector("sac-copy-button").setAttribute("value", text);
             dlg.addEventListener("sac:action", (e) => {
-                setTimeout(() => { dlg.remove(); resolve(e.detail.action); }, 120);
+                dlg.addEventListener("sac:closed", () => { dlg.remove(); resolve(e.detail.action); }, { once: true });
             }, { once: true });
             document.body.appendChild(dlg);
             setTimeout(() => dlg.open(), 0);

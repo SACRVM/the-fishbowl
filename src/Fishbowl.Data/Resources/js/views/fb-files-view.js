@@ -77,10 +77,10 @@
                 dlg.appendChild(label);
             }
             dlg.addEventListener("sac:action", (e) => {
-                setTimeout(() => {
+                dlg.addEventListener("sac:closed", () => {
                     dlg.remove();
                     resolve({ action: e.detail.action, all: !!box?.checked });
-                }, 120);
+                }, { once: true });
             }, { once: true });
             document.body.appendChild(dlg);
             setTimeout(() => dlg.open(), 0);
@@ -1185,7 +1185,7 @@
                 ];
                 dlg.addEventListener("sac:action", (e) => {
                     const result = e.detail.action === "ok" ? { workspace: select.value, folder: picker.path || "" } : null;
-                    setTimeout(() => { dlg.remove(); resolve(result); }, 120);
+                    dlg.addEventListener("sac:closed", () => { dlg.remove(); resolve(result); }, { once: true });
                 }, { once: true });
                 document.body.appendChild(dlg);
                 setTimeout(() => { dlg.open(); bindPicker(); }, 0);

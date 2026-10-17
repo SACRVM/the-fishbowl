@@ -1292,7 +1292,7 @@ class FbCalendarView extends HTMLElement {
         ];
         dlg.addEventListener("sac:action", (e) => {
             if (e.detail?.action === "go") onGo();
-            setTimeout(() => dlg.remove(), 120);
+            dlg.addEventListener("sac:closed", () => dlg.remove(), { once: true });
         });
         document.body.appendChild(dlg);
         setTimeout(() => dlg.open?.(), 0);
@@ -1441,7 +1441,7 @@ class FbCalendarView extends HTMLElement {
         body.append(make, fresh, list);
         dlg.appendChild(body);
         dlg.buttons = [{ action: "close", label: fb.t("fb.common.close", "Close"), kind: "default" }];
-        dlg.addEventListener("sac:action", () => setTimeout(() => dlg.remove(), 120));
+        dlg.addEventListener("sac:closed", () => dlg.remove(), { once: true });
         document.body.appendChild(dlg);
         await fill();
         setTimeout(() => dlg.open?.(), 0);

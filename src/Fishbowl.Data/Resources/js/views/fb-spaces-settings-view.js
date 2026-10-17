@@ -276,9 +276,10 @@ class FbSpacesSettingsView extends HTMLElement {
         });
         dlg.appendChild(label);
         // The kit dialog's own buttons; Close, Escape and the backdrop are
-        // one sac:action, and the dialog goes (its ids with it).
+        // one way out: once its exit has played (sac:closed) the dialog
+        // goes, its ids with it.
         dlg.buttons = [{ action: "close", label: fb.t("fb.common.close", "Close"), kind: "default" }];
-        dlg.addEventListener("sac:action", () => setTimeout(() => dlg.remove(), 120), { once: true });
+        dlg.addEventListener("sac:closed", () => dlg.remove(), { once: true });
         document.body.appendChild(dlg);
         setTimeout(() => dlg.open?.(), 0);
     }
@@ -299,8 +300,8 @@ class FbSpacesSettingsView extends HTMLElement {
         grid.className = "fb-space-color-grid";
         dlg.appendChild(grid);
         grid.colors = fb.accents.swatches(space.color);
-        // close() fires sac:action too, so one listener removes it either way.
-        dlg.addEventListener("sac:action", () => setTimeout(() => dlg.remove(), 120), { once: true });
+        // close() ends in sac:closed too, so one listener removes it either way.
+        dlg.addEventListener("sac:closed", () => dlg.remove(), { once: true });
         grid.addEventListener("sac:change", async (e) => {
             try {
                 await fb.api.spaces.update(slug, { color: fb.accents.slotOf(e.detail.value) });
@@ -376,7 +377,7 @@ class FbSpacesSettingsView extends HTMLElement {
             paint();
             dlg.addEventListener("sac:action", (e) => {
                 const action = e.detail?.action;
-                setTimeout(() => dlg.remove(), 120);
+                dlg.addEventListener("sac:closed", () => dlg.remove(), { once: true });
                 resolve(action === "delete" ? { archive: box.checked } : null);
             }, { once: true });
             document.body.appendChild(dlg);

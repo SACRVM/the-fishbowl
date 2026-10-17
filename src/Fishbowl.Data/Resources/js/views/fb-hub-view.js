@@ -863,7 +863,7 @@ class FbHubView extends HTMLElement {
         };
         fill();
         dlg.appendChild(list);
-        dlg.addEventListener("sac:action", () => setTimeout(() => dlg.remove(), 120), { once: true });
+        dlg.addEventListener("sac:closed", () => dlg.remove(), { once: true });
         document.body.appendChild(dlg);
         setTimeout(() => dlg.open(), 0);
     }

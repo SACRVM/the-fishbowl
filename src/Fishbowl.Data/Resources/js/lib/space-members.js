@@ -264,7 +264,7 @@
         dlg.querySelector(".fb-invite-hint").textContent = fb.t("fb.spaces.invite-hint",
             "A link for one person. Send it any way you like — whoever opens it and signs in is in, even when new accounts otherwise wait for approval.");
         dlg.addEventListener("sac:action", async (e) => {
-            setTimeout(() => dlg.remove(), 120);
+            dlg.addEventListener("sac:closed", () => dlg.remove(), { once: true });
             if (e.detail?.action !== "create") return;
             const role = dlg.querySelector("select[name=role]").value;
             const days = Number(dlg.querySelector("select[name=days]").value);
@@ -310,7 +310,7 @@
                 input.select();
             }
         });
-        dlg.addEventListener("sac:action", () => setTimeout(() => dlg.remove(), 120), { once: true });
+        dlg.addEventListener("sac:closed", () => dlg.remove(), { once: true });
         document.body.appendChild(dlg);
         setTimeout(() => dlg.open(), 0);
     }

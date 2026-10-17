@@ -167,9 +167,9 @@ class FbMessagesView extends HTMLElement {
         }
         dlg.appendChild(list);
         // The kit dialog's own buttons; every way out (Close, Escape, the
-        // backdrop, the last Unmute) is one sac:action, and the dialog goes.
+        // backdrop, the last Unmute) ends in sac:closed, and the dialog goes.
         dlg.buttons = [{ action: "close", label: fb.t("fb.common.close", "Close"), kind: "default" }];
-        dlg.addEventListener("sac:action", () => setTimeout(() => dlg.remove(), 120), { once: true });
+        dlg.addEventListener("sac:closed", () => dlg.remove(), { once: true });
         document.body.appendChild(dlg);
         setTimeout(() => dlg.open?.(), 0);
     }

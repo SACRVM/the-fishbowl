@@ -783,9 +783,9 @@ class FbContactsView extends HTMLElement {
         }
         dlg.appendChild(list);
         // The dialog's own button row (sac-dialog has no footer slot); any
-        // way out — the button, Escape, the backdrop — ends in sac:action.
+        // way out — the button, Escape, the backdrop — ends in sac:closed.
         dlg.buttons = [{ action: "close", label: fb.t("fb.common.close", "Close"), kind: "default" }];
-        dlg.addEventListener("sac:action", () => setTimeout(() => dlg.remove(), 120));
+        dlg.addEventListener("sac:closed", () => dlg.remove(), { once: true });
         document.body.appendChild(dlg);
         setTimeout(() => dlg.open?.(), 0);
     }

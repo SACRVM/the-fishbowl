@@ -693,11 +693,11 @@
                 }
             };
             dlg.addEventListener("sac:action", () => {
-                setTimeout(() => {
+                dlg.addEventListener("sac:closed", () => {
                     dlg.remove();
                     if (done) resolve(result);
                     else reject(new VaultError("cancelled", fb.t("fb.vault.cancelled", "Cancelled.")));
-                }, 120);
+                }, { once: true });
             }, { once: true });
             document.body.appendChild(dlg);
             setTimeout(() => {

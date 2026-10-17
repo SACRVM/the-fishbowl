@@ -514,7 +514,7 @@
         dlg.setAttribute("title", title);
         dlg.style.setProperty("--dialog-width", width);
         dlg.buttons = buttons;
-        dlg.addEventListener("sac:action", () => setTimeout(() => dlg.remove(), 120), { once: true });
+        dlg.addEventListener("sac:closed", () => dlg.remove(), { once: true });
         return dlg;
     }
 
