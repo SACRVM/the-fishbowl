@@ -289,6 +289,13 @@ builder.Services.AddScoped<IMcpTool, Fishbowl.Mcp.Tools.Tables.RowQueryTool>();
 builder.Services.AddScoped<IMcpTool, Fishbowl.Mcp.Tools.Tables.RowCountTool>();
 builder.Services.AddScoped<IMcpTool, Fishbowl.Mcp.Tools.Tables.RowAggregateTool>();
 builder.Services.AddScoped<IMcpTool, Fishbowl.Mcp.Tools.Tables.RowSearchTool>();
+// The workspace's files (the Files API's rules, AppsFolder.Guard included).
+builder.Services.AddScoped<IMcpTool, Fishbowl.Mcp.Tools.Files.FileListTool>();
+builder.Services.AddScoped<IMcpTool, Fishbowl.Mcp.Tools.Files.FileReadTool>();
+builder.Services.AddScoped<IMcpTool, Fishbowl.Mcp.Tools.Files.FileWriteTool>();
+builder.Services.AddScoped<IMcpTool, Fishbowl.Mcp.Tools.Files.FileMoveTool>();
+builder.Services.AddScoped<IMcpTool, Fishbowl.Mcp.Tools.Files.FileDeleteTool>();
+builder.Services.AddScoped<IMcpTool, Fishbowl.Mcp.Tools.Files.FolderCreateTool>();
 
 builder.Services.AddScoped<ToolRegistry>();
 

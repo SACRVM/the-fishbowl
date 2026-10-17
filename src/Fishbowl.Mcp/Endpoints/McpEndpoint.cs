@@ -2,6 +2,7 @@ using System.Security.Claims;
 using System.Text.Json;
 using Fishbowl.Core;
 using Fishbowl.Core.Apps;
+using Fishbowl.Core.Files;
 using Fishbowl.Core.Mcp;
 using Fishbowl.Core.Tables;
 using Fishbowl.Core.Util;
@@ -102,6 +103,14 @@ public static class McpEndpoint
             // falls through to InternalError, its wording stays in the log.
             logger.LogDebug("MCP {Method} refused by the table layer: {Code}", request.Method, ex.Code);
             error = new McpError(McpErrorCodes.InvalidParams, ex.Message);
+        }
+        catch (FileStoreException ex)
+        {
+            // The file store's refusals (a name the host won't take, a file
+            // already there, the quota, app code below Designer…) are
+            // written for the caller and name no server path.
+            logger.LogDebug("MCP {Method} refused by the file store: {Code}", request.Method, ex.Code);
+            error = new McpError(McpErrorCodes.InvalidParams, $"{ex.Code}: {ex.Message}");
         }
         catch (InvalidOperationException ex) when (ex.TargetSite?.DeclaringType?.Assembly == typeof(JsonElement).Assembly)
         {

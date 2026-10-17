@@ -8,10 +8,11 @@ using Fishbowl.Core.Tables;
 namespace Fishbowl.Core.Desktop;
 
 // The guide the server writes from the live space (space-apps spec, decision
-// 23): what an agent needs to build or fix this space's own apps — the
-// caller's role, how an app is laid out and runs, the context.space API,
-// this space's tables, its apps and their latest errors. Markdown, short
-// enough for a small agent; REST GET …/guide and the MCP tool space_guide.
+// 23): what an agent needs to work in this space and to build or fix its own
+// apps — the caller's role, the space's house rules (first), how an app is
+// laid out and runs, the context.space API, this space's tables, its apps and
+// their latest errors. Markdown, short enough for a small agent; REST GET
+// …/guide and the MCP tool space_guide.
 public static partial class SpaceGuide
 {
     public const int MaxQuoted = 300;
@@ -43,6 +44,23 @@ public static partial class SpaceGuide
                 : "You may read; apps you'd build need the Designer role."));
         sb.AppendLine();
 
+        // The house rules come first: they say how to work with this space's
+        // data, which is what most agents are here for. Only Designers write
+        // `.apps/`, so no member can slip instructions in here.
+        var rules = await HouseRulesAsync(files, ctx, ct);
+        if (rules.Count > 0)
+        {
+            sb.AppendLine("## House rules");
+            sb.AppendLine("What this space's Designers ask of everyone working in it — people and agents. Follow them.");
+            sb.AppendLine();
+            foreach (var (folder, text) in rules)
+            {
+                sb.AppendLine($"### `.apps/{folder}/{SpaceApps.HouseRulesFile}`");
+                sb.AppendLine(Demoted(text).TrimEnd());
+                sb.AppendLine();
+            }
+        }
+
         sb.AppendLine("## How a space app works");
         sb.AppendLine("""
             - An app is a folder in the space's files: `.apps/<folder>/` (folder: lower-case letters, digits, `-`).
@@ -59,11 +77,12 @@ public static partial class SpaceGuide
             - Every member of the space gets a tile; it opens in a window, in a sandboxed frame: no cookies, no network (`fetch` to other servers is blocked), no access to the page around it. Data only through `context.space`, as the person using the app — their role decides what works.
             - The frame has SACRVM APPKIT loaded: its CSS (`.card`, `.btn`, `.btn.primary`, `.toolbar`, `.empty-state`, `.muted`, the theme tokens like `var(--accent)`) and its components — `sac-section`, `sac-select`, `sac-number-field`, `sac-date-field`, `sac-time-field`, `sac-toggle`, `sac-chip`, `sac-chip-input`, `sac-menu`, `sac-tabs`, `sac-dialog`, `sac-calendar`, `sac-progress`, `sac-spinner`, `sac-icon`, `sac-tooltip`, `sac-copy-button`, `sac-status-banner`. Use those; don't load other libraries.
             - Scripts, styles, JSON, images and fonts in the folder are served next to the entry (relative URLs work); never HTML. The code isn't pinned: a change runs the next time someone opens the app.
+            - `house-rules.md` in the folder (Markdown, up to 32 KB) is how everyone should work with the space's data — this guide shows it first, to every agent.
             """);
 
         sb.AppendLine("## Writing the code");
         sb.AppendLine($"""
-            Over the Files API with a key for this space that has `write:files` and `design:apps` (and your role must be Designer):
+            With a key for this space that has `write:files` and `design:apps` (and your role must be Designer): over MCP, `file_write` (`path`: `.apps/<folder>/app.js`, the code as `text`; `overwrite: true` to replace) — or over the Files API:
             ```
             PUT /api/v1/spaces/{space.Slug}/files/content?path=.apps/<folder>/app.js&parents=1
             X-Fishbowl-Upload: 1
@@ -183,6 +202,47 @@ public static partial class SpaceGuide
             - Keep an app small and say what it does in `description`; describe tables and columns.
             - Members see an app's tile as soon as its `app.json` reads — test with a copy in a new folder first.
             """);
+        return sb.ToString();
+    }
+
+    // Every app folder's house rules, in folder order; a missing, unreadable
+    // or oversized file is left out.
+    private static async Task<List<(string Folder, string Text)>> HouseRulesAsync(IFileService files, ContextRef ctx, CancellationToken ct)
+    {
+        var found = new List<(string, string)>();
+        FileListPage page;
+        try { page = await files.ListAsync(ctx, AppsFolder.Name, null, 500, ct); }
+        catch (FileStoreException) { return found; }
+        foreach (var e in page.Entries.Where(e => e.Kind == FileKinds.Folder && SpaceApps.IsFolder(e.Name)).OrderBy(e => e.Name, StringComparer.Ordinal))
+        {
+            try
+            {
+                var h = await files.OpenReadAsync(ctx, $"{AppsFolder.Name}/{e.Name}/{SpaceApps.HouseRulesFile}", ct);
+                await using var stream = h.Stream;
+                if (h.Entry.Size > SpaceApps.MaxHouseRulesBytes) continue;
+                using var reader = new StreamReader(stream, Encoding.UTF8);
+                var text = await reader.ReadToEndAsync(ct);
+                if (!string.IsNullOrWhiteSpace(text)) found.Add((e.Name, text));
+            }
+            catch (FileStoreException) { }
+        }
+        return found;
+    }
+
+    // The rules' own headings three levels down, under this guide's `###`;
+    // lines inside a code fence stay as they are.
+    private static string Demoted(string markdown)
+    {
+        var sb = new StringBuilder();
+        var fenced = false;
+        foreach (var line in markdown.Replace("\r\n", "\n").Split('\n'))
+        {
+            if (line.TrimStart().StartsWith("```", StringComparison.Ordinal)) fenced = !fenced;
+            var level = fenced ? 0 : line.TakeWhile(c => c == '#').Count();
+            sb.AppendLine(level is > 0 and < 7 && line.Length > level && line[level] == ' '
+                ? new string('#', Math.Min(level + 3, 6)) + line[level..]
+                : line);
+        }
         return sb.ToString();
     }
 }

@@ -23,6 +23,11 @@ public static partial class SpaceApps
     public const string CodeKeyConfig = "Apps:CodeKey";
     public const int MaxManifestBytes = 64 * 1024;
 
+    // What a space asks of everyone working in it — people and agents —, kept
+    // by its Designers beside an app's code; space_guide puts it first.
+    public const string HouseRulesFile = "house-rules.md";
+    public const int MaxHouseRulesBytes = 32 * 1024;
+
     [GeneratedRegex("^[a-z0-9][a-z0-9-]{0,39}$")]
     private static partial Regex FolderShape();
 

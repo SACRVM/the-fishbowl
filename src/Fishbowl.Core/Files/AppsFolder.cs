@@ -20,6 +20,22 @@ public static class AppsFolder
     /// <summary>Is the wire path the `.apps` folder itself?</summary>
     public static bool IsRoot(string? path) => (path ?? "").Trim('/').Equals(Name, StringComparison.OrdinalIgnoreCase);
 
+    /// <summary>
+    /// The rule every door to the files keeps (REST FilesApi, the MCP file
+    /// tools) before writing, moving, copying or deleting: a path in
+    /// `.apps` is refused in the personal workspace and to anyone who may
+    /// not design — below Designer, or a key without `design:apps`.
+    /// </summary>
+    public static void Guard(bool personal, bool canDesign, params string?[] paths)
+    {
+        foreach (var p in paths)
+        {
+            if (!Contains(p)) continue;
+            if (personal) throw SpaceOnly();
+            if (!canDesign) throw DesignOnly();
+        }
+    }
+
     public static FileStoreException SpaceOnly() =>
         new(400, "apps_space_only", "App code (.apps) lives in spaces only.");
 

@@ -83,16 +83,9 @@ public static class FilesApi
         return (new Target(ContextRef.Space(resolved.Space!.Id), userId, CanDesign: canDesign), null);
     }
 
-    // Writing into or out of .apps (space-apps spec, "Where things live").
-    private static void GuardApps(Target t, params string?[] paths)
-    {
-        foreach (var p in paths)
-        {
-            if (!AppsFolder.Contains(p)) continue;
-            if (t.Personal) throw AppsFolder.SpaceOnly();
-            if (!t.CanDesign) throw AppsFolder.DesignOnly();
-        }
-    }
+    // Writing into or out of .apps (space-apps spec, "Where things live") —
+    // the rule the MCP file tools keep too.
+    private static void GuardApps(Target t, params string?[] paths) => AppsFolder.Guard(t.Personal, t.CanDesign, paths);
 
     // A trash entry's original path decides whether it is app code. The id
     // is canonicalised first (FileTrashIds): on a case-insensitive volume a
