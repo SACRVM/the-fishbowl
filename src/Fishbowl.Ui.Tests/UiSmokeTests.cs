@@ -121,6 +121,56 @@ public class UiSmokeTests
         await context.CloseAsync();
     }
 
+    // A finger drawn sideways across the note's text edits it — it never
+    // swipes the note away (sac-split's back swipe, kit 2.33; the editor's
+    // contenteditable="plaintext-only" carries data-no-swipe, sac-md-editor
+    // ded6384). The same drag on the editor's frame does go back.
+    [Fact]
+    public async Task Phone_DragAcrossTheNoteText_NeverSwipesBack_Test()
+    {
+        var context = await _fixture.Browser!.NewContextAsync(Phone());
+        var page = await context.NewPageAsync();
+        var created = await page.APIRequest.PostAsync(_fixture.BaseUrl + "/api/v1/notes", new APIRequestContextOptions
+        {
+            DataObject = new { title = "Swipe smoke note", content = "Text to drag across" },
+        });
+        Assert.True(created.Ok, $"seed note failed: {created.Status}");
+
+        await page.GotoAsync(_fixture.BaseUrl + "/#/notes");
+        await page.Locator(".nv-item", new PageLocatorOptions { HasText = "Swipe smoke note" }).First.TapAsync();
+        await page.WaitForFunctionAsync("() => document.querySelector('fb-notes-view sac-split').getAttribute('show') === 'end'");
+        var editor = page.Locator("fb-notes-view #content");
+        var before = await editor.EvaluateAsync<string>("e => e.value");
+
+        // A touch drag of 300px to the right, slow enough to read as a drag
+        // (the release comes after a pause, so it carries no flick).
+        const string drag = @"async (inner) => {
+            const host = document.querySelector('fb-notes-view #content');
+            const target = inner ? host.shadowRoot.querySelector('[contenteditable]') : host;
+            const r = target.getBoundingClientRect();
+            const x0 = r.left + 20, y = r.top + Math.min(40, r.height / 2);
+            const fire = (type, x) => target.dispatchEvent(new PointerEvent(type, {
+                pointerId: 7, pointerType: 'touch', isPrimary: true, button: 0,
+                clientX: x, clientY: y, bubbles: true, composed: true }));
+            const pause = (ms) => new Promise((done) => setTimeout(done, ms));
+            fire('pointerdown', x0);
+            for (let dx = 15; dx <= 300; dx += 15) { await pause(16); fire('pointermove', x0 + dx); }
+            await pause(120);
+            fire('pointerup', x0 + 300);
+        }";
+        await page.EvaluateAsync(drag, true);
+        await page.WaitForTimeoutAsync(700);
+        Assert.Equal("end", await page.Locator("fb-notes-view sac-split").GetAttributeAsync("show"));
+        Assert.Equal(before, await editor.EvaluateAsync<string>("e => e.value"));
+
+        // The control: on the frame around the text the same drag goes back.
+        await page.EvaluateAsync(drag, false);
+        await page.WaitForFunctionAsync("() => document.querySelector('fb-notes-view sac-split').getAttribute('show') === 'start'",
+            null, new PageWaitForFunctionOptions { Timeout = 3000 });
+
+        await context.CloseAsync();
+    }
+
     [Theory]
     [InlineData("keys", "fb-keys-settings-view")]
     [InlineData("spaces", "fb-spaces-settings-view")]

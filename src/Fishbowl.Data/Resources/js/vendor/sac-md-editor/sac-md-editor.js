@@ -220,6 +220,25 @@ const MD_TOOLBAR_TEXT = {
     table:  ["table",  "Insert a table, or edit the one at the caret", "tableLabel", "Table"],
 };
 
+// Press state by hand (kit 2.33: feedback on pointer-down). The toolbar and
+// the reveal eye cancel their mousedown to keep the caret where it is, and
+// Firefox gives a cancelled press no :active - so .pressed carries it, from
+// pointer-down until the pointer is let go anywhere.
+function trackPress(root, selector) {
+    root.addEventListener("pointerdown", (e) => {
+        const el = e.target.closest?.(selector);
+        if (!el) return;
+        el.classList.add("pressed");
+        const up = () => {
+            el.classList.remove("pressed");
+            window.removeEventListener("pointerup", up);
+            window.removeEventListener("pointercancel", up);
+        };
+        window.addEventListener("pointerup", up);
+        window.addEventListener("pointercancel", up);
+    });
+}
+
 class SacMdEditor extends HTMLElement {
     static observedAttributes = ["placeholder", "readonly"];
 
@@ -415,7 +434,7 @@ class SacMdEditor extends HTMLElement {
         }
         if (name === "readonly") {
             const ro = newVal !== null;
-            this._editor.setAttribute("contenteditable", ro ? "false" : "plaintext-only");
+            this._setEditable(!ro);
             this.classList.toggle("is-readonly", ro);
             if (ro) {
                 // Fully re-render so no line is left in "active" flat mode.
@@ -424,6 +443,15 @@ class SacMdEditor extends HTMLElement {
             }
             this._syncRevealHints();
         }
+    }
+
+    /** contenteditable and the kit's swipe opt-out travel together: a finger
+     *  dragging across text being edited never starts a <sac-split> back
+     *  swipe (the split's own field selector misses "plaintext-only"); a
+     *  read-only editor is just text, so the swipe may start there. */
+    _setEditable(on) {
+        this._editor.setAttribute("contenteditable", on ? "plaintext-only" : "false");
+        this._editor.toggleAttribute("data-no-swipe", on);
     }
 
     // -----------------------------------------------------------------------
@@ -444,12 +472,8 @@ class SacMdEditor extends HTMLElement {
         this._placeholder = this.getAttribute("placeholder") || "";
         if (this._placeholder) this._editor.setAttribute("data-placeholder", this._placeholder);
 
-        if (this.hasAttribute("readonly")) {
-            this._editor.setAttribute("contenteditable", "false");
-            this.classList.add("is-readonly");
-        } else {
-            this._editor.setAttribute("contenteditable", "plaintext-only");
-        }
+        this._setEditable(!this.hasAttribute("readonly"));
+        if (this.hasAttribute("readonly")) this.classList.add("is-readonly");
 
         // Seed with a single empty line so the caret has somewhere to go.
         this._editor.replaceChildren(this._buildRenderedLine("", freshState()));
@@ -484,6 +508,7 @@ class SacMdEditor extends HTMLElement {
         this._editor.addEventListener("mousedown", (e) => {
             if (e.target.closest?.(".sac-reveal-toggle")) e.preventDefault();
         });
+        trackPress(this._editor, ".sac-reveal-toggle");
         this._editor.addEventListener("click", (e) => {
             const toggle = e.target.closest?.(".sac-reveal-toggle");
             if (toggle) {
@@ -510,6 +535,7 @@ class SacMdEditor extends HTMLElement {
         this._toolbar.addEventListener("mousedown", (e) => {
             if (e.target.closest("button[data-fmt]")) e.preventDefault();
         });
+        trackPress(this._toolbar, "button[data-fmt]");
         this._toolbar.addEventListener("click", (e) => {
             const btn = e.target.closest("button[data-fmt]");
             if (btn) this._applyFormat(btn.dataset.fmt);
@@ -2909,9 +2935,21 @@ const TEMPLATE = `
         justify-content: center;
         line-height: 1;
     }
-    .toolbar button:hover {
-        background: color-mix(in srgb, var(--fg, #fff) 6%, transparent);
+    /* Hover looks only where a pointer hovers: a tap leaves :hover stuck
+       on the tapped button until the next tap elsewhere. */
+    @media (hover: hover) {
+        .toolbar button:hover {
+            background: color-mix(in srgb, var(--fg, #fff) 6%, transparent);
+            color: var(--text, #fff);
+        }
+    }
+    /* Press (kit 2.33): feedback on pointer-down, not on release - a ghost
+       control steps its wash up to --hover-strong, fast in. */
+    .toolbar button:active,
+    .toolbar button.pressed {
+        background: var(--hover-strong, color-mix(in srgb, var(--fg, #fff) 14%, transparent));
         color: var(--text, #fff);
+        transition-duration: 0.1s;
     }
     .toolbar button b, .toolbar button i { font-size: 13px; }
     .toolbar .sep {
@@ -2993,15 +3031,18 @@ const TEMPLATE = `
 
     /* Headings jump to size live as soon as a heading prefix is typed.
        When inactive, the hash prefix is fully hidden - the font size alone
-       signals the heading (Obsidian's approach). */
+       signals the heading (Obsidian's approach). Tracking follows size,
+       as the kit's own h1-h6: display sizes tighten, h4-h6 sit near body
+       size and keep the face's own spacing. */
     .line.heading {
         font-family: 'Outfit', sans-serif;
         font-weight: 700;
-        letter-spacing: -0.01em;
+        letter-spacing: -0.02em;
         line-height: 1.25;
         margin-top: 0.6em;
         margin-bottom: 0.2em;
     }
+    .line.h4, .line.h5, .line.h6 { letter-spacing: 0; }
     .line.h1 { font-size: 1.85em; }
     .line.h2 { font-size: 1.4em; }
     .line.h3 { font-size: 1.15em; }
@@ -3229,6 +3270,10 @@ const TEMPLATE = `
         color: var(--accent, #3b82f6);
         background: color-mix(in srgb, var(--accent, #3b82f6) 14%, transparent);
     }
+    .toolbar button.ctx:active,
+    .toolbar button.ctx.pressed {
+        background: color-mix(in srgb, var(--accent, #3b82f6) 24%, transparent);
+    }
 
     /* Table dialog (native <dialog>, top layer). */
     .tdlg {
@@ -3241,6 +3286,27 @@ const TEMPLATE = `
         box-shadow: 0 16px 48px color-mix(in srgb, var(--sink, #000) 45%, transparent);
     }
     .tdlg::backdrop { background: color-mix(in srgb, var(--sink, #000) 45%, transparent); }
+    /* In and out the way a kit dialog goes (2.33): it pops in from 96%,
+       and on close shrinks and fades back the same path. The exit needs
+       overlay (Chromium) to stay in the top layer while it plays; without
+       it the dialog closes at once rather than fade out in the flow. A
+       closing dialog takes no pointer: the editor is live again. */
+    .tdlg[open] { animation: tdlg-in 150ms ease-out; }
+    .tdlg[open]::backdrop { animation: tdlg-fade 150ms ease-out; }
+    @keyframes tdlg-in { from { opacity: 0; transform: scale(0.96); } }
+    @keyframes tdlg-fade { from { opacity: 0; } }
+    @supports (overlay: auto) {
+        .tdlg, .tdlg::backdrop {
+            transition: opacity 150ms ease-in, transform 150ms ease-in,
+                        overlay 150ms allow-discrete, display 150ms allow-discrete;
+        }
+        .tdlg:not([open]) { opacity: 0; transform: scale(0.96); pointer-events: none; }
+        .tdlg:not([open])::backdrop { opacity: 0; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+        .tdlg[open], .tdlg[open]::backdrop { animation-duration: 1ms; }
+        .tdlg, .tdlg::backdrop { transition-duration: 1ms; }
+    }
     .tdlg form {
         display: flex;
         flex-direction: column;
@@ -3251,6 +3317,28 @@ const TEMPLATE = `
     }
     .tdlg-title { font-weight: 700; }
     .tdlg-scroll { overflow: auto; min-height: 0; }
+    /* The kit's scrollbar (ui.css section 5) re-stated with its tokens:
+       ::-webkit-scrollbar does not pierce a shadow root. Firefox, which
+       has no ::-webkit-scrollbar, gets the standard pair instead. */
+    .tdlg-scroll::-webkit-scrollbar { width: var(--scrollbar-size, 12px); height: var(--scrollbar-size, 12px); }
+    .tdlg-scroll::-webkit-scrollbar-track { background: transparent; }
+    .tdlg-scroll::-webkit-scrollbar-thumb {
+        background: var(--scrollbar-thumb, color-mix(in srgb, var(--fg, #fff) 18%, transparent));
+        background-clip: content-box;
+        border: var(--scrollbar-gap, 3px) solid transparent;
+        border-radius: 999px;
+    }
+    .tdlg-scroll::-webkit-scrollbar-thumb:hover {
+        background: var(--scrollbar-thumb-hover, color-mix(in srgb, var(--fg, #fff) 32%, transparent));
+        background-clip: content-box;
+    }
+    .tdlg-scroll::-webkit-scrollbar-corner { background: transparent; }
+    @supports not selector(::-webkit-scrollbar) {
+        .tdlg-scroll {
+            scrollbar-width: thin;
+            scrollbar-color: var(--scrollbar-thumb, color-mix(in srgb, var(--fg, #fff) 18%, transparent)) transparent;
+        }
+    }
     .tdlg-grid { border-collapse: collapse; }
     .tdlg-grid th, .tdlg-grid td { padding: 2px; vertical-align: middle; }
     .tdlg-ctl { display: flex; gap: 1px; justify-content: center; align-items: center; }
@@ -3282,9 +3370,17 @@ const TEMPLATE = `
         color: var(--text-muted, #888);
         border-radius: var(--radius-m, 4px);
         cursor: pointer;
+        transition: background-color 0.12s, color 0.12s;
     }
     .tdlg-ic svg { width: 14px; height: 14px; display: block; }
-    .tdlg-ic:hover:not(:disabled) { background: var(--hover, color-mix(in srgb, var(--fg, #fff) 8%, transparent)); color: var(--text, #fff); }
+    @media (hover: hover) {
+        .tdlg-ic:hover:not(:disabled) { background: var(--hover, color-mix(in srgb, var(--fg, #fff) 8%, transparent)); color: var(--text, #fff); }
+    }
+    .tdlg-ic:active:not(:disabled) {
+        background: var(--hover-strong, color-mix(in srgb, var(--fg, #fff) 14%, transparent));
+        color: var(--text, #fff);
+        transition-duration: 0.1s;
+    }
     .tdlg-ic:disabled { opacity: 0.3; cursor: default; }
     .tdlg-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
     .tdlg-gap { flex: 1; }
@@ -3299,8 +3395,13 @@ const TEMPLATE = `
         border: 1px solid var(--border, color-mix(in srgb, var(--fg, #fff) 8%, transparent));
         border-radius: var(--radius-m, 4px);
         cursor: pointer;
+        transition: background-color 0.12s, transform 0.2s var(--ease-smooth, ease);
     }
-    .tdlg-btn:hover { background: var(--hover, color-mix(in srgb, var(--fg, #fff) 8%, transparent)); }
+    @media (hover: hover) {
+        .tdlg-btn:hover { background: var(--hover, color-mix(in srgb, var(--fg, #fff) 8%, transparent)); }
+    }
+    /* A boxed button gives under the pointer the moment it goes down. */
+    .tdlg-btn:active { transform: scale(0.97); transition-duration: 0.1s; }
     .tdlg-btn.primary {
         color: var(--on-accent, #fff);
         background: var(--accent-fill, var(--accent, #3b82f6));
@@ -3455,9 +3556,17 @@ const TEMPLATE = `
         display: block;
     }
     .sac-reveal-toggle .sac-eye-slash { visibility: hidden; }
-    .sac-reveal-toggle:hover {
+    @media (hover: hover) {
+        .sac-reveal-toggle:hover {
+            opacity: 1;
+            background: color-mix(in srgb, var(--mdb-c) 14%, transparent);
+        }
+    }
+    .sac-reveal-toggle:active,
+    .sac-reveal-toggle.pressed {
         opacity: 1;
-        background: color-mix(in srgb, var(--mdb-c) 14%, transparent);
+        background: color-mix(in srgb, var(--mdb-c) 24%, transparent);
+        transition-duration: 0.1s;
     }
     /* Revealed state: surface the slash through the eye. */
     .line.block-revealed .sac-reveal-toggle { opacity: 0.95; }
