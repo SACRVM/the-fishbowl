@@ -43,9 +43,11 @@
  * aren't installed, so there is nothing to update, grant or remove here.
  * They get the space's data as context.space (grant.api, kit 2.25):
  * fb.api.spaceData(<slug>) — tables and rows, read-only notes, todos,
- * events, contacts, members — as the signed-in user, so the server's role
- * checks hold (a Reader's app can't write); a refusal reaches the app as
- * { code, message } with the server's code (underscores as dashes).
+ * events, contacts, members, a file of its Files by path (fileInfo,
+ * readFile; openFile opens it in a tab of this page) — as the signed-in
+ * user, so the server's role checks hold (a Reader's app can't write); a
+ * refusal reaches the app as { code, message } with the server's code
+ * (underscores as dashes).
  * What breaks goes to the space's error store (fb.api.appErrors) for its
  * Designers: an entry that doesn't start (load), a refused call (call),
  * context.space.error(message, detail) (reported) — the server adds an
@@ -168,16 +170,24 @@
     function spaceApi(ws, app) {
         const data = fb.api.spaceData(ws.slice("space:".length));
         const api = {};
+        const call = (name, fn) => async (...args) => {
+            try { return await fn(...args); }
+            catch (err) {
+                const e = spaceError(err);
+                report(app, "call", `${name}: ${e.code} — ${e.message}`);
+                throw e;
+            }
+        };
         for (const [name, fn] of Object.entries(data)) {
-            api[name] = async (...args) => {
-                try { return await fn(...args); }
-                catch (err) {
-                    const e = spaceError(err);
-                    report(app, "call", `${name}: ${e.code} — ${e.message}`);
-                    throw e;
-                }
-            };
+            if (name !== "fileUrl") api[name] = call(name, fn);
         }
+        // A file of the space in its own tab, opened by this page: from the
+        // frame it would inherit the sandbox, where a PDF only downloads. The
+        // app's click activates this page too, so the tab isn't a popup the
+        // browser blocks (called from a click handler, within seconds).
+        api.openFile = call("openFile", async (path) => {
+            window.open(await data.fileUrl(path), "_blank", "noopener");
+        });
         // A message to members of the space, from this app.
         api.notify = async (to, text) => {
             try { return await fb.api.appMessage(ws.slice("space:".length), app.folder.replace(/^\.apps\//, ""), to, text); }

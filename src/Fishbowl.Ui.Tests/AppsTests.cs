@@ -470,6 +470,79 @@ public class AppsTests : IAsyncLifetime
         }
     }
 
+    // A space app reaches the space's files by path: fileInfo, readFile (a
+    // Blob over the bridge) and openFile — a tab the top page opens, so a
+    // PDF gets the browser's viewer instead of the frame's sandbox.
+    [Fact]
+    public async Task Apps_SpaceApp_ReadsAndOpensAFile_Test()
+    {
+        var (context, page, errors) = await OpenAsync();
+        string? slug = null;
+        try
+        {
+            var res = await page.APIRequest.PostAsync($"{_fixture.BaseUrl}/api/v1/spaces", new() { DataObject = new { name = "Files " + Guid.NewGuid().ToString("N")[..6] } });
+            slug = (await res.JsonAsync())!.Value.GetProperty("slug").GetString();
+            async Task Put(string path, byte[] content)
+            {
+                var put = await page.APIRequest.PutAsync($"{_fixture.BaseUrl}/api/v1/spaces/{slug}/files/content?path={Uri.EscapeDataString(path)}&parents=1",
+                    new APIRequestContextOptions
+                    {
+                        Headers = new Dictionary<string, string> { ["X-Fishbowl-Upload"] = "1", ["If-None-Match"] = "*" },
+                        DataByte = content,
+                    });
+                Assert.True(put.Ok, $"PUT {path}: {put.Status} {await put.TextAsync()}");
+            }
+            var utf8 = System.Text.Encoding.UTF8;
+            await Put("Notes/hello.txt", utf8.GetBytes("hello from the space's files"));
+            await Put("Receipts/2026 receipt.pdf", utf8.GetBytes("%PDF-1.4\n%%EOF\n"));
+            await Put(".apps/reader/app.json", utf8.GetBytes("{\"name\":\"Reader\",\"tag\":\"reader-space-app\",\"version\":\"0.1.0\",\"icon\":\"file\"}"));
+            await Put(".apps/reader/app.js", utf8.GetBytes("""
+                customElements.define('reader-space-app', class extends HTMLElement {
+                  async mount(context) {
+                    this.innerHTML = '<p id=text></p><p id=info></p><p id=refused></p><button id=open>Open</button>';
+                    const blob = await context.space.readFile('Notes/hello.txt');
+                    this.querySelector('#text').textContent = await blob.text();
+                    const info = await context.space.fileInfo('Receipts/2026 receipt.pdf');
+                    this.querySelector('#info').textContent = `${info.name} ${info.kind}`;
+                    const codes = [];
+                    for (const p of ['Receipts', 'Receipts/nope.pdf', '']) {
+                      try { await context.space.readFile(p); codes.push('read'); } catch (e) { codes.push(e.code); }
+                    }
+                    this.querySelector('#refused').textContent = codes.join(' ');
+                    this.querySelector('#open').addEventListener('click', () => context.space.openFile('Receipts/2026 receipt.pdf'));
+                  }
+                });
+                """));
+
+            await page.GotoAsync($"{_fixture.BaseUrl}/#/space/{slug}/");
+            var tile = page.Locator("fb-hub-view a.tile[data-key='app:space.reader']");
+            await Assertions.Expect(tile).ToBeVisibleAsync(new() { Timeout = 15000 });
+            await tile.ClickAsync();
+            var frame = page.FrameLocator("sac-window iframe");
+            await Assertions.Expect(frame.Locator("#text")).ToHaveTextAsync("hello from the space's files", new() { Timeout = 15000 });
+            await Assertions.Expect(frame.Locator("#info")).ToHaveTextAsync("2026 receipt.pdf file");
+            await Assertions.Expect(frame.Locator("#refused")).ToHaveTextAsync("not-a-file not-found invalid-value");
+
+            // A new tab of the top page, on the inline content URL (the
+            // headless shell has no PDF viewer: the request is the proof).
+            var requested = new TaskCompletionSource<IRequest>(TaskCreationOptions.RunContinuationsAsynchronously);
+            context.Request += (_, r) => { if (r.Url.Contains("/files/content?")) requested.TrySetResult(r); };
+            var opened = context.WaitForPageAsync();
+            await frame.Locator("#open").ClickAsync();
+            var tab = await opened;
+            var request = await requested.Task.WaitAsync(TimeSpan.FromSeconds(15), TestContext.Current.CancellationToken);
+            Assert.Contains($"/api/v1/spaces/{slug}/files/content?path={Uri.EscapeDataString("Receipts/2026 receipt.pdf")}&inline=1", request.Url);
+            Assert.NotSame(page, request.Frame.Page);
+            await tab.CloseAsync();
+            Assert.Empty(errors);
+        }
+        finally
+        {
+            if (slug is not null) await page.APIRequest.DeleteAsync($"{_fixture.BaseUrl}/api/v1/spaces/{slug}?archive=false");
+            await context.CloseAsync();
+        }
+    }
+
     [Fact]
     public async Task Apps_Phone_Screenshots_Test()
     {

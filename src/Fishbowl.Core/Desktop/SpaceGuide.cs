@@ -112,6 +112,9 @@ public static partial class SpaceGuide
             | `update(table, id, values, rowVersion?)` | partial; with `rowVersion` it refuses a stale write |
             | `remove(table, id)` | to the space's trash |
             | `notes()`, `note(id)`, `todos(includeCompleted?)`, `events(from?, to?)`, `contacts()` | the space's built-ins, read-only |
+            | `fileInfo(path)` | a file of the space's Files by its path (`"Receipts/2026/invoice.pdf"`, relative, `/`-separated): `{ name, path, kind, size, mtime, mime, … }`; a folder is refused (`not-a-file`), a missing one is `not-found` |
+            | `readFile(path)` | the file's bytes as a `Blob` (`await blob.text()`, `URL.createObjectURL(blob)` for an `<img>`) — up to 50 MB (`file-too-large`: open it instead) |
+            | `openFile(path)` | opens the file in a new browser tab — a PDF in the browser's viewer, a picture or text as itself, anything else downloads. Call it from a click handler (the browser lets a tab open only right after a click). A link to the file inside your app can't do this: a tab opened from the sandbox stays sandboxed, and a PDF only downloads there |
             | `notify(to, text)` | a message from your app to members of this space — `to`: member ids (`userId` from `members().items`) or `"all"` (everyone but the sender); text ≤ 500 characters; 30 an hour per app; members can mute an app |
             | `error(message, detail?)` | your own entry in the error store, for the space's Designers |
 

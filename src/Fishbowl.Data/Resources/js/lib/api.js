@@ -584,6 +584,8 @@
     // One space's data, pinned to it whatever workspace is active — what a
     // space app gets over the bridge (fb.desktopApps, grant.api "space").
     // The cookie decides: every call runs with the user's role there.
+    // What a space app's readFile holds in memory at most.
+    const MaxReadFileBytes = 50 * 1048576;
     function spaceData(slug) {
         const p = (path) => wsPath(`space:${slug}`, path);
         // A table name, row id or note id the app passes is one plain path
@@ -608,6 +610,20 @@
             const s = q.toString();
             return p("/events") + (s ? `?${s}` : "");
         };
+        // A file of the space's Files by its path ("Receipts/2026/x.pdf"), read
+        // with the viewer's cookie like everything here; a folder or a link
+        // is refused, and readFile holds the bytes in memory, so it stops at
+        // MaxReadFileBytes (a bigger one is opened, not read).
+        const files = filesIn(`space:${slug}`);
+        const refuse = (status, error, message) => new ApiError(status, JSON.stringify({ error, field: "path", message }));
+        const fileInfo = async (path) => {
+            if (typeof path !== "string" || path === "" || path.length > 1024) {
+                throw refuse(400, "invalid_value", "path must be a file's path in the space's Files, like \"Folder/name.pdf\".");
+            }
+            const entry = await files.stat(path);
+            if (entry?.kind !== "file") throw refuse(400, "not_a_file", `"${path}" is a ${entry?.kind || "folder"}, not a file.`);
+            return entry;
+        };
         // async, so a refused segment is a rejected promise like any refusal.
         return {
             info:      async ()            => request(`/spaces/${encodeURIComponent(slug)}`),
@@ -628,6 +644,16 @@
             todos:     async (includeCompleted) => request(p(includeCompleted ? "/todos?includeCompleted=true" : "/todos")),
             events:    async (from, to)    => request(range(from, to)),
             contacts:  async ()            => request(p("/contacts")),
+            fileInfo,
+            readFile:  async (path) => {
+                const entry = await fileInfo(path);
+                if ((entry.size ?? 0) > MaxReadFileBytes) {
+                    throw refuse(413, "file_too_large", `"${path}" is larger than ${MaxReadFileBytes / 1048576} MB; open it instead.`);
+                }
+                return files.read(path);
+            },
+            // Where openFile sends the top page (desktop-apps.js opens it).
+            fileUrl:   async (path) => files.contentUrl((await fileInfo(path)).path, { inline: true }),
         };
     }
 
