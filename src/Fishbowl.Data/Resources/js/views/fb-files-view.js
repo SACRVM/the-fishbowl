@@ -775,7 +775,14 @@
             };
         }
 
-        /** The info card's buttons: PDFs open in their own tab. */
+        /** A file in its own window (fb.fileViewer): a PDF in the browser's
+         *  viewer, anything else in the kit's quick look. */
+        _openFile(pane, path) {
+            fb.fileViewer.open({ files: pane.store.api, path })
+                .catch((err) => sac.toast(explain(err, t("fb.files.open-failed", "Couldn't open the file.")), { kind: "error" }));
+        }
+
+        /** The info card's buttons: a PDF opens in its own window. */
         _actionsFor(look, pane, path) {
             look.querySelectorAll('[slot="actions"]').forEach((el) => el.remove());
             const stat = pane.store.cached(path);
@@ -784,8 +791,8 @@
             if (isPdf(stat)) {
                 const open = document.createElement("button");
                 open.className = "btn";
-                open.innerHTML = `<sac-icon name="external-link"></sac-icon> ${t("fb.files.open-tab", "Open in new tab")}`;
-                open.addEventListener("click", () => window.open(pane.store.api.contentUrl(path, { inline: true }), "_blank", "noopener"));
+                open.innerHTML = `<sac-icon name="external-link"></sac-icon> ${t("fb.files.open-file", "Open")}`;
+                open.addEventListener("click", () => this._openFile(pane, path));
                 buttons.push(open);
             }
             if (stat.link) {
@@ -881,8 +888,8 @@
             if (kind === "file" && stat && !stat.link) {
                 const open = document.createElement("button");
                 open.className = "btn";
-                open.innerHTML = `<sac-icon name="external-link"></sac-icon> ${t("fb.files.open-tab", "Open in new tab")}`;
-                open.addEventListener("click", () => window.open(pane.store.api.contentUrl(path, { inline: true }), "_blank", "noopener"));
+                open.innerHTML = `<sac-icon name="external-link"></sac-icon> ${t("fb.files.open-file", "Open")}`;
+                open.addEventListener("click", () => this._openFile(pane, path));
                 const dl = document.createElement("a");
                 dl.className = "btn";
                 dl.href = pane.store.api.contentUrl(path);

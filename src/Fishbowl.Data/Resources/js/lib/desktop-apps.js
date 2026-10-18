@@ -44,7 +44,7 @@
  * They get the space's data as context.space (grant.api, kit 2.25):
  * fb.api.spaceData(<slug>) — tables and rows, read-only notes, todos,
  * events, contacts, members, a file of its Files by path (fileInfo,
- * readFile; openFile opens it in a tab of this page) — as the signed-in
+ * readFile; openFile shows it in a window of this page) — as the signed-in
  * user, so the server's role checks hold (a Reader's app can't write); a
  * refusal reaches the app as { code, message } with the server's code
  * (underscores as dashes).
@@ -178,15 +178,14 @@
                 throw e;
             }
         };
-        for (const [name, fn] of Object.entries(data)) {
-            if (name !== "fileUrl") api[name] = call(name, fn);
-        }
-        // A file of the space in its own tab, opened by this page: from the
-        // frame it would inherit the sandbox, where a PDF only downloads. The
-        // app's click activates this page too, so the tab isn't a popup the
-        // browser blocks (called from a click handler, within seconds).
+        for (const [name, fn] of Object.entries(data)) api[name] = call(name, fn);
+        // A file of the space in a window of this page (fb.fileViewer): from
+        // the frame it would inherit the sandbox, where a PDF only downloads.
+        // Without an inline PDF viewer (a phone) a PDF opens in a tab — the
+        // app's click activates this page too, so the browser lets it.
         api.openFile = call("openFile", async (path) => {
-            window.open(await data.fileUrl(path), "_blank", "noopener");
+            const entry = await data.fileInfo(path);
+            await fb.fileViewer.open({ files: fb.api.files.in(ws), entry });
         });
         // A message to members of the space, from this app.
         api.notify = async (to, text) => {

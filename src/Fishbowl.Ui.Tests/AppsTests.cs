@@ -499,7 +499,7 @@ public class AppsTests : IAsyncLifetime
             await Put(".apps/reader/app.js", utf8.GetBytes("""
                 customElements.define('reader-space-app', class extends HTMLElement {
                   async mount(context) {
-                    this.innerHTML = '<p id=text></p><p id=info></p><p id=refused></p><button id=open>Open</button>';
+                    this.innerHTML = '<p id=text></p><p id=info></p><p id=refused></p><button id=open>Open</button><button id=open-text>Open text</button>';
                     const blob = await context.space.readFile('Notes/hello.txt');
                     this.querySelector('#text').textContent = await blob.text();
                     const info = await context.space.fileInfo('Receipts/2026 receipt.pdf');
@@ -510,6 +510,7 @@ public class AppsTests : IAsyncLifetime
                     }
                     this.querySelector('#refused').textContent = codes.join(' ');
                     this.querySelector('#open').addEventListener('click', () => context.space.openFile('Receipts/2026 receipt.pdf'));
+                    this.querySelector('#open-text').addEventListener('click', () => context.space.openFile('Notes/hello.txt'));
                   }
                 });
                 """));
@@ -523,8 +524,17 @@ public class AppsTests : IAsyncLifetime
             await Assertions.Expect(frame.Locator("#info")).ToHaveTextAsync("2026 receipt.pdf file");
             await Assertions.Expect(frame.Locator("#refused")).ToHaveTextAsync("not-a-file not-found invalid-value");
 
-            // A new tab of the top page, on the inline content URL (the
-            // headless shell has no PDF viewer: the request is the proof).
+            // A file opens in a window of the top page, over the desktop.
+            await frame.Locator("#open-text").ClickAsync();
+            var viewer = page.Locator("sac-window.fb-file-viewer");
+            await Assertions.Expect(viewer).ToHaveAttributeAsync("title", "hello.txt", new() { Timeout = 10000 });
+            await Assertions.Expect(viewer.Locator("sac-quick-look pre")).ToHaveTextAsync("hello from the space's files", new() { Timeout = 10000 });
+            await viewer.EvaluateAsync("w => w.close()");
+            await Assertions.Expect(viewer).ToHaveCountAsync(0, new() { Timeout = 5000 });
+
+            // A PDF, where the browser has no PDF viewer (the headless shell,
+            // a phone): a tab of the top page on the inline content URL.
+            // FilesTests' Files_PdfOpensInAWindow_InChromium_Test has the window.
             var requested = new TaskCompletionSource<IRequest>(TaskCreationOptions.RunContinuationsAsynchronously);
             context.Request += (_, r) => { if (r.Url.Contains("/files/content?")) requested.TrySetResult(r); };
             var opened = context.WaitForPageAsync();

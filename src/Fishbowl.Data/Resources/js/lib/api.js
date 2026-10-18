@@ -652,8 +652,6 @@
                 }
                 return files.read(path);
             },
-            // Where openFile sends the top page (desktop-apps.js opens it).
-            fileUrl:   async (path) => files.contentUrl((await fileInfo(path)).path, { inline: true }),
         };
     }
 

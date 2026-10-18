@@ -332,12 +332,13 @@ public class FilesTests
             await Assertions.Expect(Tab(page, "right", "preview")).ToHaveAttributeAsync("active", "");
             await page.ScreenshotAsync(new PageScreenshotOptions { Path = Path.Combine(Path.GetTempPath(), "fishbowl_ui_files_preview.png") });
 
-            // It follows the cursor: a PDF gets the info card with Open in new tab.
+            // It follows the cursor: a PDF gets the info card with Open.
             await page.Keyboard.PressAsync("ArrowDown");
-            var open = preview.GetByRole(AriaRole.Button, new() { Name = "Open in new tab" });
+            var open = preview.GetByRole(AriaRole.Button, new() { Name = "Open", Exact = true });
             await Assertions.Expect(open).ToBeVisibleAsync(new() { Timeout = 10000 });
-            // (The headless shell downloads PDFs; Files_InlinePdf_RendersInChromium_Test
-            // checks the real viewer.) Here: the new tab asks for the inline variant.
+            // The headless shell has no PDF viewer (navigator.pdfViewerEnabled
+            // is false), so the PDF goes to a tab, asking for the inline variant;
+            // Files_PdfOpensInAWindow_InChromium_Test checks the window.
             var requested = new List<string>();
             context.Request += (_, r) => requested.Add(r.Url);
             var tabTask = context.WaitForPageAsync();
@@ -393,7 +394,7 @@ public class FilesTests
             await Assertions.Expect(props).ToContainTextAsync("12 bytes");
             await Assertions.Expect(props).ToContainTextAsync($"/{folder}/notes.txt");
             await Assertions.Expect(props).ToContainTextAsync("Personal");
-            await Assertions.Expect(props.GetByRole(AriaRole.Button, new() { Name = "Open in new tab" })).ToBeVisibleAsync();
+            await Assertions.Expect(props.GetByRole(AriaRole.Button, new() { Name = "Open", Exact = true })).ToBeVisibleAsync();
             await Assertions.Expect(props.GetByRole(AriaRole.Link, new() { Name = "Download" })).ToBeVisibleAsync();
             await Assertions.Expect(Status(page, "right")).ToContainTextAsync("notes.txt");
             await page.ScreenshotAsync(new PageScreenshotOptions { Path = Path.Combine(Path.GetTempPath(), "fishbowl_ui_files_properties.png") });
@@ -449,6 +450,48 @@ public class FilesTests
             Assert.DoesNotContain("sandbox", headers["content-security-policy"]);
             await Assertions.Expect(page.Locator("embed[type='application/pdf'], embed[type='application/x-google-chrome-pdf']").First)
                 .ToBeAttachedAsync(new() { Timeout = 10000 });
+        }
+        finally
+        {
+            await context.CloseAsync();
+        }
+    }
+
+    // Open shows a PDF in a window over the desktop, in the browser's own
+    // viewer — never a tab, which the installed app makes a window with
+    // nothing to drag it by and its buttons over the viewer's toolbar.
+    [Fact]
+    public async Task Files_PdfOpensInAWindow_InChromium_Test()
+    {
+        await using var browser = await _fixture.Playwright!.Chromium.LaunchAsync(new BrowserTypeLaunchOptions { Headless = true, Channel = "chromium" });
+        var context = await browser.NewContextAsync(new BrowserNewContextOptions { IgnoreHTTPSErrors = true, BypassCSP = true, ViewportSize = new ViewportSize { Width = 1400, Height = 900 } });
+        var page = await context.NewPageAsync();
+        try
+        {
+            var folder = Unique("viewer-");
+            await PutAsync(page, $"{folder}/receipt.pdf", Pdf);
+            await page.GotoAsync($"{_fixture.BaseUrl}/#/files/{folder}");
+            await Assertions.Expect(Row(page, "left", "receipt.pdf")).ToHaveCountAsync(1, new() { Timeout = 10000 });
+            Assert.True(await page.EvaluateAsync<bool>("() => navigator.pdfViewerEnabled"));
+            await FocusRowAsync(page, "left", "receipt.pdf");
+            await page.Keyboard.PressAsync("Alt+I");
+            await page.Locator("fb-files-view .fv-props").GetByRole(AriaRole.Button, new() { Name = "Open", Exact = true }).ClickAsync();
+
+            var win = page.Locator("sac-window.fb-file-viewer.pdf");
+            await Assertions.Expect(win).ToHaveAttributeAsync("title", "receipt.pdf", new() { Timeout = 10000 });
+            await Assertions.Expect(win.Locator("iframe")).ToHaveAttributeAsync("src", new System.Text.RegularExpressions.Regex("/api/v1/files/content\\?path=.*receipt\\.pdf&inline=1$"));
+            await Assertions.Expect(page.FrameLocator("sac-window.fb-file-viewer iframe")
+                .Locator("embed[type='application/pdf'], embed[type='application/x-google-chrome-pdf']").First)
+                .ToBeAttachedAsync(new() { Timeout = 10000 });
+            Assert.Single(context.Pages);
+            await page.WaitForTimeoutAsync(500);   // the window's opening animation
+            await page.ScreenshotAsync(new PageScreenshotOptions { Path = Path.Combine(Path.GetTempPath(), "fishbowl_ui_files_viewer.png") });
+
+            // The same file again (the window covers the button now): the one window, not a second.
+            await page.EvaluateAsync("(p) => fb.fileViewer.open({ files: fb.api.files.in('personal'), path: p })", $"{folder}/receipt.pdf");
+            await Assertions.Expect(page.Locator("sac-window.fb-file-viewer")).ToHaveCountAsync(1);
+            await win.EvaluateAsync("w => w.close()");
+            await Assertions.Expect(page.Locator("sac-window.fb-file-viewer")).ToHaveCountAsync(0, new() { Timeout = 5000 });
         }
         finally
         {
