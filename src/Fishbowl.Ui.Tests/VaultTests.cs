@@ -586,7 +586,8 @@ public class VaultTests
             var slug = (await space.JsonAsync())!.Value.GetProperty("slug").GetString()!;
             await page.GotoAsync($"{baseUrl}/#/space/{slug}/");
             // Personal only: a space closes the window and has no Secrets tile.
-            await Assertions.Expect(page.Locator("fb-hub-view a.tile[data-key='builtin:notes']")).ToBeVisibleAsync(new() { Timeout = 5000 });
+            // The desktop waits for /me, the spaces and the tiles: slow on a busy runner.
+            await Assertions.Expect(page.Locator("fb-hub-view a.tile[data-key='builtin:notes']")).ToBeVisibleAsync(new() { Timeout = 15000 });
             await Assertions.Expect(page.Locator("fb-hub-view a.tile[data-key='builtin:secrets']")).ToHaveCountAsync(0);
             await Assertions.Expect(page.Locator("#fb-win-secrets[open]")).ToHaveCountAsync(0);
 

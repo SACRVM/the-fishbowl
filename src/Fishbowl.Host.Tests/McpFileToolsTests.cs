@@ -209,7 +209,8 @@ public class McpFileToolsTests : IClassFixture<WebApplicationFactory<Program>>, 
             text = "# Import\n- Store the statement under `Auszüge/` first.\n```md\n# not a heading\n```\n",
         });
 
-        var md = (await OkAsync(designer, "space_guide", new { })).GetProperty("markdown").GetString()!;
+        // Line breaks as the platform writes them (CRLF on Windows).
+        var md = (await OkAsync(designer, "space_guide", new { })).GetProperty("markdown").GetString()!.ReplaceLineEndings("\n");
         var rules = md.IndexOf("## House rules", StringComparison.Ordinal);
         Assert.True(rules > 0 && rules < md.IndexOf("## How a space app works", StringComparison.Ordinal), md);
         Assert.Contains("### `.apps/finance/house-rules.md`", md);
