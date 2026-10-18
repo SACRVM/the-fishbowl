@@ -766,7 +766,7 @@ class FbHubView extends HTMLElement {
                 const version = e.app.version ? ` · v${e.app.version}` : "";
                 meta.textContent = e.app.mode === "space"
                     ? `${e.app.folder}${version}`
-                    : `${hostOf(e.app.origin)}${version} · ${e.app.mode}`;
+                    : `${hostOf(e.app.origin)}${version} · ${fb.t(`fb.apps.page-mode-${e.app.mode}`, e.app.mode)}`;
                 body.appendChild(meta);
             }
 

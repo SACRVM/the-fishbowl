@@ -292,10 +292,10 @@
         let cred;
         try {
             cred = await navigator.credentials.create({ publicKey: {
-                rp: { name: "Fishbowl secrets", id: location.hostname },
+                rp: { name: fb.t("fb.vault.passkey-rp", "Fishbowl secrets"), id: location.hostname },
                 // A random handle: the passkey only unlocks the vault, it
                 // identifies nobody.
-                user: { id: random(16), name: me?.email || "secrets", displayName: `Fishbowl secrets${me?.name ? ` — ${me.name}` : ""}` },
+                user: { id: random(16), name: me?.email || "secrets", displayName: `${fb.t("fb.vault.passkey-rp", "Fishbowl secrets")}${me?.name ? ` — ${me.name}` : ""}` },
                 challenge: random(32),
                 pubKeyCredParams: [{ type: "public-key", alg: -7 }, { type: "public-key", alg: -257 }],
                 authenticatorSelection: { residentKey: "preferred", userVerification: "required" },

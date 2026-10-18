@@ -1134,7 +1134,7 @@ class FbNotesView extends HTMLElement {
             return this._swapIn(await this.api.get(id, { prompt: false }));
         } catch (err) {
             console.error("[fb-notes-view] loading the note failed:", err);
-            window.sac?.toast?.(fb.errors.text(err, fb.t("fb.notes.save-failed", "Couldn't save that change.")), { kind: "error" });
+            window.sac?.toast?.(fb.errors.text(err, fb.t("fb.notes.change-failed", "Couldn't save that change.")), { kind: "error" });
             return null;
         }
     }
@@ -1380,7 +1380,7 @@ class FbNotesView extends HTMLElement {
             this.renderList();
         } catch (err) {
             console.error("[fb-notes-view] pin toggle failed:", err);
-            window.sac?.toast?.(fb.errors.text(err, fb.t("fb.notes.save-failed", "Couldn't save that change.")), { kind: "error" });
+            window.sac?.toast?.(fb.errors.text(err, fb.t("fb.notes.change-failed", "Couldn't save that change.")), { kind: "error" });
             note.pinned = !note.pinned;
         }
     }
@@ -1404,7 +1404,7 @@ class FbNotesView extends HTMLElement {
             this.renderList();
         } catch (err) {
             console.error("[fb-notes-view] archive toggle failed:", err);
-            window.sac?.toast?.(fb.errors.text(err, fb.t("fb.notes.save-failed", "Couldn't save that change.")), { kind: "error" });
+            window.sac?.toast?.(fb.errors.text(err, fb.t("fb.notes.change-failed", "Couldn't save that change.")), { kind: "error" });
             note.archived = !note.archived;
         }
     }
@@ -1432,7 +1432,7 @@ class FbNotesView extends HTMLElement {
             this.renderList();
         } catch (err) {
             console.error("[fb-notes-view] approve failed:", err);
-            window.sac?.toast?.(fb.errors.text(err, fb.t("fb.notes.save-failed", "Couldn't save that change.")), { kind: "error" });
+            window.sac?.toast?.(fb.errors.text(err, fb.t("fb.notes.change-failed", "Couldn't save that change.")), { kind: "error" });
             note.tags = previousTags;
         }
     }
@@ -1641,7 +1641,8 @@ const unreadablePlaceholder = () => fb.t("fb.notes.unreadable-placeholder", "can
 /** Every secret block (the one grammar, fb.api.secrets — an unclosed block
  *  runs to the end) and every stored marker as a lock. */
 function maskSecrets(text) {
-    return fb.api.secrets.replace(String(text || ""), () => "🔒").replace(SECRET_MARKER_RE, "🔒");
+    return fb.api.secrets.replace(String(text || ""), () => "🔒").replace(SECRET_MARKER_RE, "🔒")
+        .replace(/\[secret content hidden\]/g, "🔒");   // SecretStripper's placeholder in a search hit
 }
 
 /** A cached note with its decrypted secrets masked, for after a lock: what

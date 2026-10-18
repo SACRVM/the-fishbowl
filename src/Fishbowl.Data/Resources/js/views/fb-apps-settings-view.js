@@ -127,6 +127,7 @@ class FbAppsSettingsView extends HTMLElement {
             call: fb.t("fb.apps.error-call", "refused call"),
             reported: fb.t("fb.apps.error-reported", "reported"),
             trigger: fb.t("fb.apps.error-trigger", "trigger"),
+            tile: fb.t("fb.apps.error-tile", "tile"),
         };
         box.replaceChildren(tools, ...list.map((e) => {
             const row = document.createElement("div");

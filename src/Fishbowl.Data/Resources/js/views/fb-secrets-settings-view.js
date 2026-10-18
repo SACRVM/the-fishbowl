@@ -150,7 +150,10 @@ class FbSecretsSettingsView extends HTMLElement {
                 <div class="fb-row-meta"><span class="slot-kind"></span><span>${added}</span><span>${used}</span></div>
             </div>
             <div class="toolbar slot-actions"></div>`;
-        row.querySelector(".slot-name").textContent = s.label || kindText;
+        // The labels setup gave a passphrase and a recovery key were stored
+        // in English; shown, they are the kind's name in the page's language.
+        const stock = { passphrase: "Passphrase", recovery: "Recovery key" }[s.kind];
+        row.querySelector(".slot-name").textContent = !s.label || s.label === stock ? kindText : s.label;
         row.querySelector(".slot-kind").textContent = kindText;
 
         const actions = row.querySelector(".slot-actions");

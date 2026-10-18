@@ -195,11 +195,11 @@
             return note;
         }
         if (ws ? ws.startsWith("space:") : window.sac?.scope?.get?.().type === "scoped")
-            throw new SecretSaveError("Secrets are personal for now — remove the secret block to save this note in a space.");
-        if (!note?.id) throw new SecretSaveError("Save the note once before adding a secret to it.");
-        if (!window.fb?.vault) throw new SecretSaveError("Secrets are unavailable in this browser.");
+            throw new SecretSaveError(fb.t("fb.notes.secret-space", "Secrets are personal for now — remove the secret block to save this note in a space."));
+        if (!note?.id) throw new SecretSaveError(fb.t("fb.notes.secret-save-first", "Save the note once before adding a secret to it."));
+        if (!window.fb?.vault) throw new SecretSaveError(fb.t("fb.notes.secret-unavailable", "Secrets are unavailable in this browser."));
         try { await fb.vault.ensureUnlocked({ setup: true }); }
-        catch (e) { throw new SecretSaveError(e?.message || "Secrets are locked — the note was not saved."); }
+        catch (e) { throw new SecretSaveError(e?.message || fb.t("fb.notes.secret-locked", "Secrets are locked — the note was not saved.")); }
         const ciphertexts = [];
         for (let i = 0; i < bodies.length; i++)
             ciphertexts.push(await fb.vault.encryptBlock(bodies[i], blockAad(note.id, i)));

@@ -615,7 +615,7 @@ public class UiSmokeTests
         await Assertions.Expect(account).ToBeVisibleAsync();
         await account.Locator("[slot='trigger']").ClickAsync();
         await account.Locator("button[data-action='profile']").ClickAsync();
-        await page.Locator("#fb-profile-window sac-swatch[label='teal']").ClickAsync();
+        await page.Locator("#fb-profile-window sac-swatch[label='Teal']").ClickAsync();
         await page.WaitForFunctionAsync("() => document.documentElement.style.getPropertyValue('--accent') === 'var(--palette-teal)'");
         // The UI paints first and saves in the background: poll the server.
         string? saved = null;
@@ -642,7 +642,7 @@ public class UiSmokeTests
         // picking saves and closes.
         await row.Locator("button.space-color").ClickAsync();
         var picker = page.Locator("sac-dialog[open]");
-        await picker.Locator("sac-swatch[label='green']").ClickAsync();
+        await picker.Locator("sac-swatch[label='Green']").ClickAsync();
         await Assertions.Expect(page.Locator("sac-dialog")).ToHaveCountAsync(0);
         await Assertions.Expect(row.Locator("button.space-color")).ToHaveAttributeAsync("style", new System.Text.RegularExpressions.Regex("palette-green"));
 
@@ -816,7 +816,7 @@ public class UiSmokeTests
             "() => [...document.querySelectorAll('#fb-tag-manager .fb-tags-name')].some(i => i.value === 'manage-smoke')");
         await page.EvaluateAsync(@"() => [...document.querySelectorAll('#fb-tag-manager .fb-tags-row')]
             .find(r => r.querySelector('.fb-tags-name').value === 'manage-smoke')
-            .querySelector(""sac-swatch[label='green']"").shadowRoot.querySelector('button').click()");
+            .querySelector(""sac-swatch[label='Green']"").shadowRoot.querySelector('button').click()");
 
         string? color = null;
         for (var i = 0; i < 30 && color != "green"; i++)

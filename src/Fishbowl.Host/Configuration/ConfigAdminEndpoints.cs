@@ -81,7 +81,7 @@ public static class ConfigAdminEndpoints
 
             var value = request?.Value?.Trim() ?? string.Empty;
             if (string.IsNullOrEmpty(value))
-                return ApiErrors.BadRequest("value_required", "Value required (use DELETE to clear).", new { field = spec.Key });
+                return ApiErrors.BadRequest("setting_value_required", "Value required (use DELETE to clear).", new { field = spec.Key });
 
             // With `urls` set the boot skips ACME (Program.cs): saying yes to
             // a Let's Encrypt key would promise something that never happens.

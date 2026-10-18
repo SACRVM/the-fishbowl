@@ -211,7 +211,7 @@ class FbTrashView extends HTMLElement {
         }
         this.sel.clear();
         if (failed) sac.toast(fb.errors.text(failed, fb.t("fb.trash.restore-failed", "Couldn't restore that.")), { kind: "error" });
-        else if (done) sac.toast(fb.t("fb.trash.restored-many", "{n} items are back.", { n: done }), { kind: "success" });
+        else if (done) sac.toast(done === 1 ? fb.t("fb.trash.restored-many-1", "1 item is back.") : fb.t("fb.trash.restored-many", "{n} items are back.", { n: done }), { kind: "success" });
         await this.refresh();
     }
 

@@ -21,16 +21,17 @@
  */
 (function () {
     const REPO = "https://github.com/SACRVM/the-fishbowl";
-    // [name, licence, rights holder]
-    const INTERFACE = [
+    // [name, licence, rights holder] — built when the window opens, so a
+    // translated name follows the page's language.
+    const INTERFACE = () => [
         ["SACRVM APPKIT",       "MIT", "SACRVM APPKIT contributors"],
         ["sac-data-grid",       "MIT", "sac-data-grid contributors"],
         ["sac-md-editor",       "MIT", "sac-md-editor contributors"],
         ["marked",              "MIT", "Christopher Jeffrey"],
-        ["DOMPurify",           "Apache-2.0 or MPL-2.0", "Cure53 and other contributors"],
+        ["DOMPurify",           "Apache-2.0 OR MPL-2.0", "Cure53 and other contributors"],
         ["Inter",               "OFL-1.1", "The Inter Project Authors"],
         ["Outfit",              "OFL-1.1", "The Outfit Project Authors"],
-        ["BIP-39 word list",    "MIT", "bitcoin/bips"],
+        [fb.t("fb.about.bip39", "BIP-39 word list"), "MIT", "bitcoin/bips"],
     ];
     const SERVER = [
         ["Jint",                "BSD-2-Clause", "Sebastien Ros"],
@@ -60,7 +61,7 @@
             copyright: "Fishbowl contributors",
             source: REPO,
             notices: [
-                ...parts(INTERFACE, fb.t("fb.about.interface", "Interface")),
+                ...parts(INTERFACE(), fb.t("fb.about.interface", "Interface")),
                 ...parts(SERVER, fb.t("fb.about.server", "Server")),
             ],
         });

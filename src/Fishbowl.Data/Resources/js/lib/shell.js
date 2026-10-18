@@ -564,15 +564,21 @@
     // kit palette slot. Shared with the spaces settings via fb.accents.
     function accentSwatches(selected) {
         return [
-            { value: "transparent", label: "Default", selected: !selected },
-            ...fb.tags.SLOTS.map((slot) => ({ value: paletteVar(slot), label: slot, selected: slot === selected })),
+            { value: "transparent", label: colourName(null), selected: !selected },
+            ...fb.tags.SLOTS.map((slot) => ({ value: paletteVar(slot), label: colourName(slot), selected: slot === selected })),
         ];
+    }
+    // A palette slot's name in the page's language (a swatch's label and
+    // tooltip); null is the default — no colour of its own.
+    function colourName(slot) {
+        if (!slot) return fb.t("fb.colour.default", "Default");
+        return fb.t(`fb.colour.${slot}`, slot[0].toUpperCase() + slot.slice(1));
     }
     function swatchSlot(value) {
         const m = /^var\(--palette-([a-z]+)\)$/.exec(value || "");
         return m && isSlot(m[1]) ? m[1] : null;
     }
-    fb.accents = { swatches: accentSwatches, slotOf: swatchSlot, cssVar: paletteVar, forWorkspace: accentsFor };
+    fb.accents = { swatches: accentSwatches, slotOf: swatchSlot, cssVar: paletteVar, forWorkspace: accentsFor, name: colourName };
 
     async function logout() {
         try {

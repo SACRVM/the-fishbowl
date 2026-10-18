@@ -292,7 +292,7 @@ label.fb-quota-field input { width: 6em; }
 
 /* ───── Manage tags window (fb.tagManager) ───── */
 .fb-tags-list:empty::after {
-    content: "No tags yet";
+    content: attr(data-empty);   /* fb.tagManager sets it, in the page's language */
     display: block;
     text-align: center;
     color: var(--text-muted);

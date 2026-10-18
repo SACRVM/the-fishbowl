@@ -399,7 +399,7 @@ authBuilder.AddGoogle(options =>
     {
         var logger = context.HttpContext.RequestServices.GetService<ILoggerFactory>()?.CreateLogger("Auth");
         logger?.LogError(context.Failure, "Google auth failed: {Message}", context.Failure?.Message);
-        context.Response.Redirect("/login?authError=" + Uri.EscapeDataString(context.Failure?.Message ?? "unknown"));
+        context.Response.Redirect("/login?authError=" + Uri.EscapeDataString(GoogleSignInFailed));
         context.HandleResponse();
         return Task.CompletedTask;
     };
@@ -1118,4 +1118,9 @@ public record SetupRequest(
     // promoted to admin. Username + password are required together.
     string? LocalUsername = null,
     string? LocalPassword = null);
-public partial class Program { }
+public partial class Program
+{
+    // What the sign-in page says when Google refuses (and translates);
+    // Google's own wording stays in the server log.
+    internal const string GoogleSignInFailed = "Google sign-in didn't work. Try again.";
+}

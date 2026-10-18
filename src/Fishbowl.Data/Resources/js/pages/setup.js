@@ -15,6 +15,8 @@ const DE = {
     "google-summary": "Google-Anmeldung — optional (braucht Internet)",
     "google-intro": "Anmeldung über Google OAuth. Lass diesen Teil weg, wenn du im LAN ohne Internet arbeitest — richte stattdessen unten ein lokales Konto ein.",
     "min-20": "mindestens 20 Zeichen",
+    "client-id": "Google-Client-ID",
+    "client-secret": "Google-Client-Secret",
     "local-summary": "Lokales Admin-Konto — optional (geht offline)",
     "local-intro": "Leg einen Admin mit Benutzername und Passwort an. Geht ohne Internet und kann später weitere lokale Benutzer anlegen. Wähl ein starkes Passwort — ein Zurücksetzen per E-Mail gibt es nicht.",
     "username": "Benutzername",

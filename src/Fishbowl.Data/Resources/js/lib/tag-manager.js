@@ -55,6 +55,7 @@
         // The window outlives a language switch: relabel it on every open.
         w.setAttribute("title", fb.t("fb.notes.manage-tags", "Manage tags"));
         const list = w.querySelector(".fb-tags-list");
+        list.dataset.empty = fb.t("fb.notes.tags.empty", "No tags yet");
         let tags = [];
         try { tags = await fb.api.tags.list(); }
         catch (err) { console.warn("[fb.tagManager] tags unavailable:", err); }
@@ -120,7 +121,7 @@
         let currentColor = tag.color;
         const paint = () => {
             grid.colors = fb.tags.SLOTS.map(slot => ({
-                value: fb.accents.cssVar(slot), label: slot, selected: slot === currentColor,
+                value: fb.accents.cssVar(slot), label: fb.accents.name(slot), selected: slot === currentColor,
             }));
         };
         paint();

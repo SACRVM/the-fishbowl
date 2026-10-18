@@ -23,7 +23,11 @@
   </ItemGroup>
 
   <ItemGroup>
-    <EmbeddedResource Include="Resources\**\*" Exclude="Resources\**\*.stackdump" LogicalName="%(RecursiveDir)%(Filename)%(Extension)" />
+    <!-- WithCulture="false": a name like sac-data-grid.de.js is a file to
+         serve, not a German satellite resource — without it MSBuild moves
+         the file into de/Fishbowl.Data.resources.dll, where ResourceProvider
+         never looks, and only the dev overlay's disk copy hid the gap. -->
+    <EmbeddedResource Include="Resources\**\*" Exclude="Resources\**\*.stackdump" LogicalName="%(RecursiveDir)%(Filename)%(Extension)" WithCulture="false" />
   </ItemGroup>
 
 </Project>

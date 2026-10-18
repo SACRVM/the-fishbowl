@@ -52,6 +52,7 @@ const DE = {
     "This invitation link has expired. Ask for a new one.": "Dieser Einladungslink ist abgelaufen. Bitte um einen neuen.",
     "This invitation link doesn't work. Ask for a new one.": "Dieser Einladungslink funktioniert nicht. Bitte um einen neuen.",
     "Sign-in refused.": "Anmeldung abgelehnt.",
+    "Google sign-in didn't work. Try again.": "Die Anmeldung über Google hat nicht geklappt. Versuch es noch einmal.",
     "Too many sign-in attempts — wait a minute and try again.": "Zu viele Anmeldeversuche — warte eine Minute und versuch es dann noch einmal.",
 };
 // T(key, english, vars): the German text when German, else the English.

@@ -150,7 +150,7 @@
         <sac-menu slot="context" id="fb-context">
             <button slot="trigger" class="nav-icon-btn labeled fb-context-pill" aria-label="Switch workspace" data-t-aria="fb.shell.switch-workspace">
                 <sac-icon name="user"></sac-icon>
-                <span class="fb-context-label">Personal</span>
+                <span class="fb-context-label" data-t="fb.shell.personal">Personal</span>
                 <sac-icon name="chevron-down"></sac-icon>
             </button>
         </sac-menu>
@@ -165,7 +165,7 @@
         <!-- System messages: the envelope + unread count, shown once /me
              loaded. Outside fb.toolbar, so per-view repaints never drop it. -->
         <button slot="toolbar" class="nav-icon-btn has-badge" id="fb-messages-btn"
-                aria-label="Notifications" title="Notifications" hidden>
+                aria-label="Notifications" title="Notifications" data-t-aria="fb.shell.messages" data-t-title="fb.shell.messages" hidden>
             <sac-icon name="fb-bell"></sac-icon>
         </button>
         <!-- Account menu. When the ribbon runs out of room (a phone), the kit

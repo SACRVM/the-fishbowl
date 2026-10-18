@@ -95,7 +95,7 @@
         "merge_too_large": "Together the two contacts are more than one contact holds ({field}) — trim the duplicate first.",
         // System settings and setup
         "unknown_config_key": "That setting doesn't exist.",
-        "value_required": "Enter a value — or remove the setting to use the default.",
+        "setting_value_required": "Enter a value — or remove the setting to use the default.",
         "one_of": "Must be one of: {allowed}.",
         "list_empty": "Enter at least one entry.",
         "whole_number_min": "Enter a whole number, {min} or more.",
@@ -153,7 +153,6 @@
         "table_missing": "There is no table “{table}” in this space.",
         "row_missing": "That row isn't there any more.",
         "version_conflict": "Someone changed this in the meantime — reload and try again.",
-        "invalid_value": "{reason}",
         "invalid_username": "{reason}",
         "query_invalid": "That filter doesn't work here: {reason}",
         "change_invalid": "{reason}",
