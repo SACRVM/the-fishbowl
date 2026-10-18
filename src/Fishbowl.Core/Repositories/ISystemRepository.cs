@@ -44,9 +44,6 @@ public interface ISystemRepository
         bool mustChange = false, CancellationToken ct = default);
     Task<bool> SetAdminAsync(string userId, bool isAdmin, CancellationToken ct = default);
 
-    // Personal UI accent: a TagPalette slot or null (default). Callers validate.
-    Task<bool> SetAccentAsync(string userId, string? accent, CancellationToken ct = default);
-
     // Date & time format: a DateFormats name or null (ISO). Callers validate.
     Task<bool> SetDateFormatAsync(string userId, string? dateFormat, CancellationToken ct = default);
 

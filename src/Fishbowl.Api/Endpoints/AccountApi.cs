@@ -37,7 +37,6 @@ public static class AccountApi
                 createdAt = profile.CreatedAt,
                 isAdmin = profile.IsAdmin,
                 state = profile.State,
-                accent = profile.Accent,
                 dateFormat = profile.DateFormat,
                 language = profile.Language,
                 vaultAutoLockMinutes = profile.VaultAutoLockMinutes ?? VaultSettings.DefaultAutoLockMinutes,
@@ -50,8 +49,8 @@ public static class AccountApi
         .Produces(StatusCodes.Status404NotFound)
         .RequireAuthorization();
 
-        // Personal settings: the UI accent and the date & time format. A
-        // partial update — only the fields present in the body change, and
+        // Personal settings: the date & time format, the UI language and the
+        // vault's auto-lock. A partial update — only the fields present in the body change, and
         // null resets one to its default. Cookie-only: an agent's key has no
         // business restyling its owner's UI.
         group.MapPatch("/me", async (JsonElement body, ClaimsPrincipal user, ISystemRepository repo, CancellationToken ct) =>
@@ -68,9 +67,6 @@ public static class AccountApi
                 : v.ValueKind == JsonValueKind.String ? (true, true, v.GetString())
                 : (true, false, null);
 
-            var accent = Field(body, "accent");
-            if (!accent.valid || (accent.value is not null && !TagPalette.IsSlot(accent.value)))
-                return ApiErrors.BadRequest("invalid_value", "accent must be a palette slot or null", new { field = "accent" });
             var dateFormat = Field(body, "dateFormat");
             if (!dateFormat.valid || (dateFormat.value is not null && !DateFormats.IsKnown(dateFormat.value)))
                 return ApiErrors.BadRequest("invalid_value", "dateFormat must be one of iso, de, uk, us or null", new { field = "dateFormat" });
@@ -88,14 +84,13 @@ public static class AccountApi
                 autoLock = minutes;
             }
 
-            if (accent.present && !await repo.SetAccentAsync(userId, accent.value, ct)) return Results.NotFound();
             if (hasAutoLock && !await repo.SetVaultAutoLockAsync(userId, autoLock, ct)) return Results.NotFound();
             if (dateFormat.present && !await repo.SetDateFormatAsync(userId, dateFormat.value, ct)) return Results.NotFound();
             if (language.present && !await repo.SetLanguageAsync(userId, language.value, ct)) return Results.NotFound();
             return Results.NoContent();
         })
         .WithName("UpdateMe")
-        .WithSummary("Updates the current user's settings (accent, date & time format, UI language, vault auto-lock). Partial; cookie only.")
+        .WithSummary("Updates the current user's settings (date & time format, UI language, vault auto-lock). Partial; cookie only.")
         .Produces(StatusCodes.Status204NoContent)
         .Produces(StatusCodes.Status400BadRequest)
         .Produces(StatusCodes.Status401Unauthorized)

@@ -49,7 +49,6 @@ window.sac?.i18n?.add?.("de", {
     "fb.profile.title": "Profil",
     "fb.profile.joined": "Dabei seit",
     "fb.profile.user-id": "Benutzer-ID",
-    "fb.profile.accent": "Akzentfarbe",
     // The palette's colours (accent, space colour, tag colours).
     "fb.colour.default": "Standard",
     "fb.colour.blue": "Blau",
@@ -66,7 +65,6 @@ window.sac?.i18n?.add?.("de", {
     "fb.profile.language-auto": "Automatisch ({language})",
     "fb.profile.date-format": "Datums- und Zeitformat",
     "fb.profile.unnamed": "Ohne Namen",
-    "fb.profile.accent-failed": "Die Akzentfarbe konnte nicht gespeichert werden.",
     "fb.profile.date-format-failed": "Das Datumsformat konnte nicht gespeichert werden.",
     "fb.profile.language-failed": "Die Sprache konnte nicht gespeichert werden.",
 

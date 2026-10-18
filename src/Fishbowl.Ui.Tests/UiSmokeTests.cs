@@ -601,35 +601,24 @@ public class UiSmokeTests
     }
 
     [Fact]
-    public async Task Accents_PersonalAndSpaceColours_ApplyAndPersist_Test()
+    public async Task Accents_SpaceColourIsTheOnlyColour_Test()
     {
         var context = await _fixture.Browser!.NewContextAsync(new BrowserNewContextOptions { IgnoreHTTPSErrors = true, BypassCSP = true });
         var page = await context.NewPageAsync();
         var rootVar = (string name) => page.EvaluateAsync<string>(
             $"() => document.documentElement.style.getPropertyValue('{name}')");
 
-        // Personal accent: picked in the profile window, applied to --accent,
-        // saved on the user.
+        // No personal accent: the profile has no colour picker, and the
+        // personal workspace wears the kit's own accent.
         await page.GotoAsync(_fixture.BaseUrl + "/#/notes");
         var account = page.Locator("#fb-account");
         await Assertions.Expect(account).ToBeVisibleAsync();
         await account.Locator("[slot='trigger']").ClickAsync();
         await account.Locator("button[data-action='profile']").ClickAsync();
-        await page.Locator("#fb-profile-window sac-swatch[label='Teal']").ClickAsync();
-        await page.WaitForFunctionAsync("() => document.documentElement.style.getPropertyValue('--accent') === 'var(--palette-teal)'");
-        // The UI paints first and saves in the background: poll the server.
-        string? saved = null;
-        for (var i = 0; i < 50 && saved != "teal"; i++)
-        {
-            if (i > 0) await page.WaitForTimeoutAsync(100);
-            var me = await (await page.APIRequest.GetAsync(_fixture.BaseUrl + "/api/v1/me")).JsonAsync();
-            saved = me!.Value.GetProperty("accent").GetString();
-        }
-        Assert.Equal("teal", saved);
-
-        // "Default" clears it again (other tests share this user).
-        await page.Locator("#fb-profile-window sac-swatch[label='Default']").ClickAsync();
-        await page.WaitForFunctionAsync("() => document.documentElement.style.getPropertyValue('--accent') === ''");
+        await Assertions.Expect(page.Locator("#fb-profile-window #fb-language")).ToBeVisibleAsync();
+        await Assertions.Expect(page.Locator("#fb-profile-window sac-swatch-grid")).ToHaveCountAsync(0);
+        Assert.Equal("", await rootVar("--accent"));
+        await page.Locator("#fb-profile-window").EvaluateAsync("w => w.close?.()");
 
         // Space colour: picked in the spaces settings, and inside the space
         // it replaces --accent-warm; back in personal, the default returns.

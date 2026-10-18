@@ -32,9 +32,6 @@ public class User
     // choosing.
     public bool MustChangePassword { get; set; }
 
-    // Personal UI accent — a TagPalette slot name, null = the kit default.
-    public string? Accent { get; set; }
-
     // Date & time format — a DateFormats name, null = ISO.
     public string? DateFormat { get; set; }
 

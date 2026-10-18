@@ -140,18 +140,17 @@
     });
 
     // --- Accent colours -----------------------------------------------------
-    // Both are kit palette slot names ("teal"…) or null for the kit default.
-    // The personal accent is --accent. Inside a space that has a colour,
-    // the space's colour takes over the whole UI: --accent and --accent-warm
-    // (the switcher pill / shared-data tint) both become it, so you see at
-    // a glance whose data you are in. Set inline on :root, so every derived
-    // token (--accent-tint, --accent-fill…) follows. The personal accent is
-    // remembered per browser so the first paint doesn't flash the default.
-    const ACCENT_KEY = "fb.accent";
+    // A space's colour is a kit palette slot name ("teal"…) or null. Inside a
+    // space that has one, it takes over the whole UI: --accent and
+    // --accent-warm (the switcher pill / shared-data tint) both become it, so
+    // you see at a glance whose data you are in. Set inline on :root, so every
+    // derived token (--accent-tint, --accent-fill…) follows. The personal
+    // workspace, and a space without a colour, wear the kit's own accent —
+    // there is no personal accent (it fought the space's colour).
     const isSlot = (v) => typeof v === "string" && fb.tags.SLOTS.includes(v);
     const paletteVar = (slot) => `var(--palette-${slot})`;
-    let personalAccent = null;
-    try { const v = localStorage.getItem(ACCENT_KEY); if (isSlot(v)) personalAccent = v; } catch { /* storage blocked */ }
+    // What the old personal accent left in this browser.
+    try { localStorage.removeItem("fb.accent"); } catch { /* storage blocked */ }
 
     // The kit's own accents, read before anything is set inline on :root —
     // what a workspace without a colour falls back to.
@@ -166,31 +165,22 @@
     function accentsFor(workspace) {
         const slug = typeof workspace === "string" && workspace.startsWith("space:") ? workspace.slice(6) : null;
         const spaceColor = slug ? spaces?.find(s => s.slug === slug)?.color : null;
-        const accent = isSlot(spaceColor) ? spaceColor : personalAccent;
-        return {
-            accent: accent ? paletteVar(accent) : kitTokens.accent,
-            warm: isSlot(spaceColor) ? paletteVar(spaceColor) : kitTokens.warm,
-        };
+        return isSlot(spaceColor)
+            ? { accent: paletteVar(spaceColor), warm: paletteVar(spaceColor) }
+            : { accent: kitTokens.accent, warm: kitTokens.warm };
     }
 
     function applyAccents() {
         const root = document.documentElement.style;
         const ctx = sac.scope.get();
         const spaceColor = ctx.type === "scoped" ? spaces?.find(s => s.slug === ctx.slug)?.color : null;
-        const accent = isSlot(spaceColor) ? spaceColor : personalAccent;
-        if (accent) root.setProperty("--accent", paletteVar(accent));
-        else root.removeProperty("--accent");
-        if (isSlot(spaceColor)) root.setProperty("--accent-warm", paletteVar(spaceColor));
-        else root.removeProperty("--accent-warm");
-    }
-
-    function setPersonalAccent(slot) {
-        personalAccent = isSlot(slot) ? slot : null;
-        try {
-            if (personalAccent) localStorage.setItem(ACCENT_KEY, personalAccent);
-            else localStorage.removeItem(ACCENT_KEY);
-        } catch { /* storage blocked */ }
-        applyAccents();
+        if (isSlot(spaceColor)) {
+            root.setProperty("--accent", paletteVar(spaceColor));
+            root.setProperty("--accent-warm", paletteVar(spaceColor));
+        } else {
+            root.removeProperty("--accent");
+            root.removeProperty("--accent-warm");
+        }
     }
 
     // --- Workspace switcher -------------------------------------------------
@@ -275,7 +265,6 @@
 
     fb.api.me.get().then((me) => {
         user = me;
-        setPersonalAccent(me.accent);
         applyDateFormat(me.dateFormat);
         applyLanguage(me.language);
         fb.vault?.setAutoLock?.(me.vaultAutoLockMinutes);
@@ -442,17 +431,13 @@
                     <div><dt>${fb.t("fb.profile.joined", "Joined")}</dt><dd>${joined}</dd></div>
                     <div><dt>${fb.t("fb.profile.user-id", "User ID")}</dt><dd class="fb-profile-id"></dd></div>
                 </dl>
-                <div class="fb-profile-accent">
-                    <div class="fb-profile-label">${fb.t("fb.profile.accent", "Accent colour")}</div>
-                    <sac-swatch-grid selectable columns="11"></sac-swatch-grid>
-                </div>
-                <div class="fb-profile-accent">
+                <div class="fb-profile-field">
                     <label class="fb-profile-label" for="fb-language">${fb.t("fb.profile.language", "Language")}</label>
                     <span class="select"><select id="fb-language" class="fb-profile-select">
                         ${languages.map(([v]) => `<option value="${v}"${v === mode ? " selected" : ""}></option>`).join("")}
                     </select></span>
                 </div>
-                <div class="fb-profile-accent">
+                <div class="fb-profile-field">
                     <label class="fb-profile-label" for="fb-date-format">${fb.t("fb.profile.date-format", "Date &amp; time format")}</label>
                     <span class="select"><select id="fb-date-format" class="fb-profile-select">
                         ${fb.format.NAMES.map((n) => `<option value="${n}"${n === fb.format.name ? " selected" : ""}>${fb.format.example(n)}</option>`).join("")}
@@ -485,22 +470,6 @@
                 applyDateFormat(before);
                 e.target.value = before;
                 window.sac?.toast?.(fb.t("fb.profile.date-format-failed", "Couldn't save the date format."), { kind: "error" });
-            }
-        });
-        const grid = win.querySelector("sac-swatch-grid");
-        grid.colors = accentSwatches(personalAccent);
-        grid.addEventListener("sac:change", async (e) => {
-            const slot = swatchSlot(e.detail.value);
-            const before = personalAccent;
-            setPersonalAccent(slot);
-            try {
-                await fb.api.me.update({ accent: slot });
-                if (user) user.accent = slot;
-            } catch (err) {
-                console.warn("[fb-shell] accent save failed:", err?.message || err);
-                setPersonalAccent(before);
-                grid.colors = accentSwatches(before);
-                window.sac?.toast?.(fb.t("fb.profile.accent-failed", "Couldn't save the accent colour."), { kind: "error" });
             }
         });
         // User-sourced strings go in via textContent / attributes only.
