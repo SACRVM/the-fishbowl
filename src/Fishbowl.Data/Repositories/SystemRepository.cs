@@ -78,7 +78,7 @@ public class SystemRepository : ISystemRepository
                 @"SELECT id AS Id, name AS Name, email AS Email, avatar_url AS AvatarUrl,
                          created_at AS CreatedAt, password_hash AS PasswordHash,
                          password_salt AS PasswordSalt, is_admin AS IsAdmin,
-                         must_change_password AS MustChangePassword,
+                         must_change_password AS MustChangePassword, accent AS PersonalColor,
                          date_format AS DateFormat, language AS Language,
                          vault_auto_lock_minutes AS VaultAutoLockMinutes,
                          state AS State, quota_bytes AS QuotaBytes, approved_by AS ApprovedBy,
@@ -139,6 +139,17 @@ public class SystemRepository : ISystemRepository
                     AND (@flag = 1 OR is_admin = 0 OR state <> 'active'
                          OR (SELECT COUNT(*) FROM users WHERE is_admin = 1 AND state = 'active') > 1)",
                 new { userId, flag = isAdmin ? 1 : 0 },
+                cancellationToken: ct));
+        return affected > 0;
+    }
+
+    public async Task<bool> SetPersonalColorAsync(string userId, string? color, CancellationToken ct = default)
+    {
+        using var db = _dbFactory.CreateSystemConnection();
+        var affected = await db.ExecuteAsync(
+            new CommandDefinition(
+                "UPDATE users SET accent = @color WHERE id = @userId",
+                new { userId, color },
                 cancellationToken: ct));
         return affected > 0;
     }

@@ -1974,8 +1974,8 @@ public class DatabaseFactory
         try
         {
             AddColumnIfMissing(connection, transaction, "spaces", "color", "TEXT");
-            // Unused since 2026-10-18: a space's colour is the one colour, the
-            // personal workspace wears the kit's. Left in place, never read.
+            // The personal workspace's colour since 2026-10-18 (`personalColor`
+            // on /me) — before, an accent over every workspace without one.
             AddColumnIfMissing(connection, transaction, "users", "accent", "TEXT");
             AddColumnIfMissing(connection, transaction, "users", "date_format", "TEXT");
             transaction.Commit();

@@ -32,6 +32,10 @@ public class User
     // choosing.
     public bool MustChangePassword { get; set; }
 
+    // The personal workspace's colour (users.accent) — a TagPalette slot
+    // name, null = the kit's accent. Only the personal workspace wears it.
+    public string? PersonalColor { get; set; }
+
     // Date & time format — a DateFormats name, null = ISO.
     public string? DateFormat { get; set; }
 

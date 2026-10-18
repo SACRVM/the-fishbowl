@@ -140,17 +140,24 @@
     });
 
     // --- Accent colours -----------------------------------------------------
-    // A space's colour is a kit palette slot name ("teal"…) or null. Inside a
-    // space that has one, it takes over the whole UI: --accent and
-    // --accent-warm (the switcher pill / shared-data tint) both become it, so
-    // you see at a glance whose data you are in. Set inline on :root, so every
-    // derived token (--accent-tint, --accent-fill…) follows. The personal
-    // workspace, and a space without a colour, wear the kit's own accent —
-    // there is no personal accent (it fought the space's colour).
+    // Every workspace may have a colour — a kit palette slot name ("teal"…)
+    // or null — and wears only its own: a space's (spaces.color) takes over
+    // the whole UI while it is active, --accent and --accent-warm (the
+    // switcher pill / shared-data tint) both, so you see at a glance whose
+    // data you are in; the personal workspace's (personalColor on /me) is
+    // its --accent. A workspace without one wears the kit's. Set inline on
+    // :root, so every derived token (--accent-tint, --accent-fill…) follows.
+    // The personal colour is remembered per browser so the first paint
+    // doesn't flash the kit's.
+    const PERSONAL_KEY = "fb.personal-color";
     const isSlot = (v) => typeof v === "string" && fb.tags.SLOTS.includes(v);
     const paletteVar = (slot) => `var(--palette-${slot})`;
-    // What the old personal accent left in this browser.
-    try { localStorage.removeItem("fb.accent"); } catch { /* storage blocked */ }
+    let personalColor = null;
+    try {
+        localStorage.removeItem("fb.accent");   // the old accent over every workspace
+        const v = localStorage.getItem(PERSONAL_KEY);
+        if (isSlot(v)) personalColor = v;
+    } catch { /* storage blocked */ }
 
     // The kit's own accents, read before anything is set inline on :root —
     // what a workspace without a colour falls back to.
@@ -159,28 +166,47 @@
         return { accent: cs.getPropertyValue("--accent").trim(), warm: cs.getPropertyValue("--accent-warm").trim() };
     })();
 
-    /** The accents a workspace wears ("personal" | "space:<slug>"), as CSS
-     *  values — for a part of the page that shows another workspace than the
-     *  active one (Files' right pane). Same rule as applyAccents. */
+    /** The colour slot of a workspace ("personal" | "space:<slug>"), or null. */
+    function colorOf(workspace) {
+        if (typeof workspace === "string" && workspace.startsWith("space:")) {
+            const slug = workspace.slice(6);
+            const c = spaces?.find(s => s.slug === slug)?.color;
+            return isSlot(c) ? c : null;
+        }
+        return personalColor;
+    }
+
+    /** The accents a workspace wears, as CSS values — for a part of the page
+     *  that shows another workspace than the active one (Files' right pane).
+     *  Same rule as applyAccents. */
     function accentsFor(workspace) {
-        const slug = typeof workspace === "string" && workspace.startsWith("space:") ? workspace.slice(6) : null;
-        const spaceColor = slug ? spaces?.find(s => s.slug === slug)?.color : null;
-        return isSlot(spaceColor)
-            ? { accent: paletteVar(spaceColor), warm: paletteVar(spaceColor) }
-            : { accent: kitTokens.accent, warm: kitTokens.warm };
+        const color = colorOf(workspace);
+        const space = typeof workspace === "string" && workspace.startsWith("space:");
+        return {
+            accent: color ? paletteVar(color) : kitTokens.accent,
+            warm: space && color ? paletteVar(color) : kitTokens.warm,
+        };
     }
 
     function applyAccents() {
         const root = document.documentElement.style;
         const ctx = sac.scope.get();
-        const spaceColor = ctx.type === "scoped" ? spaces?.find(s => s.slug === ctx.slug)?.color : null;
-        if (isSlot(spaceColor)) {
-            root.setProperty("--accent", paletteVar(spaceColor));
-            root.setProperty("--accent-warm", paletteVar(spaceColor));
-        } else {
-            root.removeProperty("--accent");
-            root.removeProperty("--accent-warm");
-        }
+        const space = ctx.type === "scoped";
+        const color = colorOf(space ? `space:${ctx.slug}` : "personal");
+        if (color) root.setProperty("--accent", paletteVar(color));
+        else root.removeProperty("--accent");
+        if (space && color) root.setProperty("--accent-warm", paletteVar(color));
+        else root.removeProperty("--accent-warm");
+    }
+
+    /** The personal workspace's colour changed (or /me said what it is). */
+    function setPersonalColor(slot) {
+        personalColor = isSlot(slot) ? slot : null;
+        try {
+            if (personalColor) localStorage.setItem(PERSONAL_KEY, personalColor);
+            else localStorage.removeItem(PERSONAL_KEY);
+        } catch { /* storage blocked */ }
+        renderSwitcher();
     }
 
     // --- Workspace switcher -------------------------------------------------
@@ -200,6 +226,7 @@
 
         const pill = switcher.querySelector('[slot="trigger"]');
         pill.classList.toggle("space", inSpace);
+        pill.classList.toggle("personal", !inSpace && !!personalColor);
         pill.querySelector("sac-icon").setAttribute("name", inSpace ? "users" : "user");
         pill.querySelector(".fb-context-label").textContent = inSpace ? (space?.name || ctx.slug) : fb.t("fb.shell.personal", "Personal");
 
@@ -217,7 +244,7 @@
             }
             return b;
         };
-        const nodes = [item("ctx:user", "user", fb.t("fb.shell.personal", "Personal"), !inSpace), document.createElement("hr")];
+        const nodes = [item("ctx:user", "user", fb.t("fb.shell.personal", "Personal"), !inSpace, personalColor), document.createElement("hr")];
         if (spaces?.length) {
             for (const s of spaces) nodes.push(item(`ctx:space:${s.slug}`, "users", s.name || s.slug, inSpace && s.slug === ctx.slug, s.color));
         } else if (spaces) {
@@ -265,6 +292,7 @@
 
     fb.api.me.get().then((me) => {
         user = me;
+        setPersonalColor(me.personalColor);
         applyDateFormat(me.dateFormat);
         applyLanguage(me.language);
         fb.vault?.setAutoLock?.(me.vaultAutoLockMinutes);
@@ -547,7 +575,18 @@
         const m = /^var\(--palette-([a-z]+)\)$/.exec(value || "");
         return m && isSlot(m[1]) ? m[1] : null;
     }
-    fb.accents = { swatches: accentSwatches, slotOf: swatchSlot, cssVar: paletteVar, forWorkspace: accentsFor, name: colourName };
+    fb.accents = {
+        swatches: accentSwatches, slotOf: swatchSlot, cssVar: paletteVar, forWorkspace: accentsFor, name: colourName,
+        /** The personal workspace's colour slot (null = the kit's accent). */
+        get personal() { return personalColor; },
+        /** Saves it on the user and repaints; the earlier one stays on failure. */
+        async savePersonal(slot) {
+            const next = isSlot(slot) ? slot : null;
+            await fb.api.me.update({ personalColor: next });
+            if (user) user.personalColor = next;
+            setPersonalColor(next);
+        },
+    };
 
     async function logout() {
         try {

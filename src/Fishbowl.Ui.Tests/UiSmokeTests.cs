@@ -601,50 +601,93 @@ public class UiSmokeTests
     }
 
     [Fact]
-    public async Task Accents_SpaceColourIsTheOnlyColour_Test()
+    public async Task Accents_EachWorkspaceWearsItsOwnColour_Test()
     {
         var context = await _fixture.Browser!.NewContextAsync(new BrowserNewContextOptions { IgnoreHTTPSErrors = true, BypassCSP = true });
         var page = await context.NewPageAsync();
         var rootVar = (string name) => page.EvaluateAsync<string>(
             $"() => document.documentElement.style.getPropertyValue('{name}')");
+        try
+        {
+            // No accent in the profile: a colour belongs to a workspace.
+            await page.GotoAsync(_fixture.BaseUrl + "/#/notes");
+            var account = page.Locator("#fb-account");
+            await Assertions.Expect(account).ToBeVisibleAsync();
+            await account.Locator("[slot='trigger']").ClickAsync();
+            await account.Locator("button[data-action='profile']").ClickAsync();
+            await Assertions.Expect(page.Locator("#fb-profile-window #fb-language")).ToBeVisibleAsync();
+            await Assertions.Expect(page.Locator("#fb-profile-window sac-swatch-grid")).ToHaveCountAsync(0);
+            Assert.Equal("", await rootVar("--accent"));
+            await page.Locator("#fb-profile-window").EvaluateAsync("w => w.close?.()");
 
-        // No personal accent: the profile has no colour picker, and the
-        // personal workspace wears the kit's own accent.
-        await page.GotoAsync(_fixture.BaseUrl + "/#/notes");
-        var account = page.Locator("#fb-account");
-        await Assertions.Expect(account).ToBeVisibleAsync();
-        await account.Locator("[slot='trigger']").ClickAsync();
-        await account.Locator("button[data-action='profile']").ClickAsync();
-        await Assertions.Expect(page.Locator("#fb-profile-window #fb-language")).ToBeVisibleAsync();
-        await Assertions.Expect(page.Locator("#fb-profile-window sac-swatch-grid")).ToHaveCountAsync(0);
-        Assert.Equal("", await rootVar("--accent"));
-        await page.Locator("#fb-profile-window").EvaluateAsync("w => w.close?.()");
+            // The personal workspace's colour: its row in the Spaces window
+            // leads with it like a space's; picked, it is personal --accent,
+            // saved on the user and on Personal's icon in the switcher.
+            await WindowApp.OpenAsync(page, _fixture.BaseUrl, "spaces");
+            var personal = page.Locator(".personal-row");
+            await personal.Locator("button.space-color").ClickAsync();
+            await page.Locator("sac-dialog[open] sac-swatch[label='Teal']").ClickAsync();
+            await Assertions.Expect(page.Locator("sac-dialog")).ToHaveCountAsync(0);
+            await Assertions.Expect(personal.Locator("button.space-color")).ToHaveAttributeAsync("style", new System.Text.RegularExpressions.Regex("palette-teal"));
+            await page.WaitForFunctionAsync("() => document.documentElement.style.getPropertyValue('--accent') === 'var(--palette-teal)'");
+            Assert.Equal("", await rootVar("--accent-warm"));
+            var me = await (await page.APIRequest.GetAsync(_fixture.BaseUrl + "/api/v1/me")).JsonAsync();
+            Assert.Equal("teal", me!.Value.GetProperty("personalColor").GetString());
+            Assert.Equal("var(--palette-teal)", await page.Locator("#fb-context button[data-action='ctx:user'] sac-icon").First
+                .EvaluateAsync<string>("i => i.style.color"));
+            await Assertions.Expect(page.Locator("#fb-context [slot='trigger']")).ToHaveClassAsync(new System.Text.RegularExpressions.Regex("\\bpersonal\\b"));
+            await page.ScreenshotAsync(new PageScreenshotOptions { Path = Path.Combine(Path.GetTempPath(), "fishbowl_ui_personal_colour.png") });
+            await page.Locator("#fb-win-spaces").EvaluateAsync("w => w.close?.()");
+            await page.Locator("#fb-context [slot='trigger']").ClickAsync();
+            await page.WaitForTimeoutAsync(300);
+            await page.ScreenshotAsync(new PageScreenshotOptions { Path = Path.Combine(Path.GetTempPath(), "fishbowl_ui_personal_switcher.png") });
+            await page.Keyboard.PressAsync("Escape");
+            // Not hovered, the pill itself says "Personal" in that colour.
+            await page.Mouse.MoveAsync(600, 600);
+            await page.WaitForTimeoutAsync(400);
+            Assert.True(await page.EvaluateAsync<bool>(@"() => {
+                const probe = document.createElement('span');
+                probe.style.color = 'var(--palette-teal)';
+                document.body.append(probe);
+                const same = getComputedStyle(document.querySelector('#fb-context [slot=trigger]')).color === getComputedStyle(probe).color;
+                probe.remove();
+                return same;
+            }"));
+            await page.ScreenshotAsync(new PageScreenshotOptions { Path = Path.Combine(Path.GetTempPath(), "fishbowl_ui_personal_pill.png"), Clip = new Clip { X = 900, Y = 0, Width = 380, Height = 50 } });
 
-        // Space colour: picked in the spaces settings, and inside the space
-        // it replaces --accent-warm; back in personal, the default returns.
-        var name = "Colour space " + Guid.NewGuid().ToString("N")[..6];
-        var created = await page.APIRequest.PostAsync(_fixture.BaseUrl + "/api/v1/spaces", new APIRequestContextOptions { DataObject = new { name } });
-        var slug = (await created.JsonAsync())!.Value.GetProperty("slug").GetString()!;
-        await WindowApp.OpenAsync(page, _fixture.BaseUrl, "spaces");
-        var row = page.Locator($".space-row[data-slug='{slug}']");
-        // The row leads with the space's colour; clicking it opens the picker,
-        // picking saves and closes.
-        await row.Locator("button.space-color").ClickAsync();
-        var picker = page.Locator("sac-dialog[open]");
-        await picker.Locator("sac-swatch[label='Green']").ClickAsync();
-        await Assertions.Expect(page.Locator("sac-dialog")).ToHaveCountAsync(0);
-        await Assertions.Expect(row.Locator("button.space-color")).ToHaveAttributeAsync("style", new System.Text.RegularExpressions.Regex("palette-green"));
+            // A space's colour: picked in the same window; inside the space
+            // it is --accent and --accent-warm — the personal colour isn't.
+            var name = "Colour space " + Guid.NewGuid().ToString("N")[..6];
+            var created = await page.APIRequest.PostAsync(_fixture.BaseUrl + "/api/v1/spaces", new APIRequestContextOptions { DataObject = new { name } });
+            var slug = (await created.JsonAsync())!.Value.GetProperty("slug").GetString()!;
+            var plain = "Plain space " + Guid.NewGuid().ToString("N")[..6];
+            var plainSlug = (await (await page.APIRequest.PostAsync(_fixture.BaseUrl + "/api/v1/spaces", new APIRequestContextOptions { DataObject = new { name = plain } })).JsonAsync())!.Value.GetProperty("slug").GetString()!;
+            await WindowApp.OpenAsync(page, _fixture.BaseUrl, "spaces");
+            var row = page.Locator($".space-row[data-slug='{slug}']");
+            await row.Locator("button.space-color").ClickAsync();
+            await page.Locator("sac-dialog[open] sac-swatch[label='Green']").ClickAsync();
+            await Assertions.Expect(page.Locator("sac-dialog")).ToHaveCountAsync(0);
+            await Assertions.Expect(row.Locator("button.space-color")).ToHaveAttributeAsync("style", new System.Text.RegularExpressions.Regex("palette-green"));
 
-        await page.GotoAsync(_fixture.BaseUrl + $"/#/space/{slug}/notes");
-        await page.WaitForFunctionAsync("() => document.documentElement.style.getPropertyValue('--accent-warm') === 'var(--palette-green)'");
-        // …and the whole UI's accent, not just the switcher tint.
-        Assert.Equal("var(--palette-green)", await rootVar("--accent"));
-        await page.Locator("#fb-context [slot='trigger']").ClickAsync();
-        await page.Locator("#fb-context button[data-action='ctx:user']").ClickAsync();
-        await page.WaitForFunctionAsync("() => document.documentElement.style.getPropertyValue('--accent-warm') === ''");
-        Assert.Equal("", await rootVar("--accent"));
-
-        await context.CloseAsync();
+            await page.GotoAsync(_fixture.BaseUrl + $"/#/space/{slug}/notes");
+            await page.WaitForFunctionAsync("() => document.documentElement.style.getPropertyValue('--accent-warm') === 'var(--palette-green)'");
+            Assert.Equal("var(--palette-green)", await rootVar("--accent"));
+            // A space without a colour wears the kit's, not the personal one.
+            await page.GotoAsync(_fixture.BaseUrl + $"/#/space/{plainSlug}/notes");
+            await page.WaitForFunctionAsync("() => document.documentElement.style.getPropertyValue('--accent') === ''");
+            Assert.Equal("", await rootVar("--accent-warm"));
+            // Back in personal, its own colour again.
+            await page.Locator("#fb-context [slot='trigger']").ClickAsync();
+            await page.Locator("#fb-context button[data-action='ctx:user']").ClickAsync();
+            await page.WaitForFunctionAsync("() => document.documentElement.style.getPropertyValue('--accent') === 'var(--palette-teal)'");
+            Assert.Equal("", await rootVar("--accent-warm"));
+        }
+        finally
+        {
+            // Other tests share this user.
+            await page.APIRequest.PatchAsync(_fixture.BaseUrl + "/api/v1/me", new APIRequestContextOptions { DataObject = new Dictionary<string, object?> { ["personalColor"] = null } });
+            await context.CloseAsync();
+        }
     }
 
     [Fact]

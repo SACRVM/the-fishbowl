@@ -142,8 +142,9 @@ class FbSpacesSettingsView extends HTMLElement {
         }
 
         mount.innerHTML = `
-            <div class="fb-row space-row">
-                <sac-icon name="user"></sac-icon>
+            <div class="fb-row space-row personal-row">
+                <button type="button" class="space-color" title="${fb.t("fb.spaces.change-colour", "Change colour")}" aria-label="${fb.t("fb.spaces.change-colour", "Change colour")}"
+                        style="--space-color: ${this._colorVar(fb.accents.personal, "blue")}"></button>
                 <div class="fb-row-info">
                     <p class="fb-row-name">${escapeHtml(this.me.name || this.me.email || fb.t("fb.spaces.you", "You"))}</p>
                     <div class="fb-row-meta">
@@ -152,6 +153,11 @@ class FbSpacesSettingsView extends HTMLElement {
                 </div>
             </div>
         `;
+        mount.querySelector("button.space-color").addEventListener("click", () => this._pickColor({
+            name: fb.t("fb.shell.personal", "Personal"),
+            color: fb.accents.personal,
+            save: (slot) => fb.accents.savePersonal(slot),
+        }));
     }
 
     renderList() {
@@ -204,7 +210,12 @@ class FbSpacesSettingsView extends HTMLElement {
         list.querySelectorAll("button.space-color").forEach(btn => {
             btn.addEventListener("click", (e) => {
                 const slug = e.currentTarget.closest(".space-row")?.dataset.slug;
-                if (slug) this._pickColor(slug);
+                const space = this.spaces.find(t => t.slug === slug);
+                if (space) this._pickColor({
+                    name: space.name,
+                    color: space.color,
+                    save: (slot) => fb.api.spaces.update(slug, { color: slot }),
+                });
             });
         });
 
@@ -244,11 +255,12 @@ class FbSpacesSettingsView extends HTMLElement {
         });
     }
 
-    // The colour a space shows: its palette slot, or the kit's default
-    // warm accent (orange) — the palette var, not --accent-warm, which
-    // the active space itself may have overridden.
-    _colorVar(slot) {
-        return fb.accents.cssVar(fb.tags.SLOTS.includes(slot) ? slot : "orange");
+    // The colour a workspace shows: its palette slot, or what the kit wears
+    // without one — orange (warm) for a space, blue for the personal
+    // workspace — as the palette var, not --accent / --accent-warm, which
+    // the active workspace itself may have overridden.
+    _colorVar(slot, fallback = "orange") {
+        return fb.accents.cssVar(fb.tags.SLOTS.includes(slot) ? slot : fallback);
     }
 
     // The owner's settings for a space: today, whether messages from the
@@ -284,14 +296,12 @@ class FbSpacesSettingsView extends HTMLElement {
         setTimeout(() => dlg.open?.(), 0);
     }
 
-    // Colour picker window: the kit palette plus "Default". Picking one
-    // saves it and closes; it tints the space's switcher pill and the
-    // shared-data highlights while the space is active. Owner-only.
-    _pickColor(slug) {
-        const space = this.spaces.find(t => t.slug === slug);
-        if (!space) return;
+    // Colour picker: the kit palette plus "Default". Picking one saves it
+    // (save(slot) — a space's owner, or the personal workspace's user) and
+    // closes; the workspace wears it while it is active.
+    _pickColor({ name, color, save }) {
         const dlg = document.createElement("sac-dialog");
-        dlg.setAttribute("title", fb.t("fb.spaces.colour-title", "Colour — {name}", { name: space.name }));
+        dlg.setAttribute("title", fb.t("fb.spaces.colour-title", "Colour — {name}", { name }));
         dlg.style.setProperty("--dialog-width", "340px");
         dlg.buttons = [{ action: "close", label: fb.t("fb.spaces.close", "Close"), kind: "default" }];
         const grid = document.createElement("sac-swatch-grid");
@@ -299,17 +309,17 @@ class FbSpacesSettingsView extends HTMLElement {
         grid.setAttribute("columns", "6");
         grid.className = "fb-space-color-grid";
         dlg.appendChild(grid);
-        grid.colors = fb.accents.swatches(space.color);
+        grid.colors = fb.accents.swatches(color);
         // close() ends in sac:closed too, so one listener removes it either way.
         dlg.addEventListener("sac:closed", () => dlg.remove(), { once: true });
         grid.addEventListener("sac:change", async (e) => {
             try {
-                await fb.api.spaces.update(slug, { color: fb.accents.slotOf(e.detail.value) });
+                await save(fb.accents.slotOf(e.detail.value));
                 dlg.close("picked");
                 await this.refresh();
             } catch (err) {
                 console.warn("[fb-spaces-settings-view] colour failed:", err);
-                grid.colors = fb.accents.swatches(space.color);
+                grid.colors = fb.accents.swatches(color);
                 window.sac?.toast?.(err?.status === 403 ? fb.t("fb.spaces.colour-owner-only", "Only the owner can change the colour.") : fb.t("fb.spaces.colour-failed", "Failed to save the colour."), { kind: "error" });
             }
         });

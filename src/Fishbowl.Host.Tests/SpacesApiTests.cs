@@ -257,20 +257,28 @@ public class SpacesApiTests : IClassFixture<WebApplicationFactory<Program>>, IDi
     // /me lives in AccountApi; tested here because this fixture seeds real
     // user rows, which /me reads.
     [Fact]
-    public async Task Me_CarriesNoAccent_AndNeverPasswordFields()
+    public async Task MePersonalColor_RoundTrips_AndMeNeverCarriesPasswordFields()
     {
         var client = _factory.CreateClient();
         var ct = TestContext.Current.CancellationToken;
 
-        // There is no personal accent any more: a space's colour is the one
-        // colour. An old client's accent is ignored like any unknown field.
-        var patch = await client.SendAsync(Req(HttpMethod.Patch, "/api/v1/me", UserA, new { accent = "purple" }), ct);
+        // The personal workspace's colour: a palette slot or null. The old
+        // `accent` (an accent over every workspace) is gone and ignored.
+        var patch = await client.SendAsync(Req(HttpMethod.Patch, "/api/v1/me", UserA, new { personalColor = "purple", accent = "teal" }), ct);
         Assert.Equal(HttpStatusCode.NoContent, patch.StatusCode);
+        var bad = await client.SendAsync(Req(HttpMethod.Patch, "/api/v1/me", UserA, new { personalColor = "chartreuse" }), ct);
+        Assert.Equal(HttpStatusCode.BadRequest, bad.StatusCode);
 
         var raw = await (await client.SendAsync(Req(HttpMethod.Get, "/api/v1/me", UserA), ct)).Content.ReadAsStringAsync(ct);
         var me = System.Text.Json.JsonDocument.Parse(raw).RootElement;
+        Assert.Equal("purple", me.GetProperty("personalColor").GetString());
         Assert.False(me.TryGetProperty("accent", out _));
         Assert.DoesNotContain("password", raw, StringComparison.OrdinalIgnoreCase);
+
+        await client.SendAsync(Req(HttpMethod.Patch, "/api/v1/me", UserA, new { personalColor = (string?)null }), ct);
+        var cleared = await (await client.SendAsync(Req(HttpMethod.Get, "/api/v1/me", UserA), ct))
+            .Content.ReadFromJsonAsync<System.Text.Json.JsonElement>(ct);
+        Assert.Equal(System.Text.Json.JsonValueKind.Null, cleared.GetProperty("personalColor").ValueKind);
     }
 
     [Fact]

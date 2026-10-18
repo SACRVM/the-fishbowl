@@ -44,6 +44,9 @@ public interface ISystemRepository
         bool mustChange = false, CancellationToken ct = default);
     Task<bool> SetAdminAsync(string userId, bool isAdmin, CancellationToken ct = default);
 
+    // The personal workspace's colour: a TagPalette slot or null. Callers validate.
+    Task<bool> SetPersonalColorAsync(string userId, string? color, CancellationToken ct = default);
+
     // Date & time format: a DateFormats name or null (ISO). Callers validate.
     Task<bool> SetDateFormatAsync(string userId, string? dateFormat, CancellationToken ct = default);
 
