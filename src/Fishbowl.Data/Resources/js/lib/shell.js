@@ -226,7 +226,7 @@
 
         const pill = switcher.querySelector('[slot="trigger"]');
         pill.classList.toggle("space", inSpace);
-        pill.classList.toggle("personal", !inSpace && !!personalColor);
+        pill.classList.toggle("personal", !inSpace);
         pill.querySelector("sac-icon").setAttribute("name", inSpace ? "users" : "user");
         pill.querySelector(".fb-context-label").textContent = inSpace ? (space?.name || ctx.slug) : fb.t("fb.shell.personal", "Personal");
 
@@ -235,18 +235,20 @@
             b.dataset.action = action;
             b.innerHTML = `<sac-icon name="${icon}"></sac-icon><span></span>`;
             b.querySelector("span").textContent = label;
-            // The menu forces the item's colour, not its icon's: a space's
-            // own colour shows on its icon.
-            if (color) b.querySelector("sac-icon").style.color = paletteVar(color);
+            // The menu forces the item's colour, not its icon's: a
+            // workspace's colour (a CSS value) shows on its icon.
+            if (color) b.querySelector("sac-icon").style.color = color;
             if (active) {
                 b.setAttribute("aria-current", "true");
                 b.insertAdjacentHTML("beforeend", `<sac-icon class="fb-context-check" name="check"></sac-icon>`);
             }
             return b;
         };
-        const nodes = [item("ctx:user", "user", fb.t("fb.shell.personal", "Personal"), !inSpace, personalColor), document.createElement("hr")];
+        // Each workspace's icon in the colour it wears — its own, else the
+        // kit's: blue for the personal workspace, orange for a space.
+        const nodes = [item("ctx:user", "user", fb.t("fb.shell.personal", "Personal"), !inSpace, accentsFor("personal").accent), document.createElement("hr")];
         if (spaces?.length) {
-            for (const s of spaces) nodes.push(item(`ctx:space:${s.slug}`, "users", s.name || s.slug, inSpace && s.slug === ctx.slug, s.color));
+            for (const s of spaces) nodes.push(item(`ctx:space:${s.slug}`, "users", s.name || s.slug, inSpace && s.slug === ctx.slug, accentsFor(`space:${s.slug}`).warm));
         } else if (spaces) {
             const empty = document.createElement("span");
             empty.className = "fb-context-empty";

@@ -620,6 +620,21 @@ public class UiSmokeTests
             Assert.Equal("", await rootVar("--accent"));
             await page.Locator("#fb-profile-window").EvaluateAsync("w => w.close?.()");
 
+            // Without a colour of its own, Personal wears the kit's blue —
+            // the pill and its icon in the switcher alike.
+            var sameColour = (string selector, string css) => page.EvaluateAsync<bool>(@"([selector, css]) => {
+                const probe = document.createElement('span');
+                probe.style.color = css;
+                document.body.append(probe);
+                const same = getComputedStyle(document.querySelector(selector)).color === getComputedStyle(probe).color;
+                probe.remove();
+                return same;
+            }", new[] { selector, css });
+            await page.Mouse.MoveAsync(600, 600);
+            await page.WaitForTimeoutAsync(400);
+            Assert.True(await sameColour("#fb-context [slot=trigger]", "var(--palette-blue)"));
+            Assert.True(await sameColour("#fb-context button[data-action='ctx:user'] sac-icon", "var(--palette-blue)"));
+
             // The personal workspace's colour: its row in the Spaces window
             // leads with it like a space's; picked, it is personal --accent,
             // saved on the user and on Personal's icon in the switcher.
@@ -645,14 +660,7 @@ public class UiSmokeTests
             // Not hovered, the pill itself says "Personal" in that colour.
             await page.Mouse.MoveAsync(600, 600);
             await page.WaitForTimeoutAsync(400);
-            Assert.True(await page.EvaluateAsync<bool>(@"() => {
-                const probe = document.createElement('span');
-                probe.style.color = 'var(--palette-teal)';
-                document.body.append(probe);
-                const same = getComputedStyle(document.querySelector('#fb-context [slot=trigger]')).color === getComputedStyle(probe).color;
-                probe.remove();
-                return same;
-            }"));
+            Assert.True(await sameColour("#fb-context [slot=trigger]", "var(--palette-teal)"));
             await page.ScreenshotAsync(new PageScreenshotOptions { Path = Path.Combine(Path.GetTempPath(), "fishbowl_ui_personal_pill.png"), Clip = new Clip { X = 900, Y = 0, Width = 380, Height = 50 } });
 
             // A space's colour: picked in the same window; inside the space
@@ -672,10 +680,14 @@ public class UiSmokeTests
             await page.GotoAsync(_fixture.BaseUrl + $"/#/space/{slug}/notes");
             await page.WaitForFunctionAsync("() => document.documentElement.style.getPropertyValue('--accent-warm') === 'var(--palette-green)'");
             Assert.Equal("var(--palette-green)", await rootVar("--accent"));
-            // A space without a colour wears the kit's, not the personal one.
+            // A space without a colour wears the kit's, not the personal one;
+            // its switcher icon is the kit's orange, the green space's green.
             await page.GotoAsync(_fixture.BaseUrl + $"/#/space/{plainSlug}/notes");
             await page.WaitForFunctionAsync("() => document.documentElement.style.getPropertyValue('--accent') === ''");
             Assert.Equal("", await rootVar("--accent-warm"));
+            Assert.True(await sameColour($"#fb-context button[data-action='ctx:space:{plainSlug}'] sac-icon", "var(--palette-orange)"));
+            Assert.True(await sameColour($"#fb-context button[data-action='ctx:space:{slug}'] sac-icon", "var(--palette-green)"));
+            Assert.True(await sameColour("#fb-context button[data-action='ctx:user'] sac-icon", "var(--palette-teal)"));
             // Back in personal, its own colour again.
             await page.Locator("#fb-context [slot='trigger']").ClickAsync();
             await page.Locator("#fb-context button[data-action='ctx:user']").ClickAsync();

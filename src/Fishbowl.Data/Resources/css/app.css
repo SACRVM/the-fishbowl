@@ -341,7 +341,7 @@ label.fb-quota-field input { width: 6em; }
    so inside one it takes the warm accent. */
 .fb-context-pill { max-width: 220px; }
 .fb-context-pill.space { color: var(--accent-warm); }
-/* The personal workspace in its own colour, once it has one (--accent is it there). */
+/* The personal workspace in its colour — its own, else the kit's (--accent is it there). */
 .fb-context-pill.personal { color: var(--accent); }
 .fb-context-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .fb-context-check { margin-left: auto; color: var(--accent); }
