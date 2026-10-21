@@ -271,8 +271,11 @@ cmd_deploy() {
     # written under it, and a failed build leaves it as it is.
     rm -rf "$root/app.new"
     say "Building $(git -C "$repo" describe --tags --always --dirty) …"
+    # 9>&-: the build leaves servers running (the C# compiler's), which would
+    # inherit the lock's descriptor and hold it — the next deploy then found
+    # "another deploy is running".
     if ! dotnet publish "$host_dir" -c Release -r "$rid" --self-contained false \
-            -o "$root/app.new" --nologo -v quiet; then
+            -o "$root/app.new" --nologo -v quiet 9>&-; then
         rm -rf "$root/app.new"
         die "the build failed; the running host is unchanged"
     fi
