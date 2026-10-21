@@ -36,13 +36,16 @@ public static partial class SpaceApps
 
     // What a space app's frame loads after the kit, before the app: the
     // data grid Fishbowl vendors for its Tables app (it needs nothing of the
-    // kit at load and takes its German once the kit is ready). The frame's
-    // CSP allows exactly this folder of Fishbowl's own origin.
+    // kit at load and takes its German once the kit is ready), with its
+    // in-memory source, SacDataGrid.arraySource — the Tables app has its own
+    // source, an app usually holds its rows. The frame's CSP allows exactly
+    // this folder of Fishbowl's own origin.
     public const string FrameScriptFolder = "/js/vendor/sac-data-grid/js/";
     public static readonly IReadOnlyList<string> FrameScripts =
     [
         FrameScriptFolder + "sac-data-grid-types.js",
         FrameScriptFolder + "sac-data-grid.js",
+        FrameScriptFolder + "sac-data-grid-source.js",
         FrameScriptFolder + "sac-data-grid-edit.js",
         FrameScriptFolder + "sac-data-grid-form.js",
         FrameScriptFolder + "sac-data-grid.de.js",

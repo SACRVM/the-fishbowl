@@ -587,7 +587,7 @@ public class AppsTests : IAsyncLifetime
                     show(context.route);
                     context.onRoute(show);
                     this.querySelector('#mounts').textContent = 'mounts:' + window.mounts;
-                    this.querySelector('#grid').textContent = 'grid:' + (customElements.get('sac-data-grid') ? 'yes' : 'no');
+                    this.querySelector('#grid').textContent = 'grid:' + (customElements.get('sac-data-grid') && typeof SacDataGrid.arraySource === 'function' ? 'yes' : 'no');
                     this.querySelector('#go').addEventListener('click', () => { context.deepLink.set('detail/7'); show('detail/7'); });
                   }
                 });

@@ -447,6 +447,7 @@ public class DesktopApiTests : IClassFixture<WebApplicationFactory<Program>>, ID
         var guest = html.IndexOf("/kit/js/lib/app-guest.js", StringComparison.Ordinal);
         Assert.True(kit > 0 && kit < grid && grid < guest, html);
         Assert.Contains("/js/vendor/sac-data-grid/js/sac-data-grid.de.js", html);
+        Assert.True(grid < html.IndexOf("/js/vendor/sac-data-grid/js/sac-data-grid-source.js", StringComparison.Ordinal), html);   // arraySource needs the grid
         Assert.Equal(HttpStatusCode.NotFound, (await As(Carol).GetAsync($"/apps/frame/space/{space.Slug}/space.hello", Ct)).StatusCode);
         Assert.Equal(HttpStatusCode.NotFound, (await As(Bob).GetAsync($"/apps/frame/space/{space.Slug}/space.broken", Ct)).StatusCode);
     }
