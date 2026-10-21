@@ -514,8 +514,15 @@
             },
             stat:    (path) => request(`${b()}/stat${q(path)}`),
             // A URL an <img>/<audio>/<a download> can stream from; `inline`
-            // opens a PDF (or a safe type) in its own tab.
-            contentUrl: (path, { inline = false } = {}) => `${base}${b()}/content${q(path)}${inline ? "&inline=1" : ""}`,
+            // shows a PDF (or a safe type) as itself — then the URL ends in the
+            // file's name, which a browser's PDF viewer takes for its title
+            // (the server ignores it; `path` decides).
+            contentUrl: (path, { inline = false } = {}) => {
+                const name = String(path ?? "").split("/").pop();
+                return inline && name
+                    ? `${base}${b()}/content/${encodeURIComponent(name)}${q(path)}&inline=1`
+                    : `${base}${b()}/content${q(path)}`;
+            },
             read: async (path) => {
                 const res = await fetch(`${base}${b()}/content${q(path)}`);
                 if (res.status === 401) { window.location.href = "/login"; throw new ApiError(401, "Unauthenticated"); }

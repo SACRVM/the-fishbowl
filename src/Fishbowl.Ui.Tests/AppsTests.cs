@@ -536,12 +536,12 @@ public class AppsTests : IAsyncLifetime
             // a phone): a tab of the top page on the inline content URL.
             // FilesTests' Files_PdfOpensInAWindow_InChromium_Test has the window.
             var requested = new TaskCompletionSource<IRequest>(TaskCreationOptions.RunContinuationsAsynchronously);
-            context.Request += (_, r) => { if (r.Url.Contains("/files/content?")) requested.TrySetResult(r); };
+            context.Request += (_, r) => { if (r.Url.Contains("/files/content/") && r.Url.Contains("inline=1")) requested.TrySetResult(r); };
             var opened = context.WaitForPageAsync();
             await frame.Locator("#open").ClickAsync();
             var tab = await opened;
             var request = await requested.Task.WaitAsync(TimeSpan.FromSeconds(15), TestContext.Current.CancellationToken);
-            Assert.Contains($"/api/v1/spaces/{slug}/files/content?path={Uri.EscapeDataString("Receipts/2026 receipt.pdf")}&inline=1", request.Url);
+            Assert.Contains($"/api/v1/spaces/{slug}/files/content/2026%20receipt.pdf?path={Uri.EscapeDataString("Receipts/2026 receipt.pdf")}&inline=1", request.Url);
             Assert.NotSame(page, request.Frame.Page);
             await tab.CloseAsync();
             Assert.Empty(errors);

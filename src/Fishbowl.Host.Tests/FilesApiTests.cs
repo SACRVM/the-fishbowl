@@ -176,6 +176,15 @@ public class FilesApiTests : IClassFixture<WebApplicationFactory<Program>>, IDis
         Assert.Equal("application/pdf", pdf.Content.Headers.ContentType!.MediaType);
         Assert.Equal("nosniff", pdf.Headers.GetValues("X-Content-Type-Options").Single());
         Assert.DoesNotContain("sandbox", pdf.Headers.GetValues("Content-Security-Policy").Single());
+
+        // The same with the name as the URL's last segment (a PDF viewer's
+        // title): only path decides — a different name serves the same file.
+        var named = await c.GetAsync("/api/v1/files/content/other%20name.pdf?path=real.pdf&inline=1", Ct);
+        Assert.Equal(HttpStatusCode.OK, named.StatusCode);
+        Assert.Equal("application/pdf", named.Content.Headers.ContentType!.MediaType);
+        Assert.Equal("real.pdf", named.Content.Headers.ContentDisposition!.FileName?.Trim('"'));
+        Assert.StartsWith("%PDF-1.7", await named.Content.ReadAsStringAsync(Ct));
+        Assert.Equal(HttpStatusCode.NotFound, (await c.GetAsync("/api/v1/files/content/real.pdf?path=missing.pdf&inline=1", Ct)).StatusCode);
     }
 
     [Fact]

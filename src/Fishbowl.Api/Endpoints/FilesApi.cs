@@ -158,7 +158,10 @@ public static class FilesApi
             Results.Ok(await files.StatAsync(t.Ctx, path ?? "", ct))))
             .WithName($"Stat{tag}File").RequireScope(ScopeCatalog.ReadFiles);
 
-        g.MapGet("/content", (HttpContext http, string? path, int? inline) => Run(http, false, async (t, files, ct) =>
+        // The file's name as a last segment (/content/<name>?path=…) only
+        // names the URL — a browser's PDF viewer titles itself from it; the
+        // name is never read, `path` decides what is served.
+        Delegate content = (HttpContext http, string? path, int? inline) => Run(http, false, async (t, files, ct) =>
         {
             var h = await files.OpenReadAsync(t.Ctx, path ?? "", ct);
             var isPdf = h.Mime == FileSniffer.Pdf;
@@ -173,8 +176,12 @@ public static class FilesApi
                      : FileSniffer.IsInlineSafe(h.Mime) || isPdf ? h.Mime : FileSniffer.OctetStream;
             return Results.File(h.Stream, type, fileDownloadName: null, lastModified: h.Entry.Mtime,
                 entityTag: new EntityTagHeaderValue($"\"{h.Entry.Etag}\""), enableRangeProcessing: true);
-        }))
+        });
+        g.MapGet("/content", content)
             .WithName($"Get{tag}FileContent").WithSummary("Streams a file (Range, ETag). Attachment unless ?inline=1 and the sniffed type is safe; PDFs open inline in their own tab.")
+            .RequireScope(ScopeCatalog.ReadFiles);
+        g.MapGet("/content/{name}", content)
+            .WithName($"Get{tag}FileContentNamed").WithSummary("The same, the file's name as the URL's last segment (what a PDF viewer shows as its title); the name is ignored, path decides.")
             .RequireScope(ScopeCatalog.ReadFiles);
 
         g.MapPut("/content", (HttpContext http, string? path, int? parents) => Run(http, true, async (t, files, ct) =>

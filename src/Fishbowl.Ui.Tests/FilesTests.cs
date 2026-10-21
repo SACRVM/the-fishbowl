@@ -479,7 +479,8 @@ public class FilesTests
 
             var win = page.Locator("sac-window.fb-file-viewer.pdf");
             await Assertions.Expect(win).ToHaveAttributeAsync("title", "receipt.pdf", new() { Timeout = 10000 });
-            await Assertions.Expect(win.Locator("iframe")).ToHaveAttributeAsync("src", new System.Text.RegularExpressions.Regex("/api/v1/files/content\\?path=.*receipt\\.pdf&inline=1$"));
+            // The URL ends in the file's name: Chrome's viewer titles itself from it (else "content").
+            await Assertions.Expect(win.Locator("iframe")).ToHaveAttributeAsync("src", new System.Text.RegularExpressions.Regex("/api/v1/files/content/receipt\\.pdf\\?path=.*receipt\\.pdf&inline=1$"));
             await Assertions.Expect(page.FrameLocator("sac-window.fb-file-viewer iframe")
                 .Locator("embed[type='application/pdf'], embed[type='application/x-google-chrome-pdf']").First)
                 .ToBeAttachedAsync(new() { Timeout = 10000 });
