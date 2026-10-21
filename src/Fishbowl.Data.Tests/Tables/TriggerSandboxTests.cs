@@ -88,8 +88,11 @@ public class TriggerSandboxTests
     [InlineData("String(Array(100).fill('x'.repeat(2e5)))")]
     [InlineData("Array(100).fill('x'.repeat(2e5)).toLocaleString()")]
     [InlineData("'x'.concat(...Array(100).fill('x'.repeat(2e5)))")]
-    [InlineData("'x'.repeat(2e5).replaceAll('', 'yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy')")]
-    [InlineData("'x'.repeat(2e5).replace(/x/g, '$&$&$&$&$&$&$&$&$&$&$&$&$&$&$&$&$&$&$&$&$&$&$&$&$&$&$&$&$&$&$&$&$&$&$&$&$&$&$&$&$&$&$&$&$&$&$&$&$&$&')")]
+    // A replacement grows the string per match: 5000 characters a match
+    // reach the cap within some 1600 of them — 50 needed 160 000, and a slow
+    // runner met the time limit (1 s) first.
+    [InlineData("'x'.repeat(2e5).replaceAll('', 'y'.repeat(5000))")]
+    [InlineData("'x'.repeat(2e5).replace(/x/g, '$&'.repeat(5000))")]
     [InlineData("'x'.repeat(1000).replace(/x/g, () => 'y'.repeat(2e5))")]
     [InlineData("/x/g[Symbol.replace]('x'.repeat(1000), 'y'.repeat(2e5))")]
     [InlineData("String.raw({ raw: Array(100).fill('x'.repeat(2e5)) })")]

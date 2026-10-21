@@ -20,6 +20,13 @@ public class VaultTests
     private const string Label = "aws-root-label";
     private const string Trailer = "rotate-yearly-trailer";
 
+    // Every wait behind a key derivation — a passphrase's PBKDF2 at 600 000
+    // rounds, on setup, unlock, change — gets this much: seconds on a busy
+    // runner, more when other test runs share its CPU.
+    private const int KdfTimeout = 30000;
+    // A dialog that shows once a reloaded page has loaded its notes.
+    private const int ReloadTimeout = 15000;
+
     private readonly PlaywrightFixture _fixture;
 
     public VaultTests(PlaywrightFixture fixture) => _fixture = fixture;
@@ -131,13 +138,13 @@ public class VaultTests
             // ── Reload: the key is gone (memory only); a wrong passphrase is refused. ──
             await page.ReloadAsync();
             var unlock = page.Locator("sac-dialog[title='Unlock secrets']");
-            await unlock.WaitForAsync(new LocatorWaitForOptions { Timeout = 5000 });
+            await unlock.WaitForAsync(new LocatorWaitForOptions { Timeout = ReloadTimeout });
             await unlock.Locator("input[name='pass']").FillAsync("not-the-passphrase");
             await unlock.GetByRole(AriaRole.Button, new() { Name = "Unlock" }).ClickAsync();
-            await Assertions.Expect(unlock.Locator(".fb-vault-error")).ToHaveTextAsync("Wrong passphrase.");
+            await Assertions.Expect(unlock.Locator(".fb-vault-error")).ToHaveTextAsync("Wrong passphrase.", new() { Timeout = KdfTimeout });
             await unlock.Locator("input[name='pass']").FillAsync(Passphrase);
             await unlock.GetByRole(AriaRole.Button, new() { Name = "Unlock" }).ClickAsync();
-            await unlock.WaitForAsync(new LocatorWaitForOptions { State = WaitForSelectorState.Detached, Timeout = 10000 });
+            await unlock.WaitForAsync(new LocatorWaitForOptions { State = WaitForSelectorState.Detached, Timeout = KdfTimeout });
 
             await OpenNoteAsync(page, baseUrl, "Vault smoke", navigate: false);
             Assert.Contains($":::secret {Label}\n{Secret}\n:::end {Trailer}", await EditorValueAsync(page));
@@ -216,11 +223,11 @@ public class VaultTests
             // ── Lock + reload, then unlock with the recovery key. ──
             await page.EvaluateAsync("() => fb.vault.lock()");
             await page.ReloadAsync();
-            await unlock.WaitForAsync(new LocatorWaitForOptions { Timeout = 5000 });
+            await unlock.WaitForAsync(new LocatorWaitForOptions { Timeout = ReloadTimeout });
             await unlock.GetByRole(AriaRole.Button, new() { Name = "Use the recovery key instead" }).ClickAsync();
             await unlock.Locator("textarea[name='words']").FillAsync(string.Join(' ', words));
             await unlock.GetByRole(AriaRole.Button, new() { Name = "Unlock" }).ClickAsync();
-            await unlock.WaitForAsync(new LocatorWaitForOptions { State = WaitForSelectorState.Detached, Timeout = 10000 });
+            await unlock.WaitForAsync(new LocatorWaitForOptions { State = WaitForSelectorState.Detached, Timeout = KdfTimeout });
 
             await OpenNoteAsync(page, baseUrl, "Vault smoke", navigate: false);
             Assert.Contains(Secret, await EditorValueAsync(page));
@@ -345,12 +352,12 @@ public class VaultTests
             catch (TimeoutException) { /* nothing asked on load */ }
             await page.Locator("#toggle-archived-btn").ClickAsync();
             await page.Locator(".nv-item", new PageLocatorOptions { HasText = "Vault archived" }).First.ClickAsync();
-            await unlock.WaitForAsync(new LocatorWaitForOptions { Timeout = 5000 });
+            await unlock.WaitForAsync(new LocatorWaitForOptions { Timeout = ReloadTimeout });
             await unlock.Locator("input[name='pass']").FillAsync(Passphrase);
             await unlock.GetByRole(AriaRole.Button, new() { Name = "Unlock" }).ClickAsync();
             await page.WaitForFunctionAsync(
                 "() => document.querySelector('fb-notes-view #content').value.includes('" + Secret + "')",
-                null, new PageWaitForFunctionOptions { Timeout = 5000 });
+                null, new PageWaitForFunctionOptions { Timeout = KdfTimeout });
 
             // Read-only (archived): a click on the masked block shows it, a
             // second hides it again (sac-md-editor #3) — no caret needed.
@@ -416,12 +423,12 @@ public class VaultTests
             await ConfirmRecoveryWordsAsync(page);
 
             var offer = page.Locator("sac-dialog[title='Unlock with a passkey too?']");
-            await offer.WaitForAsync(new LocatorWaitForOptions { Timeout = 10000 });
+            await offer.WaitForAsync(new LocatorWaitForOptions { Timeout = KdfTimeout });
             await offer.GetByRole(AriaRole.Button, new() { Name = "Add a passkey" }).ClickAsync();
-            await offer.WaitForAsync(new LocatorWaitForOptions { State = WaitForSelectorState.Detached, Timeout = 15000 });
+            await offer.WaitForAsync(new LocatorWaitForOptions { State = WaitForSelectorState.Detached, Timeout = KdfTimeout });
 
             var rows = page.Locator("fb-secrets-settings-view .slot-row");
-            await Assertions.Expect(rows).ToHaveCountAsync(3, new() { Timeout = 10000 });
+            await Assertions.Expect(rows).ToHaveCountAsync(3, new() { Timeout = KdfTimeout });
             await Assertions.Expect(page.Locator(".slot-row[data-kind='passkey']")).ToHaveCountAsync(1);
             await Assertions.Expect(page.Locator("fb-secrets-settings-view .status-text")).ToContainTextAsync("Unlocked");
 
@@ -433,7 +440,7 @@ public class VaultTests
             var unlock = page.Locator("sac-dialog[title='Unlock secrets']");
             await unlock.WaitForAsync(new LocatorWaitForOptions { Timeout = 5000 });
             await unlock.GetByRole(AriaRole.Button, new() { Name = "Unlock with a passkey" }).ClickAsync();
-            await unlock.WaitForAsync(new LocatorWaitForOptions { State = WaitForSelectorState.Detached, Timeout = 15000 });
+            await unlock.WaitForAsync(new LocatorWaitForOptions { State = WaitForSelectorState.Detached, Timeout = KdfTimeout });
             await Assertions.Expect(page.Locator("fb-secrets-settings-view .status-text")).ToContainTextAsync("Unlocked");
             Assert.True(await page.EvaluateAsync<bool>("() => fb.vault.isUnlocked()"));
 
@@ -443,24 +450,24 @@ public class VaultTests
             await confirm.WaitForAsync(new LocatorWaitForOptions { Timeout = 5000 });
             await confirm.GetByRole(AriaRole.Button, new() { Name = "Unlock with a passkey" }).ClickAsync();
             var newPass = page.Locator("sac-dialog[title='New passphrase']");
-            await newPass.WaitForAsync(new LocatorWaitForOptions { Timeout = 15000 });
+            await newPass.WaitForAsync(new LocatorWaitForOptions { Timeout = KdfTimeout });
             await newPass.Locator("input[name='pass']").FillAsync(NewPassphrase);
             await newPass.Locator("input[name='confirm']").FillAsync(NewPassphrase);
             await newPass.GetByRole(AriaRole.Button, new() { Name = "Next" }).ClickAsync();
-            await newPass.WaitForAsync(new LocatorWaitForOptions { State = WaitForSelectorState.Detached, Timeout = 15000 });
+            await newPass.WaitForAsync(new LocatorWaitForOptions { State = WaitForSelectorState.Detached, Timeout = KdfTimeout });
             // The new passphrase is derived and saved after the dialog closes.
-            await Assertions.Expect(page.Locator("#sac-toast-stack").GetByText("Passphrase changed.").First).ToBeVisibleAsync(new() { Timeout = 15000 });
+            await Assertions.Expect(page.Locator("#sac-toast-stack").GetByText("Passphrase changed.").First).ToBeVisibleAsync(new() { Timeout = KdfTimeout });
 
             // The old passphrase is refused now, the new one opens the vault.
             await page.EvaluateAsync("() => fb.vault.lock()");
             await page.EvaluateAsync("() => { fb.vault.ensureUnlocked().catch(() => {}); }");
-            await unlock.WaitForAsync(new LocatorWaitForOptions { Timeout = 5000 });
+            await unlock.WaitForAsync(new LocatorWaitForOptions { Timeout = ReloadTimeout });
             await unlock.Locator("input[name='pass']").FillAsync(Passphrase);
             await unlock.GetByRole(AriaRole.Button, new() { Name = "Unlock", Exact = true }).ClickAsync();
-            await Assertions.Expect(unlock.Locator(".fb-vault-error")).ToHaveTextAsync("Wrong passphrase.", new() { Timeout = 10000 });
+            await Assertions.Expect(unlock.Locator(".fb-vault-error")).ToHaveTextAsync("Wrong passphrase.", new() { Timeout = KdfTimeout });
             await unlock.Locator("input[name='pass']").FillAsync(NewPassphrase);
             await unlock.GetByRole(AriaRole.Button, new() { Name = "Unlock", Exact = true }).ClickAsync();
-            await unlock.WaitForAsync(new LocatorWaitForOptions { State = WaitForSelectorState.Detached, Timeout = 10000 });
+            await unlock.WaitForAsync(new LocatorWaitForOptions { State = WaitForSelectorState.Detached, Timeout = KdfTimeout });
 
             // ── Remove: recovery is fine, then the passphrase is the last
             // recoverable slot and must stay (a passkey alone is no way in).
@@ -481,7 +488,7 @@ public class VaultTests
             await again.WaitForAsync(new LocatorWaitForOptions { Timeout = 5000 });
             await again.GetByRole(AriaRole.Button, new() { Name = "Unlock with a passkey" }).ClickAsync();
             await ConfirmRecoveryWordsAsync(page);
-            await Assertions.Expect(page.Locator(".slot-row[data-kind='recovery']")).ToHaveCountAsync(1, new() { Timeout = 15000 });
+            await Assertions.Expect(page.Locator(".slot-row[data-kind='recovery']")).ToHaveCountAsync(1, new() { Timeout = KdfTimeout });
 
             // ── Auto-lock: saved on the user, applied to the session. ──
             await page.Locator("#autolock").SelectOptionAsync("60");
@@ -530,10 +537,10 @@ public class VaultTests
             await setup.GetByRole(AriaRole.Button, new() { Name = "Next" }).ClickAsync();
             var oldWords = await ConfirmRecoveryWordsAsync(page);
             var offer = page.Locator("sac-dialog[title='Unlock with a passkey too?']");
-            await offer.WaitForAsync(new LocatorWaitForOptions { Timeout = 10000 });
+            await offer.WaitForAsync(new LocatorWaitForOptions { Timeout = KdfTimeout });
             await offer.GetByRole(AriaRole.Button, new() { Name = "Add a passkey" }).ClickAsync();
             var passkeyRow = page.Locator(".slot-row[data-kind='passkey']");
-            await Assertions.Expect(passkeyRow).ToHaveCountAsync(1, new() { Timeout = 15000 });
+            await Assertions.Expect(passkeyRow).ToHaveCountAsync(1, new() { Timeout = KdfTimeout });
 
             // ── Rename the passkey in place. ──
             await passkeyRow.Locator("button.rename").ClickAsync();
@@ -548,20 +555,20 @@ public class VaultTests
             await confirm.GetByRole(AriaRole.Button, new() { Name = "Unlock with a passkey" }).ClickAsync();
             var newWords = await ConfirmRecoveryWordsAsync(page);
             Assert.NotEqual(oldWords, newWords);
-            await Assertions.Expect(page.Locator("#sac-toast-stack").GetByText("New recovery key saved").First).ToBeVisibleAsync(new() { Timeout = 15000 });
+            await Assertions.Expect(page.Locator("#sac-toast-stack").GetByText("New recovery key saved").First).ToBeVisibleAsync(new() { Timeout = KdfTimeout });
             await Assertions.Expect(page.Locator(".slot-row[data-kind='recovery']")).ToHaveCountAsync(1);
 
             await page.EvaluateAsync("() => fb.vault.lock()");
             await page.EvaluateAsync("() => { fb.vault.ensureUnlocked().catch(() => {}); }");
             var unlock = page.Locator("sac-dialog[title='Unlock secrets']");
-            await unlock.WaitForAsync(new LocatorWaitForOptions { Timeout = 5000 });
+            await unlock.WaitForAsync(new LocatorWaitForOptions { Timeout = ReloadTimeout });
             await unlock.GetByRole(AriaRole.Button, new() { Name = "Use the recovery key instead" }).ClickAsync();
             await unlock.Locator("textarea[name='words']").FillAsync(string.Join(' ', oldWords));
             await unlock.GetByRole(AriaRole.Button, new() { Name = "Unlock", Exact = true }).ClickAsync();
-            await Assertions.Expect(unlock.Locator(".fb-vault-error")).ToHaveTextAsync("This recovery key doesn't open your secrets.", new() { Timeout = 10000 });
+            await Assertions.Expect(unlock.Locator(".fb-vault-error")).ToHaveTextAsync("This recovery key doesn't open your secrets.", new() { Timeout = KdfTimeout });
             await unlock.Locator("textarea[name='words']").FillAsync(string.Join(' ', newWords));
             await unlock.GetByRole(AriaRole.Button, new() { Name = "Unlock", Exact = true }).ClickAsync();
-            await unlock.WaitForAsync(new LocatorWaitForOptions { State = WaitForSelectorState.Detached, Timeout = 10000 });
+            await unlock.WaitForAsync(new LocatorWaitForOptions { State = WaitForSelectorState.Detached, Timeout = KdfTimeout });
 
             // ── Auto-lock: after its time without a secret operation, locked. ──
             Assert.True(await page.EvaluateAsync<bool>("() => fb.vault.isUnlocked()"));

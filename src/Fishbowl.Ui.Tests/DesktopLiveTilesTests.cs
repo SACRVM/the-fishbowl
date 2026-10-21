@@ -451,10 +451,21 @@ public class DesktopLiveTilesTests
                 await Assertions.Expect(menu.Locator("button[data-action]").First).ToBeVisibleAsync();
                 await page.WaitForTimeoutAsync(250);   // its fade-in, before an entry is clicked
             }
+            // The menu can close on its own before an entry is clicked — any
+            // scroll closes a context menu (the kit's rule), and a slow runner
+            // still settles the page: then it is opened again. An open menu
+            // without the entry still fails.
             async Task ToggleAsync(string key)
             {
-                await OpenAsync(Tile(page, key));
-                await showContent.ClickAsync();
+                for (var attempt = 1; ; attempt++)
+                {
+                    await OpenAsync(Tile(page, key));
+                    try { await showContent.ClickAsync(new() { Timeout = 5000 }); return; }
+                    catch (TimeoutException) when (attempt < 3)
+                    {
+                        if (await menu.CountAsync() > 0) throw;   // open, without the entry
+                    }
+                }
             }
 
             // On by default: the menu says so.
@@ -487,6 +498,8 @@ public class DesktopLiveTilesTests
             await Assertions.Expect(Live(page, "builtin:todos").Locator(".tl-main")).ToBeVisibleAsync(new() { Timeout = 10000 });
             await page.GotoAsync($"{_fixture.BaseUrl}/#/space/{seed.Slug}/");
             await Assertions.Expect(Tile(page, "builtin:todos")).ToBeVisibleAsync(new() { Timeout = 10000 });
+            // The desktop painted its live tiles (one batch for all) before its menu is used.
+            await Assertions.Expect(Live(page, "builtin:notes").Locator(".tl-main")).ToBeVisibleAsync(new() { Timeout = 10000 });
             await Assertions.Expect(Live(page, "builtin:todos")).ToHaveCountAsync(0);
 
             // On again.
