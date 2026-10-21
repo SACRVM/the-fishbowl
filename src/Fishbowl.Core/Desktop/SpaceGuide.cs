@@ -64,7 +64,8 @@ public static partial class SpaceGuide
         sb.AppendLine("## How a space app works");
         sb.AppendLine("""
             - An app is a folder in the space's files: `.apps/<folder>/` (folder: lower-case letters, digits, `-`).
-            - `app.json` in it: `{ "name": "Booking", "tag": "booking-app", "version": "1.0.0", "icon": "calendar", "description": "…", "entry": "app.js" }` — `tag` (a custom element name with a dash) is required, `entry` defaults to `app.js` (a `.js`/`.mjs` file in the folder).
+            - `app.json` in it: `{ "name": "Booking", "tag": "booking-app", "version": "1.0.0", "icon": "calendar", "description": "…", "entry": "app.js", "kind": "view" }` — `tag` (a custom element name with a dash) is required, `entry` defaults to `app.js` (a `.js`/`.mjs` file in the folder).
+            - `kind` says where it runs: `"window"` (the default) — a window over the desktop, for small tools; `"view"` — a page of the space, like Notes or Files: full screen below the nav, listed in the burger, its own address `#/space/<slug>/space.<folder>/…` with the app's own route after it, so back/forward and bookmarks work. A page app keeps running while the person looks elsewhere in the space (`mount` runs once). It gets `context.route` (the part after its address, `""` at first), `context.onRoute(route => …)` when that changes, `context.deepLink.set(route)` to change it and `context.href(route)` for a link to one; it draws its own layout inside the frame (filters and search on the left, a table on the right — Fishbowl's own pages are built that way).
             - The entry defines that custom element. Fishbowl calls `mount(context)` once it is on the page:
               ```js
               customElements.define("booking-app", class extends HTMLElement {
@@ -74,9 +75,9 @@ public static partial class SpaceGuide
                 }
               });
               ```
-            - Every member of the space gets a tile; it opens in a window, in a sandboxed frame: no cookies, no network (`fetch` to other servers is blocked), no access to the page around it. Data only through `context.space`, as the person using the app — their role decides what works.
-            - The frame has SACRVM APPKIT loaded: its CSS (`.card`, `.btn`, `.btn.primary`, `.toolbar`, `.empty-state`, `.muted`, the theme tokens like `var(--accent)`) and its components — `sac-section`, `sac-select`, `sac-number-field`, `sac-date-field`, `sac-time-field`, `sac-toggle`, `sac-chip`, `sac-chip-input`, `sac-menu`, `sac-tabs`, `sac-dialog`, `sac-calendar`, `sac-progress`, `sac-spinner`, `sac-icon`, `sac-tooltip`, `sac-copy-button`, `sac-status-banner`. Use those; don't load other libraries.
-            - Scripts, styles, JSON, images and fonts in the folder are served next to the entry (relative URLs work); never HTML. The code isn't pinned: a change runs the next time someone opens the app.
+            - Every member of the space gets a tile; the app opens (as a window or a page) in a sandboxed frame: no cookies, no network (`fetch` to other servers is blocked), no access to the page around it. Data only through `context.space`, as the person using the app — their role decides what works.
+            - The frame has SACRVM APPKIT loaded: its CSS (`.card`, `.btn`, `.btn.primary`, `.toolbar`, `.empty-state`, `.muted`, the theme tokens like `var(--accent)`) and its components — `sac-section`, `sac-select`, `sac-number-field`, `sac-date-field`, `sac-time-field`, `sac-toggle`, `sac-chip`, `sac-chip-input`, `sac-menu`, `sac-tabs`, `sac-dialog`, `sac-calendar`, `sac-progress`, `sac-spinner`, `sac-icon`, `sac-tooltip`, `sac-copy-button`, `sac-status-banner` —, and `sac-data-grid`, the data table of Fishbowl's Tables app (sorting, filters, column layout, inline editing; defined before your app starts). Use those; don't load other libraries.
+            - Scripts, styles, JSON, images and fonts in the folder are served next to the entry; never HTML. The frame's own address isn't the code's: a module's `import "./x.js"` and a stylesheet's `url(…)` resolve next to them, but a URL you build yourself (a `<script src>`, a `fetch`) needs the entry's own address as its base — `new URL("x.js", document.currentScript.src)`, read at the top of the entry while it runs. The code isn't pinned: a change runs the next time someone opens the app.
             - `house-rules.md` in the folder (Markdown, up to 32 KB) is how everyone should work with the space's data — this guide shows it first, to every agent.
             """);
 

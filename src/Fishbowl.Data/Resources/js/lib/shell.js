@@ -83,8 +83,12 @@
     function syncTitle() {
         const current = sac.router.currentResource();
         // A prefix route (Files, Tables) names every address below it too.
-        const route = sac.router.routes().find((r) => r.hash === current || (r.prefix && current.startsWith(r.hash + "/")));
-        if (route && current !== "#/") {
+        let route = sac.router.routes().find((r) => r.hash !== "#/" && (r.hash === current || (r.prefix && current.startsWith(r.hash + "/"))));
+        // A space's page app lives at an address of the desktop's own route
+        // (fb.desktopApps): it names itself like a page.
+        const page = !route && current !== "#/" ? fb.desktopApps?.pageAt?.() : null;
+        if (page) route = { label: page.manifest?.name || page.id, icon: page.manifest?.icon || "cube" };
+        if (route) {
             nav.setAttribute("app-name", route.label.toUpperCase());
             if (route.icon) nav.setAttribute("app-icon", route.icon);
             else nav.removeAttribute("app-icon");
@@ -92,8 +96,12 @@
             nav.removeAttribute("app-name");
             nav.removeAttribute("app-icon");
         }
+        // Its row in the burger shows it is open, like a page's.
+        document.querySelectorAll("#fb-nav > a.fb-window-link").forEach((a) =>
+            a.classList.toggle("active", !!page && a.dataset.key === `app:${page.id}`));
     }
     window.addEventListener("hashchange", syncTitle);
+    window.addEventListener("fb:desktop-apps", syncTitle);
 
     // --- Home in the burger -------------------------------------------------
     // The kit's panel lists every route but "#/" (Home is only its host jump,
@@ -137,6 +145,7 @@
             return a;
         });
         homeLink.after(...rows);
+        syncTitle();
     });
 
     // --- Accent colours -----------------------------------------------------

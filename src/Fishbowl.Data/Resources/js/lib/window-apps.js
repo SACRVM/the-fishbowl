@@ -39,7 +39,9 @@
             win = document.createElement("sac-window");
             win.setAttribute("escape-closes", "");
             win.id = id;
-            win.dataset.app = name;
+            // Not data-app: the kit's sac.apps.init() opens an app for any click
+            // inside an element carrying that attribute.
+            win.dataset.windowApp = name;
             win.setAttribute("width", `min(${app.w}px, 94vw)`);
             win.setAttribute("height", `min(${app.h}px, 86vh)`);
             win.setAttribute("top", "60px");

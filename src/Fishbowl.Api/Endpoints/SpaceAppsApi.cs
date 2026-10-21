@@ -337,6 +337,7 @@ public static class SpaceAppsApi
             icon = m.Icon,
             width = m.Width,
             height = m.Height,
+            kind = m.Kind,
         },
         origin = HostOrigin(http),
         entryUrl = CodeBase(http, key, spaceId, m.Folder) + m.Entry,
@@ -388,8 +389,8 @@ public static class SpaceAppsApi
         var origin = HostOrigin(http);
 
         string csp;
-        try { csp = FrameCsp.Build(origin, null, origin, CodeBase(http, key, spaceId, folder) + app.Value.Manifest.Entry); }
+        try { csp = FrameCsp.Build(origin, null, origin, CodeBase(http, key, spaceId, folder) + app.Value.Manifest.Entry, SpaceApps.FrameScriptFolder); }
         catch (ArgumentException) { return Results.NotFound(); }
-        return DesktopApi.Frame(http, csp, app.Value.Manifest.Name, app.Value.Manifest.Tag);
+        return DesktopApi.Frame(http, csp, app.Value.Manifest.Name, app.Value.Manifest.Tag, SpaceApps.FrameScripts);
     }
 }

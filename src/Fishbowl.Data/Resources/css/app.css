@@ -182,6 +182,11 @@ fb-secrets-settings-view.in-window > header { display: flex; margin-bottom: 16px
 fb-secrets-settings-view.in-window > header h1 { display: none; }
 /* The action bar sits in the window's toolbar slot, whose padding is the window's. */
 sac-window > .wa-bar { padding: 0; }
+/* A space's page app (fb.desktopApps): the kit's stage, fixed over the view
+   area below the nav, the app's frame filling it; the desktop, whose
+   address it is, steps aside meanwhile. */
+#fb-app-stage { position: fixed; inset: calc(50px + env(safe-area-inset-top, 0px)) 0 0 0; }
+#fb-app-stage[hidden], fb-hub-view[page-app] { display: none; }
 /* fb.fileViewer: a PDF fills its window edge to edge — the browser's viewer
    brings its own bar; everything else sits in the kit's quick look. */
 sac-window.fb-file-viewer.pdf { --window-padding: 0; }

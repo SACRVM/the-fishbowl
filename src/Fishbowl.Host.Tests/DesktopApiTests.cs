@@ -408,6 +408,7 @@ public class DesktopApiTests : IClassFixture<WebApplicationFactory<Program>>, ID
         Assert.Equal("space.hello", app.GetProperty("id").GetString());
         Assert.Equal("space", app.GetProperty("mode").GetString());
         Assert.Equal("Hello", app.GetProperty("manifest").GetProperty("name").GetString());
+        Assert.Equal("window", app.GetProperty("manifest").GetProperty("kind").GetString());   // no "kind": a window
         var entry = app.GetProperty("entryUrl").GetString()!;
         Assert.StartsWith($"http://localhost/apps/code/{space.Id}/hello/", entry);
         Assert.EndsWith("/app.js", entry);
@@ -433,12 +434,19 @@ public class DesktopApiTests : IClassFixture<WebApplicationFactory<Program>>, ID
         Assert.Equal(HttpStatusCode.NotFound, (await anon.GetAsync(bas.Replace("/hello/", "/broken/") + "app.json", Ct)).StatusCode);
         Assert.Equal(HttpStatusCode.NotFound, (await anon.GetAsync(bas + "..%2Fbroken%2Fapp.json", Ct)).StatusCode);
 
-        // The frame document: members only, its scripts limited to the code folder.
+        // The frame document: members only, its scripts limited to the code
+        // folder — and the data grid Fishbowl vendors, loaded after the kit.
         var frame = await As(Bob).GetAsync($"/apps/frame/space/{space.Slug}/space.hello", Ct);
         Assert.Equal(HttpStatusCode.OK, frame.StatusCode);
         var csp = string.Join(" ", frame.Headers.GetValues("Content-Security-Policy"));
-        Assert.Contains($"script-src http://localhost/kit/js/ {bas};", csp);
-        Assert.Contains("data-app-tag=\"hello-app\"", await frame.Content.ReadAsStringAsync(Ct));
+        Assert.Contains($"script-src http://localhost/kit/js/ {bas} http://localhost/js/vendor/sac-data-grid/js/;", csp);
+        var html = await frame.Content.ReadAsStringAsync(Ct);
+        Assert.Contains("data-app-tag=\"hello-app\"", html);
+        var kit = html.IndexOf("/kit/js/all.js", StringComparison.Ordinal);
+        var grid = html.IndexOf("/js/vendor/sac-data-grid/js/sac-data-grid.js", StringComparison.Ordinal);
+        var guest = html.IndexOf("/kit/js/lib/app-guest.js", StringComparison.Ordinal);
+        Assert.True(kit > 0 && kit < grid && grid < guest, html);
+        Assert.Contains("/js/vendor/sac-data-grid/js/sac-data-grid.de.js", html);
         Assert.Equal(HttpStatusCode.NotFound, (await As(Carol).GetAsync($"/apps/frame/space/{space.Slug}/space.hello", Ct)).StatusCode);
         Assert.Equal(HttpStatusCode.NotFound, (await As(Bob).GetAsync($"/apps/frame/space/{space.Slug}/space.broken", Ct)).StatusCode);
     }

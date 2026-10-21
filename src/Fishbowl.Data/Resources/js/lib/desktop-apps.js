@@ -57,7 +57,9 @@
  *
  * Every installed app opens as a kit window above the desktop (the host's
  * choice, whatever `kind` the manifest says): a "view" app would take over
- * the hash, and the hash is Fishbowl's router's.
+ * the hash, and the hash is Fishbowl's router's. A space's own app may be a
+ * page of its space instead ("kind": "view" in its app.json, "Page apps"
+ * below).
  *
  * Updates: when the desktop opens, each sandboxed app's manifest is read
  * again (once per session); a changed entry hash or version shows as
@@ -113,11 +115,13 @@
         return `/apps/frame/${type}/${encodeURIComponent(id)}/${encodeURIComponent(app.id)}`;
     }
 
-    /** What the kit gets: the stored manifest, as a window, with our pin. */
+    /** What the kit gets: the stored manifest, as a window (a page app as a
+     *  view — never in the kit's own route list: nav false), with our pin. */
     function kitManifest(app) {
         return Object.assign({}, app.manifest, {
             id: app.id,
-            kind: "window",
+            kind: isPage(app) ? "view" : "window",
+            nav: false,
             src: app.entryUrl,
             origin: app.origin,
             manifestUrl: app.manifestUrl,
@@ -236,9 +240,84 @@
         return e;
     }
 
+    /* ---------------------------------------------------- page apps -- */
+
+    // A space app whose app.json says "kind": "view" is a page of its space:
+    // #/space/<slug>/space.<folder>/<its own route> — the kit's view address,
+    // so back/forward and bookmarks work —, full screen below the nav on the
+    // kit's stage (#fb-app-stage, fixed over the view area), kept running
+    // (hidden) while you look elsewhere in the space. There is no router
+    // route per app (the kit's router can't drop one when the app leaves the
+    // workspace, so it would linger in the next space's burger): the router
+    // mounts the desktop for every address no page claims, and fb-hub-view
+    // hands one that names a page app here (showPage) and stays out of
+    // sight. The burger lists it with the other apps under Home (shell.js).
+    // The kit's gaps around this (no unregister, init's [data-app] clicks,
+    // close() rewriting the address): SACRVM/sacrvm-appkit#46.
+    const isPage = (app) => app?.mode === "space" && app?.manifest?.kind === "view";
+
+    let stageBound = false;
+    function bindStage() {
+        if (stageBound || !window.sac?.apps || !document.getElementById("fb-app-stage")) return;
+        stageBound = true;
+        // init() points the kit at the stage and lets it route view addresses
+        // (it opens a page app from a link or a reload by itself). It also
+        // claims clicks on any [data-app] element — Fishbowl sets none
+        // (window apps carry data-window-app, the Apps window data-app-id).
+        sac.apps.init({ viewHost: "#fb-app-stage" });
+    }
+
+    /** The address after the workspace prefix: "space.booking/2026". */
+    const pagePath = () => String(sac.router.currentResource() || "").replace(/^#\/?/, "");
+
+    /** The page app the address names ("#/space/<slug>/space.booking/…"), or
+     *  null — for an address no page claims (the desktop's, the ribbon's). */
+    function pageAt() {
+        const id = pagePath().split("/")[0];
+        const app = id ? byId(id) : null;
+        return isPage(app) ? app : null;
+    }
+
+    /** Show a page app on the stage — the desktop's call for its address. */
+    async function showPage(app) {
+        bindStage();
+        const stage = document.getElementById("fb-app-stage");
+        if (stage) stage.hidden = false;
+        try {
+            await adding.get(app.id);
+            // The kit opened it from the address already, unless it was
+            // registered after the address changed and before it was bound.
+            if (sac.apps.active() !== app.id) {
+                let route = pagePath().split("/").slice(1).join("/");
+                try { route = decodeURIComponent(route); } catch { /* as written */ }
+                await sac.apps.open(app.id, null, { route });
+            }
+        } catch (err) {
+            report(app, "load", `${err?.code || "error"}: ${err?.message || "couldn't start"}`);
+            sac.toast?.(fb.t("fb.apps.no-start", "{name} couldn't start.", { name: nameOf(app) }), { kind: "error" });
+        }
+    }
+
+    /** Leave the page: the stage hides, the app keeps running (hidden). */
+    function hidePage() {
+        const stage = document.getElementById("fb-app-stage");
+        if (stage) stage.hidden = true;
+        const id = window.sac?.apps?.active?.();
+        if (!id) return;
+        // close() parks the view, and writes "#/" into the address — which
+        // already says where we went: keep it.
+        const keep = window.location.href;
+        const st = window.history.state;
+        sac.apps.close(id);
+        window.history.replaceState(st, "", keep);
+    }
+
     /** Hand the active workspace's apps to the kit; drop what left. */
     function register() {
         if (!window.sac?.apps) return;
+        // Bound before a page app is handed over, so the kit opens one the
+        // address already names (a reload, a link) as soon as it knows it.
+        if (state.apps.some(isPage)) bindStage();
         const want = new Map(state.apps.map((a) => [a.id, JSON.stringify([state.ws, a.mode, a.entryIntegrity, a.granted, a.updatedAt])]));
         for (const [id, sig] of registered) {
             if (want.get(id) !== sig) {
@@ -276,10 +355,14 @@
         };
         register();
         if (state.canArrange) checkUpdates();
+        // The desktop (a page app's address) and the ribbon look again.
+        window.dispatchEvent(new CustomEvent("fb:desktop-apps"));
     }
 
     async function open(id) {
         if (!byId(id)) return;
+        // A page app is an address: the desktop's route shows it.
+        if (isPage(byId(id))) { sac.router.navigate(sac.scope.hashFor(`#/${id}`)); return; }
         try {
             await adding.get(id);
             await sac.apps.open(id);
@@ -824,6 +907,7 @@
 
     fb.desktopApps = {
         sync, open, install, update, permissions, remove,
+        isPage, pageAt, showPage, hidePage,
         get state() { return state; },
         updateFor, frameUrlOf, dataSize, formatBytes, identityOf,
         get byId() { return byId; },

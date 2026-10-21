@@ -23,7 +23,9 @@ public static partial class FrameCsp
     /// Null writes 'self' (tests, and a host that can't tell).</param>
     /// <param name="entryUrl">The app's entry script; its folder is what the
     /// frame may load app files from. Null allows the whole app origin.</param>
-    public static string Build(string appOrigin, IEnumerable<string>? connect, string? hostOrigin = null, string? entryUrl = null)
+    /// <param name="hostScripts">A folder of the host's own scripts the frame
+    /// loads too (a space app's data grid), a path like "/js/vendor/x/".</param>
+    public static string Build(string appOrigin, IEnumerable<string>? connect, string? hostOrigin = null, string? entryUrl = null, string? hostScripts = null)
     {
         if (!AppOrigins.IsSafe(appOrigin))
             throw new ArgumentException("Not a safe origin.", nameof(appOrigin));
@@ -53,13 +55,17 @@ public static partial class FrameCsp
             appDir = appOrigin + folder;
         }
 
+        if (hostScripts is not null && !(hostScripts.StartsWith('/') && hostScripts.EndsWith('/') && SafePath().IsMatch(hostScripts)))
+            throw new ArgumentException("Not a folder path the header can carry.", nameof(hostScripts));
+
         string Kit(string sub) => hostOrigin is null ? "'self'" : $"{hostOrigin}/kit/{sub}/";
+        var extraScripts = hostScripts is null ? "" : " " + (hostOrigin is null ? "'self'" : hostOrigin + hostScripts);
         var connectSrc = string.Join(' ', connectList.Distinct(StringComparer.Ordinal).Concat(new[] { "blob:", "data:" }));
         var ancestors = hostOrigin ?? "'self'";
 
         return string.Join("; ",
             "default-src 'none'",
-            $"script-src {Kit("js")} {appDir}",
+            $"script-src {Kit("js")} {appDir}{extraScripts}",
             $"style-src {Kit("css")} {appDir} 'unsafe-inline'",
             $"font-src {Kit("fonts")} {appDir}",
             $"img-src {appDir} blob: data:",

@@ -118,6 +118,21 @@ const COVER_HTML = `
 
 class FbHubView extends HTMLElement {
     connectedCallback() {
+        // Every address no page claims lands here — a space's page app's too
+        // ("#/space/<slug>/space.booking/…", fb.desktopApps): the desktop
+        // then only hands it to the kit's stage and stays out of sight. (The
+        // router mounts it afresh on every change of that address; the app
+        // itself runs on.)
+        const page = fb.desktopApps.pageAt();
+        if (page) {
+            this._pageOnly = true;
+            this.toggleAttribute("page-app", true);
+            fb.desktopApps.showPage(page);
+            // The app left the space meanwhile: its address is the desktop's.
+            this._onPage = () => { if (!fb.desktopApps.pageAt()) sac.router.navigate(sac.scope.hashFor("#/")); };
+            window.addEventListener("fb:desktop-apps", this._onPage);
+            return;
+        }
         this._entries = [];
         this._canArrange = false;
         // What the desktop of this workspace loaded last (kept by fb.desktopLive
@@ -151,9 +166,15 @@ class FbHubView extends HTMLElement {
         });
         this._ro.observe(this._grid);
         this._loadVersion();
+        // After a reload on a page app's address the apps arrive later.
+        this._onPage = () => this._syncPage();
+        window.addEventListener("fb:desktop-apps", this._onPage);
     }
 
     disconnectedCallback() {
+        window.removeEventListener("fb:desktop-apps", this._onPage);
+        if (this.hasAttribute("page-app")) fb.desktopApps.hidePage();
+        if (this._pageOnly) return;
         window.removeEventListener("sac:scope-changed", this._onContext);
         window.removeEventListener("fb:app-tile", this._onAppTile);
         window.removeEventListener("fb:apps-changed", this._onApps);
@@ -824,8 +845,19 @@ class FbHubView extends HTMLElement {
         return out;
     }
 
+    /** Loaded as the desktop, the address turned out to be a page app's (a
+     *  reload — the apps came later): step aside and hand it over. */
+    _syncPage() {
+        const app = fb.desktopApps.pageAt();
+        if (!app || this.hasAttribute("page-app")) return;
+        this.toggleAttribute("page-app", true);
+        fb.toolbar.clear();
+        fb.desktopApps.showPage(app);
+    }
+
     /** "Show hidden tiles" — only when there are some and you may arrange. */
     _toolbar() {
+        if (this.hasAttribute("page-app")) return;
         const hidden = this._entries.filter((e) => e.hidden);
         fb.toolbar.set(this._canArrange && hidden.length ? [{
             icon: "eye",

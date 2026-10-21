@@ -194,7 +194,7 @@ public class AppsTests : IAsyncLifetime
 
             // ── Settings → Apps lists it. ──
             await WindowApp.OpenAsync(page, _fixture.BaseUrl, "apps");
-            var row = page.Locator($"fb-apps-settings-view .fb-row[data-app='{FixtureAppServer.AppId}']");
+            var row = page.Locator($"fb-apps-settings-view .fb-row[data-app-id='{FixtureAppServer.AppId}']");
             await Assertions.Expect(row).ToContainTextAsync("v2.0.0");
             await Assertions.Expect(row.Locator("sac-chip")).ToHaveAttributeAsync("label", "sandboxed");
             await Assertions.Expect(page.Locator("#fb-win-apps .wa-bar button[title='Install an app']")).ToBeVisibleAsync();
@@ -434,7 +434,7 @@ public class AppsTests : IAsyncLifetime
             // The Apps window lists it, with nothing to update or remove.
             await WindowApp.CloseAllAsync(page);
             await WindowApp.OpenAsync(page, _fixture.BaseUrl, "apps", $"#/space/{slug}/");
-            var row = page.Locator("fb-apps-settings-view .fb-row[data-app='space.hello']");
+            var row = page.Locator("fb-apps-settings-view .fb-row[data-app-id='space.hello']");
             await Assertions.Expect(row).ToContainTextAsync(".apps/hello · v0.1.0");
             await Assertions.Expect(row.Locator("button[data-action]")).ToHaveCountAsync(0);
             // Its Designer sees what broke: the refused call, its own report and
@@ -553,6 +553,118 @@ public class AppsTests : IAsyncLifetime
         }
     }
 
+    // A space app with "kind": "view" is a page of its space: its own address
+    // (the kit's view address, back/forward and bookmarks work), full screen
+    // on the kit's stage below the nav, named in the ribbon, its row in the
+    // burger marked, kept running while you look elsewhere, the data grid in
+    // its frame — and a window app stays a window.
+    [Fact]
+    public async Task Apps_SpaceApp_KindView_IsAPageOfTheSpace_Test()
+    {
+        var (context, page, errors) = await OpenAsync();
+        string? slug = null;
+        try
+        {
+            var res = await page.APIRequest.PostAsync($"{_fixture.BaseUrl}/api/v1/spaces", new() { DataObject = new { name = "Pages " + Guid.NewGuid().ToString("N")[..6] } });
+            slug = (await res.JsonAsync())!.Value.GetProperty("slug").GetString();
+            async Task Put(string path, string content)
+            {
+                var put = await page.APIRequest.PutAsync($"{_fixture.BaseUrl}/api/v1/spaces/{slug}/files/content?path={Uri.EscapeDataString(path)}&parents=1",
+                    new APIRequestContextOptions
+                    {
+                        Headers = new Dictionary<string, string> { ["X-Fishbowl-Upload"] = "1", ["If-None-Match"] = "*" },
+                        DataByte = System.Text.Encoding.UTF8.GetBytes(content),
+                    });
+                Assert.True(put.Ok, $"PUT {path}: {put.Status} {await put.TextAsync()}");
+            }
+            await Put(".apps/ledger/app.json", "{\"name\":\"Ledger\",\"tag\":\"ledger-page\",\"kind\":\"view\",\"icon\":\"book\"}");
+            await Put(".apps/ledger/app.js", """
+                customElements.define('ledger-page', class extends HTMLElement {
+                  mount(context) {
+                    window.mounts = (window.mounts || 0) + 1;
+                    this.innerHTML = '<p id=mounts></p><p id=route></p><p id=grid></p><button id=go>Go</button>';
+                    const show = (r) => { this.querySelector('#route').textContent = 'route:' + r; };
+                    show(context.route);
+                    context.onRoute(show);
+                    this.querySelector('#mounts').textContent = 'mounts:' + window.mounts;
+                    this.querySelector('#grid').textContent = 'grid:' + (customElements.get('sac-data-grid') ? 'yes' : 'no');
+                    this.querySelector('#go').addEventListener('click', () => { context.deepLink.set('detail/7'); show('detail/7'); });
+                  }
+                });
+                """);
+            await Put(".apps/tool/app.json", "{\"name\":\"Tool\",\"tag\":\"tool-app\"}");
+            await Put(".apps/tool/app.js", "customElements.define('tool-app', class extends HTMLElement { mount() { this.innerHTML = '<p id=tool>a window</p>'; } });");
+
+            var desk = $"{_fixture.BaseUrl}/#/space/{slug}/";
+            await page.GotoAsync(desk);
+            var tile = page.Locator("fb-hub-view a.tile[data-key='app:space.ledger']");
+            await Assertions.Expect(tile).ToBeVisibleAsync(new() { Timeout = 15000 });
+            await tile.ClickAsync();
+
+            // Its own address, the stage, the desktop aside, the name in the ribbon.
+            await Assertions.Expect(page).ToHaveURLAsync(new System.Text.RegularExpressions.Regex($"#/space/{slug}/space\\.ledger$"));
+            var stage = page.Locator("#fb-app-stage");
+            await Assertions.Expect(stage).ToBeVisibleAsync();
+            await Assertions.Expect(page.Locator("fb-hub-view")).ToBeHiddenAsync();
+            var frame = page.FrameLocator("#fb-app-stage iframe");
+            await Assertions.Expect(frame.Locator("#mounts")).ToHaveTextAsync("mounts:1", new() { Timeout = 15000 });
+            await Assertions.Expect(frame.Locator("#route")).ToHaveTextAsync("route:");
+            await Assertions.Expect(frame.Locator("#grid")).ToHaveTextAsync("grid:yes");
+            await Assertions.Expect(page.Locator("#fb-nav")).ToHaveAttributeAsync("app-name", "LEDGER");
+            await Assertions.Expect(page.Locator("#fb-nav > a.fb-window-link[data-key='app:space.ledger']")).ToHaveClassAsync(new System.Text.RegularExpressions.Regex("\\bactive\\b"));
+            await page.ScreenshotAsync(new() { Path = Path.Combine(Shots, "desk-6-page-app.png") });
+            await page.Locator("#fb-nav").EvaluateAsync("n => n.shadowRoot.querySelector('.burger, [part~=burger], button[aria-label]')?.click()");
+            await page.WaitForTimeoutAsync(400);
+            await page.ScreenshotAsync(new() { Path = Path.Combine(Shots, "desk-7-page-app-burger.png") });
+            await page.Keyboard.PressAsync("Escape");
+            // It fills the view area below the nav.
+            var box = (await stage.BoundingBoxAsync())!;
+            Assert.Equal(50, box.Y, 1);
+            Assert.Equal(900 - 50, box.Height, 1);
+
+            // Its own route, in the address.
+            await frame.Locator("#go").ClickAsync();
+            await Assertions.Expect(page).ToHaveURLAsync(new System.Text.RegularExpressions.Regex($"#/space/{slug}/space\\.ledger/detail/7$"));
+
+            // Elsewhere in the space: the page steps aside, the address stays.
+            await page.GotoAsync($"{_fixture.BaseUrl}/#/space/{slug}/notes");
+            await Assertions.Expect(page.Locator("fb-notes-view")).ToBeVisibleAsync();
+            await Assertions.Expect(stage).ToBeHiddenAsync();
+            await page.WaitForTimeoutAsync(300);
+            Assert.EndsWith($"#/space/{slug}/notes", page.Url);
+
+            // Back: the same app, still running, on the route it was left at.
+            await page.GoBackAsync();
+            await Assertions.Expect(stage).ToBeVisibleAsync();
+            await Assertions.Expect(frame.Locator("#route")).ToHaveTextAsync("route:detail/7");
+            await Assertions.Expect(frame.Locator("#mounts")).ToHaveTextAsync("mounts:1");
+
+            // A link to a route of it: the app hears it.
+            await page.GotoAsync($"{_fixture.BaseUrl}/#/space/{slug}/space.ledger/other");
+            await Assertions.Expect(frame.Locator("#route")).ToHaveTextAsync("route:other");
+
+            // A reload on its address opens it again.
+            await page.ReloadAsync();
+            await Assertions.Expect(page.FrameLocator("#fb-app-stage iframe").Locator("#route")).ToHaveTextAsync("route:other", new() { Timeout = 15000 });
+
+            // The desktop: back, the stage gone.
+            await page.GotoAsync(desk);
+            await Assertions.Expect(page.Locator("fb-hub-view")).ToBeVisibleAsync();
+            await Assertions.Expect(stage).ToBeHiddenAsync();
+
+            // A window app stays a window.
+            await page.Locator("fb-hub-view a.tile[data-key='app:space.tool']").ClickAsync();
+            await Assertions.Expect(page.FrameLocator("sac-window iframe").Locator("#tool")).ToHaveTextAsync("a window", new() { Timeout = 15000 });
+            Assert.EndsWith($"#/space/{slug}/", page.Url);
+            Assert.Empty(errors);
+        }
+        finally
+        {
+            if (slug is not null) await page.APIRequest.DeleteAsync($"{_fixture.BaseUrl}/api/v1/spaces/{slug}?archive=false");
+            await context.CloseAsync();
+        }
+    }
+
     [Fact]
     public async Task Apps_Phone_Screenshots_Test()
     {
@@ -572,7 +684,7 @@ public class AppsTests : IAsyncLifetime
             await page.ScreenshotAsync(new() { Path = Path.Combine(Shots, "phone-2-install-url.png") });
             await url.Locator("button[data-action='cancel']").ClickAsync();
             await WindowApp.OpenAsync(page, _fixture.BaseUrl, "apps");
-            await Assertions.Expect(page.Locator($"fb-apps-settings-view .fb-row[data-app='{FixtureAppServer.AppId}']")).ToBeVisibleAsync();
+            await Assertions.Expect(page.Locator($"fb-apps-settings-view .fb-row[data-app-id='{FixtureAppServer.AppId}']")).ToBeVisibleAsync();
             await page.ScreenshotAsync(new() { Path = Path.Combine(Shots, "phone-7-settings-apps.png") });
             await WindowApp.CloseAllAsync(page);
             await page.GotoAsync(_fixture.BaseUrl + "/#/");

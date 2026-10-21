@@ -223,7 +223,7 @@ public class DesktopAppsHardeningApiTests : IClassFixture<WebApplicationFactory<
         var frame = await lan.GetAsync($"/apps/frame/space/{space.Slug}/space.hello", Ct);
         Assert.Equal(HttpStatusCode.OK, frame.StatusCode);
         var csp = string.Join(" ", frame.Headers.GetValues("Content-Security-Policy"));
-        Assert.Contains($"script-src http://192.168.1.5/kit/js/ {entry[..^"app.js".Length]};", csp);
+        Assert.Contains($"script-src http://192.168.1.5/kit/js/ {entry[..^"app.js".Length]} http://192.168.1.5/js/vendor/sac-data-grid/js/;", csp);
         Assert.Contains("frame-ancestors http://192.168.1.5", csp);
     }
 

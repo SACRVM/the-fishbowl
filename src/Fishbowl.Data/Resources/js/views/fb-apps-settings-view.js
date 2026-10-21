@@ -153,7 +153,7 @@ class FbAppsSettingsView extends HTMLElement {
     row(app, canWrite) {
         const row = document.createElement("div");
         row.className = "fb-row";
-        row.dataset.app = app.id;
+        row.dataset.appId = app.id;   // not data-app: the kit's sac.apps.init() claims clicks on that
         const icon = document.createElement("sac-icon");
         icon.setAttribute("name", app.manifest?.icon || "cube");
 

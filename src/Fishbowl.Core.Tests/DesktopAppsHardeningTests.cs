@@ -53,6 +53,32 @@ public class DesktopAppsHardeningTests
     }
 
     [Fact]
+    public void SpaceApp_Kind_WindowByDefault_ViewWhenAsked_ElseAWindowAndWhy()
+    {
+        static SpaceAppManifest Parse(string extra, out string? problem) => SpaceApps.Parse("board", JsonDocument.Parse(
+            "{\"name\":\"Board\",\"tag\":\"board-app\"" + extra + "}").RootElement, out problem)!;
+        Assert.Equal("window", Parse("", out var p1).Kind);
+        Assert.Null(p1);
+        Assert.Equal("view", Parse(",\"kind\":\"view\"", out var p2).Kind);
+        Assert.Null(p2);
+        Assert.Equal("window", Parse(",\"kind\":\"page\"", out var p3).Kind);
+        Assert.Contains("kind", p3);
+    }
+
+    [Fact]
+    public void FrameCsp_HostScripts_AFolderOfTheHostOnly()
+    {
+        const string Host = "https://fish.example";
+        var csp = FrameCsp.Build(Host, null, Host, Host + "/apps/code/S1/board/sig/app.js", "/js/vendor/sac-data-grid/js/");
+        Assert.Contains($"script-src {Host}/kit/js/ {Host}/apps/code/S1/board/sig/ {Host}/js/vendor/sac-data-grid/js/;", csp);
+        // Without it, as before.
+        Assert.Contains($"script-src {Host}/kit/js/ {Host}/apps/code/S1/board/sig/;", FrameCsp.Build(Host, null, Host, Host + "/apps/code/S1/board/sig/app.js"));
+        // Nothing but a plain folder path reaches the header.
+        foreach (var bad in new[] { "js/vendor/", "/js/vendor", "/js/ 'unsafe-inline'/", "/js;script-src *;/", "https://evil.example/" })
+            Assert.Throws<ArgumentException>(() => FrameCsp.Build(Host, null, Host, Host + "/apps/code/S1/board/sig/app.js", bad));
+    }
+
+    [Fact]
     public void AppDataFolders_SameIgnoringCase()
     {
         Assert.True(AppDataFolders.Same(AppDataFolders.For("Color Bucket", "a"), AppDataFolders.For("color bucket!", "b")));

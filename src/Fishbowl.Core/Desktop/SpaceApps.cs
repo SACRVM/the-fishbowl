@@ -28,6 +28,26 @@ public static partial class SpaceApps
     public const string HouseRulesFile = "house-rules.md";
     public const int MaxHouseRulesBytes = 32 * 1024;
 
+    // Where an app runs (app.json "kind"): a window over the desktop (the
+    // default), or a page of the space — its own route, full screen below
+    // the nav, kept running while you look elsewhere.
+    public const string KindWindow = "window";
+    public const string KindView = "view";
+
+    // What a space app's frame loads after the kit, before the app: the
+    // data grid Fishbowl vendors for its Tables app (it needs nothing of the
+    // kit at load and takes its German once the kit is ready). The frame's
+    // CSP allows exactly this folder of Fishbowl's own origin.
+    public const string FrameScriptFolder = "/js/vendor/sac-data-grid/js/";
+    public static readonly IReadOnlyList<string> FrameScripts =
+    [
+        FrameScriptFolder + "sac-data-grid-types.js",
+        FrameScriptFolder + "sac-data-grid.js",
+        FrameScriptFolder + "sac-data-grid-edit.js",
+        FrameScriptFolder + "sac-data-grid-form.js",
+        FrameScriptFolder + "sac-data-grid.de.js",
+    ];
+
     [GeneratedRegex("^[a-z0-9][a-z0-9-]{0,39}$")]
     private static partial Regex FolderShape();
 
@@ -122,6 +142,12 @@ public static partial class SpaceApps
             problem = "\"icon\" must be a kit icon name (lower-case letters, digits and -, at most 40) — it was left out.";
             icon = null;
         }
+        var kind = Str("kind", 20);
+        if (kind is not null && kind != KindWindow && kind != KindView)
+        {
+            problem = $"\"kind\" is \"window\" or \"view\" (got \"{kind}\") — it opens as a window.";
+            kind = null;
+        }
         return new SpaceAppManifest(
             Folder: folder,
             Name: string.IsNullOrWhiteSpace(name) ? folder : name.Trim(),
@@ -131,10 +157,12 @@ public static partial class SpaceApps
             Description: Str("description", 500),
             Icon: icon,
             Width: Str("width", 20),
-            Height: Str("height", 20));
+            Height: Str("height", 20),
+            Kind: kind ?? KindWindow);
     }
 }
 
 public sealed record SpaceAppManifest(
     string Folder, string Name, string Tag, string Entry,
-    string? Version, string? Description, string? Icon, string? Width, string? Height);
+    string? Version, string? Description, string? Icon, string? Width, string? Height,
+    string Kind = SpaceApps.KindWindow);
