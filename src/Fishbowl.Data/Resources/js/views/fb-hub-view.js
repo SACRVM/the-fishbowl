@@ -781,7 +781,10 @@ class FbHubView extends HTMLElement {
                 desc.textContent = e.desc || "";
                 body.append(h2, desc);
             }
-            if (e.app) {
+            // The origin line is a plain tile's: a live one shows name, status
+            // and list only, like the built-ins — and in its grid the line had
+            // no place, so it widened the icon's column.
+            if (e.app && !live) {
                 const meta = document.createElement("p");
                 meta.className = "tile-meta";
                 const version = e.app.version ? ` · v${e.app.version}` : "";

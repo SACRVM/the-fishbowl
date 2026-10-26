@@ -342,16 +342,28 @@ public class AppsTests : IAsyncLifetime
             await Assertions.Expect(kanban.Locator(".tl-main")).ToHaveTextAsync("2 cards", new() { Timeout = 15000 });
             await Assertions.Expect(kanban.Locator(".tl-status > h2")).ToHaveTextAsync("Kanban");
             await Assertions.Expect(kanban.Locator(".tl-items li")).ToHaveCountAsync(2);
+            // A live tile has no origin line, and its name starts right after
+            // the icon — where a built-in live tile's does.
+            await Assertions.Expect(kanban.Locator(".tile-meta")).ToHaveCountAsync(0);
+            var notes = page.Locator("fb-hub-view a.tile[data-key='builtin:notes']");
+            await Assertions.Expect(notes.Locator(".tl-main")).ToBeVisibleAsync(new() { Timeout = 10000 });
+            const string NameOffset = "t => t.querySelector('.tl-status > h2').getBoundingClientRect().left - t.getBoundingClientRect().left";
+            Assert.Equal(await notes.EvaluateAsync<double>(NameOffset), await kanban.EvaluateAsync<double>(NameOffset), 1);
             // Until arranged, the space's apps come right after the full-screen apps.
             var order = await page.Locator("fb-hub-view a.tile[data-key]").EvaluateAllAsync<string[]>("els => els.map(e => e.dataset.key)");
             Assert.True(Array.IndexOf(order, "app:space.kanban") < Array.IndexOf(order, "builtin:messages"), string.Join(", ", order));
             Assert.True(Array.IndexOf(order, "app:space.kanban") > Array.IndexOf(order, "builtin:tables"), string.Join(", ", order));
+            // Live or not, an app's tile opens the app in its window.
+            await kanban.ClickAsync();
+            await Assertions.Expect(page.FrameLocator("sac-window iframe[title='Kanban']").Locator("kanban-tile-app")).ToHaveTextAsync("kanban", new() { Timeout = 15000 });
+            await WindowApp.CloseAllAsync(page);
 
             // Plain until the app ran; then what it set, also after a reload.
             var pusher = page.Locator("fb-hub-view a.tile[data-key='app:space.pusher']");
             await Assertions.Expect(pusher.Locator(".tl-main")).ToHaveCountAsync(0);
+            await Assertions.Expect(pusher.Locator(".tile-meta")).ToHaveTextAsync(new System.Text.RegularExpressions.Regex(@"^\.apps/pusher"));   // a plain tile keeps it
             await pusher.ClickAsync();
-            await Assertions.Expect(page.FrameLocator("sac-window iframe").Locator("#done")).ToHaveTextAsync("set", new() { Timeout = 15000 });
+            await Assertions.Expect(page.FrameLocator("sac-window iframe[title='Pusher']").Locator("#done")).ToHaveTextAsync("set", new() { Timeout = 15000 });
             await WindowApp.CloseAllAsync(page);
             await Assertions.Expect(pusher.Locator(".tl-main")).ToHaveTextAsync("pushed main", new() { Timeout = 10000 });
             await Assertions.Expect(pusher.Locator(".tl-text")).ToHaveTextAsync("pushed row");
