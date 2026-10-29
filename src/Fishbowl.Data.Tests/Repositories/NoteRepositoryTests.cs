@@ -162,6 +162,9 @@ public class NoteRepositoryTests : IDisposable
             Archived = false
         };
 
+        // Taken before the write, not compared to "now" after it: a slow
+        // runner (Windows CI took 15 s here) must not fail a window.
+        var before = DateTime.UtcNow.AddSeconds(-1);
         var id = await _repo.CreateAsync(TestUserId, original, TestContext.Current.CancellationToken);
         var retrieved = await _repo.GetByIdAsync(TestUserId, id, TestContext.Current.CancellationToken);
 
@@ -173,7 +176,7 @@ public class NoteRepositoryTests : IDisposable
         Assert.True(retrieved.Pinned);
         Assert.False(retrieved.Archived);
         Assert.Equal(TestUserId, retrieved.CreatedBy);
-        Assert.True(retrieved.CreatedAt > DateTime.UtcNow.AddSeconds(-10));
+        Assert.True(retrieved.CreatedAt >= before);
     }
 
     [Fact]
