@@ -13,6 +13,7 @@ class FbKeysSettingsView extends HTMLElement {
         super();
         this.keys = [];
         this.spaces = [];
+        this.addresses = null;
         this.busy = false;
     }
 
@@ -23,12 +24,14 @@ class FbKeysSettingsView extends HTMLElement {
 
     async refresh() {
         try {
-            const [keys, spaces] = await Promise.all([
+            const [keys, spaces, addresses] = await Promise.all([
                 fb.api.keys.list(),
                 fb.api.spaces.list(),
+                this.addresses || fb.api.keys.addresses().catch(() => null),
             ]);
             this.keys = keys || [];
             this.spaces = spaces || [];
+            this.addresses = addresses;
         } catch (err) {
             console.error("[fb-keys-settings-view] load failed:", err);
             this.keys = [];
@@ -100,6 +103,20 @@ class FbKeysSettingsView extends HTMLElement {
             ? t("try-build", "Read the space guide, then build a small app for this space that lists our open orders.")
             : access === "write" ? t("try-write", "Remember that the team meeting moved to Thursdays.")
             : t("try-read", "What do I have on my calendar this week?");
+        // A connector is called from Anthropic's servers: on a host only this
+        // computer or network reaches (or without https) say so, not the steps.
+        const connector = this.addresses ? this.addresses.connector : location.protocol === "https:";
+        if (client === "connector" && !connector) {
+            steps.innerHTML = `
+                <p class="guide-unreachable">${t("connector-unreachable", "claude.ai can't reach this Fishbowl. A connector is called from Anthropic's servers, not from your browser, so it needs Fishbowl at a public HTTPS address with a real certificate — and {address} isn't one.", { address: `<code>${escapeHtml(location.origin)}</code>` })}</p>
+                <div class="toolbar"><button type="button" class="btn" id="guide-to-code">${t("connector-use-code", "Connect Claude Code instead")}</button></div>`;
+            steps.querySelector("#guide-to-code").addEventListener("click", () => {
+                const select = this.querySelector("#guide-client");
+                select.value = "code";
+                select.dispatchEvent(new Event("change"));
+            });
+            return;
+        }
         if (client === "connector") {
             steps.innerHTML = `
                 <ol class="guide-steps">
@@ -107,6 +124,7 @@ class FbKeysSettingsView extends HTMLElement {
                     <li>${t("step-connector-2", "URL:")} <code class="guide-url"></code> <sac-copy-button></sac-copy-button></li>
                     <li>${t("step-connector-3", "Sign in when asked, then pick the workspace and what it may do.")}</li>
                 </ol>
+                <p class="muted">${t("connector-public", "claude.ai calls this address from Anthropic's servers: the internet must reach it over HTTPS, with a real certificate.")}</p>
                 <p class="muted">${t("try", "Try:")} <em class="guide-try"></em></p>`;
             steps.querySelector(".guide-url").textContent = mcp;
             steps.querySelector("sac-copy-button").setAttribute("value", mcp);
@@ -142,10 +160,13 @@ class FbKeysSettingsView extends HTMLElement {
                 contextId: space ? contextId : null,
                 scopes: FbKeysSettingsView.scopesFor(access, space, this.querySelector("#guide-send")?.checked),
             });
-            const mcp = `${location.origin}/mcp`;
+            // The address a program reaches — on the dev host the plain http
+            // port, since programs refuse its self-signed certificate.
+            const origin = this.addresses?.origin || location.origin;
+            const mcp = `${origin}/mcp`;
             const text = client === "code"
                 ? `claude mcp add --transport http fishbowl ${mcp} --header "Authorization: Bearer ${created.rawToken}"`
-                : `MCP:   ${mcp}\nAPI:   ${location.origin}/api/v1${space ? `/spaces/${contextId}` : ""}\nToken: ${created.rawToken}`;
+                : `MCP:   ${mcp}\nAPI:   ${origin}/api/v1${space ? `/spaces/${contextId}` : ""}\nToken: ${created.rawToken}`;
             await this._revealToken(created, text);
             await this.refresh();
         } catch (err) {

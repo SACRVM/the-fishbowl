@@ -4,6 +4,8 @@ using Fishbowl.Core.Mcp;
 using Fishbowl.Core.Models;
 using Fishbowl.Core.Repositories;
 using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Hosting.Server;
+using Microsoft.AspNetCore.Hosting.Server.Features;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
 
@@ -131,6 +133,22 @@ public static class ApiKeysApi
         })
         .WithName("RevokeApiKey")
         .WithSummary("Revokes the given key. Idempotent-ish: unknown IDs return 404.");
+
+        // "Connect an agent" builds its steps from this (ClientAddresses):
+        // the origin a program reaches this server at, and whether a claude.ai
+        // connector can reach it at all.
+        group.MapGet("/addresses", (HttpContext http, IServer server, ClaimsPrincipal user) =>
+        {
+            if (RejectIfBearer(user) is { } reject) return reject;
+            var bound = server.Features.Get<IServerAddressesFeature>()?.Addresses ?? [];
+            return Results.Ok(new
+            {
+                origin = ClientAddresses.ProgramOrigin(http.Request.Scheme, http.Request.Host, bound),
+                connector = ClientAddresses.ConnectorPossible(http.Request.Scheme, http.Request.Host),
+            });
+        })
+        .WithName("GetClientAddresses")
+        .WithSummary("Where a program reaches this server, and whether a claude.ai connector can.");
 
         return routes;
     }

@@ -804,6 +804,9 @@
                     body: JSON.stringify({ name, contextType, contextId, scopes }),
                 }),
             delete: (id)     => request(`/keys/${encodeURIComponent(id)}`, { method: "DELETE" }),
+            // { origin, connector }: where a program reaches this server, and
+            // whether a claude.ai connector can (ClientAddresses on the server).
+            addresses: ()    => request("/keys/addresses"),
         },
         version: () => request("/version"),
         providers: () => fetch("/api/auth/providers").then(r => r.json()),

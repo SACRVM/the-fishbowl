@@ -317,6 +317,22 @@ public class ApiKeysApiTests : IClassFixture<WebApplicationFactory<Program>>, ID
         var delResp = await client.DeleteAsync($"/api/v1/keys/{issued.Record.Id}",
             TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.Forbidden, delResp.StatusCode);
+
+        var addrResp = await client.GetAsync("/api/v1/keys/addresses", TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.Forbidden, addrResp.StatusCode);
+    }
+
+    [Fact]
+    public async Task Addresses_LocalHost_NoConnector_RequestsOwnOrigin()
+    {
+        var client = _factory.CreateClient();
+        var resp = await client.SendAsync(Req(HttpMethod.Get, "/api/v1/keys/addresses", Alice),
+            TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
+        var body = await resp.Content.ReadFromJsonAsync<System.Text.Json.JsonElement>(TestContext.Current.CancellationToken);
+        // The test server answers http://localhost — no connector reaches that.
+        Assert.False(body.GetProperty("connector").GetBoolean());
+        Assert.Equal("http://localhost", body.GetProperty("origin").GetString());
     }
 
     public void Dispose()

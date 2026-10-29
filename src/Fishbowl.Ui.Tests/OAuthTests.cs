@@ -45,14 +45,18 @@ public class OAuthTests
             Assert.Contains("code=", back.Query);
             Assert.Contains("state=s1", back.Query);
 
-            // Connect an agent → Claude Code: a key and the command, once.
+            // Connect an agent: the fixture's http://127.0.0.1 is no address a
+            // claude.ai connector reaches, so the window says so instead of
+            // the steps, and hands over to Claude Code: a key and the command, once.
             await WindowApp.OpenAsync(page, _fixture.BaseUrl, "keys");
             var guide = page.Locator("#agent-guide");
-            await Assertions.Expect(guide).ToContainTextAsync("Add custom connector");
-            await guide.Locator("#guide-client").SelectOptionAsync("code");
+            await Assertions.Expect(guide.Locator(".guide-unreachable")).ToContainTextAsync("claude.ai can't reach this Fishbowl");
+            await Assertions.Expect(guide).Not.ToContainTextAsync("Add custom connector");
+            await guide.Locator("#guide-to-code").ClickAsync();
+            await Assertions.Expect(guide.Locator("#guide-client")).ToHaveValueAsync("code");
             await guide.Locator("#guide-create").ClickAsync();
             var shown = page.Locator("sac-dialog .fb-token-block");
-            await Assertions.Expect(shown).ToContainTextAsync("claude mcp add --transport http fishbowl");
+            await Assertions.Expect(shown).ToContainTextAsync($"claude mcp add --transport http fishbowl {_fixture.BaseUrl}/mcp");
             await Assertions.Expect(shown).ToContainTextAsync("Authorization: Bearer fb_live_");
             Assert.Empty(errors);
         }
