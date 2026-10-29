@@ -265,6 +265,7 @@ builder.Services.AddScoped<IMcpTool, FindContactTool>();
 builder.Services.AddScoped<IMcpTool, ListEventsTool>();
 builder.Services.AddScoped<IMcpTool, Fishbowl.Mcp.Tools.Mail.MailSearchTool>();
 builder.Services.AddScoped<IMcpTool, Fishbowl.Mcp.Tools.Mail.MailThreadTool>();
+builder.Services.AddScoped<IMcpTool, Fishbowl.Mcp.Tools.Mail.MailAccountsTool>();
 builder.Services.AddScoped<IMcpTool, Fishbowl.Mcp.Tools.Mail.MailTagTool>();
 builder.Services.AddScoped<IMcpTool, Fishbowl.Mcp.Tools.Mail.MailMarkTool>();
 builder.Services.AddScoped<IMcpTool, Fishbowl.Mcp.Tools.Mail.MailArchiveTool>();

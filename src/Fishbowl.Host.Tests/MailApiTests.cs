@@ -1042,6 +1042,63 @@ public class MailApiTests : IClassFixture<WebApplicationFactory<Program>>, IDisp
         Assert.False(assigned.GetProperty("added").GetBoolean());
     }
 
+    // The sender is named, never guessed: with two accounts a new mail must say
+    // which, by the address mail_accounts lists — a wrong guess can't be called back.
+    [Fact]
+    public async Task Mcp_MailSend_SeveralAccounts_NamesTheSender_NeverTheFirst()
+    {
+        const string user = "mail_mcp_from";
+        using (var db = _db.CreateSystemConnection())
+            db.Execute("INSERT OR IGNORE INTO users(id, name, email, created_at) VALUES (@id, 'F', 'f@example.com', @now)",
+                new { id = user, now = DateTime.UtcNow.ToString("o") });
+        var cookie = As(user);
+        var (first, second) = (NewAddress(), NewAddress());
+        await SyncedAccountAsync(cookie, P, first);
+        var secondId = await SyncedAccountAsync(cookie, P, second);
+        var alias = NewAddress();
+        Assert.Equal(HttpStatusCode.OK, (await cookie.PatchAsJsonAsync($"{P}/accounts/{secondId}", new { aliases = new[] { alias } }, Ct)).StatusCode);
+
+        var key = await KeyAsync(user, ContextRef.User(user), "read:mail", "write:mail", "send:mail");
+        var accounts = ToolPayload(await RpcAsync(key, "tools/call", new { }, "mail_accounts")).GetProperty("accounts").EnumerateArray().ToList();
+        Assert.Equal(new[] { first, second }.Order(), accounts.Select(a => a.GetProperty("address").GetString()!).Order());
+        Assert.Contains(alias, accounts.Single(a => a.GetProperty("id").GetString() == secondId).GetProperty("aliases").EnumerateArray().Select(x => x.GetString()));
+
+        // No sender named: refused with the addresses to choose from, nothing written or sent.
+        var mail = new { to = new[] { "grace@example.org" }, subject = "Hello", body = "Hi." };
+        var refused = (await RpcAsync(key, "tools/call", mail, "mail_send")).GetProperty("error").GetProperty("message").GetString()!;
+        Assert.Contains(first, refused);
+        Assert.Contains(second, refused);
+        refused = (await RpcAsync(key, "tools/call", mail, "mail_draft")).GetProperty("error").GetProperty("message").GetString()!;
+        Assert.Contains(second, refused);
+        Assert.Empty((await Json(await cookie.GetAsync($"{P}/drafts", Ct))).EnumerateArray());
+
+        // An unknown address and an alias are refused too; an alias names what goes out instead.
+        refused = (await RpcAsync(key, "tools/call", new { from = "nobody@example.org", to = mail.to, mail.subject, mail.body }, "mail_send"))
+            .GetProperty("error").GetProperty("message").GetString()!;
+        Assert.Contains(first, refused);
+        refused = (await RpcAsync(key, "tools/call", new { from = alias, to = mail.to, mail.subject, mail.body }, "mail_send"))
+            .GetProperty("error").GetProperty("message").GetString()!;
+        Assert.Contains($"goes out from \"{second}\"", refused);
+        Assert.Empty(Fishbowl.Host.Testing.SampleMailboxConnector.Outbox(first));
+        Assert.Empty(Fishbowl.Host.Testing.SampleMailboxConnector.Outbox(second));
+
+        // Named — any case, with a name around it — it goes from that account, and the answer says so.
+        var draft = ToolPayload(await RpcAsync(key, "tools/call", new { from = second.ToUpperInvariant(), to = mail.to, mail.subject, mail.body }, "mail_draft"));
+        Assert.Equal(second, draft.GetProperty("from").GetString());
+        Assert.Equal(secondId, draft.GetProperty("accountId").GetString());
+        var sent = ToolPayload(await RpcAsync(key, "tools/call", new { draftId = draft.GetProperty("draftId").GetString() }, "mail_send"));
+        Assert.Equal(second, sent.GetProperty("from").GetString());
+        sent = ToolPayload(await RpcAsync(key, "tools/call", new { from = $"Ada <{first}>", to = mail.to, subject = "Second", mail.body }, "mail_send"));
+        Assert.Equal(first, sent.GetProperty("from").GetString());
+        Assert.Equal("Hello", Assert.Single(Fishbowl.Host.Testing.SampleMailboxConnector.Outbox(second)).Subject);
+        Assert.Equal("Second", Assert.Single(Fishbowl.Host.Testing.SampleMailboxConnector.Outbox(first)).Subject);
+
+        // from and accountId naming two accounts is a contradiction, not a choice.
+        refused = (await RpcAsync(key, "tools/call", new { from = first, accountId = secondId, to = mail.to, mail.subject, mail.body }, "mail_draft"))
+            .GetProperty("error").GetProperty("message").GetString()!;
+        Assert.Contains("different accounts", refused);
+    }
+
     // ---- 10. delete ----
 
     [Fact]

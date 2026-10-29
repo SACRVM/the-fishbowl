@@ -204,9 +204,17 @@ connected over MCP can search, read, tag, file, delete, set expiry, draft and
     - Triggers and tiles get no mail: a table write that sends mail is a
       footgun. It can come later on purpose.
 18. **The agent can do everything a person can.**
-    - **MCP tools:** `mail_search`, `mail_thread`, `mail_get`, `mail_tag`,
-      `mail_archive`, `mail_mark`, `mail_delete` (mode), `mail_expire`,
-      `mail_rules`, `mail_draft`, `mail_send`, `mail_assign_contact`.
+    - **MCP tools:** `mail_search`, `mail_thread`, `mail_get`, `mail_accounts`,
+      `mail_tag`, `mail_archive`, `mail_mark`, `mail_delete` (mode),
+      `mail_expire`, `mail_rules`, `mail_draft`, `mail_send`,
+      `mail_assign_contact`.
+    - **The sender is named, never guessed** (2026-10-29: an agent asked to
+      send from one address could only pass an account id no tool listed,
+      and without one the first account went out). `mail_accounts` lists the
+      accounts with their addresses; `mail_draft` / `mail_send` take `from`
+      (an account's address); a new mail in a workspace with several accounts
+      that names none is refused with the addresses. A reply or forward keeps
+      the account its message came to.
     - **Scopes:**
       - `read:mail`;
       - `write:mail` — organise, delete, expire, rules, drafts;

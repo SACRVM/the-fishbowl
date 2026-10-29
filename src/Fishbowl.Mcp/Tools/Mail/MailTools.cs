@@ -91,6 +91,40 @@ public class MailSearchTool : IMcpTool
     }
 }
 
+public class MailAccountsTool : IMcpTool
+{
+    private readonly IMailRepository _mail;
+    public MailAccountsTool(IMailRepository mail) => _mail = mail;
+
+    public string Name => "mail_accounts";
+    public string Description =>
+        "Lists the workspace's mail accounts: the address its mail goes out from, its further own addresses " +
+        "(aliases — mail to them arrives here, but what is sent goes out from the address), its name, id and state. " +
+        "mail_draft and mail_send take the address as `from`.";
+    public string RequiredScope => ScopeCatalog.ReadMail;
+
+    public object InputSchema => new { type = "object", properties = new { } };
+
+    public async Task<object> InvokeAsync(ContextRef ctx, string actor, JsonElement arguments, ClaimsPrincipal principal, CancellationToken ct)
+    {
+        var accounts = await _mail.ListAccountsAsync(ctx, ct);
+        return new
+        {
+            accounts = accounts.Select(a => new
+            {
+                id = a.Id,
+                address = a.Address,
+                displayName = a.DisplayName,
+                aliases = a.Aliases,
+                name = a.Name,
+                provider = a.Provider,
+                state = a.State,
+                lastError = a.LastError,
+            }),
+        };
+    }
+}
+
 public class MailThreadTool : IMcpTool
 {
     private readonly IMailRepository _mail;
@@ -98,8 +132,8 @@ public class MailThreadTool : IMcpTool
 
     public string Name => "mail_thread";
     public string Description =>
-        "Reads one mail conversation: every message oldest first, with sender, recipients, date, direction (in/out), " +
-        "the plain text and the attachment names. Long texts are cut." + MailToolText.Untrusted;
+        "Reads one mail conversation: every message oldest first, with the account it lies in (mail_accounts), sender, " +
+        "recipients, date, direction (in/out), the plain text and the attachment names. Long texts are cut." + MailToolText.Untrusted;
     public string RequiredScope => ScopeCatalog.ReadMail;
 
     public object InputSchema => new
@@ -128,6 +162,7 @@ public class MailThreadTool : IMcpTool
             messages = messages.Select(x => new
             {
                 id = x.Id,
+                accountId = x.AccountId,
                 direction = x.Direction,
                 sentAt = x.SentAt,
                 from = new { name = x.FromName, address = x.FromAddress },
