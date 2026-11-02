@@ -414,9 +414,19 @@ public class VaultTests
         {
             // ── Set up from the settings page, adding a passkey on the way. ──
             await WindowApp.OpenAsync(page, baseUrl, "secrets");
+            // The passphrase field has the focus as the dialog opens, not a
+            // frame later: a late focus took it back from the second field
+            // while that was being filled, so both entries landed in the
+            // first and the dialog stayed on "don't match".
+            await page.EvaluateAsync(@"() => document.addEventListener('sac:open', () => {
+                let a = document.activeElement;
+                while (a?.shadowRoot?.activeElement) a = a.shadowRoot.activeElement;
+                window.__focusAtOpen = a?.getAttribute('name') || a?.localName;
+            }, { once: true })");
             await page.GetByRole(AriaRole.Button, new() { Name = "Set up secrets" }).ClickAsync();
             var setup = page.Locator("sac-dialog[title='Set up secrets']");
             await setup.WaitForAsync(new LocatorWaitForOptions { Timeout = 5000 });
+            Assert.Equal("pass", await page.EvaluateAsync<string>("() => window.__focusAtOpen"));
             await setup.Locator("input[name='pass']").FillAsync(Passphrase);
             await setup.Locator("input[name='confirm']").FillAsync(Passphrase);
             await setup.GetByRole(AriaRole.Button, new() { Name = "Next" }).ClickAsync();

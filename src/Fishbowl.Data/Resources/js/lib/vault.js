@@ -701,10 +701,13 @@
             }, { once: true });
             document.body.appendChild(dlg);
             setTimeout(() => {
+                // The first field that shows (a hidden label hides its input)
+                // takes the focus as the dialog opens (the kit's autofocus) —
+                // not a frame later, which took it back from a field already
+                // being typed in: the second entry landed in the first.
+                [...body.querySelectorAll("input, textarea")]
+                    .find(el => !el.closest("[hidden]"))?.setAttribute("autofocus", "");
                 dlg.open();
-                // The first field that shows (a hidden label hides its input).
-                requestAnimationFrame(() => [...body.querySelectorAll("input, textarea")]
-                    .find(el => !el.closest("[hidden]"))?.focus());
             }, 0);
         });
     }
