@@ -43,7 +43,8 @@ public static class MailAccountStates
 
 public record MailPerson(string? Name, string Address);
 
-public record MailAttachment(int Index, string Part, string? Name, string Type, long? Size);
+/// <param name="InText">The file stands in the text, where its mark is (<see cref="Util.MailText"/>).</param>
+public record MailAttachment(int Index, string Part, string? Name, string Type, long? Size, bool InText = false);
 
 // An account as the API shows it — never its password.
 public class MailAccount

@@ -107,4 +107,35 @@ public class MailStorageTests : MailFixture
         Assert.Empty((await ByKeyAsync("note@x")).Attachments);
         Assert.Equal(0, Scalar("SELECT COUNT(*) FROM mail_messages WHERE parts = 0"));
     }
+
+    // User schema v30: Apple Mail's "text, photo, text" kept only the text
+    // before the photo. Mail without HTML that has files is read once more,
+    // and the whole text comes back with the photo marked where it stood —
+    // searchable, its vector made again, the mark in neither.
+    [Fact]
+    public async Task MailFromBeforeV30_GetsTheTextAfterItsPhotoBack()
+    {
+        var acc = await AddAccountAsync();
+        var s = Connector.For(acc.Id);
+        var photo = s.AddMessage("inbox", messageId: "<trip@x>", subject: "Trip", text: "Here is the beach:");
+        await SyncAsync(acc);
+        s.ByRole["inbox"].Messages[photo].Body = new SyncBody("Here is the beach:\n\n\uFFFC\n\nAnd the lighthouse at dusk.", null,
+            [new SyncAttachment(0, "2", "IMG_0042.jpeg", "image/jpeg", 1_400_000, InText: true)]);
+        using (var db = Factory.CreateContextConnection(Ctx))
+            db.Execute(@"
+                UPDATE mail_messages SET attachments = '[{""index"":0,""part"":""2"",""name"":""IMG_0042.jpeg"",""type"":""image/jpeg"",""size"":1400000}]', embedded = 1;
+                PRAGMA user_version = 29;");
+
+        Assert.Equal(1, Scalar("SELECT COUNT(*) FROM mail_messages WHERE parts = 0"));
+        Assert.Empty(await Repo.ListThreadsAsync(Ctx, new MailListQuery { Text = "lighthouse" }, Ct));
+        await SyncAsync(acc);
+
+        var m = await ByKeyAsync("trip@x");
+        Assert.Equal("Here is the beach:\n\n\uFFFC\n\nAnd the lighthouse at dusk.", m.BodyText);
+        Assert.True(Assert.Single(m.Attachments).InText);
+        Assert.Equal("Here is the beach: And the lighthouse at dusk.", m.Snippet);
+        Assert.Single(await Repo.ListThreadsAsync(Ctx, new MailListQuery { Text = "lighthouse" }, Ct));
+        Assert.Equal(0, Scalar("SELECT embedded FROM mail_messages WHERE message_key = 'trip@x'"));
+        Assert.Equal(0, Scalar("SELECT COUNT(*) FROM mail_messages WHERE parts = 0"));
+    }
 }

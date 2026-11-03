@@ -489,6 +489,9 @@ class FbMailView extends HTMLElement {
                 fb-mail-view .mv-picture img { display: block; max-width: 100%; max-height: 70vh; height: auto; border-radius: var(--radius-m); }
                 fb-mail-view .mv-picture:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
                 fb-mail-view .mv-attachments { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px; }
+                /* A file that stood in the text: the text goes on under it. */
+                fb-mail-view .mv-msg-body > :is(.mv-pictures, .mv-attachments) + .mv-text { margin-top: 12px; }
+                fb-mail-view .mv-msg-body > :is(.mv-pictures, .mv-attachments):first-child { margin-top: 0; }
                 fb-mail-view .mv-att {
                     display: inline-flex; align-items: center; gap: 6px; max-width: 100%; padding: 6px 10px;
                     border: 1px solid var(--border); border-radius: var(--radius-m); color: var(--text); text-decoration: none;
@@ -1729,18 +1732,11 @@ class FbMailView extends HTMLElement {
             frame.addEventListener("load", () => setup(frame.contentDocument));
             watchFrame();
             body.appendChild(frame);
-        } else {
-            const pre = document.createElement("pre");
-            pre.className = "mv-text";
-            this.fillText(pre, m.bodyText || "");
-            body.appendChild(pre);
         }
-        // Pictures show under the text (a photo the iPhone sent inline, or
+        // Pictures show as pictures (a photo the iPhone sent inline, or
         // attached); a click opens one large. The rest are links. A picture
         // the browser can't draw falls back to its link.
         const pictureTypes = /^image\/(jpeg|png|gif|webp|avif|bmp)$/i;
-        const pictures = (m.attachments || []).filter((a) => pictureTypes.test(a.type || ""));
-        const files = (m.attachments || []).filter((a) => !pictures.includes(a));
         const linkTo = (a) => {
             const link = document.createElement("a");
             link.className = "mv-att";
@@ -1751,40 +1747,67 @@ class FbMailView extends HTMLElement {
             link.children[2].textContent = a.size ? fb.accounts?.formatBytes?.(a.size) ?? "" : "";
             return link;
         };
-        if (pictures.length) {
-            const box = document.createElement("div");
-            box.className = "mv-pictures";
-            for (const a of pictures) {
-                const name = a.name || this.t("attachment", "Attachment");
-                const url = this.api.attachmentUrl(m.id, a.index, { inline: true });
-                const shot = document.createElement("button");
-                shot.type = "button";
-                shot.className = "mv-picture";
-                shot.title = name;
-                const img = document.createElement("img");
-                img.alt = name;
-                img.loading = "lazy";
-                img.decoding = "async";
-                img.src = url;
-                img.addEventListener("error", () => shot.replaceWith(linkTo(a)), { once: true });
-                shot.appendChild(img);
-                shot.addEventListener("click", () => fb.fileViewer.open({
-                    source: { url, type: a.type, name, size: a.size },
-                    download: this.api.attachmentUrl(m.id, a.index),
-                }));
-                box.appendChild(shot);
+        const pictureOf = (a) => {
+            const name = a.name || this.t("attachment", "Attachment");
+            const url = this.api.attachmentUrl(m.id, a.index, { inline: true });
+            const shot = document.createElement("button");
+            shot.type = "button";
+            shot.className = "mv-picture";
+            shot.title = name;
+            const img = document.createElement("img");
+            img.alt = name;
+            img.loading = "lazy";
+            img.decoding = "async";
+            img.src = url;
+            img.addEventListener("error", () => shot.replaceWith(linkTo(a)), { once: true });
+            shot.appendChild(img);
+            shot.addEventListener("click", () => fb.fileViewer.open({
+                source: { url, type: a.type, name, size: a.size },
+                download: this.api.attachmentUrl(m.id, a.index),
+            }));
+            return shot;
+        };
+        const boxOf = (files) => {
+            const pictures = files.filter((a) => pictureTypes.test(a.type || ""));
+            const rest = files.filter((a) => !pictures.includes(a));
+            const out = [];
+            if (pictures.length) {
+                const box = document.createElement("div");
+                box.className = "mv-pictures";
+                box.append(...pictures.map(pictureOf));
+                out.push(box);
             }
-            body.appendChild(box);
+            if (rest.length) {
+                const box = document.createElement("div");
+                box.className = "mv-attachments";
+                box.append(...rest.map(linkTo));
+                out.push(box);
+            }
+            return out;
+        };
+        const all = m.attachments || [];
+        const placed = new Set();
+        if (!m.hasHtml) {
+            // The text with its files where they stood ("text, photo, text",
+            // as the iPhone sends it): each mark (U+FFFC, a line of its own)
+            // is the next file marked as in the text.
+            const inText = all.filter((a) => a.inText);
+            const pieces = (m.bodyText || "").split(/\s*\uFFFC\s*/);
+            pieces.forEach((piece, i) => {
+                if (piece || pieces.length === 1) {
+                    const pre = document.createElement("pre");
+                    pre.className = "mv-text";
+                    this.fillText(pre, piece);
+                    body.appendChild(pre);
+                }
+                const file = i < pieces.length - 1 ? inText[i] : null;
+                if (file) { placed.add(file); body.append(...boxOf([file])); }
+            });
         }
-        if (files.length) {
-            const box = document.createElement("div");
-            box.className = "mv-attachments";
-            for (const a of files) box.appendChild(linkTo(a));
-            body.appendChild(box);
-        }
+        // Everything else under the text.
+        body.append(...boxOf(all.filter((a) => !placed.has(a))));
     }
 
-    /** "dark" or "light", from the page's actual background — whatever set it. */
     /** "dark" or "light", from the page's actual background — whatever set it. */
     theme() {
         const rgb = (getComputedStyle(document.body).backgroundColor.match(/\d+(\.\d+)?/g) || [0, 0, 0]).map(Number);

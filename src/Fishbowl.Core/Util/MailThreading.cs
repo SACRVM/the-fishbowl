@@ -76,7 +76,7 @@ public static partial class MailThreading
     public static string? Snippet(string? text, int max = 200)
     {
         if (string.IsNullOrWhiteSpace(text)) return null;
-        var s = Spaces().Replace(text, " ").Trim();
+        var s = Spaces().Replace(text.Replace(MailText.Mark, ' '), " ").Trim();
         return s.Length <= max ? s : s[..max].TrimEnd() + "…";
     }
 }

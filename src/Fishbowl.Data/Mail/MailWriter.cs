@@ -154,7 +154,8 @@ public sealed class MailWriter
             var words = Words(language ?? user?.Language);
             var when = When(original.SentAt, timeZone, user?.DateFormat);
             var sender = Person(original.FromName, original.FromAddress ?? "");
-            var text = original.BodyText ?? "";
+            // A file that stood in the text: its name where it stood.
+            var text = MailText.Named(original.BodyText ?? "", original.Attachments, a => $"[{a.Name ?? a.Type}]");
             if (d.Kind == MailDraftKinds.Forward)
             {
                 var head = new List<string> { words.Forwarded, $"{words.From}: {sender}", $"{words.Date}: {when}", $"{words.Subject}: {original.Subject}" };

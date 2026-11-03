@@ -170,12 +170,73 @@ public sealed partial class ImapMailbox : IMailbox
             var entity = await f.GetBodyPartAsync(id, part, t).ConfigureAwait(false);
             return (entity as TextPart)?.Text;
         }
-        var text = await Read(s.TextBody).ConfigureAwait(false);
         var html = await Read(s.HtmlBody).ConfigureAwait(false);
-        var attachments = AttachmentParts(s.Body, s.TextBody, s.HtmlBody, html).Select((a, i) => new SyncAttachment(
-            i, a.PartSpecifier, a.FileName, a.ContentType.MimeType, a.Octets)).ToList();
+        var files = AttachmentParts(s.Body, s.TextBody, s.HtmlBody, html);
+        // The iPhone writes "text, photo, text" as text parts around the
+        // photo: every one of them is the text, in order, the photo marked
+        // where it stood.
+        var pieces = new List<TextPiece>();
+        foreach (var part in TextLayout(s.Body, s.TextBody, files))
+            pieces.Add(part is BodyPartText t2 && IndexOf(files, part) < 0
+                ? new TextPiece(await Read(t2).ConfigureAwait(false), null)
+                : new TextPiece(null, IndexOf(files, part)));
+        var (text, inText) = Compose(pieces);
+        var attachments = files.Select((a, i) => new SyncAttachment(
+            i, a.PartSpecifier, a.FileName, a.ContentType.MimeType, a.Octets, inText.Contains(i))).ToList();
         return new SyncBody(text, html, attachments);
     }, ct);
+
+    private static int IndexOf(IReadOnlyList<BodyPartBasic> files, BodyPart part)
+    {
+        for (var i = 0; i < files.Count; i++)
+            if (ReferenceEquals(files[i], part) || files[i].PartSpecifier == part.PartSpecifier) return i;
+        return -1;
+    }
+
+    /// <summary>A part of the text as written: its text, or the file
+    /// (an index into the attachments) that stood there.</summary>
+    internal readonly record struct TextPiece(string? Text, int? File);
+
+    /// <summary>
+    /// The text as it was written: the text body, and when it sits in a
+    /// multipart/mixed, every plain text beside it that isn't a file, with the
+    /// files among them, in order — Apple Mail puts the text before, between
+    /// and after inline photos into parts of their own (a list's footer is one
+    /// too). In an alternative the text body alone.
+    /// </summary>
+    internal static IReadOnlyList<BodyPartBasic> TextLayout(BodyPart? body, BodyPartText? text, IReadOnlyList<BodyPartBasic> files)
+    {
+        if (text is null) return [];
+        BodyPartMultipart? Parent(BodyPart? part) => part is not BodyPartMultipart m ? null
+            : m.BodyParts.Any(p => ReferenceEquals(p, text) || p.PartSpecifier == text.PartSpecifier) ? m
+            : m.BodyParts.Select(Parent).FirstOrDefault(found => found is not null);
+        var parent = Parent(body);
+        if (parent is null || !parent.ContentType.IsMimeType("multipart", "mixed")) return [text];
+        return parent.BodyParts.OfType<BodyPartBasic>()
+            .Where(p => IndexOf(files, p) >= 0
+                || ReferenceEquals(p, text) || p.PartSpecifier == text.PartSpecifier
+                || p is BodyPartText { IsPlain: true } t && t.ContentDisposition?.IsAttachment != true && string.IsNullOrEmpty(t.FileName))
+            .ToList();
+    }
+
+    /// <summary>
+    /// The pieces as one text: the texts as paragraphs, a file between them as
+    /// a line holding U+FFFC (the object replacement character, the mark a
+    /// reader puts the file in place of). Files after the last text are not
+    /// marked — they follow it anyway. Returns which files were.
+    /// </summary>
+    internal static (string? Text, IReadOnlySet<int> InText) Compose(IReadOnlyList<TextPiece> pieces)
+    {
+        var kept = pieces.Where(p => p.File is >= 0 || !string.IsNullOrWhiteSpace(p.Text)).ToList();
+        var last = kept.FindLastIndex(p => p.File is null);
+        var inText = new HashSet<int>();
+        if (last < 0) return (pieces.FirstOrDefault(p => p.File is null).Text, inText);
+        var lines = new List<string>();
+        for (var i = 0; i <= last; i++)
+            if (kept[i].File is { } f) { lines.Add("\uFFFC"); inText.Add(f); }
+            else lines.Add(kept[i].Text!.Trim('\r', '\n'));
+        return (string.Join("\n\n", lines), inText);
+    }
 
     // cid:… anywhere in the HTML (src, url()): a part it shows itself.
     [System.Text.RegularExpressions.GeneratedRegex(@"cid:([^""'\s>)]+)", System.Text.RegularExpressions.RegexOptions.IgnoreCase)]

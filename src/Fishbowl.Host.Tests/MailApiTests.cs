@@ -529,6 +529,8 @@ public class MailApiTests : IClassFixture<WebApplicationFactory<Program>>, IDisp
         Assert.Contains("Thanks, **Ada**.", sent.TextBody);
         Assert.True(sent.TextBody!.Contains("schrieb Ada Lovelace <ada@example.org>:"), sent.TextBody);
         Assert.Contains("> The variables live in the store, column by column.", sent.TextBody);
+        // The photo that stood in the text: its name where it stood.
+        Assert.Contains("> [store.png]\n> \n> The mill works on them.", sent.TextBody!.Replace("\r\n", "\n"));
         Assert.Contains("<strong>Ada</strong>", sent.HtmlBody);
         Assert.Contains("<br", sent.HtmlBody);   // a line break is a line break
         Assert.Contains("<blockquote", sent.HtmlBody);
@@ -733,6 +735,7 @@ public class MailApiTests : IClassFixture<WebApplicationFactory<Program>>, IDisp
         var photo = (await Messages(c, P, ThreadIdOf(await Threads(c, P), "Analytical engine notes")))
             .Single(m => m.GetProperty("attachments").GetArrayLength() > 0);
         Assert.Equal("store.png", photo.GetProperty("attachments")[0].GetProperty("name").GetString());
+        Assert.True(photo.GetProperty("attachments")[0].GetProperty("inText").GetBoolean());
         var photoId = photo.GetProperty("id").GetString();
 
         var r = await c.GetAsync($"{P}/messages/{photoId}/attachments/0?inline=true", Ct);
@@ -1019,6 +1022,9 @@ public class MailApiTests : IClassFixture<WebApplicationFactory<Program>>, IDisp
         Assert.Equal(3, messages.Count);
         Assert.Contains("operations cards", messages[0].GetProperty("text").GetString());
         Assert.Equal("in", messages[0].GetProperty("direction").GetString());
+        // A photo that stood in the text: named where it stood, no mark.
+        Assert.Equal("The variables live in the store, column by column.\n\n[image: store.png]\n\nThe mill works on them.",
+            messages[2].GetProperty("text").GetString());
 
         // Without read:mail the tools are refused like any scope-less tool.
         var noMail = await KeyAsync(user, ContextRef.User(user), "read:notes");

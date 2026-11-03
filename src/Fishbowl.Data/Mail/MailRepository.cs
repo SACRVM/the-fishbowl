@@ -627,16 +627,34 @@ public partial class MailRepository : IMailRepository
         return rows.Select(r => (r.Id, r.Role, (uint)r.Uid)).ToList();
     }
 
-    /// <summary>A message's attachment list as its body was read again; null
-    /// (the server no longer has it there) keeps the list it has.</summary>
-    public async Task SetPartsAsync(ContextRef ctx, string id, List<MailAttachment>? attachments, CancellationToken ct)
-    {
-        using var db = _db.CreateContextConnection(ctx);
-        await db.ExecuteAsync(attachments is null
-            ? new CommandDefinition("UPDATE mail_messages SET parts = 1 WHERE id = @id", new { id }, cancellationToken: ct)
-            : new CommandDefinition("UPDATE mail_messages SET parts = 1, attachments = @attachments WHERE id = @id",
-                new { id, attachments }, cancellationToken: ct));
-    }
+    /// <summary>A message as its body was read again: its attachment list,
+    /// and its text when that grew (the text after a photo) — then indexed
+    /// anew and its vector made again. Null attachments (the server no longer
+    /// has it there) keep what it has.</summary>
+    public Task SetPartsAsync(ContextRef ctx, string id, List<MailAttachment>? attachments, string? text, CancellationToken ct) =>
+        _db.WithContextTransactionAsync(ctx, async (db, tx, token) =>
+        {
+            if (attachments is null)
+            {
+                await db.ExecuteAsync(new CommandDefinition(
+                    "UPDATE mail_messages SET parts = 1 WHERE id = @id", new { id }, tx, cancellationToken: token));
+                return;
+            }
+            await db.ExecuteAsync(new CommandDefinition(
+                "UPDATE mail_messages SET parts = 1, attachments = @attachments WHERE id = @id",
+                new { id, attachments }, tx, cancellationToken: token));
+            var old = await db.ExecuteScalarAsync<string?>(new CommandDefinition(
+                "SELECT body_text FROM mail_messages WHERE id = @id", new { id }, tx, cancellationToken: token));
+            if (text is null || text.Length <= (old?.Length ?? 0)) return;
+            await db.ExecuteAsync(new CommandDefinition(@"
+                DELETE FROM mail_fts WHERE rowid = (SELECT rowid FROM mail_messages WHERE id = @id);
+                UPDATE mail_messages SET body_text = @text, snippet = @snippet, embedded = 0 WHERE id = @id;",
+                new { id, text, snippet = MailThreading.Snippet(text) }, tx, cancellationToken: token));
+            await db.ExecuteAsync(new CommandDefinition("DELETE FROM vec_mail WHERE id = @id", new { id }, tx, cancellationToken: token));
+            var m = await db.QuerySingleAsync<MailMessage>(new CommandDefinition(
+                "SELECT * FROM mail_messages WHERE id = @id", new { id }, tx, cancellationToken: token));
+            await IndexAsync(db, tx, m, token);
+        }, ct);
 
     public async Task<string?> FindByKeyAsync(ContextRef ctx, string accountId, string key, CancellationToken ct)
     {
@@ -828,7 +846,7 @@ public partial class MailRepository : IMailRepository
         await db.ExecuteAsync(new CommandDefinition(@"
             INSERT INTO mail_fts (rowid, subject, people, body)
             VALUES ((SELECT rowid FROM mail_messages WHERE id = @Id), @Subject, @people, @body)",
-            new { m.Id, Subject = m.Subject ?? "", people, body = m.BodyText ?? "" }, tx, cancellationToken: ct));
+            new { m.Id, Subject = m.Subject ?? "", people, body = MailText.Plain(m.BodyText ?? "") }, tx, cancellationToken: ct));
     }
 
     /// <summary>A message's state from its places: inbox → inbox, else sent →

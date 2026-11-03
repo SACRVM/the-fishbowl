@@ -40,7 +40,7 @@ public sealed class MailSyncer
     private const int HeaderChunk = 50;
     public const int MaxTextChars = 1_000_000;
     public const int MaxHtmlChars = 2_000_000;
-    // Mail stored before a part sent inline counted, read again per pass.
+    // Mail stored before inline parts counted (v29, v30), read again per pass.
     public const int PartsPerPass = 100;
 
     private readonly MailRepository _repo;
@@ -154,10 +154,12 @@ public sealed class MailSyncer
 
     /// <summary>
     /// Mail stored before a part sent inline counted as an attachment (user
-    /// schema v29) that may have lost one: its body read once more, a share a
-    /// pass, so the photo the iPhone put inline comes back as the attachment
-    /// it is. A message the server no longer has there keeps its list; any
-    /// other failure leaves the rest for the next pass.
+    /// schema v29) that may have lost one, or before the text around inline
+    /// photos was all kept (v30): its body read once more, a share a pass, so
+    /// the photo the iPhone put inline comes back as the attachment it is and
+    /// the text after it comes back too. A message the server no longer has
+    /// there keeps what it has; any other failure leaves the rest for the next
+    /// pass.
     /// </summary>
     private async Task RepairPartsAsync(ContextRef ctx, MailAccount account, IMailbox box, CancellationToken ct)
     {
@@ -168,8 +170,14 @@ public sealed class MailSyncer
             foreach (var (id, _, uid) in role)
             {
                 List<MailAttachment>? found = null;
+                string? text = null;
                 if (name is not null)
-                    try { found = Attachments(await box.BodyAsync(name, uid, ct)); }
+                    try
+                    {
+                        var body = await box.BodyAsync(name, uid, ct);
+                        found = Attachments(body);
+                        text = TextOf(body);
+                    }
                     catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
                     catch (MailException ex) { _logger.LogDebug(ex, "Mail body gone (account {AccountId}, uid {Uid})", account.Id, uid); }
                     catch (Exception ex)
@@ -177,13 +185,22 @@ public sealed class MailSyncer
                         _logger.LogDebug(ex, "Mail body unreadable again (account {AccountId}, uid {Uid})", account.Id, uid);
                         return;
                     }
-                await _repo.SetPartsAsync(ctx, id, found, ct);
+                await _repo.SetPartsAsync(ctx, id, found, text, ct);
             }
         }
     }
 
+    /// <summary>What is stored as a message's text: its text part, else its
+    /// HTML as text, at most <see cref="MaxTextChars"/>.</summary>
+    private static string? TextOf(SyncBody? body)
+    {
+        var text = body?.Text is { Length: > 0 } t ? HtmlToText.Normalize(t)
+            : body?.Html is { Length: > 0 } html ? HtmlToText.Convert(html) : null;
+        return text is { Length: > MaxTextChars } ? text[..MaxTextChars] : text;
+    }
+
     private static List<MailAttachment> Attachments(SyncBody? body) =>
-        body?.Attachments.Select(x => new MailAttachment(x.Index, x.Part, x.FileName, x.ContentType, x.Size)).ToList() ?? new();
+        body?.Attachments.Select(x => new MailAttachment(x.Index, x.Part, x.FileName, x.ContentType, x.Size, x.InText)).ToList() ?? new();
 
     private async Task<IReadOnlyList<MailRule>> RulesAsync(ContextRef ctx, CancellationToken ct)
     {
@@ -303,9 +320,7 @@ public sealed class MailSyncer
             catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
             catch (Exception ex) { _logger.LogDebug(ex, "Mail body unreadable (account {AccountId}, uid {Uid})", account.Id, h.Uid); }
 
-            var text = body?.Text is { Length: > 0 } t ? HtmlToText.Normalize(t)
-                : body?.Html is { Length: > 0 } html ? HtmlToText.Convert(html) : null;
-            if (text is { Length: > MaxTextChars }) text = text[..MaxTextChars];
+            var text = TextOf(body);
             var from = h.From?.Address?.Trim().ToLowerInvariant();
             var m = new MailMessage
             {

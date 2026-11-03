@@ -27,8 +27,9 @@ public sealed record SyncHeader(
     string? ListId);
 
 /// <summary>One attachment as the body structure names it; <see cref="Part"/>
-/// is the IMAP section id the content is fetched by.</summary>
-public sealed record SyncAttachment(int Index, string Part, string? FileName, string ContentType, long? Size);
+/// is the IMAP section id the content is fetched by. <see cref="InText"/>: it
+/// stands between the text's parts, marked there by a line holding U+FFFC.</summary>
+public sealed record SyncAttachment(int Index, string Part, string? FileName, string ContentType, long? Size, bool InText = false);
 
 /// <summary>The readable parts of a message, as sent (not converted).</summary>
 public sealed record SyncBody(string? Text, string? Html, IReadOnlyList<SyncAttachment> Attachments);

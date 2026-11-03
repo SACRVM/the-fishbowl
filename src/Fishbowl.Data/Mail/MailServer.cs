@@ -123,6 +123,11 @@ public sealed class MailServer
         var body = await box.BodyAsync(folder, uid, ct);
         var text = body.Text is { Length: > 0 } t ? Fishbowl.Mail.Text.HtmlToText.Normalize(t)
             : body.Html is { Length: > 0 } html ? Fishbowl.Mail.Text.HtmlToText.Convert(html) : null;
+        // Spam shows no files: one that stood in the text is its name there.
+        if (text is not null)
+            text = Fishbowl.Core.Util.MailText.Named(text,
+                body.Attachments.Select(a => new MailAttachment(a.Index, a.Part, a.FileName, a.ContentType, a.Size, a.InText)).ToList(),
+                a => $"[{a.Name ?? a.Type}]");
         return new SpamMessage(
             new SpamItem(accountId, h.Uid, status.UidValidity, h.From?.Name, h.From?.Address, h.Subject, h.Date ?? h.InternalDate ?? DateTimeOffset.MinValue, h.Seen),
             h.To.Select(a => string.IsNullOrEmpty(a.Name) ? a.Address : $"{a.Name} <{a.Address}>").ToList(),

@@ -13,7 +13,7 @@ public class DatabaseFactory
 {
     /// <summary>The user/space schema head: the PRAGMA user_version a context
     /// DB has once it is open. Raise it with every ApplyUserVN.</summary>
-    public const int UserSchemaHead = 29;
+    public const int UserSchemaHead = 30;
 
     private readonly string _dataRoot;
     private readonly string _usersPath;
@@ -602,10 +602,26 @@ public class DatabaseFactory
         if (version < 29)
         {
             ApplyUserV29(connection);
-            connection.Execute($"PRAGMA user_version = {UserSchemaHead}");
+            connection.Execute("PRAGMA user_version = 29");
             _logger.LogInformation("Applied user schema v29 to {DbPath}", ((SqliteConnection)connection).DataSource);
+            version = 29;
+        }
+
+        if (version < 30)
+        {
+            ApplyUserV30(connection);
+            connection.Execute($"PRAGMA user_version = {UserSchemaHead}");
+            _logger.LogInformation("Applied user schema v30 to {DbPath}", ((SqliteConnection)connection).DataSource);
         }
     }
+
+    // Apple Mail writes "text, photo, text" as text parts around the photo,
+    // and only the first was kept: mail without HTML that has files is read
+    // once more (parts = 0), and the sync takes the whole text
+    // (ImapMailbox.TextFragments, MailSyncer.RepairPartsAsync).
+    private static void ApplyUserV30(IDbConnection connection) => connection.Execute(@"
+        UPDATE mail_messages SET parts = 0
+        WHERE body_html IS NULL AND body_html_z IS NULL AND coalesce(attachments, '[]') <> '[]';");
 
     // A part sent inline counts as an attachment unless the HTML shows it (a
     // photo the iPhone puts inline in a mail without HTML was lost). `parts`

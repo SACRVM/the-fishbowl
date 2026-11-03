@@ -78,10 +78,13 @@ public class MailTests
             await Assertions.Expect(msgs).ToHaveCountAsync(3);
             await Assertions.Expect(msgs.Nth(1).Locator(".mv-dir")).ToHaveAttributeAsync("name", "fb-mail-out");
             await Assertions.Expect(msgs.Nth(2)).ToHaveClassAsync(new System.Text.RegularExpressions.Regex(@"\bopen\b"));
-            await Assertions.Expect(msgs.Nth(2).Locator(".mv-text")).ToContainTextAsync("column by column");
-            // The photo sent with it shows under the text, and opens large.
+            await Assertions.Expect(msgs.Nth(2).Locator(".mv-text").First).ToContainTextAsync("column by column");
+            // The photo sent with it stands where it stood in the text, and opens large.
             var picture = msgs.Nth(2).Locator(".mv-picture img");
             await Assertions.Expect(picture).ToBeVisibleAsync();
+            Assert.Equal(new[] { "mv-text", "mv-pictures", "mv-text" },
+                await msgs.Nth(2).Locator(".mv-msg-body > *").EvaluateAllAsync<string[]>("els => els.map(e => e.classList[0])"));
+            await Assertions.Expect(msgs.Nth(2).Locator(".mv-text").Last).ToHaveTextAsync("The mill works on them.");
             await page.WaitForFunctionAsync("() => document.querySelector('fb-mail-view .mv-picture img')?.naturalWidth > 0");
             await Assertions.Expect(msgs.Nth(2).Locator(".mv-att")).ToHaveCountAsync(0);
             await msgs.Nth(2).Locator(".mv-picture").ClickAsync();

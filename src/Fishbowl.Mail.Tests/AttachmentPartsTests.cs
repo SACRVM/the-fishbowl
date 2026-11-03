@@ -82,4 +82,54 @@ public class AttachmentPartsTests
 
         Assert.Equal(["Bescheid.pdf"], files.Select(p => p.FileName));
     }
+
+    // The text of "text, photo, text" (Apple Mail): every plain part beside
+    // the photo, with the files among them, in order — only the first text
+    // was kept, and nothing said where a photo stood.
+    [Fact]
+    public void TheTextAroundInlinePhotos_IsEveryPlainPart_WithTheFiles_InOrder()
+    {
+        var (first, last) = (Text("1"), Text("5"));
+        var body = Multi("mixed", "", first, Photo("2"), Text("3"), Photo("4"), last, Pdf("6"));
+        var files = ImapMailbox.AttachmentParts(body, first, null, null);
+
+        Assert.Equal(["1", "2", "3", "4", "5", "6"], ImapMailbox.TextLayout(body, first, files).Select(p => p.PartSpecifier));
+    }
+
+    [Fact]
+    public void InAnAlternative_TheTextBodyIsTheText()
+    {
+        var text = Text("1.1");
+        var body = Multi("mixed", "", Multi("alternative", "1", text, Text("1.2", "html")), Photo("2"));
+        var files = ImapMailbox.AttachmentParts(body, text, null, null);
+
+        Assert.Equal(["1.1"], ImapMailbox.TextLayout(body, text, files).Select(p => p.PartSpecifier));
+        Assert.Empty(ImapMailbox.TextLayout(body, null, files));
+    }
+
+    // A file between texts is a line of its own holding U+FFFC; one after the
+    // last text, or an empty text, is no mark — it follows the text anyway.
+    [Fact]
+    public void FilesBetweenTexts_AreMarked_WhereTheyStood()
+    {
+        var (text, inText) = ImapMailbox.Compose([
+            new("\r\n", null), new(null, 0), new("Hallo,\r\nhier das Foto:\r\n", null),
+            new(null, 1), new("\r\nund noch eins:", null), new(null, 2), new("", null), new(null, 3),
+        ]);
+
+        Assert.Equal("\uFFFC\n\nHallo,\r\nhier das Foto:\n\n\uFFFC\n\nund noch eins:", text);
+        Assert.Equal([0, 1], inText.Order());
+    }
+
+    [Fact]
+    public void OneTextWithAPhotoAfterIt_IsTheTextAlone()
+    {
+        var (text, inText) = ImapMailbox.Compose([new("", null), new(null, 0), new(" ", null)]);
+        Assert.Equal("", text);
+        Assert.Empty(inText);
+
+        (text, inText) = ImapMailbox.Compose([new("Gruß\r\n", null), new(null, 0)]);
+        Assert.Equal("Gruß", text);
+        Assert.Empty(inText);
+    }
 }

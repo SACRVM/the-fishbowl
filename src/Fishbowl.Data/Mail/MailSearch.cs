@@ -2,6 +2,7 @@ using System.Text.RegularExpressions;
 using Dapper;
 using Fishbowl.Core;
 using Fishbowl.Core.Models;
+using Fishbowl.Core.Util;
 using Fishbowl.Core.Search;
 using Fishbowl.Data.Search;
 using Microsoft.Extensions.Logging;
@@ -179,7 +180,7 @@ public partial class MailRepository
         var kept = new List<string>();
         foreach (var raw in (body ?? "").Split('\n'))
         {
-            var line = raw.Trim();
+            var line = raw.Replace(MailText.Mark, ' ').Trim();
             if (QuoteStart().IsMatch(line)) break;
             if (line.Length == 0 || line.StartsWith('>')) continue;
             kept.Add(line);

@@ -3,6 +3,7 @@ using System.Text.Json;
 using Fishbowl.Core;
 using Fishbowl.Core.Mcp;
 using Fishbowl.Core.Models;
+using Fishbowl.Core.Util;
 using Fishbowl.Core.Repositories;
 
 namespace Fishbowl.Mcp.Tools.Mail;
@@ -159,21 +160,27 @@ public class MailThreadTool : IMcpTool
         {
             untrusted = true,
             threadId,
-            messages = messages.Select(x => new
+            messages = messages.Select(x =>
             {
-                id = x.Id,
-                accountId = x.AccountId,
-                direction = x.Direction,
-                sentAt = x.SentAt,
-                from = new { name = x.FromName, address = x.FromAddress },
-                to = x.ToList.Select(p => new { name = p.Name, address = p.Address }),
-                cc = x.CcList.Select(p => new { name = p.Name, address = p.Address }),
-                subject = x.Subject,
-                tags = x.Tags,
-                seen = x.Seen,
-                text = x.BodyText is { Length: > 0 } t && t.Length > max ? t[..max] + "…" : x.BodyText,
-                truncated = x.BodyText is { } bt && bt.Length > max,
-                attachments = x.Attachments.Select(a => new { name = a.Name, type = a.Type, size = a.Size }),
+                // A file that stood in the text is named where it stood.
+                var text = x.BodyText is null ? null : MailText.Named(x.BodyText, x.Attachments,
+                    a => $"[{(a.Type.StartsWith("image/", StringComparison.OrdinalIgnoreCase) ? "image" : "file")}: {a.Name ?? a.Type}]");
+                return new
+                {
+                    id = x.Id,
+                    accountId = x.AccountId,
+                    direction = x.Direction,
+                    sentAt = x.SentAt,
+                    from = new { name = x.FromName, address = x.FromAddress },
+                    to = x.ToList.Select(p => new { name = p.Name, address = p.Address }),
+                    cc = x.CcList.Select(p => new { name = p.Name, address = p.Address }),
+                    subject = x.Subject,
+                    tags = x.Tags,
+                    seen = x.Seen,
+                    text = text is { Length: > 0 } t && t.Length > max ? t[..max] + "…" : text,
+                    truncated = text is { } bt && bt.Length > max,
+                    attachments = x.Attachments.Select(a => new { name = a.Name, type = a.Type, size = a.Size }),
+                };
             }),
         };
     }

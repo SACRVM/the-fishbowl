@@ -233,7 +233,12 @@
             quote.querySelector(".mc-quote-head").textContent = d.kind === "forward"
                 ? t("quote-forward", "Forwarded message — from {sender}, {date}:", { sender, date })
                 : t("quote-reply", "On {date}, {sender} wrote:", { sender, date });
-            quote.querySelector(".mc-quote-text").textContent = original.bodyText || "";
+            // A file that stood in the text: its name where it stood, as sent (MailText.Named).
+            const inText = (original.attachments || []).filter((a) => a.inText);
+            let n = 0;
+            quote.querySelector(".mc-quote-text").textContent = (original.bodyText || "")
+                .replace(/\s*\uFFFC\s*/g, () => { const a = inText[n++]; return a ? `\n\n[${a.name || a.type}]\n\n` : "\n\n"; })
+                .replace(/\n{3,}/g, "\n\n").trim();
             quote.hidden = false;
         }
 

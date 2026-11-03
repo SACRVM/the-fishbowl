@@ -69,11 +69,12 @@ internal sealed class SampleMailbox : IMailbox
             var self = new MailAddress("Playwright", me);
             uint uid = 1;
             void Add(string folder, string id, string? inReplyTo, string[] refs, MailAddress from, MailAddress to, string subject,
-                TimeSpan ago, bool seen, string? text, string? html = null, (string Name, string Type, byte[] Bytes)? file = null)
+                TimeSpan ago, bool seen, string? text, string? html = null, (string Name, string Type, byte[] Bytes)? file = null,
+                bool inText = false)
             {
                 var header = new SyncHeader(uid, id, inReplyTo, refs, now - ago, now - ago, from, [to], [], [], [], subject, seen, false,
                     (text?.Length ?? 0) + (html?.Length ?? 0), null);
-                var attachments = file is { } f ? new List<SyncAttachment> { new(0, "2", f.Name, f.Type, f.Bytes.Length) } : new List<SyncAttachment>();
+                var attachments = file is { } f ? new List<SyncAttachment> { new(0, "2", f.Name, f.Type, f.Bytes.Length, inText) } : new List<SyncAttachment>();
                 s.Folders[folder].Add(new Message(uid++, header, new SyncBody(text, html, attachments), file?.Bytes));
             }
             Add("INBOX", "engine-1@example.org", null, [], ada, self, "Analytical engine notes", TimeSpan.FromDays(2), true,
@@ -81,9 +82,11 @@ internal sealed class SampleMailbox : IMailbox
             Add("Sent Messages", "engine-2@fishbowl.test", "engine-1@example.org", ["engine-1@example.org"], self, ada,
                 "Re: Analytical engine notes", TimeSpan.FromDays(1), true, "Thank you — what about the variables?");
             Add("INBOX", "engine-3@example.org", "engine-2@fishbowl.test", ["engine-1@example.org", "engine-2@fishbowl.test"], ada, self,
-                "Re: Analytical engine notes", TimeSpan.FromHours(3), false, "The variables live in the store, column by column.",
-                // A photo sent inline, as the iPhone does: shown under the text.
-                file: ("store.png", "image/png", Logo));
+                "Re: Analytical engine notes", TimeSpan.FromHours(3), false,
+                "The variables live in the store, column by column.\n\n\uFFFC\n\nThe mill works on them.",
+                // "Text, photo, text" as the iPhone sends it: the photo stands
+                // where its mark is.
+                file: ("store.png", "image/png", Logo), inText: true);
             Add("INBOX", "news-1@example.com", null, [], new MailAddress("Weekly News", "news@example.com"), self, "This week in engines",
                 TimeSpan.FromHours(5), false, null,
                 // Like real newsletters: a background of its own (on paper), body
