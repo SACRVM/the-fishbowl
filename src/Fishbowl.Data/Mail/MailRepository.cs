@@ -611,7 +611,8 @@ public partial class MailRepository : IMailRepository
     }
 
     /// <summary>An account's messages whose attachment list is from before a
-    /// part sent inline counted (user schema v29), each with one of its places.</summary>
+    /// part sent inline counted (user schema v29), newest first, each with one
+    /// of its places.</summary>
     public async Task<IReadOnlyList<(string Id, string Role, uint Uid)>> PartsDueAsync(ContextRef ctx, string accountId, int limit, CancellationToken ct)
     {
         using var db = _db.CreateContextConnection(ctx);
@@ -620,6 +621,7 @@ public partial class MailRepository : IMailRepository
             FROM mail_messages m JOIN mail_locations l ON l.message_id = m.id AND l.account_id = m.account_id
             WHERE m.account_id = @accountId AND m.parts = 0
             GROUP BY m.id
+            ORDER BY m.sent_at DESC
             LIMIT @limit",
             new { accountId, limit }, cancellationToken: ct));
         return rows.Select(r => (r.Id, r.Role, (uint)r.Uid)).ToList();
