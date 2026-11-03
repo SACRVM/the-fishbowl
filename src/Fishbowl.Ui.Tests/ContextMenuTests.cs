@@ -83,6 +83,13 @@ public class ContextMenuTests
             await Assertions.Expect(Item(page, "Open")).ToBeVisibleAsync();
             await Assertions.Expect(Item(page, "Delete contact")).ToBeVisibleAsync();
             await page.Keyboard.PressAsync("Escape");
+            await Assertions.Expect(Menu(page)).ToHaveCountAsync(0);
+
+            // The menu stays in <body> while the view is open. It must take no
+            // room there: as an inline box it added a 21px line under the view,
+            // and the page got a scrollbar and slid up by that much.
+            Assert.Equal(0, await page.EvaluateAsync<int>(
+                "() => document.documentElement.scrollHeight - document.documentElement.clientHeight"));
             Assert.Empty(errors);
         }
         finally

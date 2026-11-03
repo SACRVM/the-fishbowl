@@ -187,6 +187,12 @@ sac-window > .wa-bar { padding: 0; }
    address it is, steps aside meanwhile. */
 #fb-app-stage { position: fixed; inset: calc(50px + env(safe-area-inset-top, 0px)) 0 0 0; }
 #fb-app-stage[hidden], fb-hub-view[page-app] { display: none; }
+/* Stopgap for a kit bug (SACRVM/sacrvm-appkit#47), to drop once a kit
+   release fixes it. sac.contextMenu and sac.tooltip.attach leave their host
+   in <body>, inline. That adds a 21px line under the full-height views, so
+   the page scrolls. Their panels are fixed popovers, so the host needs no
+   room in the flow. */
+body > sac-menu.sac-context-menu, body > sac-tooltip { position: fixed; top: 0; left: 0; }
 /* fb.fileViewer: a PDF fills its window edge to edge — the browser's viewer
    brings its own bar; everything else sits in the kit's quick look. */
 sac-window.fb-file-viewer.pdf { --window-padding: 0; }
