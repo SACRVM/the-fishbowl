@@ -402,7 +402,10 @@
             // The tags mail carries: [{ name, count, source }] — each account's
             // source tag (system-given) first.
             tags: ()               => request(p("/mail/tags")),
-            attachmentUrl: (mid, index) => `${base}${p(`/mail/messages/${id(mid)}/attachments/${index}`)}`,
+            // { inline: true }: a picture to show (the server sniffs it; anything
+            // else still comes as a download).
+            attachmentUrl: (mid, index, { inline } = {}) =>
+                `${base}${p(`/mail/messages/${id(mid)}/attachments/${index}`)}${inline ? "?inline=true" : ""}`,
             // The HTML body as a sandboxed page of its own (MailApi): no script,
             // nothing remote unless `images`; a plain mail in the app's
             // `theme` ("dark" | "light").

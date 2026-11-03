@@ -12,6 +12,9 @@
  *   fb.fileViewer.open({ files, path, entry? })
  *     files — fb.api.files.in(<workspace>); entry — its stat, when the
  *     caller has it. The same file again brings its window to the front.
+ *   fb.fileViewer.open({ source: { url, type, name, size }, download? })
+ *     anything else the page can fetch (a mail's picture) in the quick look;
+ *     download — the URL its Download button saves (default: url).
  */
 (function () {
     const fb = window.fb;
@@ -19,7 +22,13 @@
     const isPdf = (entry) => /pdf/i.test(entry?.mime || entry?.type || "") || /\.pdf$/i.test(entry?.name || "");
     const open = new Map();   // "<workspace>|<path>" → its window
 
-    async function show({ files, path, entry }) {
+    async function show({ files, path, entry, source, download }) {
+        if (source) {
+            const key = `url|${source.url}`;
+            const existing = open.get(key);
+            if (existing?.isConnected) { existing.bringToFront?.(); return existing; }
+            return place(key, source.name, false, (win) => look(win, source, download || source.url, source.name));
+        }
         entry = entry || await files.stat(path);
         path = entry.path || path;
         const key = `${files.workspace}|${path}`;
@@ -32,34 +41,47 @@
             return null;
         }
 
+        return place(key, entry.name, pdf, (win) => {
+            if (pdf) {
+                const frame = document.createElement("iframe");
+                frame.src = files.contentUrl(path, { inline: true });
+                frame.title = entry.name;
+                win.appendChild(frame);
+            } else {
+                look(win, { url: files.contentUrl(path), type: entry.mime || entry.type || "", name: entry.name, size: entry.size },
+                    files.contentUrl(path), entry.name);
+            }
+        });
+    }
+
+    /** The kit's quick look on a source in the window, with Download in its actions. */
+    function look(win, source, downloadUrl, name) {
+        const view = document.createElement("sac-quick-look");
+        const dl = document.createElement("a");
+        dl.className = "btn";
+        dl.slot = "actions";
+        dl.href = downloadUrl;
+        dl.download = name || "";
+        dl.innerHTML = `<sac-icon name="download"></sac-icon> ${t("fb.files.download", "Download")}`;
+        view.appendChild(dl);
+        view.addEventListener("sac:dismiss", () => win.close());
+        win.appendChild(view);
+        view.source = source;
+    }
+
+    /** The window over the desktop, filled by `fill`, kept under `key`. */
+    function place(key, title, pdf, fill) {
         const win = document.createElement("sac-window");
         win.className = "fb-file-viewer";
         win.classList.toggle("pdf", pdf);
-        win.setAttribute("title", entry.name);
+        win.setAttribute("title", title);
         win.setAttribute("escape-closes", "");
         win.setAttribute("controls", "max close");
         win.setAttribute("width", "min(960px, 94vw)");
         win.setAttribute("height", "calc(100vh - 76px)");
         win.setAttribute("top", "60px");
         win.setAttribute("left", "max(3vw, calc(50vw - 480px))");
-        if (pdf) {
-            const frame = document.createElement("iframe");
-            frame.src = files.contentUrl(path, { inline: true });
-            frame.title = entry.name;
-            win.appendChild(frame);
-        } else {
-            const look = document.createElement("sac-quick-look");
-            const dl = document.createElement("a");
-            dl.className = "btn";
-            dl.slot = "actions";
-            dl.href = files.contentUrl(path);
-            dl.download = entry.name;
-            dl.innerHTML = `<sac-icon name="download"></sac-icon> ${t("fb.files.download", "Download")}`;
-            look.appendChild(dl);
-            look.addEventListener("sac:dismiss", () => win.close());
-            win.appendChild(look);
-            look.source = { url: files.contentUrl(path), type: entry.mime || entry.type || "", name: entry.name, size: entry.size };
-        }
+        fill(win);
         win.addEventListener("sac:close", () => { win.remove(); open.delete(key); }, { once: true });
         document.body.appendChild(win);
         open.set(key, win);

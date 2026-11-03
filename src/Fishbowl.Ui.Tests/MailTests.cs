@@ -79,6 +79,16 @@ public class MailTests
             await Assertions.Expect(msgs.Nth(1).Locator(".mv-dir")).ToHaveAttributeAsync("name", "fb-mail-out");
             await Assertions.Expect(msgs.Nth(2)).ToHaveClassAsync(new System.Text.RegularExpressions.Regex(@"\bopen\b"));
             await Assertions.Expect(msgs.Nth(2).Locator(".mv-text")).ToContainTextAsync("column by column");
+            // The photo sent with it shows under the text, and opens large.
+            var picture = msgs.Nth(2).Locator(".mv-picture img");
+            await Assertions.Expect(picture).ToBeVisibleAsync();
+            await page.WaitForFunctionAsync("() => document.querySelector('fb-mail-view .mv-picture img')?.naturalWidth > 0");
+            await Assertions.Expect(msgs.Nth(2).Locator(".mv-att")).ToHaveCountAsync(0);
+            await msgs.Nth(2).Locator(".mv-picture").ClickAsync();
+            var viewer = page.Locator("sac-window.fb-file-viewer[title='store.png']");
+            await Assertions.Expect(viewer.Locator("sac-quick-look")).ToBeVisibleAsync();
+            await page.Keyboard.PressAsync("Escape");
+            await Assertions.Expect(viewer).ToHaveCountAsync(0);
             await Assertions.Expect(engine).Not.ToHaveClassAsync(new System.Text.RegularExpressions.Regex(@"\bunread\b"));
             await page.ScreenshotAsync(new() { Path = Shot("thread") });
 

@@ -723,6 +723,35 @@ public class MailApiTests : IClassFixture<WebApplicationFactory<Program>>, IDisp
         Assert.Equal(HttpStatusCode.NotFound, (await c.GetAsync($"{P}/messages/{msgId}/attachments/5", Ct)).StatusCode);
     }
 
+    // A picture shown under the text (inline=true) comes as the image its
+    // bytes say it is — and only then: the PDF stays a download.
+    [Fact]
+    public async Task Attachment_Inline_IsAPictureOnlyWhenItsBytesAreOne()
+    {
+        var c = Fresh();
+        await SyncedAccountAsync(c, P);
+        var photo = (await Messages(c, P, ThreadIdOf(await Threads(c, P), "Analytical engine notes")))
+            .Single(m => m.GetProperty("attachments").GetArrayLength() > 0);
+        Assert.Equal("store.png", photo.GetProperty("attachments")[0].GetProperty("name").GetString());
+        var photoId = photo.GetProperty("id").GetString();
+
+        var r = await c.GetAsync($"{P}/messages/{photoId}/attachments/0?inline=true", Ct);
+        Assert.Equal(HttpStatusCode.OK, r.StatusCode);
+        Assert.Equal("image/png", r.Content.Headers.ContentType?.MediaType);
+        Assert.Equal("inline", r.Content.Headers.ContentDisposition?.DispositionType);
+        Assert.Equal("nosniff", r.Headers.GetValues("X-Content-Type-Options").Single());
+        Assert.Contains("max-age", r.Headers.CacheControl?.ToString());
+
+        var plain = await c.GetAsync($"{P}/messages/{photoId}/attachments/0", Ct);
+        Assert.Equal("attachment", plain.Content.Headers.ContentDisposition?.DispositionType);
+        Assert.Equal("application/octet-stream", plain.Content.Headers.ContentType?.MediaType);
+
+        var invoice = (await Messages(c, P, ThreadIdOf(await Threads(c, P), "Your invoice")))[0].GetProperty("id").GetString();
+        var pdf = await c.GetAsync($"{P}/messages/{invoice}/attachments/0?inline=true", Ct);
+        Assert.Equal("attachment", pdf.Content.Headers.ContentDisposition?.DispositionType);
+        Assert.Equal("application/octet-stream", pdf.Content.Headers.ContentType?.MediaType);
+    }
+
     // ---- 5. tags ----
 
     [Fact]

@@ -667,7 +667,11 @@ public static partial class MailApi
                 : await DeleteMailAsync(t, [id], mode, server);
         }).WithName($"Delete{tag}MailMessage").WithSummary("Deletes one message — only here or everywhere.");
 
-        g.MapGet("/messages/{id}/attachments/{index:int}", async (string id, int index, HttpContext http, IMailRepository repo,
+        // inline=true: a picture shown under the text — served as the image it
+        // is only when its bytes say it is a raster image the browser draws
+        // (FileSniffer, never the type the mail claims); anything else stays
+        // a download.
+        g.MapGet("/messages/{id}/attachments/{index:int}", async (string id, int index, bool? inline, HttpContext http, IMailRepository repo,
             MailServer server, CancellationToken ct) =>
         {
             var (t, err) = await ResolveAsync(http, space, Need.Read, ct);
@@ -692,13 +696,19 @@ public static partial class MailApi
                 return ApiErrors.Json(StatusCodes.Status502BadGateway, code, why);
             }
             buffer.Position = 0;
-            var disposition = new ContentDispositionHeaderValue("attachment");
+            var sniffed = inline == true
+                ? Fishbowl.Data.Files.FileSniffer.Sniff(buffer.GetBuffer().AsSpan(0, (int)Math.Min(buffer.Length, 4096)), attachment.Name ?? "")
+                : null;
+            var picture = sniffed is not null && sniffed.StartsWith("image/", StringComparison.Ordinal) && Fishbowl.Data.Files.FileSniffer.IsInlineSafe(sniffed);
+            var disposition = new ContentDispositionHeaderValue(picture ? "inline" : "attachment");
             disposition.SetHttpFileName(string.IsNullOrWhiteSpace(attachment.Name) ? $"attachment-{index}" : attachment.Name);
             http.Response.Headers[HeaderNames.ContentDisposition] = disposition.ToString();
             http.Response.Headers["X-Content-Type-Options"] = "nosniff";
             http.Response.Headers[HeaderNames.ContentSecurityPolicy] = "sandbox";
-            return Results.Stream(buffer, "application/octet-stream");
-        }).WithName($"Get{tag}MailAttachment").WithSummary("One attachment, fetched from the mail server.");
+            // A message's parts never change: the picture needn't come from the server again.
+            if (picture) http.Response.Headers[HeaderNames.CacheControl] = "private, max-age=86400";
+            return Results.Stream(buffer, picture ? sniffed! : "application/octet-stream");
+        }).WithName($"Get{tag}MailAttachment").WithSummary("One attachment, fetched from the mail server; inline=true shows a raster image as one.");
 
         // ---- spam: read live from the server, never stored; a person's only ----
         // (an agent never reads spam — it's where crafted mail lands).

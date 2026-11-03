@@ -81,7 +81,9 @@ internal sealed class SampleMailbox : IMailbox
             Add("Sent Messages", "engine-2@fishbowl.test", "engine-1@example.org", ["engine-1@example.org"], self, ada,
                 "Re: Analytical engine notes", TimeSpan.FromDays(1), true, "Thank you — what about the variables?");
             Add("INBOX", "engine-3@example.org", "engine-2@fishbowl.test", ["engine-1@example.org", "engine-2@fishbowl.test"], ada, self,
-                "Re: Analytical engine notes", TimeSpan.FromHours(3), false, "The variables live in the store, column by column.");
+                "Re: Analytical engine notes", TimeSpan.FromHours(3), false, "The variables live in the store, column by column.",
+                // A photo sent inline, as the iPhone does: shown under the text.
+                file: ("store.png", "image/png", Logo));
             Add("INBOX", "news-1@example.com", null, [], new MailAddress("Weekly News", "news@example.com"), self, "This week in engines",
                 TimeSpan.FromHours(5), false, null,
                 // Like real newsletters: a background of its own (on paper), body

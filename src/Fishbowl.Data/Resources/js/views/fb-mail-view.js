@@ -482,6 +482,12 @@ class FbMailView extends HTMLElement {
                     padding: 0; border: 0; background: none; font: inherit; color: var(--accent); cursor: pointer;
                 }
                 fb-mail-view .mv-images button:hover { text-decoration: underline; }
+                fb-mail-view .mv-pictures { display: flex; flex-direction: column; align-items: flex-start; gap: 12px; margin-top: 12px; }
+                fb-mail-view .mv-picture {
+                    max-width: 100%; padding: 0; border: 0; border-radius: var(--radius-m); background: none; cursor: zoom-in;
+                }
+                fb-mail-view .mv-picture img { display: block; max-width: 100%; max-height: 70vh; height: auto; border-radius: var(--radius-m); }
+                fb-mail-view .mv-picture:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
                 fb-mail-view .mv-attachments { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px; }
                 fb-mail-view .mv-att {
                     display: inline-flex; align-items: center; gap: 6px; max-width: 100%; padding: 6px 10px;
@@ -1729,23 +1735,56 @@ class FbMailView extends HTMLElement {
             this.fillText(pre, m.bodyText || "");
             body.appendChild(pre);
         }
-        if (m.attachments?.length) {
+        // Pictures show under the text (a photo the iPhone sent inline, or
+        // attached); a click opens one large. The rest are links. A picture
+        // the browser can't draw falls back to its link.
+        const pictureTypes = /^image\/(jpeg|png|gif|webp|avif|bmp)$/i;
+        const pictures = (m.attachments || []).filter((a) => pictureTypes.test(a.type || ""));
+        const files = (m.attachments || []).filter((a) => !pictures.includes(a));
+        const linkTo = (a) => {
+            const link = document.createElement("a");
+            link.className = "mv-att";
+            link.href = this.api.attachmentUrl(m.id, a.index);
+            link.setAttribute("download", a.name || "");
+            link.innerHTML = `<sac-icon name="attachment"></sac-icon><span></span><span class="muted"></span>`;
+            link.children[1].textContent = a.name || this.t("attachment", "Attachment");
+            link.children[2].textContent = a.size ? fb.accounts?.formatBytes?.(a.size) ?? "" : "";
+            return link;
+        };
+        if (pictures.length) {
+            const box = document.createElement("div");
+            box.className = "mv-pictures";
+            for (const a of pictures) {
+                const name = a.name || this.t("attachment", "Attachment");
+                const url = this.api.attachmentUrl(m.id, a.index, { inline: true });
+                const shot = document.createElement("button");
+                shot.type = "button";
+                shot.className = "mv-picture";
+                shot.title = name;
+                const img = document.createElement("img");
+                img.alt = name;
+                img.loading = "lazy";
+                img.decoding = "async";
+                img.src = url;
+                img.addEventListener("error", () => shot.replaceWith(linkTo(a)), { once: true });
+                shot.appendChild(img);
+                shot.addEventListener("click", () => fb.fileViewer.open({
+                    source: { url, type: a.type, name, size: a.size },
+                    download: this.api.attachmentUrl(m.id, a.index),
+                }));
+                box.appendChild(shot);
+            }
+            body.appendChild(box);
+        }
+        if (files.length) {
             const box = document.createElement("div");
             box.className = "mv-attachments";
-            for (const a of m.attachments) {
-                const link = document.createElement("a");
-                link.className = "mv-att";
-                link.href = this.api.attachmentUrl(m.id, a.index);
-                link.setAttribute("download", a.name || "");
-                link.innerHTML = `<sac-icon name="attachment"></sac-icon><span></span><span class="muted"></span>`;
-                link.children[1].textContent = a.name || this.t("attachment", "Attachment");
-                link.children[2].textContent = a.size ? fb.accounts?.formatBytes?.(a.size) ?? "" : "";
-                box.appendChild(link);
-            }
+            for (const a of files) box.appendChild(linkTo(a));
             body.appendChild(box);
         }
     }
 
+    /** "dark" or "light", from the page's actual background — whatever set it. */
     /** "dark" or "light", from the page's actual background — whatever set it. */
     theme() {
         const rgb = (getComputedStyle(document.body).backgroundColor.match(/\d+(\.\d+)?/g) || [0, 0, 0]).map(Number);
