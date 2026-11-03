@@ -121,6 +121,20 @@ public class AttachmentPartsTests
         Assert.Equal([0, 1], inText.Order());
     }
 
+    // Apple Mail's own U+FFFC in a text says where a file went, but not which:
+    // it goes, so the marks left are ours, each with its file.
+    [Fact]
+    public void TheSendersOwnMarks_Go()
+    {
+        var (text, inText) = ImapMailbox.Compose([new("Anbei die Doku \uFFFC", null), new(null, 0)]);
+        Assert.Equal("Anbei die Doku ", text);
+        Assert.Empty(inText);
+
+        (text, inText) = ImapMailbox.Compose([new("Hallo\n\n\uFFFC\n\nGruß", null), new(null, 0), new("Ende", null)]);
+        Assert.Equal("Hallo\n\n\n\nGruß\n\n\uFFFC\n\nEnde", text);
+        Assert.Equal([0], inText);
+    }
+
     [Fact]
     public void OneTextWithAPhotoAfterIt_IsTheTextAlone()
     {

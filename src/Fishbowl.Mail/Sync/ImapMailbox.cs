@@ -223,10 +223,13 @@ public sealed partial class ImapMailbox : IMailbox
     /// The pieces as one text: the texts as paragraphs, a file between them as
     /// a line holding U+FFFC (the object replacement character, the mark a
     /// reader puts the file in place of). Files after the last text are not
-    /// marked — they follow it anyway. Returns which files were.
+    /// marked — they follow it anyway. Returns which files were. Apple Mail
+    /// writes U+FFFC into a text itself where a file went; those go, so every
+    /// mark in the text is one of ours, with its file.
     /// </summary>
     internal static (string? Text, IReadOnlySet<int> InText) Compose(IReadOnlyList<TextPiece> pieces)
     {
+        pieces = pieces.Select(p => p.Text is { } t && t.Contains('\uFFFC') ? p with { Text = t.Replace("\uFFFC", "") } : p).ToList();
         var kept = pieces.Where(p => p.File is >= 0 || !string.IsNullOrWhiteSpace(p.Text)).ToList();
         var last = kept.FindLastIndex(p => p.File is null);
         var inText = new HashSet<int>();

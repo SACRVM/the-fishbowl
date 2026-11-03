@@ -628,9 +628,10 @@ public partial class MailRepository : IMailRepository
     }
 
     /// <summary>A message as its body was read again: its attachment list,
-    /// and its text when that grew (the text after a photo) — then indexed
-    /// anew and its vector made again. Null attachments (the server no longer
-    /// has it there) keep what it has.</summary>
+    /// and its text when it reads otherwise now (the text after a photo, the
+    /// marks where files stood — they belong to the attachments read with it)
+    /// — then indexed anew and its vector made again. Null attachments (the
+    /// server no longer has it there) or no text keep what it has.</summary>
     public Task SetPartsAsync(ContextRef ctx, string id, List<MailAttachment>? attachments, string? text, CancellationToken ct) =>
         _db.WithContextTransactionAsync(ctx, async (db, tx, token) =>
         {
@@ -645,7 +646,7 @@ public partial class MailRepository : IMailRepository
                 new { id, attachments }, tx, cancellationToken: token));
             var old = await db.ExecuteScalarAsync<string?>(new CommandDefinition(
                 "SELECT body_text FROM mail_messages WHERE id = @id", new { id }, tx, cancellationToken: token));
-            if (text is null || text.Length <= (old?.Length ?? 0)) return;
+            if (string.IsNullOrWhiteSpace(text) || text == old) return;
             await db.ExecuteAsync(new CommandDefinition(@"
                 DELETE FROM mail_fts WHERE rowid = (SELECT rowid FROM mail_messages WHERE id = @id);
                 UPDATE mail_messages SET body_text = @text, snippet = @snippet, embedded = 0 WHERE id = @id;",

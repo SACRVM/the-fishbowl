@@ -138,4 +138,29 @@ public class MailStorageTests : MailFixture
         Assert.Equal(0, Scalar("SELECT embedded FROM mail_messages WHERE message_key = 'trip@x'"));
         Assert.Equal(0, Scalar("SELECT COUNT(*) FROM mail_messages WHERE parts = 0"));
     }
+
+    // Apple Mail writes U+FFFC into a plain text where a file went; a read
+    // again drops it (Compose), and the repair takes the text that reads
+    // otherwise now — shorter too — so no mark is left without its file.
+    [Fact]
+    public async Task MailFromBeforeV30_LosesTheSendersOwnMark()
+    {
+        var acc = await AddAccountAsync();
+        var s = Connector.For(acc.Id);
+        var doc = s.AddMessage("inbox", messageId: "<doc@x>", subject: "Doku", text: "Anbei die Doku \uFFFC");
+        await SyncAsync(acc);
+        s.ByRole["inbox"].Messages[doc].Body = new SyncBody("Anbei die Doku", null,
+            [new SyncAttachment(0, "2", "Doku.docx", "application/octet-stream", 90_000)]);
+        using (var db = Factory.CreateContextConnection(Ctx))
+            db.Execute(@"
+                UPDATE mail_messages SET attachments = '[{""index"":0,""part"":""2"",""name"":""Doku.docx"",""type"":""application/octet-stream"",""size"":90000}]';
+                PRAGMA user_version = 29;");
+
+        await SyncAsync(acc);
+
+        var m = await ByKeyAsync("doc@x");
+        Assert.Equal("Anbei die Doku", m.BodyText);
+        Assert.False(Assert.Single(m.Attachments).InText);
+        Assert.Equal(0, Scalar("SELECT COUNT(*) FROM mail_messages WHERE parts = 0"));
+    }
 }
