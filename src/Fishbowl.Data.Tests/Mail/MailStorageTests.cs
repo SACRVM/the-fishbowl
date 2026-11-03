@@ -1,5 +1,6 @@
 using Dapper;
 using Fishbowl.Core.Models;
+using Fishbowl.Mail.Sync;
 
 namespace Fishbowl.Tests.Mail;
 
@@ -77,5 +78,33 @@ public class MailStorageTests : MailFixture
         Assert.Equal(Html, (await Repo.GetMessageAsync(Ctx, m.Id, Ct))!.BodyHtml);
         Assert.Single(await Repo.ListThreadsAsync(Ctx, new MailListQuery { Text = "alpha" }, Ct));
         Assert.Single(await Repo.ListThreadsAsync(Ctx, new MailListQuery { Text = "weekly" }, Ct));
+    }
+
+    // User schema v29: a part sent inline counts as an attachment. Mail stored
+    // before that lost the photo the iPhone put inline (no HTML shows it); the
+    // migration marks what may have lost one, and the sync reads its body again.
+    [Fact]
+    public async Task MailFromBeforeV29_GetsItsInlinePhotoBack()
+    {
+        var acc = await AddAccountAsync();
+        var s = Connector.For(acc.Id);
+        var photo = s.AddMessage("inbox", messageId: "<photo@x>", subject: "BU Auszahlung", text: "");
+        s.AddMessage("inbox", messageId: "<note@x>", subject: "Short note", text: "see you");
+        await SyncAsync(acc);
+        // As v28 stored it: the photo not listed — and the mail as big as the photo.
+        s.ByRole["inbox"].Messages[photo].Body = new SyncBody("", null, [new SyncAttachment(0, "2", "IMG_0042.jpeg", "image/jpeg", 1_400_000)]);
+        using (var db = Factory.CreateContextConnection(Ctx))
+            db.Execute(@"
+                UPDATE mail_messages SET attachments = '[]';
+                UPDATE mail_messages SET size = 1400000 WHERE message_key = 'photo@x';
+                PRAGMA user_version = 28;");
+
+        Assert.Equal(1, Scalar("SELECT COUNT(*) FROM mail_messages WHERE parts = 0"));   // the small one isn't read again
+        await SyncAsync(acc);
+
+        var a = Assert.Single((await ByKeyAsync("photo@x")).Attachments);
+        Assert.Equal(("IMG_0042.jpeg", "image/jpeg", "2"), (a.Name, a.Type, a.Part));
+        Assert.Empty((await ByKeyAsync("note@x")).Attachments);
+        Assert.Equal(0, Scalar("SELECT COUNT(*) FROM mail_messages WHERE parts = 0"));
     }
 }

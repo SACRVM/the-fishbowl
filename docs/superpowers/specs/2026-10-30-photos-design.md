@@ -137,7 +137,7 @@ replace a NAS, and photos are most of what a NAS holds.
 
 ## Data (rough)
 
-Context schema v29:
+The next context schema version:
 
 - `photos`: id (ULID), the shown part's path, kind (`photo`, `video`,
   `live`, `burst`), `taken_at` (UTC) and its offset, width, height, duration,
@@ -201,7 +201,7 @@ Context schema v29:
 1. **Platform.** Differential snapshots with retention, quotas raised, max
    file size.
 2. **Import.**
-   - Schema v29 and `tools/import-photos`.
+   - The schema and `tools/import-photos`.
    - Files into the workspace's `Photos/`.
    - The inventory into the photo tables, idempotent by `source_id`.
    - Sidecars and the inventory kept in a dot folder beside the library

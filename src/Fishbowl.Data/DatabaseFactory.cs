@@ -13,7 +13,7 @@ public class DatabaseFactory
 {
     /// <summary>The user/space schema head: the PRAGMA user_version a context
     /// DB has once it is open. Raise it with every ApplyUserVN.</summary>
-    public const int UserSchemaHead = 28;
+    public const int UserSchemaHead = 29;
 
     private readonly string _dataRoot;
     private readonly string _usersPath;
@@ -594,9 +594,37 @@ public class DatabaseFactory
         if (version < 28)
         {
             ApplyUserV28(connection);
-            connection.Execute($"PRAGMA user_version = {UserSchemaHead}");
+            connection.Execute("PRAGMA user_version = 28");
             _logger.LogInformation("Applied user schema v28 to {DbPath}", ((SqliteConnection)connection).DataSource);
+            version = 28;
         }
+
+        if (version < 29)
+        {
+            ApplyUserV29(connection);
+            connection.Execute($"PRAGMA user_version = {UserSchemaHead}");
+            _logger.LogInformation("Applied user schema v29 to {DbPath}", ((SqliteConnection)connection).DataSource);
+        }
+    }
+
+    // A part sent inline counts as an attachment unless the HTML shows it (a
+    // photo the iPhone puts inline in a mail without HTML was lost). `parts`
+    // is 1 where a message's attachment list follows that rule. Mail stored
+    // before it that may have lost a part — none listed and more bytes than
+    // its text and HTML explain (the HTML is packed, about a seventh) — or that
+    // was stored without any body gets 0: the sync reads its body once more, a
+    // share a pass (MailSyncer.RepairPartsAsync).
+    private static void ApplyUserV29(IDbConnection connection)
+    {
+        var cols = connection.Query<string>("SELECT name FROM pragma_table_info('mail_messages')").ToList();
+        if (!cols.Contains("parts")) connection.Execute("ALTER TABLE mail_messages ADD COLUMN parts INTEGER NOT NULL DEFAULT 1;");
+        connection.Execute(@"
+            UPDATE mail_messages SET parts = 0
+            WHERE coalesce(attachments, '[]') = '[]' AND (
+                   (body_text IS NULL AND body_html IS NULL AND body_html_z IS NULL)
+                OR (body_html IS NULL AND body_html_z IS NULL AND size > 20000)
+                OR size - 1.4 * (7 * coalesce(length(body_html_z), 0) + coalesce(length(body_html), 0) + coalesce(length(body_text), 0)) > 50000);
+            CREATE INDEX IF NOT EXISTS ix_mail_messages_parts ON mail_messages(account_id) WHERE parts = 0;");
     }
 
     // Pinned conversations: kept on top of the list until unpinned. A

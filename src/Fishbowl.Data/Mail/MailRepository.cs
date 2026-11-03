@@ -610,6 +610,32 @@ public partial class MailRepository : IMailRepository
         return rows.ToDictionary(r => (uint)r.Uid, r => r.MessageId);
     }
 
+    /// <summary>An account's messages whose attachment list is from before a
+    /// part sent inline counted (user schema v29), each with one of its places.</summary>
+    public async Task<IReadOnlyList<(string Id, string Role, uint Uid)>> PartsDueAsync(ContextRef ctx, string accountId, int limit, CancellationToken ct)
+    {
+        using var db = _db.CreateContextConnection(ctx);
+        var rows = await db.QueryAsync<(string Id, string Role, long Uid)>(new CommandDefinition(@"
+            SELECT m.id, l.role, MIN(l.uid)
+            FROM mail_messages m JOIN mail_locations l ON l.message_id = m.id AND l.account_id = m.account_id
+            WHERE m.account_id = @accountId AND m.parts = 0
+            GROUP BY m.id
+            LIMIT @limit",
+            new { accountId, limit }, cancellationToken: ct));
+        return rows.Select(r => (r.Id, r.Role, (uint)r.Uid)).ToList();
+    }
+
+    /// <summary>A message's attachment list as its body was read again; null
+    /// (the server no longer has it there) keeps the list it has.</summary>
+    public async Task SetPartsAsync(ContextRef ctx, string id, List<MailAttachment>? attachments, CancellationToken ct)
+    {
+        using var db = _db.CreateContextConnection(ctx);
+        await db.ExecuteAsync(attachments is null
+            ? new CommandDefinition("UPDATE mail_messages SET parts = 1 WHERE id = @id", new { id }, cancellationToken: ct)
+            : new CommandDefinition("UPDATE mail_messages SET parts = 1, attachments = @attachments WHERE id = @id",
+                new { id, attachments }, cancellationToken: ct));
+    }
+
     public async Task<string?> FindByKeyAsync(ContextRef ctx, string accountId, string key, CancellationToken ct)
     {
         using var db = _db.CreateContextConnection(ctx);

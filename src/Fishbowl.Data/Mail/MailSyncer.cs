@@ -40,6 +40,8 @@ public sealed class MailSyncer
     private const int HeaderChunk = 50;
     public const int MaxTextChars = 1_000_000;
     public const int MaxHtmlChars = 2_000_000;
+    // Mail stored before a part sent inline counted, read again per pass.
+    public const int PartsPerPass = 100;
 
     private readonly MailRepository _repo;
     private readonly IMailboxConnector _connector;
@@ -134,6 +136,7 @@ public sealed class MailSyncer
             }
             var trashed = await _repo.TrashOrphansAsync(ctx, candidates, ct);
             if (rules.Archive.Count > 0) await ArchiveAsync(ctx, account, rules.Archive, ct);
+            await RepairPartsAsync(ctx, account, box, ct);
             await _repo.SetAccountStateAsync(ctx, account.Id, MailAccountStates.Ok, null, done, ct);
             return new Result(true, null, done, added, trashed);
         }
@@ -148,6 +151,39 @@ public sealed class MailSyncer
             return new Result(false, code, false, 0, 0);
         }
     }
+
+    /// <summary>
+    /// Mail stored before a part sent inline counted as an attachment (user
+    /// schema v29) that may have lost one: its body read once more, a share a
+    /// pass, so the photo the iPhone put inline comes back as the attachment
+    /// it is. A message the server no longer has there keeps its list; any
+    /// other failure leaves the rest for the next pass.
+    /// </summary>
+    private async Task RepairPartsAsync(ContextRef ctx, MailAccount account, IMailbox box, CancellationToken ct)
+    {
+        var due = await _repo.PartsDueAsync(ctx, account.Id, PartsPerPass, ct);
+        foreach (var role in due.GroupBy(d => d.Role))
+        {
+            var name = await box.RoleFolderAsync(role.Key, ct);
+            foreach (var (id, _, uid) in role)
+            {
+                List<MailAttachment>? found = null;
+                if (name is not null)
+                    try { found = Attachments(await box.BodyAsync(name, uid, ct)); }
+                    catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
+                    catch (MailException ex) { _logger.LogDebug(ex, "Mail body gone (account {AccountId}, uid {Uid})", account.Id, uid); }
+                    catch (Exception ex)
+                    {
+                        _logger.LogDebug(ex, "Mail body unreadable again (account {AccountId}, uid {Uid})", account.Id, uid);
+                        return;
+                    }
+                await _repo.SetPartsAsync(ctx, id, found, ct);
+            }
+        }
+    }
+
+    private static List<MailAttachment> Attachments(SyncBody? body) =>
+        body?.Attachments.Select(x => new MailAttachment(x.Index, x.Part, x.FileName, x.ContentType, x.Size)).ToList() ?? new();
 
     private async Task<IReadOnlyList<MailRule>> RulesAsync(ContextRef ctx, CancellationToken ct)
     {
@@ -289,7 +325,7 @@ public sealed class MailSyncer
                 Snippet = MailThreading.Snippet(text),
                 BodyText = text,
                 BodyHtml = body?.Html is { Length: > 0 and <= MaxHtmlChars } bh ? bh : null,
-                Attachments = body?.Attachments.Select(x => new MailAttachment(x.Index, x.Part, x.FileName, x.ContentType, x.Size)).ToList() ?? new(),
+                Attachments = Attachments(body),
                 Size = h.Size,
                 Seen = h.Seen,
                 Flagged = h.Flagged,

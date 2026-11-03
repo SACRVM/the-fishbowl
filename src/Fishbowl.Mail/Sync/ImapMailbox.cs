@@ -16,7 +16,7 @@ namespace Fishbowl.Mail.Sync;
 /// the sync stores: headers and flags in batches, then per message the text
 /// and HTML parts by section — attachments stay on the server until asked for.
 /// </summary>
-public sealed class ImapMailbox : IMailbox
+public sealed partial class ImapMailbox : IMailbox
 {
     private readonly MailboxSession _session;
 
@@ -172,10 +172,53 @@ public sealed class ImapMailbox : IMailbox
         }
         var text = await Read(s.TextBody).ConfigureAwait(false);
         var html = await Read(s.HtmlBody).ConfigureAwait(false);
-        var attachments = s.Attachments.Select((a, i) => new SyncAttachment(
+        var attachments = AttachmentParts(s.Body, s.TextBody, s.HtmlBody, html).Select((a, i) => new SyncAttachment(
             i, a.PartSpecifier, a.FileName, a.ContentType.MimeType, a.Octets)).ToList();
         return new SyncBody(text, html, attachments);
     }, ct);
+
+    // cid:… anywhere in the HTML (src, url()): a part it shows itself.
+    [System.Text.RegularExpressions.GeneratedRegex(@"cid:([^""'\s>)]+)", System.Text.RegularExpressions.RegexOptions.IgnoreCase)]
+    private static partial System.Text.RegularExpressions.Regex CidRef();
+
+    /// <summary>
+    /// What a reader gets as files: every part but the text and the HTML that
+    /// are shown. A part marked as an attachment always counts; one sent
+    /// inline counts too (the iPhone puts a photo inline, and in a mail
+    /// without HTML nothing shows it), unless the HTML shows it itself (cid:)
+    /// or it is text without a name (the other alternatives, the text Apple
+    /// Mail puts around an inline image).
+    /// </summary>
+    internal static IReadOnlyList<BodyPartBasic> AttachmentParts(BodyPart? body, BodyPart? text, BodyPart? html, string? htmlSource)
+    {
+        var shown = htmlSource is null
+            ? new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+            : CidRef().Matches(htmlSource).Select(m => Clean(Uri.UnescapeDataString(m.Groups[1].Value))).OfType<string>()
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        static bool Same(BodyPart b, BodyPart? other) => other is not null && (ReferenceEquals(b, other) || b.PartSpecifier == other.PartSpecifier);
+        var list = new List<BodyPartBasic>();
+        void Walk(BodyPart? part)
+        {
+            switch (part)
+            {
+                case BodyPartMultipart multipart:
+                    foreach (var p in multipart.BodyParts) Walk(p);
+                    break;
+                case BodyPartBasic b when b.ContentDisposition?.IsAttachment == true:
+                    list.Add(b);
+                    break;
+                case BodyPartBasic b when Same(b, text) || Same(b, html):
+                case BodyPartBasic { ContentType: var type } b2 when type.IsMimeType("text", "*") && string.IsNullOrEmpty(b2.FileName):
+                case BodyPartBasic b3 when Clean(b3.ContentId) is { } cid && shown.Contains(cid):
+                    break;
+                case BodyPartBasic b:
+                    list.Add(b);
+                    break;
+            }
+        }
+        Walk(body);
+        return list;
+    }
 
     public Task<IReadOnlyList<SyncFlags>> FlagsAsync(string folder, ulong? changedSince, CancellationToken ct) =>
         InFolder<IReadOnlyList<SyncFlags>>(folder, async (f, _, t) =>
