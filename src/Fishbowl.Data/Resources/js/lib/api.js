@@ -360,6 +360,10 @@
             // By words and meaning, best first: { q, account, tag, unread,
             // archived, all (list and archive alike), limit } → { threads, degraded }
             search: (opts = {}) => request(p("/mail/search") + mailQuery(opts)),
+            // Who a mail can go to, best first (contacts and people from the
+            // mail): [{ address, name, text, contactId, contactKind, label,
+            // organisation, mails, lastAt }]. Cookie only, writers.
+            recipients: (q, limit) => request(p("/mail/recipients") + mailQuery({ q, limit })),
             thread:  (tid)         => request(p(`/mail/threads/${id(tid)}`)),
             setTags: (tid, tags)   => request(p(`/mail/threads/${id(tid)}/tags`), { method: "PUT", body: JSON.stringify({ tags }) }),
             setSeen: (tid, seen)   => request(p(`/mail/threads/${id(tid)}/seen`), { method: "POST", body: JSON.stringify({ seen }) }),

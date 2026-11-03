@@ -804,6 +804,71 @@ public class MailTests
         }
     }
 
+    // To, Cc and Bcc suggest as an address is typed — the contacts and the
+    // people in the mail, the archive too — and the book beside To searches
+    // them, several at once. The field stays text; Enter never sends.
+    [Fact]
+    public async Task Mail_Recipients_AreSuggested_AndPicked_Test()
+    {
+        var (context, page, slug, _) = await SpaceWithMailAsync();
+        var errors = new List<string>();
+        page.PageError += (_, e) => errors.Add(e);
+        try
+        {
+            var contact = await page.APIRequest.PostAsync($"{_fixture.BaseUrl}/api/v1/spaces/{slug}/contacts", new()
+            {
+                DataObject = new { kind = "person", firstName = "Katherine", lastName = "Johnson", emails = new[] { new { label = "work", value = "kj@nasa.example" } } },
+            });
+            Assert.True(contact.Ok);
+            await page.GotoAsync($"{_fixture.BaseUrl}/#/space/{slug}/mail");
+            await Assertions.Expect(page.Locator("fb-mail-view .mv-item")).ToHaveCountAsync(3, new() { Timeout = 15000 });
+            await page.Locator("fb-mail-view #mv-new").ClickAsync();
+            var compose = page.Locator("fb-mail-view .mc");
+            var to = compose.Locator("#mc-to");
+            var suggestions = page.Locator(".fb-suggest:popover-open .fb-suggest-row");
+
+            // A contact, by a word of the name; Enter takes the first.
+            await to.ClickAsync();
+            await page.Keyboard.TypeAsync("john");
+            await Assertions.Expect(suggestions.First).ToContainTextAsync("Katherine Johnson");
+            await Assertions.Expect(suggestions.First).ToContainTextAsync("work");
+            await page.ScreenshotAsync(new() { Path = Shot("recipients-suggest") });
+            await page.Keyboard.PressAsync("Enter");
+            await Assertions.Expect(to).ToHaveValueAsync("Katherine Johnson <kj@nasa.example>, ");
+            await Assertions.Expect(suggestions).ToHaveCountAsync(0);
+
+            // Someone only the mail knows (an archived mail from them); Tab takes it.
+            await page.Keyboard.TypeAsync("hopp");
+            await Assertions.Expect(suggestions.First).ToContainTextAsync("Grace Hopper");
+            await page.Keyboard.PressAsync("Tab");
+            await Assertions.Expect(to).ToHaveValueAsync("Katherine Johnson <kj@nasa.example>, Grace Hopper <grace@example.org>, ");
+
+            // Enter with nothing to take doesn't send.
+            await to.FocusAsync();
+            await page.Keyboard.PressAsync("Enter");
+            await Assertions.Expect(compose).ToHaveCountAsync(1);
+            await Assertions.Expect(compose.Locator("#mc-state")).ToHaveTextAsync("Draft saved", new() { Timeout = 5000 });
+
+            // The book: search, tick, into Cc.
+            await compose.Locator("#mc-book").ClickAsync();
+            var dialog = page.Locator("sac-dialog[title='Add recipients']");
+            await dialog.Locator(".mc-pick-search").FillAsync("ada");
+            var ada = dialog.Locator(".mc-pick-row", new() { HasText = "Ada Lovelace" });
+            await ada.Locator("input").CheckAsync();
+            await dialog.Locator("sac-segmented-control button[data-value='cc']").ClickAsync();
+            await page.ScreenshotAsync(new() { Path = Shot("recipients-pick") });
+            await dialog.GetByRole(AriaRole.Button, new() { Name = "Add", Exact = true }).ClickAsync();
+            await Assertions.Expect(compose.Locator("#mc-cc")).ToBeVisibleAsync();
+            await Assertions.Expect(compose.Locator("#mc-cc")).ToHaveValueAsync("Ada Lovelace <ada@example.org>, ");
+            Assert.Empty(errors);
+        }
+        finally
+        {
+            await page.APIRequest.DeleteAsync($"{_fixture.BaseUrl}/api/v1/spaces/{slug}?archive=false");
+            await context.CloseAsync();
+        }
+    }
+
     // Spam, read live: the Spam button counts what came since the last look;
     // the view shows each as text, and "Not spam" brings one into the list.
     [Fact]

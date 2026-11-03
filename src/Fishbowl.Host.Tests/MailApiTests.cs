@@ -834,6 +834,28 @@ public class MailApiTests : IClassFixture<WebApplicationFactory<Program>>, IDisp
         return (space, $"/api/v1/spaces/{space.Slug}/mail");
     }
 
+    // Who a mail can go to (the To field's suggestions): the space's people
+    // from its mail, for whoever writes there, with a cookie — an agent has
+    // find_contact and mail_search.
+    [Fact]
+    public async Task Recipients_ComeFromTheMail_ForWritersWithACookie()
+    {
+        var (space, sp) = await SpaceAsync();
+        var owner = As(Owner);
+        await SyncedAccountAsync(owner, sp);
+
+        var r = await As(Member).GetAsync(sp + "/recipients?q=ada", Ct);
+        Assert.Equal(HttpStatusCode.OK, r.StatusCode);
+        var ada = Assert.Single((await Json(r)).EnumerateArray());
+        Assert.Equal("ada@example.org", ada.GetProperty("address").GetString());
+        Assert.Equal("Ada Lovelace <ada@example.org>", ada.GetProperty("text").GetString());
+
+        Assert.Equal(HttpStatusCode.Forbidden, (await As(Reader).GetAsync(sp + "/recipients?q=ada", Ct)).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await As(Outsider).GetAsync(sp + "/recipients?q=ada", Ct)).StatusCode);
+        var key = await KeyAsync(Owner, ContextRef.Space(space.Slug), "read:mail", "write:mail");
+        Assert.Equal(HttpStatusCode.Forbidden, (await key.GetAsync(sp + "/recipients?q=ada", Ct)).StatusCode);
+    }
+
     [Fact]
     public async Task Space_Roles_ReaderReads_MemberOrganises_AdminManages()
     {

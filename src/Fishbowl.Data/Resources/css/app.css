@@ -469,6 +469,57 @@ label.fb-quota-field input { width: 6em; }
 .fb-mail-form label.fb-check { display: flex; color: var(--text); font-size: 0.85rem; }
 .fb-mail-form label.fb-check input { display: inline-block; width: auto; }
 
+/* fb.addressSuggest: the kit's dropdown level (sac-select's list) as light
+   DOM under a recipients field — fixed, in the top layer. */
+.fb-suggest[popover] {
+    position: fixed;
+    inset: auto;
+    margin: 0;
+    z-index: 9999;
+    max-width: calc(100vw - 16px);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    padding: 4px;
+    font-size: 0.8rem;
+    color: var(--text);
+    background: var(--glass-strong);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius-l);
+    box-shadow: var(--shadow-2);
+}
+.fb-suggest-row {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    column-gap: 8px;
+    align-items: center;
+    min-height: 30px;
+    padding: 5px 8px;
+    border-radius: var(--radius-m);
+    cursor: pointer;
+    --icon-size: 14px;
+}
+.fb-suggest-row sac-icon { grid-row: span 2; color: var(--text-muted); }
+.fb-suggest-name, .fb-suggest-sub { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fb-suggest-sub { color: var(--text-muted); font-size: 0.75rem; }
+.fb-suggest-sub:empty { display: none; }
+.fb-suggest-row.is-active { background: var(--hover); }
+.fb-suggest-row:active { background: var(--hover-strong); }
+@media (pointer: coarse) { .fb-suggest-row { min-height: 44px; } }
+
+/* The mail address picker (fb.mailCompose): a search, To / Cc / Bcc, ticks. */
+.mc-pick { display: flex; flex-direction: column; gap: 12px; }
+.mc-pick-list { display: flex; flex-direction: column; max-height: min(50dvh, 360px); overflow-y: auto; }
+label.fb-check.mc-pick-row { align-items: center; padding: 6px 8px; border-radius: var(--radius-m); cursor: pointer; }
+.mc-pick-row:hover { background: var(--hover); }
+.mc-pick-row input { width: auto; margin: 0; }
+.mc-pick-text { display: flex; flex-direction: column; min-width: 0; }
+.mc-pick-name, .mc-pick-sub { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mc-pick-sub { font-size: 0.8rem; }
+.mc-pick-sub:empty { display: none; }
+.mc-pick-none { margin: 8px; }
+
 /* Lists on the kit's keyboard (sac.selection, kit 2.30): the list takes the
    focus for its keys without a ring of its own (each view's style); the
    cursor row carries the kit's focus mark, as .icon-btn:focus-visible does. */

@@ -271,7 +271,7 @@ public sealed class MailWriter
 
     // "Ada Lovelace <ada@example.org>" as a person reads it; a name with a
     // comma or other address punctuation in quotes, so it parses back.
-    private static string Person(string? name, string address)
+    internal static string Person(string? name, string address)
     {
         if (string.IsNullOrWhiteSpace(name)) return address;
         var n = name.Trim();

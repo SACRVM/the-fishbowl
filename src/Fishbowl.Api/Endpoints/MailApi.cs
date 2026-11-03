@@ -415,6 +415,18 @@ public static partial class MailApi
             return Results.Ok(new { threads = found.Threads, degraded = found.Degraded });
         }).WithName($"Search{tag}Mail").WithSummary("Conversations by how well they answer q — its words and its meaning — best first.");
 
+        // Who a mail can go to: the To, Cc and Bcc suggestions and the address
+        // picker (MailRecipients). Writing's helper for a person: an agent has
+        // find_contact and mail_search.
+        g.MapGet("/recipients", async (HttpContext http, MailRecipients recipients, string? q, int? limit, CancellationToken ct) =>
+        {
+            if (Bearer(http)) return Results.Forbid();
+            var (t, err) = await ResolveAsync(http, space, Need.Write, ct);
+            if (err is not null) return err;
+            if (q is { Length: > 200 }) q = q[..200];
+            return Results.Ok(await recipients.SuggestAsync(t!.Ctx, q, limit ?? 8, ct));
+        }).WithName($"Suggest{tag}MailRecipients").WithSummary("Contacts and people from the workspace's mail that match q, best first (cookie only).");
+
         g.MapGet("/threads/{threadId}", async (string threadId, HttpContext http, IMailRepository repo, CancellationToken ct) =>
         {
             var (t, err) = await ResolveAsync(http, space, Need.Read, ct);

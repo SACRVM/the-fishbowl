@@ -138,6 +138,14 @@ public class MailThread
 /// words counted because the model wasn't ready.</summary>
 public record MailSearchResult(IReadOnlyList<MailThread> Threads, bool Degraded);
 
+/// <summary>Someone a mail can go to (the To, Cc and Bcc suggestions): one
+/// address of a contact, or one from the workspace's mail. <c>Text</c> is how
+/// it goes into the field ("Ada Lovelace &lt;ada@example.org&gt;");
+/// <c>Mails</c> counts the mail with them that counted, <c>LastAt</c> is the
+/// latest.</summary>
+public record MailRecipient(string Address, string? Name, string Text, string? ContactId, string? ContactKind,
+    string? Label, string? Organisation, int Mails, DateTime? LastAt);
+
 public class MailListQuery
 {
     public string? Text { get; set; }          // full text

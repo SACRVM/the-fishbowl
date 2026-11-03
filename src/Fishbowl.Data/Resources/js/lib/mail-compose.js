@@ -11,7 +11,10 @@
  * Contacts); one nothing was written into is dropped when it is left.
  * Recipients are one plain text field each, addresses separated by commas —
  * never chips: an address stays text you can correct in place (decided
- * 2026-10-08).
+ * 2026-10-08). What is typed there is looked up among the contacts and the
+ * people in the workspace's mail (fb.addressSuggest); the book beside To
+ * opens a search over the same people, several at once, for To, Cc or Bcc.
+ * Enter in a field never sends.
  *
  *   const c = fb.mailCompose.mount(pane, { api, ws, draft, accounts, original, onClose });
  *   await c.leave();   // saves; an untouched draft goes
@@ -33,6 +36,93 @@
         }
         if (cur.trim()) out.push(cur.trim());
         return out;
+    }
+
+    /** "Ada <ada@x.org>" or "ada@x.org" → "ada@x.org". */
+    const addressOf = (part) => {
+        const m = /<([^>]*)>/.exec(part);
+        return (m ? m[1] : part).trim().toLowerCase();
+    };
+
+    /**
+     * The address picker: the contacts and the people in the mail, searched
+     * as you type; tick several, then they go into To, Cc or Bcc.
+     * → { field: "to"|"cc"|"bcc", items } or null.
+     */
+    function pickRecipients(api) {
+        return new Promise((resolve) => {
+            const dlg = document.createElement("sac-dialog");
+            dlg.setAttribute("title", t("pick-title", "Add recipients"));
+            dlg.style.setProperty("--dialog-width", "520px");
+            const body = document.createElement("div");
+            body.className = "mc-pick";
+            body.innerHTML = `
+                <input type="search" class="mc-pick-search" autofocus autocomplete="off" spellcheck="false">
+                <sac-segmented-control class="mc-pick-field" value="to">
+                    <button type="button" data-value="to">${t("to-label", "To")}</button>
+                    <button type="button" data-value="cc">Cc</button>
+                    <button type="button" data-value="bcc">Bcc</button>
+                </sac-segmented-control>
+                <div class="mc-pick-list" role="group"></div>`;
+            const search = body.querySelector(".mc-pick-search");
+            search.placeholder = t("pick-search", "Search contacts and mail");
+            search.setAttribute("aria-label", search.placeholder);
+            const target = body.querySelector(".mc-pick-field");
+            target.setAttribute("aria-label", t("pick-field", "Add to"));
+            const list = body.querySelector(".mc-pick-list");
+            list.setAttribute("aria-label", t("pick-title", "Add recipients"));
+            const chosen = new Map();   // address → item, kept while the search changes
+            const note = (text) => Object.assign(document.createElement("p"), { className: "muted mc-pick-none", textContent: text });
+            let seq = 0, timer = null;
+            const fill = async () => {
+                const mine = ++seq;
+                let found;
+                try { found = await api.recipients(search.value.trim(), 100); }
+                catch (err) {
+                    if (mine === seq) list.replaceChildren(note(fb.errors.text(err, t("pick-failed", "The search didn't work."))));
+                    return;
+                }
+                if (mine !== seq) return;
+                if (!found.length) { list.replaceChildren(note(t("pick-none", "No one found."))); return; }
+                list.replaceChildren(...found.map((it) => {
+                    const row = document.createElement("label");
+                    row.className = "fb-check mc-pick-row";
+                    const box = document.createElement("input");
+                    box.type = "checkbox";
+                    box.checked = chosen.has(it.address);
+                    box.addEventListener("change", () => {
+                        if (box.checked) chosen.set(it.address, it);
+                        else chosen.delete(it.address);
+                        dlg.setDisabled?.("add", chosen.size === 0);
+                    });
+                    const name = document.createElement("span");
+                    name.className = "mc-pick-name";
+                    name.textContent = it.name || it.address;
+                    const sub = document.createElement("span");
+                    sub.className = "mc-pick-sub muted";
+                    sub.textContent = [it.name ? it.address : null, it.label, it.organisation].filter(Boolean).join(" · ");
+                    const text = document.createElement("span");
+                    text.className = "mc-pick-text";
+                    text.append(name, sub);
+                    row.append(box, text);
+                    return row;
+                }));
+            };
+            search.addEventListener("input", () => { clearTimeout(timer); timer = setTimeout(fill, 150); });
+            dlg.appendChild(body);
+            dlg.buttons = [
+                { action: "cancel", label: fb.t("fb.common.cancel", "Cancel"), kind: "default" },
+                { action: "add", label: t("pick-add", "Add"), kind: "primary", disabled: true },
+            ];
+            dlg.addEventListener("sac:action", (e) => {
+                clearTimeout(timer);
+                resolve(e.detail.action === "add" && chosen.size ? { field: target.value || "to", items: [...chosen.values()] } : null);
+            }, { once: true });
+            dlg.addEventListener("sac:closed", () => dlg.remove(), { once: true });
+            document.body.appendChild(dlg);
+            fill();
+            setTimeout(() => dlg.open?.(), 0);
+        });
     }
 
     const TITLES = {
@@ -59,6 +149,7 @@
                     <label for="mc-to">${t("to-label", "To")}</label>
                     <div class="mc-to">
                         <input id="mc-to" data-f="to" autocomplete="off" spellcheck="false"/>
+                        <button type="button" class="icon-btn" id="mc-book" title="${t("pick", "Choose from contacts and mail")}" aria-label="${t("pick", "Choose from contacts and mail")}"><sac-icon name="contacts"></sac-icon></button>
                         <button type="button" class="mc-more" id="mc-more">${t("cc-bcc", "Cc / Bcc")}</button>
                     </div>
                     <label for="mc-cc" class="mc-cc" hidden>Cc</label>
@@ -102,6 +193,33 @@
         for (const name of ["to", "cc", "bcc"])
             field(name).addEventListener("input", () => change(name, splitAddresses(field(name).value)));
         field("subject").addEventListener("input", () => change("subject", field("subject").value));
+
+        // Who it goes to: suggestions as an address is typed, and the picker.
+        const suggest = ["to", "cc", "bcc"].map((name) =>
+            fb.addressSuggest.attach(field(name), { search: (q) => api.recipients(q, 8) }));
+        const stop = () => suggest.forEach((s) => s.destroy());
+        form.querySelector("#mc-book").addEventListener("click", async () => {
+            const picked = await pickRecipients(api);
+            if (!picked) return;
+            if (picked.field !== "to") showCc(true);
+            const f = field(picked.field);
+            const have = new Set(splitAddresses(f.value).map(addressOf));
+            const add = picked.items.filter((it) => !have.has(it.address)).map((it) => it.text);
+            if (add.length) {
+                const kept = f.value.replace(/[\s,;]+$/, "");
+                f.value = (kept ? `${kept}, ` : "") + add.join(", ") + ", ";
+                change(picked.field, splitAddresses(f.value));
+            }
+            f.focus();
+            f.setSelectionRange(f.value.length, f.value.length);
+        });
+        // Enter in a field never sends (Send is the form's submit); in the
+        // subject it goes on to the text.
+        form.addEventListener("keydown", (e) => {
+            if (e.key !== "Enter" || e.isComposing || !(e.target instanceof HTMLInputElement) || e.target.type === "checkbox") return;
+            e.preventDefault();
+            if (e.target === field("subject")) editor.focus?.();
+        });
 
         const editor = form.querySelector("#mc-text");
         editor.value = d.body || "";
@@ -212,6 +330,7 @@
                     language: sac.lang?.get?.(),
                 });
                 done = true;
+                stop();
                 onClose?.({ sent });
             } catch (err) {
                 button.disabled = false;
@@ -233,6 +352,7 @@
             }
             clearTimeout(timer);
             done = true;
+            stop();
             try { await api.deleteDraft(d.id); } catch { /* gone already */ }
             onClose?.({ discarded: true });
         });
@@ -246,6 +366,7 @@
             async leave() {
                 if (done) return;
                 done = true;
+                stop();
                 if (!dirty) { try { await api.deleteDraft(d.id); } catch { /* gone */ } return; }
                 await save();
             },
