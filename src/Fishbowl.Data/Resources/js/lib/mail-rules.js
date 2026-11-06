@@ -123,7 +123,7 @@
         el.addEventListener("keydown", (e) => { if (e.key === "Enter" && e.target === el) { e.preventDefault(); edit(r); } });
 
         const menu = document.createElement("sac-menu");
-        menu.innerHTML = `<button slot="trigger" type="button" class="icon-btn" aria-label="${t("account-more", "More")}" title="${t("account-more", "More")}"><sac-icon name="more"></sac-icon></button>`;
+        menu.innerHTML = `<button slot="trigger" type="button" class="icon-btn tool" aria-label="${t("account-more", "More")}" title="${t("account-more", "More")}"><sac-icon name="more"></sac-icon></button>`;
         const item = (action, label, icon) => {
             const b = document.createElement("button");
             b.type = "button";

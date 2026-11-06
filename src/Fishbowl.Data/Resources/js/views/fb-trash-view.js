@@ -156,7 +156,7 @@ class FbTrashView extends HTMLElement {
     button(icon, label, cls, onClick) {
         const b = document.createElement("button");
         b.type = "button";
-        b.className = "icon-btn " + cls;
+        b.className = "icon-btn tool " + cls;
         b.title = label;
         b.setAttribute("aria-label", label);
         b.innerHTML = `<sac-icon name="${icon}"></sac-icon>`;

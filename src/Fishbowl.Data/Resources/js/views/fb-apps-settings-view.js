@@ -202,7 +202,7 @@ class FbAppsSettingsView extends HTMLElement {
             }
             const del = document.createElement("button");
             del.type = "button";
-            del.className = "icon-btn danger";
+            del.className = "icon-btn tool danger";
             del.dataset.action = "remove";
             del.title = fb.t("fb.apps.page-remove", "Remove {name}", { name: app.manifest?.name || app.id });
             del.setAttribute("aria-label", del.title);

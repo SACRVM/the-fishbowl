@@ -171,8 +171,8 @@ class FbSecretsSettingsView extends HTMLElement {
         };
         if (s.kind === "passphrase") button("btn", fb.t("fb.secrets.change", "Change"), () => this._run(() => fb.vault.changePassphrase(), fb.t("fb.secrets.passphrase-changed", "Passphrase changed.")));
         if (s.kind === "recovery") button("btn", fb.t("fb.secrets.replace", "Replace"), () => this._run(() => fb.vault.newRecoveryKey(), fb.t("fb.secrets.recovery-replaced", "New recovery key saved — the old one no longer works.")));
-        if (s.kind === "passkey") button("icon-btn rename", fb.t("fb.secrets.rename", "Rename"), () => this._rename(row, s), "pencil");
-        button("icon-btn danger remove", fb.t("fb.secrets.remove", "Remove"), () => this._remove(s, kindText), "trash");
+        if (s.kind === "passkey") button("icon-btn tool rename", fb.t("fb.secrets.rename", "Rename"), () => this._rename(row, s), "pencil");
+        button("icon-btn tool danger remove", fb.t("fb.secrets.remove", "Remove"), () => this._remove(s, kindText), "trash");
         return row;
     }
 

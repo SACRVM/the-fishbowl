@@ -211,10 +211,13 @@ sac-window.fb-file-viewer sac-quick-look { height: 100%; }
     align-items: center;
     column-gap: 16px;
     row-gap: 4px;
-    font-size: 12px;
+    font-size: 13px;
     color: var(--text-muted);
 }
 .fb-row .toolbar { flex-shrink: 0; flex-wrap: wrap; }
+/* A row's icon actions are the kit's .icon-btn.tool (32px, 18px icon,
+   --text-muted), never the plain .icon-btn: that one is a tertiary 14px
+   mark in --text-dim, and over a window's glass it all but disappeared. */
 
 /* A checkbox with its sentence (scopes, setup's ACME terms, archive-before-
    delete): the kit's <label> is a block caption above a field; this one
@@ -323,7 +326,7 @@ label.fb-quota-field input { width: 6em; }
 }
 .fb-tags-row + .fb-tags-row { border-top: 1px solid var(--border); }
 /* A system tag has no delete button: its room stays, so the swatches line up. */
-.fb-tags-row:not(:has(.fb-tags-delete))::after { content: ""; flex: none; width: var(--icon-btn-size); }
+.fb-tags-row:not(:has(.fb-tags-delete))::after { content: ""; flex: none; width: var(--tool-btn-size); }
 .fb-tags-name { flex: 1; min-width: 8em; }
 .fb-tags-name.invalid { border-color: var(--danger); }
 .fb-tags-name[readonly] {

@@ -367,7 +367,7 @@ class FbKeysSettingsView extends HTMLElement {
                         </div>
                         <div class="fb-row-meta key-scopes">${scopes}</div>
                     </div>
-                    <button type="button" class="icon-btn danger revoke-btn" title="${fb.t("fb.keys.revoke", "Revoke")}" aria-label="${fb.t("fb.keys.revoke", "Revoke")}">
+                    <button type="button" class="icon-btn tool danger revoke-btn" title="${fb.t("fb.keys.revoke", "Revoke")}" aria-label="${fb.t("fb.keys.revoke", "Revoke")}">
                         <sac-icon name="trash"></sac-icon>
                     </button>
                 </div>

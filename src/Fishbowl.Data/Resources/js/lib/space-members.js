@@ -98,7 +98,10 @@
             </div>`;
         row.querySelector(".fb-row-name").textContent =
             (m.name || fb.t("fb.messages.someone", "Someone")) + (m.you ? " " + fb.t("fb.spaces.you-suffix", "(you)") : "");
-        row.querySelector("sac-chip").setAttribute("label", roleLabel(m.role));
+        const chip = row.querySelector("sac-chip");
+        chip.setAttribute("label", roleLabel(m.role));
+        // In the space's colour, as in the Spaces window (else the kit's orange for a space).
+        chip.setAttribute("color", fb.tags.SLOTS.includes(current.space.color) ? current.space.color : "orange");
 
         const manageable = canManage && !m.you && m.role !== "owner" && rank(m.role) <= rank(mine);
         const leavable = m.you && m.role !== "owner";
@@ -111,7 +114,7 @@
         const trigger = document.createElement("button");
         trigger.slot = "trigger";
         trigger.type = "button";
-        trigger.className = "icon-btn";
+        trigger.className = "icon-btn tool";
         trigger.title = m.you ? fb.t("fb.spaces.leave", "Leave space") : fb.t("fb.spaces.change-role", "Change role");
         trigger.setAttribute("aria-label", trigger.title);
         const more = document.createElement("sac-icon");
@@ -216,7 +219,7 @@
             row.innerHTML = `
                 <sac-icon name="link"></sac-icon>
                 <div class="fb-row-info"><p class="fb-row-name"></p></div>
-                <button type="button" class="icon-btn danger">
+                <button type="button" class="icon-btn tool danger">
                     <sac-icon name="trash"></sac-icon>
                 </button>`;
             const vars = { role: roleLabel(i.role), when: fb.format.dateTime(i.expiresAt), who: i.createdBy || "" };

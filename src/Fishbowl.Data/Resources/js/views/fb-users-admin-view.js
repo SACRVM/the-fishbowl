@@ -222,7 +222,7 @@ class FbUsersAdminView extends HTMLElement {
         const trigger = document.createElement("button");
         trigger.slot = "trigger";
         trigger.type = "button";
-        trigger.className = "icon-btn";
+        trigger.className = "icon-btn tool";
         trigger.title = fb.t("fb.admin.manage", "Manage {name}", { name: u.name || u.email || fb.t("fb.admin.account", "account") });
         trigger.setAttribute("aria-label", trigger.title);
         const more = document.createElement("sac-icon");

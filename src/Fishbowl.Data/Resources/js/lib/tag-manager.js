@@ -73,7 +73,7 @@
                    ${system ? `readonly title="${fb.t("fb.notes.tags.protected", "System tag — the name is protected")}"` : ""}>
             <span class="fb-tags-count"></span>
             <sac-swatch-grid selectable columns="${fb.tags.SLOTS.length}" aria-label="${fb.t("fb.notes.tags.colour", "Tag colour")}"></sac-swatch-grid>
-            ${system ? "" : `<button type="button" class="icon-btn fb-tags-delete" title="${fb.t("fb.notes.tags.delete", "Delete tag")}" aria-label="${fb.t("fb.notes.tags.delete", "Delete tag")}">
+            ${system ? "" : `<button type="button" class="icon-btn tool fb-tags-delete" title="${fb.t("fb.notes.tags.delete", "Delete tag")}" aria-label="${fb.t("fb.notes.tags.delete", "Delete tag")}">
                                  <sac-icon name="trash"></sac-icon></button>`}`;
 
         // User-sourced strings go in through properties, never markup.

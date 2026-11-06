@@ -70,6 +70,12 @@ class FbSpacesSettingsView extends HTMLElement {
                     background: var(--space-color);
                 }
                 fb-spaces-settings-view button.space-color { cursor: pointer; }
+                /* A row's actions, the kit's tool buttons as one group. When
+                   the name has less than 200px beside them (a phone, whose
+                   tool buttons are 44px) the group goes under it, right. */
+                fb-spaces-settings-view .space-row { flex-wrap: wrap; }
+                fb-spaces-settings-view .space-row .fb-row-info { flex: 1 1 200px; }
+                fb-spaces-settings-view .space-actions { display: flex; gap: 4px; margin-left: auto; flex-shrink: 0; }
                 fb-spaces-settings-view button.space-color:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
                 /* The delete dialog's body lives in the dialog, outside the view. */
                 .fb-space-delete p { margin: 0 0 12px; }
@@ -184,26 +190,28 @@ class FbSpacesSettingsView extends HTMLElement {
                     <p class="fb-row-name">${escapeHtml(t.name)}</p>
                     <div class="fb-row-meta">
                         <span>/${escapeHtml(t.slug)}</span>
-                        <sac-chip class="role" label="${escapeAttr(roleLabel(t.role))}"></sac-chip>
+                        <sac-chip class="role" color="${escapeAttr(this._slot(t.color))}" label="${escapeAttr(roleLabel(t.role))}"></sac-chip>
                         <code title="spaces/${escapeAttr(t.id)}/space.db">${escapeHtml(t.id)}</code>
                     </div>
                 </div>
+                <div class="space-actions">
                 ${t.role === "owner"
-                    ? `<button type="button" class="icon-btn settings-btn" title="${fb.t("fb.spaces.settings", "Settings")}" aria-label="${fb.t("fb.spaces.settings", "Settings")}">
+                    ? `<button type="button" class="icon-btn tool settings-btn" title="${fb.t("fb.spaces.settings", "Settings")}" aria-label="${fb.t("fb.spaces.settings", "Settings")}">
                            <sac-icon name="settings"></sac-icon>
                        </button>`
                     : ""}
-                <button type="button" class="icon-btn members-btn" title="${fb.t("fb.spaces.members", "Members")}" aria-label="${fb.t("fb.spaces.members", "Members")}">
+                <button type="button" class="icon-btn tool members-btn" title="${fb.t("fb.spaces.members", "Members")}" aria-label="${fb.t("fb.spaces.members", "Members")}">
                     <sac-icon name="users"></sac-icon>
                 </button>
-                <button type="button" class="icon-btn open-btn" title="${fb.t("fb.spaces.open", "Open this space")}" aria-label="${fb.t("fb.spaces.open-aria", "Open")}">
+                <button type="button" class="icon-btn tool open-btn" title="${fb.t("fb.spaces.open", "Open this space")}" aria-label="${fb.t("fb.spaces.open-aria", "Open")}">
                     <sac-icon name="chevron-right"></sac-icon>
                 </button>
                 ${t.role === "owner"
-                    ? `<button type="button" class="icon-btn danger delete-btn" title="${fb.t("fb.spaces.delete", "Delete space")}" aria-label="${fb.t("fb.spaces.delete-aria", "Delete")}">
+                    ? `<button type="button" class="icon-btn tool danger delete-btn" title="${fb.t("fb.spaces.delete", "Delete space")}" aria-label="${fb.t("fb.spaces.delete-aria", "Delete")}">
                            <sac-icon name="trash"></sac-icon>
                        </button>`
                     : ""}
+                </div>
             </div>
         `).join("");
 
@@ -260,7 +268,12 @@ class FbSpacesSettingsView extends HTMLElement {
     // workspace — as the palette var, not --accent / --accent-warm, which
     // the active workspace itself may have overridden.
     _colorVar(slot, fallback = "orange") {
-        return fb.accents.cssVar(fb.tags.SLOTS.includes(slot) ? slot : fallback);
+        return fb.accents.cssVar(this._slot(slot, fallback));
+    }
+
+    // A space's palette slot: its own colour, else the kit's orange for a space.
+    _slot(slot, fallback = "orange") {
+        return fb.tags.SLOTS.includes(slot) ? slot : fallback;
     }
 
     // The owner's settings for a space: today, whether messages from the
@@ -431,15 +444,17 @@ class FbSpacesSettingsView extends HTMLElement {
                     <p class="fb-row-name space-name"></p>
                     <div class="fb-row-meta"><span class="archived-at"></span><span class="expires"></span></div>
                 </div>
-                <a class="icon-btn open-btn" title="${fb.t("fb.spaces.archive-download", "Download the archive")}" aria-label="${fb.t("fb.spaces.archive-download-aria", "Download")}" download>
+                <div class="space-actions">
+                <a class="icon-btn tool open-btn" title="${fb.t("fb.spaces.archive-download", "Download the archive")}" aria-label="${fb.t("fb.spaces.archive-download-aria", "Download")}" download>
                     <sac-icon name="download"></sac-icon>
                 </a>
-                <button type="button" class="icon-btn open-btn restore-btn" title="${fb.t("fb.spaces.archive-restore", "Restore as a new space")}" aria-label="${fb.t("fb.spaces.archive-restore-aria", "Restore")}">
+                <button type="button" class="icon-btn tool open-btn restore-btn" title="${fb.t("fb.spaces.archive-restore", "Restore as a new space")}" aria-label="${fb.t("fb.spaces.archive-restore-aria", "Restore")}">
                     <sac-icon name="undo"></sac-icon>
                 </button>
-                <button type="button" class="icon-btn danger delete-btn" title="${fb.t("fb.spaces.archive-delete", "Delete the archive")}" aria-label="${fb.t("fb.spaces.archive-delete-aria", "Delete archive")}">
+                <button type="button" class="icon-btn tool danger delete-btn" title="${fb.t("fb.spaces.archive-delete", "Delete the archive")}" aria-label="${fb.t("fb.spaces.archive-delete-aria", "Delete archive")}">
                     <sac-icon name="trash"></sac-icon>
-                </button>`;
+                </button>
+                </div>`;
             row.querySelector(".space-name").textContent = a.name;
             row.querySelector(".archived-at").textContent = fb.t("fb.spaces.archived-at", "Archived {when} · {size}", { when: fb.format.dateTime(a.archivedAt), size: fmtSize(a.sizeBytes) });
             row.querySelector(".expires").textContent = a.expiresAt

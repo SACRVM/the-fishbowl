@@ -96,7 +96,7 @@ class FbMessagesView extends HTMLElement {
     _muteMenu(spaceId, app, appName, spaceName) {
         const menu = document.createElement("sac-menu");
         menu.className = "msg-mute";
-        menu.innerHTML = `<button slot="trigger" type="button" class="icon-btn" aria-label="${fb.t("fb.messages.more", "More")}" title="${fb.t("fb.messages.more", "More")}"><sac-icon name="more"></sac-icon></button>`;
+        menu.innerHTML = `<button slot="trigger" type="button" class="icon-btn tool" aria-label="${fb.t("fb.messages.more", "More")}" title="${fb.t("fb.messages.more", "More")}"><sac-icon name="more"></sac-icon></button>`;
         const item = (action, label) => {
             const b = document.createElement("button");
             b.type = "button";
@@ -233,7 +233,7 @@ class FbMessagesView extends HTMLElement {
         if (!m.readAt) {
             const read = document.createElement("button");
             read.type = "button";
-            read.className = "icon-btn msg-read";
+            read.className = "icon-btn tool msg-read";
             read.title = fb.t("fb.messages.mark-read", "Mark read");
             read.setAttribute("aria-label", read.title);
             read.innerHTML = `<sac-icon name="check"></sac-icon>`;
