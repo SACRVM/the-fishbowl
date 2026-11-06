@@ -9,14 +9,19 @@
  * against the linking note's own slug folder (`a/b` links `../c.md` → `c`),
  * with or without ".md", else by its file name alone. Code (fenced or
  * inline) holds no links. The Notes app shows a note's links and the notes
- * that link to it under its text, and opens one on Ctrl/⌘+click in it — the
- * vendored editor renders none of these forms itself.
+ * that link to it under its text.
+ *
+ * In the text the editor (sac-md-editor) shows them as links: a wikilink is
+ * its registered inline "wikilink" (href "wiki:<target>"), "note:" and
+ * "wiki:" are host schemes, and the Notes editor takes relative hrefs
+ * (links="host"). Following one — Ctrl/⌘+click while editing, a click in a
+ * read-only note — is the editor's sac:link, whose href fromHref() reads.
  *
  *   fb.noteLinks.parse(text)                → [{ kind: "wiki"|"id"|"path", target, label }]
  *   fb.noteLinks.resolve(link, from, notes) → note | null
  *   fb.noteLinks.outgoing(note, notes)      → [{ link, note|null }] (each target once)
  *   fb.noteLinks.backlinks(note, notes)     → notes that link to it
- *   fb.noteLinks.at(lineText, column)       → the link at a column of a line, or null
+ *   fb.noteLinks.fromHref(href)             → the link an editor href names, or null
  */
 (function () {
     if (!window.fb) return;
@@ -41,7 +46,7 @@
         }).join("\n");
     }
 
-    function linksIn(text, withPos) {
+    function parse(text) {
         const src = withoutCode(text);
         const out = [];
         for (const m of src.matchAll(WIKI)) {
@@ -49,18 +54,28 @@
             if (target) out.push({ kind: "wiki", target, label: (m[2] || m[1]).trim(), start: m.index, end: m.index + m[0].length });
         }
         for (const m of src.matchAll(MD)) {
-            const href = m[2].trim();
-            let link = null;
-            if (/^note:/i.test(href)) link = { kind: "id", target: href.slice(5) };
-            else if (!SCHEME.test(href) && !href.startsWith("#") && !href.startsWith("/") && /\.md(#.*)?$/i.test(href))
-                link = { kind: "path", target: decodeURIComponent(href.replace(/#.*$/, "")) };
+            const link = fromHref(m[2].trim());
             if (link) out.push({ ...link, label: m[1].trim() || link.target, start: m.index, end: m.index + m[0].length });
         }
         out.sort((a, b) => a.start - b.start);
-        return withPos ? out : out.map(({ kind, target, label }) => ({ kind, target, label }));
+        return out.map(({ kind, target, label }) => ({ kind, target, label }));
     }
 
-    const parse = (text) => linksIn(text, false);
+    const decode = (s) => { try { return decodeURIComponent(s); } catch { return s; } };
+
+    /** The note link an href names: "wiki:<target>" (the editor's wikilink),
+     *  "note:<id>", or a relative path to a ".md" file; null for the rest. */
+    function fromHref(href) {
+        href = String(href || "").trim();
+        if (/^wiki:/i.test(href)) {
+            const target = decode(href.slice(5)).trim();
+            return target ? { kind: "wiki", target } : null;
+        }
+        if (/^note:/i.test(href)) return { kind: "id", target: href.slice(5) };
+        if (!SCHEME.test(href) && !href.startsWith("#") && !href.startsWith("/") && /\.md(#.*)?$/i.test(href))
+            return { kind: "path", target: decode(href.replace(/#.*$/, "")) };
+        return null;
+    }
 
     const lower = (s) => String(s || "").toLowerCase();
     const stripMd = (s) => s.replace(/\.md$/i, "");
@@ -111,9 +126,17 @@
             && parse(n.content).some((link) => resolve(link, n, notes)?.id === note.id));
     }
 
-    function at(lineText, column) {
-        return linksIn(lineText, true).find((l) => column >= l.start && column <= l.end) || null;
-    }
+    fb.noteLinks = { parse, resolve, outgoing, backlinks, fromHref };
 
-    fb.noteLinks = { parse, resolve, outgoing, backlinks, at };
+    // The editor shows them as links (page-wide: its registry and schemes
+    // belong to the element class; the editor loads after this file).
+    customElements.whenDefined("sac-md-editor").then((Editor) => {
+        if (typeof Editor.registerInline !== "function") return;
+        Editor.linkSchemes = ["note:", "wiki:"];
+        Editor.registerInline({
+            name: "wikilink",
+            match: /\[\[([^\[\]\n|]+?)(?:\|([^\[\]\n]+?))?\]\]/,
+            render: (m) => ({ text: m[2] || m[1], href: `wiki:${encodeURIComponent(m[1].trim())}`, title: m[1].trim() }),
+        });
+    });
 })();

@@ -62,14 +62,14 @@ same, for the board.
 
 ## 7. Links between notes
 
-- The vendored editor renders none of these links and has no extension point
-  for inline elements.
-- So the Notes app resolves them itself (`fb.noteLinks`): `[[Title]]`,
+- The Notes app resolves them itself (`fb.noteLinks`): `[[Title]]`,
   `[[Title|text]]`, `note:<id>`, and relative `.md` paths by slug.
-- It shows "Links" and "Linked from" under the text. Ctrl/⌘+click in the text
-  opens a link.
-- An inline-link hook in `sac-md-editor` would let the text itself show them
-  as links. That belongs upstream.
+- It shows "Links" and "Linked from" under the text.
+- In the text, the editor shows them as links through its inline registry
+  (`wikilink`), its host schemes (`note:`, `wiki:`) and `links="host"`.
+  Following one (Ctrl/⌘+click while editing, a click when read-only) fires
+  the editor's `sac:link`, and the Notes app opens the note. The editor
+  gained these the same day (sac-md-editor#5).
 
 ## 8. OR / NOT and saved filters
 

@@ -162,6 +162,20 @@ public class NotesForAgentsTests
             var outLinks = page.Locator("fb-notes-view #links-out");
             await Assertions.Expect(outLinks.Locator("sac-chip")).ToHaveCountAsync(1);
             await Assertions.Expect(outLinks.Locator(".nv-link-missing")).ToHaveTextAsync($"Nowhere {tag}");
+
+            // In the text the editor shows the wikilink as a link; Ctrl/⌘+click
+            // on it opens its note (the editor's sac:link).
+            var wiki = page.Locator($"fb-notes-view #content a.inline-wikilink[title='Target {tag}']");
+            await Assertions.Expect(wiki).ToBeVisibleAsync();
+            await wiki.ClickAsync(new() { Modifiers = new[] { KeyboardModifier.ControlOrMeta } });
+            await Assertions.Expect(page.Locator("fb-notes-view .nv-item.selected")).ToContainTextAsync($"Target {tag}");
+            await row.ClickAsync();
+            // A link by id (a host scheme of the editor's) the same way.
+            await page.Locator($"fb-notes-view #content a[href='note:{target}']").ClickAsync(new() { Modifiers = new[] { KeyboardModifier.ControlOrMeta } });
+            await Assertions.Expect(page.Locator("fb-notes-view .nv-item.selected")).ToContainTextAsync($"Target {tag}");
+            await row.ClickAsync();
+            await Assertions.Expect(outLinks.Locator("sac-chip")).ToHaveCountAsync(1);
+
             await outLinks.Locator($"sac-chip[label='Target {tag}']").ClickAsync();
             await Assertions.Expect(page.Locator("fb-notes-view .nv-item.selected")).ToContainTextAsync($"Target {tag}");
             await Assertions.Expect(page.Locator($"fb-notes-view #links-in sac-chip[label='Source {tag}']")).ToBeVisibleAsync();

@@ -787,7 +787,7 @@ class FbNotesView extends HTMLElement {
                             <button type="button" class="btn primary" id="empty-new-btn"><sac-icon name="plus"></sac-icon> ${fb.t("fb.notes.new", "New note")}</button>
                         </div>
                         <div id="editor" class="nv-editor" hidden>
-                            <sac-md-editor id="content" class="nv-content-input" placeholder="${fb.t("fb.notes.placeholder", "Start writing — the first line is the title")}"></sac-md-editor>
+                            <sac-md-editor id="content" class="nv-content-input" links="host" placeholder="${fb.t("fb.notes.placeholder", "Start writing — the first line is the title")}"></sac-md-editor>
                         </div>
                     </div>
                     <section class="nv-links" id="links" hidden>
@@ -921,14 +921,13 @@ class FbNotesView extends HTMLElement {
         this.querySelector("#history-btn").addEventListener("click", () => this._openHistory());
         this.querySelector("#back-to-board-btn").addEventListener("click", () => this._showBoard());
         // A link to another note (fb.noteLinks): its chip under the text, or
-        // Ctrl/⌘+click on it in the text — the editor renders none of the
-        // note-link forms itself. In a read-only note a plain click on a
-        // rendered link opens it too (it would open "#" in a new tab).
+        // the link in the text — the editor's sac:link, on Ctrl/⌘+click while
+        // editing and on a click in a read-only note.
         this.querySelector("#links").addEventListener("click", (e) => {
             const chip = e.target.closest("sac-chip[data-note]");
             if (chip) this.select(chip.dataset.note);
         });
-        contentEl.addEventListener("click", (e) => this._linkClick(e), true);
+        contentEl.addEventListener("sac:link", (e) => this._followLink(e));
     }
 
     /** Suggestions for the tag input: every tag the user may assign, most
@@ -1944,34 +1943,12 @@ class FbNotesView extends HTMLElement {
         box.hidden = !out.length && !back.length;
     }
 
-    /** Ctrl/⌘+click on a note link in the text (or a plain click on a
-     *  rendered one in a read-only note) opens the note it names. */
-    _linkClick(e) {
-        const editor = this.querySelector("#content");
-        const path = e.composedPath();
-        const anchor = path.find((n) => n.tagName === "A");
-        const ro = editor.hasAttribute("readonly");
-        if (!(e.ctrlKey || e.metaKey) && !(ro && anchor)) return;
-        const line = path.find((n) => n.classList?.contains?.("line"));
-        if (!line) return;
-        const text = line.textContent;
-        let link = null;
-        const pos = document.caretPositionFromPoint?.(e.clientX, e.clientY, { shadowRoots: [editor.shadowRoot] });
-        if (pos && line.contains(pos.offsetNode)) {
-            const walker = document.createTreeWalker(line, NodeFilter.SHOW_TEXT);
-            let col = 0;
-            for (let node = walker.nextNode(); node; node = walker.nextNode()) {
-                if (node === pos.offsetNode) { col += pos.offset; break; }
-                col += node.textContent.length;
-            }
-            link = fb.noteLinks.at(text, col);
-        }
-        const all = fb.noteLinks.parse(text);
-        if (!link && anchor) link = all.find((l) => l.label === anchor.textContent.trim()) || null;
-        if (!link && !anchor && all.length === 1) link = all[0];
+    /** A link followed in the text (the editor's sac:link): a note link
+     *  opens the note it names; a web link the editor opens itself. */
+    _followLink(e) {
+        const link = fb.noteLinks.fromHref(e.detail?.href);
         if (!link) return;
         e.preventDefault();
-        e.stopPropagation();
         const target = fb.noteLinks.resolve(link, this._openNote, this._pool || this.notes);
         if (target) this.select(target.id);
         else sac.toast?.(fb.t("fb.notes.link-missing", "No note with this title or slug"), { kind: "error" });

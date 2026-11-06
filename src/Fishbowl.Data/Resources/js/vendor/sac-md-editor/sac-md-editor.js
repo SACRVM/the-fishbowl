@@ -28,6 +28,11 @@
  *                 flex: 1 in a column) instead of the 60vh minimum. A click
  *                 in the empty area below the text puts the caret at the end.
  *                 Without a host height the surface is as tall as its text.
+ *   links       - "host": relative hrefs (../decisions/0003.md#why,
+ *                 notes/a.md) are links in this editor, for the host to
+ *                 open through sac:link. Without it they render as links
+ *                 that go nowhere, like every href the editor does not
+ *                 allow (see Links below).
  *
  * Properties:
  *   value - string; markdown source (getter + setter).
@@ -42,6 +47,17 @@
  *   input  - native Event after every edit (may arrive more than once per
  *            keystroke: the browser's own plus the editor's).
  *   change - native Event when focus leaves after an edit.
+ * Action event - the kit convention for those (CustomEvent, bubbles,
+ * composed, cancelable, like sac-split's sac:split-back):
+ *   sac:link   - a link is followed: a click in read-only, Ctrl/Cmd+click
+ *                while editing (the caret line included - its source is
+ *                looked up under the pointer). detail { href, text, raw,
+ *                line }: href as written (a reference link's resolved;
+ *                a relative one unresolved), the text shown, the link's
+ *                whole source, the 0-based line index. preventDefault()
+ *                keeps the editor from opening it; otherwise a web link
+ *                (http(s), mailto, #) opens in a new tab as always and a
+ *                host link (linkSchemes, links="host") goes nowhere.
  *
  * Methods:
  *   focus() - focus the editor surface.
@@ -117,6 +133,44 @@
  *
  * :::secret is not built in: js/sac-md-secret.js registers it (load it
  * after this file). The demo does, and so does any host that wants it.
+ *
+ * Links: an href is a link the editor follows when it is http(s), mailto
+ * or a #fragment ("web"), or when the host allows it ("host"):
+ *
+ *   Editor.linkSchemes = ["note:", "wiki:"];  // page-wide; javascript:,
+ *                                             // data:, vbscript:, file:,
+ *                                             // blob: are refused
+ *   <sac-md-editor links="host">              // relative hrefs, per editor
+ *
+ * Any other href keeps the look of a link but gets no href: a click goes
+ * nowhere (it used to open a blank tab at #).
+ *
+ * Inline links (registry), the inline twin of registerBlock - a host link
+ * form inside a line, page-wide on the element class:
+ *
+ *   const off = Editor.registerInline({
+ *       name:   "wikilink",                   // a-z 0-9 -, unique
+ *       match:  /\[\[([^\[\]\n|]+?)(?:\|([^\[\]\n]+?))?\]\]/,
+ *       render: (m) => ({ text: m[2] || m[1], href: `wiki:${m[1]}`,
+ *                         title: m[1], className: "" }),   // or null: no link
+ *       css:    "a.inline-wikilink { text-decoration-style: dotted; }",
+ *   });
+ *   off();                                   // or Editor.unregisterInline(name)
+ *   Editor.inlines                           // registered names
+ *
+ * match is tried at every position of a line's inline text (as if
+ * sticky - flags g / y / d are the editor's business); render(m) gets that
+ * match (m.input is the text from that position on). The source stays the
+ * line's textContent: the shown text - the (highest-numbered) capture group
+ * equal to it, else its first occurrence in the match - becomes the
+ * anchor, the rest of the
+ * match its hidden markers. Shown text that is not in the source at all (a
+ * title for an id) is generated content over the hidden source. Inlines
+ * are not recognised in code spans, fences, indented code or inside a
+ * link's text; the href goes through the same gate as any link, so a host
+ * scheme needs linkSchemes. The anchor carries .inline-<name> plus
+ * className, and `css` is injected like a block's. A throwing render counts
+ * as no match. Registering re-renders every editor on the page.
  *
  * SECURITY: masking is a purely VISUAL layer. The plaintext stays in the DOM
  * and in whatever the host saves from `value`. The blur is a courtesy
@@ -240,7 +294,7 @@ function trackPress(root, selector) {
 }
 
 class SacMdEditor extends HTMLElement {
-    static observedAttributes = ["placeholder", "readonly"];
+    static observedAttributes = ["placeholder", "readonly", "links"];
 
     constructor() {
         super();
@@ -279,6 +333,29 @@ class SacMdEditor extends HTMLElement {
         if (BLOCKS.delete(name)) refreshBlocks();
     }
     static get blocks() { return [...BLOCKS.keys()]; }
+
+    // Inline registry and host link schemes - see the header. Page-wide too.
+    static registerInline(def) {
+        const inline = compileInline(def);
+        INLINES.delete(inline.name);         // re-registering replaces
+        INLINES.set(inline.name, inline);
+        refreshBlocks();
+        return () => {
+            if (INLINES.get(inline.name) !== inline) return;
+            INLINES.delete(inline.name);
+            refreshBlocks();
+        };
+    }
+    static unregisterInline(name) {
+        if (INLINES.delete(name)) refreshBlocks();
+    }
+    static get inlines() { return [...INLINES.keys()]; }
+    static get linkSchemes() { return [...linkSchemes]; }
+    static set linkSchemes(list) {
+        linkSchemes = compileSchemes(list);
+        purifyConfig = purifyConfigFor(linkSchemes);
+        refreshBlocks();
+    }
 
     connectedCallback() {
         mdAddStrings();
@@ -443,12 +520,18 @@ class SacMdEditor extends HTMLElement {
             }
             this._syncRevealHints();
         }
+        // Which hrefs are links changed: every line renders again.
+        if (name === "links") this._refreshBlocks();
     }
+
+    /** links="host": relative hrefs are links here, for the host to open. */
+    _hostLinks() { return this.getAttribute("links") === "host"; }
 
     /** contenteditable and the kit's swipe opt-out travel together: a finger
      *  dragging across text being edited never starts a <sac-split> back
-     *  swipe (the split's own field selector misses "plaintext-only"); a
-     *  read-only editor is just text, so the swipe may start there. */
+     *  swipe or a <sac-nav> drawer swipe. Kit 2.33.3 skips "plaintext-only"
+     *  by itself, but a host runs on the kit it vendors, and older ones miss
+     *  it; a read-only editor is just text, so the swipe may start there. */
     _setEditable(on) {
         this._editor.setAttribute("contenteditable", on ? "plaintext-only" : "false");
         this._editor.toggleAttribute("data-no-swipe", on);
@@ -506,9 +589,22 @@ class SacMdEditor extends HTMLElement {
         // is the inner <svg> (or a path/circle/line) — classList on e.target
         // would miss the wrapping .sac-reveal-toggle span.
         this._editor.addEventListener("mousedown", (e) => {
-            if (e.target.closest?.(".sac-reveal-toggle")) e.preventDefault();
+            if (e.target.closest?.(".sac-reveal-toggle")) { e.preventDefault(); return; }
+            // Ctrl/Cmd+press on a link while editing: the caret stays where
+            // it is, so the line under the pointer is still the same on the
+            // click that follows the link (and Firefox starts no extra
+            // selection range).
+            if (this._followGesture(e) && !this.hasAttribute("readonly") && this._linkAt(e)) {
+                e.preventDefault();
+            }
         });
         trackPress(this._editor, ".sac-reveal-toggle");
+        // A middle-click on a host link would open a tab the browser cannot
+        // fill (note:..., a path the host maps).
+        this._editor.addEventListener("auxclick", (e) => {
+            const a = e.target.closest?.("a[href]");
+            if (a && hrefKind(a.getAttribute("href"), this._hostLinks()) === "host") e.preventDefault();
+        });
         this._editor.addEventListener("click", (e) => {
             const toggle = e.target.closest?.(".sac-reveal-toggle");
             if (toggle) {
@@ -516,6 +612,7 @@ class SacMdEditor extends HTMLElement {
                 if (line) this._toggleBlockReveal(line);
                 return;
             }
+            if (this._followGesture(e) && this._followLink(e)) return;
             // Read-only has no caret, so no active line shows a masked body
             // sharp - the eye would be the only way in. A click (or tap) on
             // any line of a masked block toggles it instead. Not when the
@@ -574,7 +671,9 @@ class SacMdEditor extends HTMLElement {
 
         line.classList.remove("active");
         this._applyBlockClass(line, src, block);
-        const defs = this._linkDefs;
+        // What inline rendering needs: reference definitions, and whether
+        // relative hrefs are links here (links="host").
+        const ctx = { defs: this._linkDefs, host: this._hostLinks() };
 
         const blockType = line.dataset.block || "";
         if (blockType === "fence-body") {
@@ -595,7 +694,7 @@ class SacMdEditor extends HTMLElement {
             if (m) {
                 const prefix = m[1];
                 const rest   = src.substring(prefix.length);
-                line.innerHTML = `<span class="block-marker">${escapeHtml(prefix)}</span>${renderInline(rest, defs)}`;
+                line.innerHTML = `<span class="block-marker">${escapeHtml(prefix)}</span>${renderInline(rest, ctx)}`;
                 return;
             }
         }
@@ -608,7 +707,7 @@ class SacMdEditor extends HTMLElement {
                     `<span class="block-marker">${escapeHtml(m[1])}</span>` +
                     `<span class="${boxClass}">[${m[2]}]</span>` +
                     `<span class="block-marker">${escapeHtml(m[3])}</span>` +
-                    renderInline(m[4], defs);
+                    renderInline(m[4], ctx);
                 return;
             }
         }
@@ -641,12 +740,12 @@ class SacMdEditor extends HTMLElement {
             // Content wrapped in .block-body-text so a mask blurs just the
             // text - blurring the whole line would smear the card's left
             // border too. Source is preserved (line.textContent equals src).
-            const inner = src === "" ? "" : renderInline(src, defs);
+            const inner = src === "" ? "" : renderInline(src, ctx);
             line.innerHTML = `<span class="block-body-text">${inner}</span>`;
             return;
         }
         if (TABLE_TYPES.has(blockType)) {
-            line.innerHTML = renderTableRow(src, blockType, block.aligns, defs);
+            line.innerHTML = renderTableRow(src, blockType, block.aligns, ctx);
             return;
         }
         if (blockType === "indent-code") {
@@ -666,7 +765,7 @@ class SacMdEditor extends HTMLElement {
             line.innerHTML = "";
             return;
         }
-        line.innerHTML = renderInline(src, defs);
+        line.innerHTML = renderInline(src, ctx);
     }
 
     /** Flatten a line to a single text node, preserving the caret position
@@ -1961,6 +2060,82 @@ class SacMdEditor extends HTMLElement {
     }
 
     // -----------------------------------------------------------------------
+    // Following links (sac:link)
+    // -----------------------------------------------------------------------
+
+    /** The press that follows a link: any primary click in read-only, a
+     *  Ctrl/Cmd one while editing (a plain click there places the caret). */
+    _followGesture(e) {
+        if (e.button !== 0) return false;
+        return this.hasAttribute("readonly") || e.ctrlKey || e.metaKey;
+    }
+
+    /** The followable link under a pointer event, or null:
+     *  { href, kind, text, raw, line }. A rendered line has its anchors.
+     *  The caret line is flat source, so it is rendered once more,
+     *  detached, and the character under the pointer looked up there - by
+     *  the invariant both hold the same text, so the offsets agree. */
+    _linkAt(e) {
+        const line = this._lineContaining(e.target);
+        if (!line) return null;
+        let a = e.target.closest?.("a");
+        if (!a && line.classList.contains("active")) {
+            const offset = this._offsetAtPoint(line, e.clientX, e.clientY);
+            if (offset === null) return null;
+            const src = line.textContent;
+            const state = this._stateBefore(line);
+            const ahead = this._aheadFor(line, state, src);
+            const probe = document.createElement("div");
+            this._renderLine(probe, src, state, ahead);
+            a = anchorAtOffset(probe, offset);
+        }
+        if (!a || !a.hasAttribute("href")) return null;
+        const href = a.getAttribute("href");
+        const kind = hrefKind(href, this._hostLinks());
+        if (!kind) return null;
+        return {
+            href, kind,
+            text: a.hasAttribute("data-glyph") ? a.getAttribute("data-glyph") : a.textContent,
+            raw:  linkRaw(a),
+            line: Array.prototype.indexOf.call(this._editor.children, line),
+        };
+    }
+
+    /** Character offset in `line` under a viewport point, or null. */
+    _offsetAtPoint(line, x, y) {
+        let node = null, offset = 0;
+        if (document.caretPositionFromPoint) {
+            const pos = document.caretPositionFromPoint(x, y, { shadowRoots: [this.shadowRoot] });
+            if (pos) { node = pos.offsetNode; offset = pos.offset; }
+        } else if (document.caretRangeFromPoint) {
+            const range = document.caretRangeFromPoint(x, y);
+            if (range) { node = range.startContainer; offset = range.startOffset; }
+        }
+        if (!node || (node !== line && !line.contains(node))) return null;
+        return this._charOffset(line, node, offset);
+    }
+
+    /** Fire sac:link for the link a follow gesture hit. Unless the host
+     *  cancels it, a web link opens the way it always did (a new tab: the
+     *  browser's own in read-only, window.open while editing, where the
+     *  browser follows nothing); a host link goes nowhere - only the host
+     *  knows where it points. True when the click was a link's. */
+    _followLink(e) {
+        const link = this._linkAt(e);
+        if (!link) return false;
+        const go = this.dispatchEvent(new CustomEvent("sac:link", {
+            detail: { href: link.href, text: link.text, raw: link.raw, line: link.line },
+            bubbles: true,
+            composed: true,
+            cancelable: true,
+        }));
+        const readonly = this.hasAttribute("readonly");
+        if (!(go && link.kind === "web" && readonly)) e.preventDefault();
+        if (go && link.kind === "web" && !readonly) window.open(link.href, "_blank", "noopener,noreferrer");
+        return true;
+    }
+
+    // -----------------------------------------------------------------------
     // Caret + selection helpers
     // -----------------------------------------------------------------------
 
@@ -2456,7 +2631,7 @@ function formatTable(texts) {
  *  a .tcell (CSS display: table-cell). The line itself is display:
  *  table-row, so consecutive rows form one anonymous table and the columns
  *  line up with no measuring. textContent stays the source. */
-function renderTableRow(src, kind, aligns, defs) {
+function renderTableRow(src, kind, aligns, ctx) {
     let col = 0;
     return splitTableRow(src).map((g) => {
         if (g.kind !== "cell") return `<span class="block-marker">${escapeHtml(g.text)}</span>`;
@@ -2464,7 +2639,7 @@ function renderTableRow(src, kind, aligns, defs) {
         if (kind === "table-delim") {
             return `<span class="tcell tdelim"><span class="block-marker">${escapeHtml(g.text)}</span></span>`;
         }
-        return `<span class="tcell ta-${a}">${renderInline(g.text, defs)}</span>`;
+        return `<span class="tcell ta-${a}">${renderInline(g.text, ctx)}</span>`;
     }).join("");
 }
 
@@ -2522,10 +2697,116 @@ function setBlockLabel(line, def) {
     else line.style.setProperty("--mdb-label", JSON.stringify(String(label)));
 }
 
+/** Any registry change - blocks, inlines, link schemes: new CSS for every
+ *  shadow root and every line re-derived. */
 function refreshBlocks() {
-    blockCss = [...BLOCKS.values()].map((d) => d.css).filter(Boolean).join("\n");
+    blockCss = [...BLOCKS.values(), ...INLINES.values()].map((d) => d.css).filter(Boolean).join("\n");
+    inlineExt = inlineExtensions();
     blockGen++;
     for (const editor of LIVE_EDITORS) editor._refreshBlocks();
+}
+
+// ---------------------------------------------------------------------------
+// Inline registry and host links (static API on the element class - see the
+// header). An inline is a host link form inside a line ([[Title]]); it
+// reaches marked's lexer as an inline extension, tried at every position
+// before marked's own rules, so a code span still wins where it starts first.
+// ---------------------------------------------------------------------------
+
+const INLINES = new Map();         // name -> compiled inline definition, in order
+let inlineExt = null;              // marked's `extensions` for INLINES, null when none
+let linkSchemes = [];              // host schemes allowed in hrefs ("note:", ...)
+
+function compileInline(def) {
+    if (!def || typeof def.name !== "string" || !/^[a-z][a-z0-9-]*$/.test(def.name)) {
+        throw new TypeError("sac-md-editor registerInline: name must be a-z, 0-9 and dashes");
+    }
+    if (!(def.match instanceof RegExp)) {
+        throw new TypeError(`sac-md-editor registerInline("${def.name}"): match must be a RegExp`);
+    }
+    if (typeof def.render !== "function") {
+        throw new TypeError(`sac-md-editor registerInline("${def.name}"): render must be a function`);
+    }
+    // Two copies of the pattern: sticky (a match starting exactly here, with
+    // group indices to find the shown text) and global (where the next one
+    // could start, so marked's text rule stops in front of it).
+    const flags = def.match.flags.replace(/[gyd]/g, "");
+    return {
+        name:   def.name,
+        at:     new RegExp(def.match.source, flags + "yd"),
+        next:   new RegExp(def.match.source, flags + "g"),
+        render: def.render,
+        css:    def.css ? String(def.css) : "",
+    };
+}
+
+function inlineExtensions() {
+    if (!INLINES.size) return null;
+    const defs = [...INLINES.values()];
+    return {
+        inline: defs.map((def) => function (src) {
+            // Never a link inside a link's own text.
+            if (this.lexer.state.inLink) return undefined;
+            def.at.lastIndex = 0;
+            const m = def.at.exec(src);
+            if (!m || !m[0]) return undefined;        // an empty match would never advance
+            let out;
+            try { out = def.render(m); } catch { return undefined; }   // foreign code
+            if (!out || typeof out !== "object") return undefined;
+            return { type: "sac-inline", raw: m[0], def, m, out };
+        }),
+        startInline: defs.map((def) => (src) => {
+            def.next.lastIndex = 0;
+            const m = def.next.exec(src);
+            return m ? m.index : undefined;
+        }),
+    };
+}
+
+// Never a host scheme: these run code or carry content of their own.
+const BANNED_SCHEMES = new Set(["javascript:", "vbscript:", "data:", "file:", "blob:"]);
+
+function compileSchemes(list) {
+    if (list == null) return [];
+    if (typeof list === "string" || typeof list[Symbol.iterator] !== "function") {
+        throw new TypeError("sac-md-editor linkSchemes: give an array of schemes, e.g. [\"note:\"]");
+    }
+    const out = new Set();
+    for (const s of list) {
+        let scheme = String(s).trim().toLowerCase();
+        if (!scheme.endsWith(":")) scheme += ":";
+        if (!/^[a-z][a-z0-9+.-]*:$/.test(scheme)) {
+            throw new TypeError(`sac-md-editor linkSchemes: "${s}" is not a URL scheme`);
+        }
+        if (BANNED_SCHEMES.has(scheme)) {
+            throw new TypeError(`sac-md-editor linkSchemes: "${scheme}" is never allowed`);
+        }
+        out.add(scheme);
+    }
+    return [...out];
+}
+
+/** A relative reference (../x.md, notes/a.md#why, ?q, /abs/path): resolved
+ *  against a stand-in base it stays on that base. The URL parser applies the
+ *  browser's own leniency (stripped controls, tabs inside a scheme), so a
+ *  disguised "java\tscript:" cannot pass for a path. */
+const REL_BASE = "https://sac-md-editor.invalid/";
+function isRelativeHref(href) {
+    if (!href || /^[a-z][a-z0-9+.-]*:/i.test(href)) return false;
+    try { return new URL(href, REL_BASE).origin === "https://sac-md-editor.invalid"; }
+    catch { return false; }
+}
+
+/** What an href may be: "web" (http(s), mailto, #fragment - opens in a new
+ *  tab as always), "host" (a scheme in linkSchemes, or a relative href in an
+ *  editor with links="host" - only the host can open it, through sac:link)
+ *  or "" (anything else - shown as a link, but not one). */
+function hrefKind(href, host) {
+    if (SAFE_HREF_RE.test(href)) return "web";
+    const lower = href.toLowerCase();
+    if (linkSchemes.some((s) => lower.startsWith(s))) return "host";
+    if (host && isRelativeHref(href)) return "host";
+    return "";
 }
 
 /** Cross-line state at the top of a document. `inFence` and `inBlock` (the
@@ -2703,31 +2984,127 @@ const PURIFY_CONFIG = {
     KEEP_CONTENT: true,
 };
 
+/** DOMPurify's own URI check, rebuilt from linkSchemes: its default list
+ *  knows no host scheme and would strip href="note:..." behind our back.
+ *  Same shape as DOMPurify's default (a scheme from the list, or no
+ *  scheme at all), but only the schemes hrefKind lets through. */
+function purifyConfigFor(schemes) {
+    const names = ["https?", "mailto", ...schemes.map((s) => s.slice(0, -1).replace(/[+.]/g, "\\$&"))];
+    return {
+        ...PURIFY_CONFIG,
+        ALLOWED_URI_REGEXP: new RegExp(`^(?:(?:${names.join("|")}):|[^a-z]|[a-z+.\\-]+(?:[^a-z+.\\-:]|$))`, "i"),
+    };
+}
+let purifyConfig = purifyConfigFor([]);
+
 const SAFE_HREF_RE = /^(https?:|mailto:|#)/i;
 // Images: http/https only. Block data: URIs (SVG-XSS, canvas leaks),
 // javascript:, and anything else that could exfil or execute.
 const SAFE_IMG_SRC_RE = /^https?:/i;
 
-/** `defs`: the document's link reference definitions ({ label: { href,
- *  title } }), so [text][id], [text][] and [text] resolve. */
-function renderInline(text, defs = null) {
+// The walk below is synchronous and starts only in renderInline, which sets
+// this for its duration: does the editor let relative hrefs through
+// (links="host")?
+let walkHost = false;
+
+/** `ctx`: { defs, host } - the document's link reference definitions
+ *  ({ label: { href, title } }), so [text][id], [text][] and [text]
+ *  resolve, and whether the editor has links="host". */
+function renderInline(text, ctx = null) {
     if (!text) return "";
     // Graceful degradation if vendor scripts haven't loaded yet (e.g. in a
     // unit test harness that imports just the component file).
     if (typeof marked === "undefined" || typeof DOMPurify === "undefined") {
         return escapeHtml(text);
     }
+    const defs = ctx && ctx.defs;
+    // A fresh options object every time: marked's Lexer writes its
+    // tokenizer into the one it is given.
+    const options = { gfm: true, breaks: false };
+    if (inlineExt) options.extensions = inlineExt;
     let tokens;
     try {
         if (defs && Object.keys(defs).length) {
-            const lexer = new marked.Lexer({ gfm: true, breaks: false });
+            const lexer = new marked.Lexer(options);
             lexer.tokens.links = defs;
             tokens = lexer.inlineTokens(text);
         } else {
-            tokens = marked.Lexer.lexInline(text, { gfm: true, breaks: false });
+            tokens = marked.Lexer.lexInline(text, options);
         }
     } catch { return escapeHtml(text); }
-    return DOMPurify.sanitize(walkInlineTokens(tokens), PURIFY_CONFIG);
+    walkHost = !!(ctx && ctx.host);
+    return DOMPurify.sanitize(walkInlineTokens(tokens), purifyConfig);
+}
+
+/** The anchor the character at `offset` belongs to in a rendered line, or
+ *  null - its text, or one of its own markers ([ and ](url), [[ and ]]).
+ *  A caret position sits between two characters, so the one before it
+ *  counts too: a click on the right half of a link's last character. */
+function anchorAtOffset(root, offset) {
+    const owner = (node) => {
+        const el = node.parentElement;
+        if (!el) return null;
+        const a = el.closest("a");
+        if (a) return a;
+        if (el.classList.contains("link-open"))  return el.nextElementSibling?.matches("a") ? el.nextElementSibling : null;
+        if (el.classList.contains("link-close")) return el.previousElementSibling?.matches("a") ? el.previousElementSibling : null;
+        return null;
+    };
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+    let total = 0, before = null, node;
+    while ((node = walker.nextNode())) {
+        const end = total + node.length;
+        if (offset >= total && offset < end) return owner(node) || before;
+        if (offset === end) before = owner(node);
+        total = end;
+    }
+    return before;
+}
+
+/** A rendered link's whole source: the anchor and its own markers. */
+function linkRaw(a) {
+    const prev = a.previousElementSibling, next = a.nextElementSibling;
+    return (prev && prev.classList.contains("link-open") ? prev.textContent : "") +
+        a.textContent +
+        (next && next.classList.contains("link-close") ? next.textContent : "");
+}
+
+/** An anchor's attributes. A link whose href may not be followed (see
+ *  hrefKind) keeps its look but gets no href: no blank tab at "#". */
+function linkAttrs(href, title) {
+    const titleAttr = title ? ` title="${escapeAttr(title)}"` : "";
+    if (!hrefKind(href, walkHost)) return titleAttr;
+    return ` href="${escapeAttr(href)}"${titleAttr} target="_blank" rel="noopener noreferrer"`;
+}
+
+/** A registered inline: the part of the source the host shows becomes the
+ *  anchor, the rest is marker (link-open before, link-close after), so the
+ *  line's textContent stays the source. The shown text is found as a
+ *  capture group (the highest-numbered one equal to it), else as a
+ *  substring; text that is not in the source at all (a title for an id) is
+ *  generated content over the hidden source, like an entity. */
+function renderRegisteredInline(t) {
+    const { def, m, out } = t;
+    const raw  = m[0];
+    const text = out.text == null ? "" : String(out.text);
+    const href = out.href == null ? "" : String(out.href);
+    const extra = out.className ? " " + String(out.className).trim() : "";
+    const attrs = linkAttrs(href, out.title == null ? "" : String(out.title)) +
+        ` class="${escapeAttr("inline-" + def.name + extra)}"`;
+    let at = -1;
+    if (text) {
+        for (let g = m.length - 1; g >= 1 && at < 0; g--) {
+            if (m[g] === text && m.indices && m.indices[g]) at = m.indices[g][0] - m.index;
+        }
+        if (at < 0) at = raw.indexOf(text);
+    }
+    if (at < 0) {
+        return `<a${attrs} data-glyph="${escapeAttr(text)}"><span class="marker">${escapeHtml(raw)}</span></a>`;
+    }
+    const before = raw.substring(0, at), after = raw.substring(at + text.length);
+    return (before ? `<span class="marker link-open">${escapeHtml(before)}</span>` : "") +
+        `<a${attrs}>${escapeHtml(text)}</a>` +
+        (after ? `<span class="marker link-close">${escapeHtml(after)}</span>` : "");
 }
 
 // HTML entity: named, decimal or hex. Rendered as its character via CSS
@@ -2805,11 +3182,10 @@ function renderInlineToken(t) {
             return `<span class="marker">${escapeHtml(t.raw.replace(/\n$/, ""))}</span><br>`;
         case "link": {
             const href = t.href || "";
-            const safe = SAFE_HREF_RE.test(href) ? href : "#";
             // Autolinks: <url>, <email>, or bare URL — one contiguous anchor,
             // no outer bracket markers.
             if (t.raw === href || t.raw === `<${href}>` || t.raw === `<${t.text}>`) {
-                return `<a href="${escapeAttr(safe)}" target="_blank" rel="noopener noreferrer">${escapeHtml(t.raw)}</a>`;
+                return `<a${linkAttrs(href, "")}>${escapeHtml(t.raw)}</a>`;
             }
             // Inline link [label](href) — preserve the `](...)` tail literally.
             // Reference link [label][id] / [label][] / [label]: the tail is
@@ -2822,9 +3198,12 @@ function renderInlineToken(t) {
                 : refIdx >= 0 ? t.raw.substring(refIdx)
                 : "]";
             if ("[" + t.text + tail !== t.raw) return escapeHtml(t.raw);
-            const titleAttr = t.title ? ` title="${escapeAttr(t.title)}"` : "";
-            return `<span class="marker">[</span><a href="${escapeAttr(safe)}"${titleAttr} target="_blank" rel="noopener noreferrer">${walkInlineTokens(t.tokens || [])}</a><span class="marker">${escapeHtml(tail)}</span>`;
+            // link-open / link-close: the anchor's own markers, so a click
+            // can tell the whole link's source (sac:link detail.raw).
+            return `<span class="marker link-open">[</span><a${linkAttrs(href, t.title)}>${walkInlineTokens(t.tokens || [])}</a><span class="marker link-close">${escapeHtml(tail)}</span>`;
         }
+        case "sac-inline":
+            return renderRegisteredInline(t);
         case "image": {
             // Preserve the raw source as a marker span (hidden on inactive
             // lines via the existing .line:not(.active) .marker rule), then
@@ -3224,15 +3603,23 @@ const TEMPLATE = `
     }
 
     /* Setext underline (=== / --- under paragraph text): the paragraph
-       renders as the heading, the underline collapses to a sliver. */
-    .line.setext-underline:not(.active) {
+       renders as the heading, the underline collapses to a sliver - but
+       not while the caret is in that heading. The underline is half the
+       heading's source, and ArrowDown skips a 4px line, so collapsed it
+       could not be reached to edit. "That heading": an active
+       .setext-heading line before it with only heading lines between. */
+    .line.setext-underline:not(.active):is(:not(.setext-heading.active ~ *),
+                                           .setext-heading.active ~ :not(.setext-heading) ~ *) {
         min-height: 0;
         height: 4px;
         padding: 0;
         overflow: hidden;
     }
-    .line.setext-underline:not(.active) .block-marker { display: none; }
-    .line.setext-underline.active { color: var(--text-muted, #888); }
+    .line.setext-underline:not(.active):is(:not(.setext-heading.active ~ *),
+                                           .setext-heading.active ~ :not(.setext-heading) ~ *) .block-marker {
+        display: none;
+    }
+    .line.setext-underline { color: var(--text-muted, #888); }
 
     /* Link reference definition ([id]: url): metadata, not prose. */
     .line.linkdef {
@@ -3415,6 +3802,9 @@ const TEMPLATE = `
     /* HTML entity (&copy;): the source stays in the DOM as a marker
        (hidden on inactive lines), the character is generated content. */
     .line:not(.active) .entity::before { content: attr(data-glyph); }
+    /* A registered inline whose shown text is not in its source (a title
+       for an id): the same trick - hidden source, generated text. */
+    .line:not(.active) a[data-glyph]::before { content: attr(data-glyph); }
 
     /* Active fence marker (user is editing the fence boundary line):
        dim the raw markers so they read as syntax, keep the card bg. */
