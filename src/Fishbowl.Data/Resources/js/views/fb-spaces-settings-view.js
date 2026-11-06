@@ -157,8 +157,14 @@ class FbSpacesSettingsView extends HTMLElement {
                         <code title="users/${escapeAttr(this.me.id)}/personal.db">${escapeHtml(this.me.id)}</code>
                     </div>
                 </div>
+                <div class="space-actions">
+                    <button type="button" class="icon-btn tool window-btn" title="${fb.t("fb.shell.new-window", "Open in a new window")}" aria-label="${fb.t("fb.shell.new-window", "Open in a new window")}">
+                        <sac-icon name="external-link"></sac-icon>
+                    </button>
+                </div>
             </div>
         `;
+        mount.querySelector(".window-btn").addEventListener("click", () => fb.desktop.openWindow("personal"));
         mount.querySelector("button.space-color").addEventListener("click", () => this._pickColor({
             name: fb.t("fb.shell.personal", "Personal"),
             color: fb.accents.personal,
@@ -203,6 +209,9 @@ class FbSpacesSettingsView extends HTMLElement {
                 <button type="button" class="icon-btn tool members-btn" title="${fb.t("fb.spaces.members", "Members")}" aria-label="${fb.t("fb.spaces.members", "Members")}">
                     <sac-icon name="users"></sac-icon>
                 </button>
+                <button type="button" class="icon-btn tool window-btn" title="${fb.t("fb.shell.new-window", "Open in a new window")}" aria-label="${fb.t("fb.shell.new-window", "Open in a new window")}">
+                    <sac-icon name="external-link"></sac-icon>
+                </button>
                 <button type="button" class="icon-btn tool open-btn" title="${fb.t("fb.spaces.open", "Open this space")}" aria-label="${fb.t("fb.spaces.open-aria", "Open")}">
                     <sac-icon name="chevron-right"></sac-icon>
                 </button>
@@ -235,6 +244,12 @@ class FbSpacesSettingsView extends HTMLElement {
             });
         });
 
+        list.querySelectorAll(".window-btn").forEach(btn => {
+            btn.addEventListener("click", (e) => {
+                const slug = e.currentTarget.closest(".space-row")?.dataset.slug;
+                if (slug) fb.desktop.openWindow(`space:${slug}`);   // this window stays as it is
+            });
+        });
         list.querySelectorAll(".members-btn").forEach(btn => {
             btn.addEventListener("click", (e) => {
                 const slug = e.currentTarget.closest(".space-row")?.dataset.slug;

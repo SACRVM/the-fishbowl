@@ -99,6 +99,23 @@
         // Its row in the burger shows it is open, like a page's.
         document.querySelectorAll("#fb-nav > a.fb-window-link").forEach((a) =>
             a.classList.toggle("active", !!page && a.dataset.key === `app:${page.id}`));
+        appLabel = route?.label || null;
+        syncDocumentTitle();
+    }
+
+    // The window's own title: the space and the open app, so several windows
+    // (fb.desktop.openWindow) tell apart in the task bar and the window list.
+    // An installed app's window puts "The Fishbowl - " before a title that
+    // doesn't start with it (Chrome), so only a browser tab gets the name
+    // after it; the personal workspace names no workspace.
+    let appLabel = null;
+    function syncDocumentTitle() {
+        const ctx = sac.scope.get();
+        const space = ctx.type === "scoped" ? (spaces?.find((s) => s.slug === ctx.slug)?.name || ctx.slug) : null;
+        const label = [space, appLabel].filter(Boolean).join(" · ");
+        const app = ["standalone", "window-controls-overlay", "minimal-ui", "fullscreen"]
+            .some((m) => window.matchMedia(`(display-mode: ${m})`).matches);
+        document.title = !label ? "The Fishbowl" : app ? label : `${label} — The Fishbowl`;
     }
     window.addEventListener("hashchange", syncTitle);
     window.addEventListener("fb:desktop-apps", syncTitle);
@@ -239,11 +256,22 @@
         pill.querySelector("sac-icon").setAttribute("name", inSpace ? "users" : "user");
         pill.querySelector(".fb-context-label").textContent = inSpace ? (space?.name || ctx.slug) : fb.t("fb.shell.personal", "Personal");
 
-        const item = (action, icon, label, active, color) => {
+        const item = (action, icon, label, active, color, ws) => {
             const b = document.createElement("button");
             b.dataset.action = action;
             b.innerHTML = `<sac-icon name="${icon}"></sac-icon><span></span>`;
             b.querySelector("span").textContent = label;
+            // A workspace opens in a window of its own from the icon at its
+            // end (on hover; Ctrl/⌘/Shift-click or a middle click do too).
+            if (ws) {
+                b.dataset.ws = ws;
+                b.classList.add("reveal-on-hover");
+                const win = document.createElement("sac-icon");
+                win.className = "fb-context-window hover-reveal";
+                win.setAttribute("name", "external-link");
+                win.title = fb.t("fb.shell.new-window", "Open in a new window");
+                b.appendChild(win);
+            }
             // The menu forces the item's colour, not its icon's: a
             // workspace's colour (a CSS value) shows on its icon.
             if (color) b.querySelector("sac-icon").style.color = color;
@@ -255,9 +283,9 @@
         };
         // Each workspace's icon in the colour it wears — its own, else the
         // kit's: blue for the personal workspace, orange for a space.
-        const nodes = [item("ctx:user", "user", fb.t("fb.shell.personal", "Personal"), !inSpace, accentsFor("personal").accent), document.createElement("hr")];
+        const nodes = [item("ctx:user", "user", fb.t("fb.shell.personal", "Personal"), !inSpace, accentsFor("personal").accent, "personal"), document.createElement("hr")];
         if (spaces?.length) {
-            for (const s of spaces) nodes.push(item(`ctx:space:${s.slug}`, "users", s.name || s.slug, inSpace && s.slug === ctx.slug, accentsFor(`space:${s.slug}`).warm));
+            for (const s of spaces) nodes.push(item(`ctx:space:${s.slug}`, "users", s.name || s.slug, inSpace && s.slug === ctx.slug, accentsFor(`space:${s.slug}`).warm, `space:${s.slug}`));
         } else if (spaces) {
             const empty = document.createElement("span");
             empty.className = "fb-context-empty";
@@ -269,7 +297,25 @@
         for (const el of [...switcher.children]) if (el.getAttribute("slot") !== "trigger") el.remove();
         switcher.append(...nodes);
         applyAccents();
+        syncDocumentTitle();
     }
+
+    // Before the menu's own click (on the host, below these): the window
+    // icon, a modified click or a middle click open the workspace in a new
+    // window instead of switching this one.
+    function windowFrom(e) {
+        const b = e.target.closest?.("button[data-ws]");
+        if (!b || !switcher.contains(b)) return false;
+        const icon = !!e.target.closest(".fb-context-window");
+        if (!icon && !(e.ctrlKey || e.metaKey || e.shiftKey || e.button === 1)) return false;
+        e.preventDefault();
+        e.stopPropagation();
+        switcher.close();
+        fb.desktop.openWindow(b.dataset.ws);
+        return true;
+    }
+    switcher?.addEventListener("click", windowFrom, true);
+    switcher?.addEventListener("auxclick", (e) => { if (e.button === 1) windowFrom(e); }, true);
 
     switcher?.addEventListener("sac:select", (e) => {
         const action = e.detail.action || "";

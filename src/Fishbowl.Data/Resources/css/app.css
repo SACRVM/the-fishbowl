@@ -359,6 +359,20 @@ label.fb-quota-field input { width: 6em; }
 .fb-context-pill.personal { color: var(--accent); }
 .fb-context-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .fb-context-check { margin-left: auto; color: var(--accent); }
+/* "Open in a new window" at a workspace's end (shell.js, kit .hover-reveal),
+   before the active one's check, with a hit area larger than the glyph so a
+   near miss doesn't switch this window instead. Only where windows are:
+   not on a touch screen. */
+.fb-context-window {
+    box-sizing: content-box;
+    padding: 4px;
+    margin: -4px -4px -4px auto;
+    border-radius: var(--radius-m);
+    color: var(--text-muted);
+}
+.fb-context-window:hover { color: var(--text); background: var(--hover-strong); }
+.fb-context-window + .fb-context-check { margin-left: 0; }
+@media (hover: none) and (pointer: coarse) { .fb-context-window { display: none; } }
 .fb-context-empty {
     display: block;
     padding: 7px 10px;

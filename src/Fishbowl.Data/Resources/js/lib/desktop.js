@@ -29,7 +29,8 @@
  *   Create    new note / todo / event / contact — fb.desktop.go() into the
  *             view (the live tiles' "+" does the same)
  *   Go        the desktop, and the Your data window
- *   Workspace Personal and every space
+ *   Workspace Personal and every space, to switch to or to open in a
+ *             window of its own (fb.desktop.openWindow)
  *   Notes     full-text search in the active workspace's notes (a
  *             sac.commands source over the hybrid search), title + the
  *             matching words; picking one opens the note
@@ -166,6 +167,26 @@
         }
     }
 
+    /**
+     * A workspace in a window of its own, beside this one, which stays where
+     * it is: `ws` is "personal" | "space:<slug>", `view` one of its pages
+     * (default: its desktop). Nothing is shared between the windows but the
+     * session — the workspace is the address. In the installed app an
+     * address in its scope opens another app window; in a browser tab it is
+     * a window too (a popup the size of this one), not a tab, so the two sit
+     * side by side.
+     */
+    function openWindow(ws, view) {
+        const path = view ? `/${view}` : "";
+        const hash = ws === "personal" ? `#${path || "/"}` : `#/space/${encodeURIComponent(ws.slice(6))}${path}`;
+        const url = new URL("/" + hash, location.origin).href;
+        const app = ["standalone", "window-controls-overlay", "minimal-ui", "fullscreen"]
+            .some((m) => window.matchMedia(`(display-mode: ${m})`).matches);
+        const features = app ? "noopener"
+            : `popup,noopener,width=${Math.round(window.outerWidth)},height=${Math.round(window.outerHeight)}`;
+        window.open(url, "_blank", features);
+    }
+
     /** The pending intent for `view`, once — or null. */
     function takeIntent(view) {
         if (!pending || pending.view !== view) return null;
@@ -235,6 +256,20 @@
             register(`ws:${s.slug}`, {
                 label: fb.t("fb.palette.switch-to", "Switch to {name}", { name: s.name }), icon: "users", group: fb.t("fb.palette.workspace", "Workspace"),
                 run: () => sac.scope.set({ type: "scoped", slug: s.slug }),
+            });
+        }
+        // Every workspace in a window of its own — the active one too: a
+        // second window of the same workspace (Mail beside the Calendar).
+        register("win:personal", {
+            label: fb.t("fb.palette.window", "Open {name} in a new window", { name: fb.t("fb.shell.personal", "Personal") }),
+            icon: "external-link", group: fb.t("fb.palette.workspace", "Workspace"),
+            run: () => openWindow("personal"),
+        });
+        for (const s of spaces) {
+            register(`win:${s.slug}`, {
+                label: fb.t("fb.palette.window", "Open {name} in a new window", { name: s.name }),
+                icon: "external-link", group: fb.t("fb.palette.workspace", "Workspace"),
+                run: () => openWindow(`space:${s.slug}`),
             });
         }
         for (const c of sac.commands.list()) {
@@ -357,5 +392,5 @@
         }
     });
 
-    fb.desktop = { SIZES, builtins, load, save, go, takeIntent, syncCommands };
+    fb.desktop = { SIZES, builtins, load, save, go, openWindow, takeIntent, syncCommands };
 })();
