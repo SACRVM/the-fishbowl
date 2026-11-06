@@ -100,7 +100,7 @@ class SacCopyButton extends HTMLElement {
                     border: none;
                     border-radius: var(--radius-m);
                     background: transparent;
-                    color: var(--text-dim);
+                    color: var(--text-muted);
                     cursor: pointer;
                     transition: color 120ms var(--ease-smooth), background 120ms var(--ease-smooth);
                 }

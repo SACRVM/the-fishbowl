@@ -154,7 +154,7 @@
     const motion = () => (window.sac && window.sac.motion) || null;
 
     /** A back swipe never starts in these (they drag or type themselves). */
-    const NO_SWIPE = 'input, textarea, select, [contenteditable=""], [contenteditable="true"], ' +
+    const NO_SWIPE = 'input, textarea, select, [contenteditable]:not([contenteditable="false"]), ' +
         'sac-slider, [role="slider"], [role="separator"], [data-no-swipe]';
 
 class SacSplit extends HTMLElement {

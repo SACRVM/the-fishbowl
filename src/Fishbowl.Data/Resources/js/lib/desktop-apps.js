@@ -215,14 +215,20 @@
             .catch(() => { /* the store is best effort */ });
     }
 
-    // What goes wrong inside a running app's frame (kit ≥ 2.26, sac:app-error
-    // on document): a mount that throws didn't start ("load"); an uncaught
+    // What goes wrong with an app (sac:app-error on document): a script or a
+    // frame that doesn't start (kit 2.35.1, "load" with the kit's code —
+    // network, timeout, integrity — whoever opened it: a tile, the palette or
+    // its address) and a mount that throws didn't start ("load"); an uncaught
     // error, a rejection or a failing unmount is "runtime". Only a space app's
     // reach the store (report() checks) — an installed app isn't the space's code.
     document.addEventListener("sac:app-error", (e) => {
         const d = e.detail || {};
         const app = byId(d.appId);
         if (!app) return;
+        if (d.kind === "load") {
+            report(app, "load", `${d.code || "error"}: ${d.message || "couldn't start"}`, typeof d.stack === "string" ? d.stack : null);
+            return;
+        }
         const at = d.source ? ` (${d.source}${d.line ? `:${d.line}${d.column ? `:${d.column}` : ""}` : ""})` : "";
         const what = d.kind === "rejection" ? "Unhandled rejection: " : d.kind === "unmount" ? "unmount: " : "";
         report(app, d.kind === "mount" ? "load" : "runtime", `${what}${d.message || "Script error."}${at}`,
@@ -246,71 +252,59 @@
     // #/space/<slug>/space.<folder>/<its own route> — the kit's view address,
     // so back/forward and bookmarks work —, full screen below the nav on the
     // kit's stage (#fb-app-stage, fixed over the view area), kept running
-    // (hidden) while you look elsewhere in the space. There is no router
-    // route per app (the kit's router can't drop one when the app leaves the
-    // workspace, so it would linger in the next space's burger): the router
-    // mounts the desktop for every address no page claims, and fb-hub-view
-    // hands one that names a page app here (showPage) and stays out of
-    // sight. The burger lists it with the other apps under Home (shell.js).
-    // The kit's gaps around this (no unregister, init's [data-app] clicks,
-    // close() rewriting the address): SACRVM/sacrvm-appkit#46.
+    // (hidden) while you look elsewhere in the space. The kit's recipe for
+    // views beside sac.router: each page app of the active workspace has a
+    // router route ("#/space.<folder>/*", no view of the router's — its
+    // outlet #app-root stays empty and hidden while the app is on stage),
+    // dropped again when the workspace changes. The route names the app in
+    // the ribbon (shell.js); the burger lists it as our row under Home, so
+    // the route stays out of sac-nav's panel and the palette (nav, palette:
+    // false). The kit opens the view from its address, a reload or a link
+    // included, and parks it when the address names another page.
     const isPage = (app) => app?.mode === "space" && app?.manifest?.kind === "view";
 
     let stageBound = false;
     function bindStage() {
-        if (stageBound || !window.sac?.apps || !document.getElementById("fb-app-stage")) return;
-        stageBound = true;
-        // init() points the kit at the stage and lets it route view addresses
-        // (it opens a page app from a link or a reload by itself). It also
-        // claims clicks on any [data-app] element — Fishbowl sets none
-        // (window apps carry data-window-app, the Apps window data-app-id).
-        sac.apps.init({ viewHost: "#fb-app-stage" });
-    }
-
-    /** The address after the workspace prefix: "space.booking/2026". */
-    const pagePath = () => String(sac.router.currentResource() || "").replace(/^#\/?/, "");
-
-    /** The page app the address names ("#/space/<slug>/space.booking/…"), or
-     *  null — for an address no page claims (the desktop's, the ribbon's). */
-    function pageAt() {
-        const id = pagePath().split("/")[0];
-        const app = id ? byId(id) : null;
-        return isPage(app) ? app : null;
-    }
-
-    /** Show a page app on the stage — the desktop's call for its address. */
-    async function showPage(app) {
-        bindStage();
         const stage = document.getElementById("fb-app-stage");
-        if (stage) stage.hidden = false;
-        try {
-            await adding.get(app.id);
-            // The kit opened it from the address already, unless it was
-            // registered after the address changed and before it was bound.
-            if (sac.apps.active() !== app.id) {
-                let route = pagePath().split("/").slice(1).join("/");
-                try { route = decodeURIComponent(route); } catch { /* as written */ }
-                await sac.apps.open(app.id, null, { route });
-            }
-        } catch (err) {
-            report(app, "load", `${err?.code || "error"}: ${err?.message || "couldn't start"}`);
-            sac.toast?.(fb.t("fb.apps.no-start", "{name} couldn't start.", { name: nameOf(app) }), { kind: "error" });
+        if (stageBound || !window.sac?.apps || !stage) return;
+        stageBound = true;
+        // The router's outlet is the kit's home, shown while no view is on
+        // stage; tiles: false — no [data-app] click delegation, Fishbowl
+        // opens apps from code.
+        sac.apps.init({ viewHost: "#fb-app-stage", home: "#app-root", tiles: false });
+        // The stage covers the view area: there only while a view is on it.
+        document.addEventListener("sac:apps-changed", () => { stage.hidden = !sac.apps.active(); });
+    }
+
+    const pageRoutes = new Map();           // "#/<id>/*" → { label, icon } it was registered with
+
+    /** One router route per page app of the active workspace; the rest go. */
+    function syncPageRoutes() {
+        if (!window.sac?.router?.unregister) return;
+        const want = new Map(state.apps.filter(isPage).map((a) =>
+            [`#/${a.id}/*`, { label: nameOf(a), icon: a.manifest?.icon || "cube" }]));
+        for (const [hash, was] of pageRoutes) {
+            const now = want.get(hash);
+            if (now && now.label === was.label && now.icon === was.icon) continue;
+            sac.router.unregister(hash);
+            pageRoutes.delete(hash);
+        }
+        for (const [hash, r] of want) {
+            if (pageRoutes.has(hash)) continue;
+            pageRoutes.set(hash, r);
+            sac.router.register(hash, null, { label: r.label, icon: r.icon, nav: false, palette: false, scope: "scoped" });
         }
     }
 
-    /** Leave the page: the stage hides, the app keeps running (hidden). */
-    function hidePage() {
-        const stage = document.getElementById("fb-app-stage");
-        if (stage) stage.hidden = true;
-        const id = window.sac?.apps?.active?.();
-        if (!id) return;
-        // close() parks the view, and writes "#/" into the address — which
-        // already says where we went: keep it.
-        const keep = window.location.href;
-        const st = window.history.state;
-        sac.apps.close(id);
-        window.history.replaceState(st, "", keep);
-    }
+    // A workspace switch takes the apps of the one left at once: the switch
+    // (sac:scope-changed) comes before the router and the kit read the new
+    // address, so neither shows the old workspace's app there. The new
+    // workspace's arrive with its desktop (sync).
+    window.addEventListener("sac:scope-changed", () => {
+        if (state.ws === null || state.ws === workspace()) return;
+        state = Object.assign({}, state, { ws: workspace(), apps: [] });
+        register();
+    });
 
     /** Hand the active workspace's apps to the kit; drop what left. */
     function register() {
@@ -336,6 +330,7 @@
                 .finally(() => { if (adding.get(app.id) === p) adding.delete(app.id); });
             adding.set(app.id, p);
         }
+        syncPageRoutes();
     }
 
     /**
@@ -355,21 +350,21 @@
         };
         register();
         if (state.canArrange) checkUpdates();
-        // The desktop (a page app's address) and the ribbon look again.
+        // The ribbon looks again (a page app's name).
         window.dispatchEvent(new CustomEvent("fb:desktop-apps"));
     }
 
     async function open(id) {
         if (!byId(id)) return;
-        // A page app is an address: the desktop's route shows it.
+        // A page app is an address: the kit opens it there.
         if (isPage(byId(id))) { sac.router.navigate(sac.scope.hashFor(`#/${id}`)); return; }
         try {
             await adding.get(id);
             await sac.apps.open(id);
         }
         catch (err) {
+            // The error store hears it from the kit (sac:app-error, "load").
             const code = err?.code;
-            report(byId(id), "load", `${code || "error"}: ${err?.message || "couldn't start"}`);
             sac.toast?.(code === "integrity"
                 ? fb.t("fb.apps.changed", "{name} changed since you installed it — review the update first.", { name: nameOf(byId(id)) })
                 : fb.t("fb.apps.no-start", "{name} couldn't start.", { name: nameOf(byId(id)) }), { kind: "error" });
@@ -907,7 +902,7 @@
 
     fb.desktopApps = {
         sync, open, install, update, permissions, remove,
-        isPage, pageAt, showPage, hidePage,
+        isPage,
         get state() { return state; },
         updateFor, frameUrlOf, dataSize, formatBytes, identityOf,
         get byId() { return byId; },

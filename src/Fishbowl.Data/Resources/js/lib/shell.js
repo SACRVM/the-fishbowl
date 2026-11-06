@@ -82,12 +82,9 @@
     // brand.
     function syncTitle() {
         const current = sac.router.currentResource();
-        // A prefix route (Files, Tables) names every address below it too.
-        let route = sac.router.routes().find((r) => r.hash !== "#/" && (r.hash === current || (r.prefix && current.startsWith(r.hash + "/"))));
-        // A space's page app lives at an address of the desktop's own route
-        // (fb.desktopApps): it names itself like a page.
-        const page = !route && current !== "#/" ? fb.desktopApps?.pageAt?.() : null;
-        if (page) route = { label: page.manifest?.name || page.id, icon: page.manifest?.icon || "cube" };
+        // A prefix route (Files, Tables, a space's page app) names every
+        // address below it too.
+        const route = sac.router.routes().find((r) => r.hash !== "#/" && (r.hash === current || (r.prefix && current.startsWith(r.hash + "/"))));
         if (route) {
             nav.setAttribute("app-name", route.label.toUpperCase());
             if (route.icon) nav.setAttribute("app-icon", route.icon);
@@ -96,9 +93,11 @@
             nav.removeAttribute("app-name");
             nav.removeAttribute("app-icon");
         }
-        // Its row in the burger shows it is open, like a page's.
+        // A page app's row in the burger shows it is open, like a page's
+        // (its route is "#/<app id>", fb.desktopApps).
+        const appKey = route ? `app:${route.hash.slice(2)}` : null;
         document.querySelectorAll("#fb-nav > a.fb-window-link").forEach((a) =>
-            a.classList.toggle("active", !!page && a.dataset.key === `app:${page.id}`));
+            a.classList.toggle("active", a.dataset.key === appKey));
         appLabel = route?.label || null;
         syncDocumentTitle();
     }
@@ -119,6 +118,8 @@
     }
     window.addEventListener("hashchange", syncTitle);
     window.addEventListener("fb:desktop-apps", syncTitle);
+    // The kit titles the page when a view comes on stage or goes; ours wins.
+    document.addEventListener("sac:apps-changed", syncDocumentTitle);
 
     // --- Home in the burger -------------------------------------------------
     // The kit's panel lists every route but "#/" (Home is only its host jump,

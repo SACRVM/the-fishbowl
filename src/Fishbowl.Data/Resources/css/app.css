@@ -183,16 +183,10 @@ fb-secrets-settings-view.in-window > header h1 { display: none; }
 /* The action bar sits in the window's toolbar slot, whose padding is the window's. */
 sac-window > .wa-bar { padding: 0; }
 /* A space's page app (fb.desktopApps): the kit's stage, fixed over the view
-   area below the nav, the app's frame filling it; the desktop, whose
-   address it is, steps aside meanwhile. */
+   area below the nav, the app's frame filling it, there only while a view
+   is on it (the kit hides #app-root meanwhile). */
 #fb-app-stage { position: fixed; inset: calc(50px + env(safe-area-inset-top, 0px)) 0 0 0; }
-#fb-app-stage[hidden], fb-hub-view[page-app] { display: none; }
-/* Stopgap for a kit bug (SACRVM/sacrvm-appkit#47), to drop once a kit
-   release fixes it. sac.contextMenu and sac.tooltip.attach leave their host
-   in <body>, inline. That adds a 21px line under the full-height views, so
-   the page scrolls. Their panels are fixed popovers, so the host needs no
-   room in the flow. */
-body > sac-menu.sac-context-menu, body > sac-tooltip { position: fixed; top: 0; left: 0; }
+#fb-app-stage[hidden] { display: none; }
 /* fb.fileViewer: a PDF fills its window edge to edge — the browser's viewer
    brings its own bar; everything else sits in the kit's quick look. */
 sac-window.fb-file-viewer.pdf { --window-padding: 0; }
@@ -215,9 +209,9 @@ sac-window.fb-file-viewer sac-quick-look { height: 100%; }
     color: var(--text-muted);
 }
 .fb-row .toolbar { flex-shrink: 0; flex-wrap: wrap; }
-/* A row's icon actions are the kit's .icon-btn.tool (32px, 18px icon,
-   --text-muted), never the plain .icon-btn: that one is a tertiary 14px
-   mark in --text-dim, and over a window's glass it all but disappeared. */
+/* A row's icon actions are the kit's .icon-btn.tool (32px, 18px icon, a
+   44px target on touch), never the plain .icon-btn: that one is a 14px
+   mark, too slight for a row's actions. */
 
 /* A checkbox with its sentence (scopes, setup's ACME terms, archive-before-
    delete): the kit's <label> is a block caption above a field; this one

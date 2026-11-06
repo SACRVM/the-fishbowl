@@ -169,6 +169,10 @@
             if (menu) return menu;
             menu = document.createElement("sac-menu");
             menu.className = "sac-context-menu";
+            // Out of the flow: an inline host at the end of <body> would add
+            // a line box (21px) and make a viewport-tall page scroll. The
+            // panel is a fixed popover, so positioning is unaffected.
+            menu.style.cssText = "position:fixed;top:0;left:0";
             menu.addEventListener("sac:select", (e) => {
                 e.stopPropagation();
                 const c = current;

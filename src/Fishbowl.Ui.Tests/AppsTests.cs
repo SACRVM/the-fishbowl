@@ -577,7 +577,8 @@ public class AppsTests : IAsyncLifetime
         string? slug = null;
         try
         {
-            var res = await page.APIRequest.PostAsync($"{_fixture.BaseUrl}/api/v1/spaces", new() { DataObject = new { name = "Pages " + Guid.NewGuid().ToString("N")[..6] } });
+            var name = "Pages " + Guid.NewGuid().ToString("N")[..6];
+            var res = await page.APIRequest.PostAsync($"{_fixture.BaseUrl}/api/v1/spaces", new() { DataObject = new { name } });
             slug = (await res.JsonAsync())!.Value.GetProperty("slug").GetString();
             async Task Put(string path, string content)
             {
@@ -605,6 +606,8 @@ public class AppsTests : IAsyncLifetime
                 });
                 """);
             await Put(".apps/tool/app.json", "{\"name\":\"Tool\",\"tag\":\"tool-app\"}");
+            // A page whose script isn't there.
+            await Put(".apps/broken/app.json", "{\"name\":\"Broken\",\"tag\":\"broken-page\",\"kind\":\"view\"}");
             await Put(".apps/tool/app.js", "customElements.define('tool-app', class extends HTMLElement { mount() { this.innerHTML = '<p id=tool>a window</p>'; } });");
 
             var desk = $"{_fixture.BaseUrl}/#/space/{slug}/";
@@ -624,6 +627,14 @@ public class AppsTests : IAsyncLifetime
             await Assertions.Expect(frame.Locator("#grid")).ToHaveTextAsync("grid:yes");
             await Assertions.Expect(page.Locator("#fb-nav")).ToHaveAttributeAsync("app-name", "LEDGER");
             await Assertions.Expect(page.Locator("#fb-nav > a.fb-window-link[data-key='app:space.ledger']")).ToHaveClassAsync(new System.Text.RegularExpressions.Regex("\\bactive\\b"));
+            // The router's outlet (the kit's home) steps aside; the app is in
+            // the burger once, as our row — its route stays out of the kit's
+            // list (nav: false); the title names the space and the app.
+            await Assertions.Expect(page.Locator("#app-root")).ToBeHiddenAsync();
+            Assert.Equal(0, await page.Locator("#fb-nav").EvaluateAsync<int>(
+                "n => [...n.shadowRoot.querySelectorAll('a')].filter(a => (a.getAttribute('href') || '').includes('space.ledger')).length"));
+            Assert.Equal(1, await page.Locator("#fb-nav > a.fb-window-link[data-key='app:space.ledger']").CountAsync());
+            Assert.Equal($"{name} · Ledger — The Fishbowl", await page.TitleAsync());
             await page.ScreenshotAsync(new() { Path = Path.Combine(Shots, "desk-6-page-app.png") });
             await page.Locator("#fb-nav").EvaluateAsync("n => n.shadowRoot.querySelector('.burger, [part~=burger], button[aria-label]')?.click()");
             await page.WaitForTimeoutAsync(400);
@@ -668,6 +679,29 @@ public class AppsTests : IAsyncLifetime
             await page.Locator("fb-hub-view a.tile[data-key='app:space.tool']").ClickAsync();
             await Assertions.Expect(page.FrameLocator("sac-window iframe").Locator("#tool")).ToHaveTextAsync("a window", new() { Timeout = 15000 });
             Assert.EndsWith($"#/space/{slug}/", page.Url);
+
+            // A page that doesn't start, opened from its address: the kit says
+            // so, and the space's error store has it (kit's sac:app-error, "load").
+            await page.GotoAsync($"{_fixture.BaseUrl}/#/space/{slug}/space.broken");
+            var stored = "";
+            for (var i = 0; i < 50 && !(stored.Contains("\"app\":\"broken\"") && stored.Contains("\"kind\":\"load\"")); i++)
+            {
+                await page.WaitForTimeoutAsync(200);
+                stored = await (await page.APIRequest.GetAsync($"{_fixture.BaseUrl}/api/v1/spaces/{slug}/apps/errors?app=broken")).TextAsync();
+            }
+            Assert.Contains("\"kind\":\"load\"", stored);
+            Assert.Single(System.Text.Json.JsonDocument.Parse(stored).RootElement.GetProperty("errors").EnumerateArray(),
+                e => e.GetProperty("kind").GetString() == "load");
+
+            // Another workspace from the page: the space's app and its route
+            // go with the space, the personal desktop shows.
+            await page.GotoAsync($"{_fixture.BaseUrl}/#/space/{slug}/space.ledger");
+            await Assertions.Expect(stage).ToBeVisibleAsync();
+            await page.EvaluateAsync("() => sac.scope.set({ type: 'root' })");
+            await Assertions.Expect(page.Locator("fb-hub-view")).ToBeVisibleAsync();
+            await Assertions.Expect(stage).ToBeHiddenAsync();
+            Assert.EndsWith("/#/", page.Url);
+            Assert.Equal(0, await page.EvaluateAsync<int>("() => sac.router.routes().filter(r => r.hash === '#/space.ledger').length"));
             Assert.Empty(errors);
         }
         finally

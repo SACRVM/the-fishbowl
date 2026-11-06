@@ -218,6 +218,11 @@ sac-window,
     --glass-solid: var(--glass-hue);
     --tile:        color-mix(in srgb, var(--surface) 70%, transparent);     /* launcher tiles    */
     --tile-hover:  color-mix(in srgb, var(--surface) 90%, transparent);
+    /* The ground under a window's content: glass is for the chrome (title
+       bar, toolbar, frame); text, chips and row actions sit on a near-opaque
+       ground, so a bright desktop tile behind the window cannot wash out
+       their contrast. 6% of the blurred backdrop still shows through. */
+    --window-ground: color-mix(in srgb, var(--surface) 94%, transparent);
 
     /* Text — two-step secondary: --text-muted carries real secondary
        information (AA on every plane); --text-dim is strictly tertiary,
@@ -771,7 +776,10 @@ a.nav-icon-btn { text-decoration: none; }
     border: none;
     border-radius: var(--radius-m);
     background: transparent;
-    color: var(--text-dim);
+    /* --text-muted, not --text-dim: a thin 14px glyph at rest must clear 3 : 1
+       against a window's glass in both themes (it is 5.1 : 1 in light, 6.7 : 1
+       in dark; --text-dim was 2.9 : 1 in light). */
+    color: var(--text-muted);
     font-family: inherit;
     cursor: pointer;
     transition: color 120ms var(--ease-smooth), background 120ms var(--ease-smooth);

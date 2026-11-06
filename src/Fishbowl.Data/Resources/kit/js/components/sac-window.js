@@ -436,6 +436,7 @@ class SacWindow extends HTMLElement {
             }
             :host([compact]) .content {
                 padding-bottom: calc(var(--window-padding, 20px) + env(safe-area-inset-bottom, 0px));
+                background: transparent;   /* the whole window is opaque already */
             }
 
             .window-container {
@@ -529,6 +530,10 @@ class SacWindow extends HTMLElement {
                    page behind the window never moves under it. */
                 overscroll-behavior: contain;
                 padding: var(--window-padding, 20px);
+                /* Glass is the chrome; the content sits on a near-opaque
+                   ground (--window-ground), so muted text, chips and icon
+                   buttons keep their contrast over a busy desktop. */
+                background: var(--window-ground);
                 color: color-mix(in srgb, var(--fg) 78%, var(--bg));
                 font-size: 0.9rem;
                 line-height: 1.6;

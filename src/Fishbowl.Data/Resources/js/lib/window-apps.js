@@ -39,8 +39,8 @@
             win = document.createElement("sac-window");
             win.setAttribute("escape-closes", "");
             win.id = id;
-            // Not data-app: the kit's sac.apps.init() opens an app for any click
-            // inside an element carrying that attribute.
+            // Not data-app: that is the kit's attribute for an app opened by a
+            // click (sac.apps.init's delegation, which Fishbowl leaves off).
             win.dataset.windowApp = name;
             win.setAttribute("width", `min(${app.w}px, 94vw)`);
             win.setAttribute("height", `min(${app.h}px, 86vh)`);
