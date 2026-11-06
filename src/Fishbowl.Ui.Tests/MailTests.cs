@@ -234,6 +234,18 @@ public class MailTests
             await Assertions.Expect(page.Locator("fb-mail-view .mv-tagbar > sac-chip[label='sample']")).ToHaveCountAsync(1);
             var given = await page.Locator("fb-mail-view .mv-tagbar sac-chip-input").EvaluateAsync<string[]>("el => el.value");
             Assert.Equal(new[] { "bills" }, given);
+            // A tag made here in a colour of its own wears it in the list and
+            // the strip at once — not its hash colour (grey for this name),
+            // which the list painted while the colour was still on its way.
+            var input = page.Locator("fb-mail-view .mv-tagbar sac-chip-input");
+            await input.Locator("input.entry").FillAsync("aftermatch");   // a chip is there: the entry shows
+            await input.Locator(".opt.create").ClickAsync();
+            await input.Locator(".swatch-btn[data-color='blue']").ClickAsync();
+            await Assertions.Expect(rows.Filter(new() { HasText = "Your invoice" }).Locator("sac-chip[label='aftermatch']"))
+                .ToHaveAttributeAsync("color", "blue");
+            await Assertions.Expect(page.Locator("fb-mail-view #mv-tag-filter sac-chip[label='aftermatch']")).ToHaveAttributeAsync("color", "blue");
+            Assert.Equal("blue", (await (await page.APIRequest.GetAsync($"{_fixture.BaseUrl}/api/v1/spaces/{slug}/tags")).JsonAsync())!.Value.EnumerateArray()
+                .Single(t => t.GetProperty("name").GetString() == "aftermatch").GetProperty("color").GetString());
             // A plain mail's frame says the same colour scheme as its page: no white canvas under it.
             Assert.Equal("light", await page.Locator("fb-mail-view iframe.mv-html").EvaluateAsync<string>("el => getComputedStyle(el).colorScheme"));
         }

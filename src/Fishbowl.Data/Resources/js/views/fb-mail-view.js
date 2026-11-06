@@ -77,6 +77,14 @@ class FbMailView extends HTMLElement {
         };
         window.addEventListener("fb:intent", this._onIntent);
         this._onIntent();
+        // A tag made, recoloured, renamed or deleted anywhere (here, Manage
+        // tags, Mail rules): the rows and the strip take its colour.
+        this._onTagsInvalidated = () => fb.tags.all().then(() => {
+            if (!this.isConnected) return;
+            this.renderList();
+            this.renderTagFilter();
+        }, () => {});
+        window.addEventListener("fb-tags-invalidated", this._onTagsInvalidated);
         this._onVisible = () => { if (document.visibilityState === "visible") this.reload({ keep: true }); };
         document.addEventListener("visibilitychange", this._onVisible);
         // The list's keys and marks (kit 2.30), one for all three tabs: an
@@ -110,6 +118,7 @@ class FbMailView extends HTMLElement {
 
     disconnectedCallback() {
         if (this._onIntent) window.removeEventListener("fb:intent", this._onIntent);
+        if (this._onTagsInvalidated) window.removeEventListener("fb-tags-invalidated", this._onTagsInvalidated);
         if (this._onVisible) document.removeEventListener("visibilitychange", this._onVisible);
         this._rowMenu?.destroy();
         this._tabMenu?.destroy();
@@ -1055,7 +1064,18 @@ class FbMailView extends HTMLElement {
                 .filter((x) => x.userAssignable !== false && !this.sourceTags().has(x.name))
                 .map((x) => ({ name: x.name, color: x.color, count: x.mailCount }));
         } catch { /* no suggestions */ }
+        // A tag made here keeps the colour picked for it (like notes'): it is
+        // stored before the conversation gets it — the input says sac:create
+        // just before sac:change, and the server would make an unknown tag in
+        // its hash colour.
+        let created = Promise.resolve();
+        input.addEventListener("sac:create", (e) => {
+            created = fb.api.tags.upsertColor(e.detail.name, e.detail.color)
+                .then(() => fb.tags.invalidate())
+                .catch((err) => console.warn("[fb-mail-view] creating tag failed:", err?.status));
+        });
         const save = async () => {
+            await created;
             try {
                 const res = await this.api.setTags(threadId, input.value);
                 const th = this.thread(threadId);
@@ -1065,11 +1085,6 @@ class FbMailView extends HTMLElement {
             } catch (err) { sac.toast?.(fb.errors.text(err, this.t("tags-failed", "The tags couldn't be saved.")), { kind: "error" }); }
         };
         input.addEventListener("sac:change", save);
-        // A tag made here keeps the colour picked for it (like notes').
-        input.addEventListener("sac:create", async (e) => {
-            try { await fb.api.tags.upsertColor(e.detail.name, e.detail.color); fb.tags.invalidate(); }
-            catch (err) { console.warn("[fb-mail-view] creating tag failed:", err?.status); }
-        });
     }
 
     messageEl(m, open, threadId, single) {
