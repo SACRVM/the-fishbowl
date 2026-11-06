@@ -44,6 +44,14 @@
     if (!sac.icons.has("fb-rule")) {
         sac.icons.register("fb-rule", '<path d="M3 4h18l-7 8.5V19l-4 2v-8.5z"/>');
     }
+    // The Notes app's saved filters (a funnel, like a mail rule) and its
+    // board (columns of cards) — the kit has neither.
+    if (!sac.icons.has("fb-filter")) {
+        sac.icons.register("fb-filter", '<path d="M3 4h18l-7 8.5V19l-4 2v-8.5z"/>');
+    }
+    if (!sac.icons.has("fb-board")) {
+        sac.icons.register("fb-board", '<rect x="3" y="4" width="5" height="16" rx="1"/><rect x="10" y="4" width="5" height="11" rx="1"/><rect x="17" y="4" width="4" height="14" rx="1"/>');
+    }
     // Writing mail: reply, reply all, forward, send — the kit ships none.
     const mailIcons = {
         "fb-reply": '<path d="M9 17 4 12l5-5"/><path d="M20 18v-2a4 4 0 0 0-4-4H4"/>',

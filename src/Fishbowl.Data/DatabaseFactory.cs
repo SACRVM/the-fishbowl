@@ -13,7 +13,7 @@ public class DatabaseFactory
 {
     /// <summary>The user/space schema head: the PRAGMA user_version a context
     /// DB has once it is open. Raise it with every ApplyUserVN.</summary>
-    public const int UserSchemaHead = 30;
+    public const int UserSchemaHead = 31;
 
     private readonly string _dataRoot;
     private readonly string _usersPath;
@@ -610,9 +610,56 @@ public class DatabaseFactory
         if (version < 30)
         {
             ApplyUserV30(connection);
-            connection.Execute($"PRAGMA user_version = {UserSchemaHead}");
+            connection.Execute("PRAGMA user_version = 30");
             _logger.LogInformation("Applied user schema v30 to {DbPath}", ((SqliteConnection)connection).DataSource);
+            version = 30;
         }
+
+        if (version < 31)
+        {
+            ApplyUserV31(connection);
+            connection.Execute($"PRAGMA user_version = {UserSchemaHead}");
+            _logger.LogInformation("Applied user schema v31 to {DbPath}", ((SqliteConnection)connection).DataSource);
+        }
+    }
+
+    // Notes as documents for agents (spec 2026-11-06-notes-for-agents): tags
+    // on todos, a note's slug (unique in any case) and lock, what agents
+    // changed (note_versions), the Notes app's saved filters, and what a tag
+    // means.
+    private static void ApplyUserV31(IDbConnection connection)
+    {
+        // A table a test's hand-built old DB never had is left alone.
+        bool Table(string table) => connection.ExecuteScalar<long>(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = @table", new { table }) > 0;
+        bool Lacks(string table, string column) => Table(table)
+            && !connection.Query<string>($"SELECT name FROM pragma_table_info('{table}')").Contains(column);
+        if (Lacks("todos", "tags")) connection.Execute("ALTER TABLE todos ADD COLUMN tags TEXT NOT NULL DEFAULT '[]';");
+        if (Lacks("notes", "slug")) connection.Execute("ALTER TABLE notes ADD COLUMN slug TEXT;");
+        if (Lacks("notes", "locked")) connection.Execute("ALTER TABLE notes ADD COLUMN locked INTEGER NOT NULL DEFAULT 0;");
+        if (Lacks("tags", "description")) connection.Execute("ALTER TABLE tags ADD COLUMN description TEXT;");
+        if (Table("notes"))
+            connection.Execute("CREATE UNIQUE INDEX IF NOT EXISTS ux_notes_slug ON notes(slug COLLATE NOCASE) WHERE slug IS NOT NULL;");
+        connection.Execute(@"
+            CREATE TABLE IF NOT EXISTS note_versions (
+                id        TEXT PRIMARY KEY,
+                note_id   TEXT NOT NULL,
+                title     TEXT NOT NULL,
+                content   TEXT,
+                tags      TEXT NOT NULL DEFAULT '[]',
+                saved_at  TEXT NOT NULL,
+                saved_by  TEXT,
+                source    TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS ix_note_versions_note ON note_versions(note_id, saved_at);
+            CREATE TABLE IF NOT EXISTS note_filters (
+                id          TEXT PRIMARY KEY,
+                name        TEXT NOT NULL,
+                expr        TEXT NOT NULL,
+                position    REAL NOT NULL,
+                created_by  TEXT,
+                created_at  TEXT NOT NULL
+            );");
     }
 
     // Apple Mail writes "text, photo, text" as text parts around the photo,

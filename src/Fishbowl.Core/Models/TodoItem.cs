@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 
 namespace Fishbowl.Core.Models;
 
@@ -22,4 +23,8 @@ public class TodoItem
     // The user's order in the list (ascending). Null on create = append at
     // the end; null on update = keep the stored position.
     public double? Position { get; set; }
+
+    // The workspace's tags, under the notes' rules (user/space schema v31).
+    // Null on update = keep the stored ones (a client from before tags).
+    public List<string>? Tags { get; set; }
 }

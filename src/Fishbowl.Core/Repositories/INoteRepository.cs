@@ -37,6 +37,27 @@ public interface INoteRepository
         int offset,
         CancellationToken ct = default);
 
+    // Every note in change order (updated_at, then id — both ascending) for
+    // a copy kept in sync (MCP note_list): the tag filter, only what changed
+    // after `Since`, past the previous page's keyset. Limit 1–500.
+    Task<IReadOnlyList<NoteChange>> ListChangesAsync(ContextRef ctx, NoteChangeQuery query, CancellationToken ct = default);
+
+    // The note whose slug this is, in any case (user/space schema v31).
+    Task<Note?> GetBySlugAsync(ContextRef ctx, string slug, CancellationToken ct = default);
+
+    // One change applied to what is stored, in one transaction (NotePatch):
+    // the tags added and removed in place, an append, the lock. A locked note
+    // refuses a new title or text (409 note_locked) but takes an append.
+    // Source tags as for an update — except that a human change of tags
+    // alone (a board move) is no approval and keeps review:pending. An
+    // agent's change keeps the note as it was (note_versions). Null when the
+    // note isn't there.
+    Task<Note?> PatchAsync(ContextRef ctx, string id, NotePatch patch, NoteSource source, string? actorUserId, CancellationToken ct = default);
+
+    // What agents changed: the note before each of their writes, newest first.
+    Task<IReadOnlyList<NoteVersion>> ListVersionsAsync(ContextRef ctx, string noteId, CancellationToken ct = default);
+    Task<NoteVersion?> GetVersionAsync(ContextRef ctx, string noteId, string versionId, CancellationToken ct = default);
+
     Task<string> CreateAsync(ContextRef ctx, string actorUserId, Note note, CancellationToken ct = default);
     Task<string> CreateAsync(ContextRef ctx, string actorUserId, Note note, NoteSource source, CancellationToken ct = default);
     Task<bool> UpdateAsync(ContextRef ctx, Note note, CancellationToken ct = default);

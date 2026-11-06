@@ -33,20 +33,25 @@ public class TagRepository : ITagRepository
                  mail_use AS (SELECT je.value AS name, COUNT(DISTINCT m.thread_id) AS n
                                 FROM mail_messages m, json_each(m.tags) je GROUP BY je.value),
                  rule_use AS (SELECT je.value AS name, COUNT(DISTINCT r.id) AS n
-                                FROM mail_rules r, json_each(r.add_tags) je GROUP BY je.value)
+                                FROM mail_rules r, json_each(r.add_tags) je GROUP BY je.value),
+                 todo_use AS (SELECT je.value AS name, COUNT(DISTINCT d.id) AS n
+                                FROM todos d, json_each(d.tags) je GROUP BY je.value)
             SELECT t.name AS Name,
                    t.color AS Color,
+                   t.description AS Description,
                    t.created_at AS CreatedAt,
                    t.is_system AS IsSystem,
                    t.user_assignable AS UserAssignable,
                    t.user_removable AS UserRemovable,
                    COALESCE(nu.n, 0) AS UsageCount,
                    COALESCE(mu.n, 0) AS MailCount,
-                   COALESCE(ru.n, 0) AS RuleCount
+                   COALESCE(ru.n, 0) AS RuleCount,
+                   COALESCE(tu.n, 0) AS TodoCount
             FROM tags t
             LEFT JOIN note_use nu ON nu.name = t.name
             LEFT JOIN mail_use mu ON mu.name = t.name
             LEFT JOIN rule_use ru ON ru.name = t.name
+            LEFT JOIN todo_use tu ON tu.name = t.name
             ORDER BY t.name", cancellationToken: ct));
     }
 
@@ -67,7 +72,7 @@ public class TagRepository : ITagRepository
             new { name = normalized, color, createdAt = now }, cancellationToken: ct));
 
         return await db.QuerySingleAsync<Tag>(new CommandDefinition(
-            @"SELECT name AS Name, color AS Color, created_at AS CreatedAt,
+            @"SELECT name AS Name, color AS Color, created_at AS CreatedAt, description AS Description,
                      is_system AS IsSystem,
                      user_assignable AS UserAssignable,
                      user_removable AS UserRemovable,
@@ -123,6 +128,7 @@ public class TagRepository : ITagRepository
             await RewriteNoteTagsAsync(db, tx, oldN, newN, token);
             await RewriteMailTagsAsync(db, tx, oldN, newN, token);
             await RewriteRuleTagsAsync(db, tx, oldN, newN, token);
+            await RewriteTodoTagsAsync(db, tx, oldN, newN, token);
             return true;
         }, ct);
     }
@@ -147,9 +153,24 @@ public class TagRepository : ITagRepository
             await RewriteNoteTagsAsync(db, tx, normalized, newName: null, token);
             await RewriteMailTagsAsync(db, tx, normalized, newName: null, token);
             await RewriteRuleTagsAsync(db, tx, normalized, newName: null, token);
+            await RewriteTodoTagsAsync(db, tx, normalized, newName: null, token);
             return true;
         }, ct);
     }
+
+    public async Task<bool> SetDescriptionAsync(ContextRef ctx, string name, string? description, CancellationToken ct = default)
+    {
+        var normalized = TagName.Normalize(name);
+        var text = string.IsNullOrWhiteSpace(description) ? null : description.Trim();
+        if (text is { Length: > MaxDescriptionLength })
+            throw new ArgumentException($"A tag's description is at most {MaxDescriptionLength} characters.");
+        using var db = _dbFactory.CreateContextConnection(ctx);
+        return await db.ExecuteAsync(new CommandDefinition(
+            "UPDATE tags SET description = @text WHERE name = @normalized",
+            new { normalized, text }, cancellationToken: ct)) > 0;
+    }
+
+    public const int MaxDescriptionLength = 200;
 
     // ────────── Legacy (personal-context) aliases ──────────
 
@@ -228,6 +249,25 @@ public class TagRepository : ITagRepository
             await db.ExecuteAsync(new CommandDefinition(
                 "UPDATE mail_rules SET add_tags = @next WHERE id = @id",
                 new { next, id }, transaction: tx, cancellationToken: ct));
+        }
+    }
+
+    // And todos' (user/space schema v31) — with updated_at, like notes.
+    private static async Task RewriteTodoTagsAsync(
+        IDbConnection db, IDbTransaction tx, string oldName, string? newName, CancellationToken ct)
+    {
+        var rows = (await db.QueryAsync<(string Id, string Tags)>(new CommandDefinition(@"
+            SELECT id, tags FROM todos
+            WHERE EXISTS (SELECT 1 FROM json_each(todos.tags) je WHERE je.value = @oldName)",
+            new { oldName }, transaction: tx, cancellationToken: ct))).ToList();
+        var now = DateTime.UtcNow.ToString("o");
+        foreach (var (id, json) in rows)
+        {
+            var next = (System.Text.Json.JsonSerializer.Deserialize<List<string>>(json) ?? new()).Where(t => t != oldName).ToList();
+            if (newName is not null && !next.Contains(newName)) next.Add(newName);
+            await db.ExecuteAsync(new CommandDefinition(
+                "UPDATE todos SET tags = @next, updated_at = @now WHERE id = @id",
+                new { next, now, id }, transaction: tx, cancellationToken: ct));
         }
     }
 

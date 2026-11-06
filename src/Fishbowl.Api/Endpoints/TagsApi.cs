@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
 using System.Security.Claims;
+using Fishbowl.Core;
 using Fishbowl.Core.Models;
 using Fishbowl.Core.Repositories;
 
@@ -11,6 +12,7 @@ public static class TagsApi
 {
     public record UpsertColorRequest(string Color);
     public record RenameRequest(string NewName);
+    public record DescriptionRequest(string? Description);
 
     public static RouteGroupBuilder MapTagsApi(this IEndpointRouteBuilder routes)
     {
@@ -53,6 +55,25 @@ public static class TagsApi
         .Produces<Tag>()
         .Produces(StatusCodes.Status400BadRequest)
         .Produces(StatusCodes.Status401Unauthorized)
+        .RequireScope("write:tags");
+
+        group.MapPut("/{name}/description", async (
+            string name, DescriptionRequest body, ClaimsPrincipal user, ITagRepository repo, CancellationToken ct) =>
+        {
+            var userId = user.FindFirst("fishbowl_user_id")?.Value;
+            if (string.IsNullOrEmpty(userId)) return Results.Unauthorized();
+            try
+            {
+                return await repo.SetDescriptionAsync(ContextRef.User(userId), name, body.Description, ct)
+                    ? Results.NoContent() : Results.NotFound();
+            }
+            catch (ArgumentException ex)
+            {
+                return ApiErrors.BadRequest("invalid_value", ex.Message, new { reason = ex.Message });
+            }
+        })
+        .WithName("SetTagDescription")
+        .WithSummary("Sets what a tag means (one line, at most 200 characters; empty clears it).")
         .RequireScope("write:tags");
 
         group.MapPost("/{name}/rename", async (

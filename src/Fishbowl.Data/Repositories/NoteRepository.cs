@@ -5,6 +5,7 @@ using Fishbowl.Core.Models;
 using Fishbowl.Core.Repositories;
 using Fishbowl.Core.Search;
 using Fishbowl.Core.Util;
+using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 
@@ -92,6 +93,38 @@ public class NoteRepository : INoteRepository
             sql, new { tags, count = tags.Count }, cancellationToken: ct));
     }
 
+    public async Task<IReadOnlyList<NoteChange>> ListChangesAsync(ContextRef ctx, NoteChangeQuery query, CancellationToken ct = default)
+    {
+        using var db = _dbFactory.CreateContextConnection(ctx);
+        var where = new List<string>();
+        // An array, not a List<string>: Dapper writes a List<string> as JSON
+        // (JsonTagsHandler) instead of spreading it over IN (…).
+        var tags = query.Tags is { Count: > 0 } t ? t.Distinct().ToArray() : null;
+        if (tags is not null)
+            where.Add(query.Match == "all"
+                ? "(SELECT COUNT(DISTINCT je.value) FROM json_each(notes.tags) je WHERE je.value IN @tags) = @count"
+                : "EXISTS (SELECT 1 FROM json_each(notes.tags) je WHERE je.value IN @tags)");
+        // Stored as ISO-8601 UTC ("o"), so text order is time order.
+        if (query.Since is { } since) where.Add("notes.updated_at > @since");
+        if (query.AfterStamp is not null && query.AfterId is not null)
+            where.Add("(notes.updated_at > @afterStamp OR (notes.updated_at = @afterStamp AND notes.id > @afterId))");
+        var sql = "SELECT notes.*, notes.updated_at AS stamp FROM notes"
+            + (where.Count > 0 ? " WHERE " + string.Join(" AND ", where) : "")
+            + " ORDER BY notes.updated_at, notes.id LIMIT @limit";
+        var rows = await db.QueryAsync<Note, NoteStamp, NoteChange>(new CommandDefinition(sql, new
+        {
+            tags,
+            count = tags?.Length ?? 0,
+            since = query.Since?.ToUniversalTime().ToString("o"),
+            afterStamp = query.AfterStamp,
+            afterId = query.AfterId,
+            limit = Math.Clamp(query.Limit, 1, 500),
+        }, cancellationToken: ct), (note, stamp) => new NoteChange(note, stamp.Stamp), splitOn: "stamp");
+        return rows.ToList();
+    }
+
+    private sealed class NoteStamp { public string Stamp { get; set; } = ""; }
+
     public Task<string> CreateAsync(ContextRef ctx, string actorUserId, Note note, CancellationToken ct = default)
         => CreateAsync(ctx, actorUserId, note, NoteSource.Human, ct);
 
@@ -108,14 +141,15 @@ public class NoteRepository : INoteRepository
         note.CreatedAt = DateTime.UtcNow;
         note.UpdatedAt = note.CreatedAt;
         note.CreatedBy = actorUserId;
+        note.Slug = string.IsNullOrWhiteSpace(note.Slug) ? null : NoteSlug.Validate(note.Slug);
 
-        await _dbFactory.WithContextTransactionAsync(ctx, async (db, tx, token) =>
+        await SlugGuard(() => _dbFactory.WithContextTransactionAsync(ctx, async (db, tx, token) =>
         {
             note.Tags = (await _tagRepository.EnsureExistsAsync(db, tx, note.Tags, token)).ToList();
 
             await db.ExecuteAsync(new CommandDefinition(@"
-                INSERT INTO notes (id, title, content, content_secret, type, tags, created_by, created_at, updated_at, pinned, archived)
-                VALUES (@Id, @Title, @Content, @ContentSecret, @Type, @Tags, @CreatedBy, @CreatedAt, @UpdatedAt, @Pinned, @Archived)",
+                INSERT INTO notes (id, title, content, content_secret, type, tags, created_by, created_at, updated_at, pinned, archived, slug, locked)
+                VALUES (@Id, @Title, @Content, @ContentSecret, @Type, @Tags, @CreatedBy, @CreatedAt, @UpdatedAt, @Pinned, @Archived, @Slug, @Locked)",
                 new
                 {
                     note.Id,
@@ -128,7 +162,9 @@ public class NoteRepository : INoteRepository
                     CreatedAt = note.CreatedAt.ToString("o"),
                     UpdatedAt = note.UpdatedAt.ToString("o"),
                     Pinned = note.Pinned ? 1 : 0,
-                    Archived = note.Archived ? 1 : 0
+                    Archived = note.Archived ? 1 : 0,
+                    note.Slug,
+                    Locked = note.Locked ? 1 : 0,
                 }, transaction: tx, cancellationToken: token));
 
             await db.ExecuteAsync(new CommandDefinition(
@@ -142,7 +178,7 @@ public class NoteRepository : INoteRepository
                 }, transaction: tx, cancellationToken: token));
 
             await UpsertEmbeddingAsync(db, tx, note, token);
-        }, ct);
+        }, ct));
 
         return note.Id;
     }
@@ -155,9 +191,21 @@ public class NoteRepository : INoteRepository
         ApplySourceTags(note, source);
         EnforceLimits(ctx, note);
         note.UpdatedAt = DateTime.UtcNow;
+        // null keeps the stored slug, "" clears it.
+        var slug = note.Slug is null ? null : note.Slug.Trim().Length == 0 ? "" : NoteSlug.Validate(note.Slug);
 
-        return await _dbFactory.WithContextTransactionAsync<bool>(ctx, async (db, tx, token) =>
+        return await SlugGuard(() => _dbFactory.WithContextTransactionAsync<bool>(ctx, async (db, tx, token) =>
         {
+            var stored = await db.QuerySingleOrDefaultAsync<Note>(new CommandDefinition(
+                "SELECT * FROM notes WHERE id = @Id", new { note.Id }, transaction: tx, cancellationToken: token));
+            // An update never sets or lifts the lock (a patch does), and a
+            // locked note keeps its title and text — as stored, secret blocks
+            // as their markers (the client encrypts them anew on every save,
+            // so the ciphertext differs even when nothing did).
+            note.Locked = stored?.Locked ?? false;
+            if (stored is { Locked: true } && (note.Title != stored.Title || note.Content != stored.Content))
+                throw Locked();
+
             // Re-add any UserRemovable=false system tag that the existing
             // row carries — a human PUT that omits source:mcp should not
             // be able to wipe the provenance marker. SystemTags.Seeds is
@@ -165,12 +213,13 @@ public class NoteRepository : INoteRepository
             await PreserveLockedTagsAsync(db, tx, note, token);
 
             note.Tags = (await _tagRepository.EnsureExistsAsync(db, tx, note.Tags, token)).ToList();
+            note.Slug = slug is null ? stored?.Slug : slug.Length == 0 ? null : slug;
 
             var affected = await db.ExecuteAsync(new CommandDefinition(@"
                 UPDATE notes
                 SET title = @Title, content = @Content, content_secret = @ContentSecret,
                     type = @Type, tags = @Tags, updated_at = @UpdatedAt,
-                    pinned = @Pinned, archived = @Archived
+                    pinned = @Pinned, archived = @Archived, slug = @Slug
                 WHERE id = @Id",
                 new
                 {
@@ -182,8 +231,11 @@ public class NoteRepository : INoteRepository
                     UpdatedAt = note.UpdatedAt.ToString("o"),
                     Pinned = note.Pinned ? 1 : 0,
                     Archived = note.Archived ? 1 : 0,
+                    note.Slug,
                     note.Id
                 }, transaction: tx, cancellationToken: token));
+            if (affected > 0 && stored is not null && source == NoteSource.Mcp)
+                await KeepVersionAsync(db, tx, stored, note, actor: null, token);
 
             if (affected > 0)
             {
@@ -206,7 +258,7 @@ public class NoteRepository : INoteRepository
             }
 
             return affected > 0;
-        }, ct);
+        }, ct));
     }
 
     public async Task<bool> DeleteAsync(ContextRef ctx, string id, CancellationToken ct = default, string? deletedBy = null)
@@ -234,6 +286,173 @@ public class NoteRepository : INoteRepository
             return affected > 0;
         }, ct);
     }
+
+    public async Task<Note?> GetBySlugAsync(ContextRef ctx, string slug, CancellationToken ct = default)
+    {
+        using var db = _dbFactory.CreateContextConnection(ctx);
+        return await db.QuerySingleOrDefaultAsync<Note>(new CommandDefinition(
+            "SELECT * FROM notes WHERE slug = @slug COLLATE NOCASE", new { slug = slug.Trim() }, cancellationToken: ct));
+    }
+
+    public async Task<Note?> PatchAsync(ContextRef ctx, string id, NotePatch patch, NoteSource source, string? actorUserId, CancellationToken ct = default)
+    {
+        var slug = patch.Slug is null ? null : patch.Slug.Trim().Length == 0 ? "" : NoteSlug.Validate(patch.Slug);
+        return await SlugGuard(() => _dbFactory.WithContextTransactionAsync<Note?>(ctx, async (db, tx, token) =>
+        {
+            var stored = await db.QuerySingleOrDefaultAsync<Note>(new CommandDefinition(
+                "SELECT * FROM notes WHERE id = @id", new { id }, transaction: tx, cancellationToken: token));
+            if (stored is null) return null;
+            var note = SecretStripper.StripNote(stored);   // a copy to change …
+            note.Content = stored.Content;                 // … of the stored text
+            note.ContentSecret = stored.ContentSecret;
+            note.CreatedBy = stored.CreatedBy;
+
+            // Lifted first (the caller checked who may), so one patch can
+            // unlock and change the text.
+            if (patch.Locked == false) note.Locked = false;
+            if (note.Locked && ((patch.Title is not null && patch.Title != note.Title)
+                                || (patch.Content is not null && patch.Content != note.Content)))
+                throw Locked();
+            if (patch.Title is not null) note.Title = patch.Title;
+            if (patch.Content is not null) note.Content = patch.Content;
+            if (!string.IsNullOrWhiteSpace(patch.Append))
+            {
+                // Appending under a secret block would put text the client
+                // never encrypted into a note whose secrets it holds.
+                if (SecretStripper.ContainsSecret(note.Content) || note.ContentSecret is { Length: > 0 })
+                    throw new ResourceValidationException(new ResourceValidationError(NoteLimits.Resource, "append",
+                        "this note holds secrets — its text can only be changed in Fishbowl", ResourceValidationKind.Conflict, "secret_note"));
+                var body = (note.Content ?? "").TrimEnd();
+                note.Content = (body.Length > 0 ? body + "\n\n" : "") + patch.Append.Trim();
+            }
+            if (patch.Locked == true) note.Locked = true;
+            if (patch.Pinned is { } pinned) note.Pinned = pinned;
+            if (patch.Archived is { } archived) note.Archived = archived;
+            if (slug is not null) note.Slug = slug.Length == 0 ? null : slug;
+
+            note.Tags = PatchTags(stored.Tags, patch, source);
+            EnforceLimits(ctx, note);
+            note.Tags = (await _tagRepository.EnsureExistsAsync(db, tx, note.Tags, token)).ToList();
+
+            var textChanged = note.Title != stored.Title || note.Content != stored.Content;
+            var tagsChanged = !note.Tags.ToHashSet().SetEquals(stored.Tags);
+            if (!textChanged && !tagsChanged && note.Slug == stored.Slug && note.Locked == stored.Locked
+                && note.Pinned == stored.Pinned && note.Archived == stored.Archived)
+                return note;   // nothing to write
+
+            note.UpdatedAt = DateTime.UtcNow;
+            await db.ExecuteAsync(new CommandDefinition(@"
+                UPDATE notes
+                SET title = @Title, content = @Content, tags = @Tags, slug = @Slug, locked = @Locked,
+                    pinned = @Pinned, archived = @Archived, updated_at = @UpdatedAt
+                WHERE id = @Id",
+                new
+                {
+                    note.Title,
+                    note.Content,
+                    note.Tags,
+                    note.Slug,
+                    Locked = note.Locked ? 1 : 0,
+                    Pinned = note.Pinned ? 1 : 0,
+                    Archived = note.Archived ? 1 : 0,
+                    UpdatedAt = note.UpdatedAt.ToString("o"),
+                    note.Id,
+                }, transaction: tx, cancellationToken: token));
+            if (textChanged || tagsChanged)
+            {
+                await db.ExecuteAsync(new CommandDefinition(
+                    "UPDATE notes_fts SET title = @Title, content = @Content, tags = @TagsFlat WHERE rowid = (SELECT rowid FROM notes WHERE id = @Id)",
+                    new { note.Id, note.Title, Content = FtsContent(note.Content), TagsFlat = string.Join(' ', note.Tags) },
+                    transaction: tx, cancellationToken: token));
+                if (source == NoteSource.Mcp) await KeepVersionAsync(db, tx, stored, note, actorUserId, token);
+                await UpsertEmbeddingAsync(db, tx, note, token);
+            }
+            return note;
+        }, ct));
+    }
+
+    // A patch's tags: replaced, then added to and taken from, as stored.
+    // An agent's change is marked for review; a person's text change is the
+    // approval (as UpdateAsync), a change of tags alone isn't. Nobody adds a
+    // tag only the system gives, and nobody takes one the system keeps.
+    private static List<string> PatchTags(IReadOnlyCollection<string> stored, NotePatch patch, NoteSource source)
+    {
+        static string Norm(string t) => TagName.IsValid(t) ? TagName.Normalize(t) : t.Trim();
+        var tags = (patch.Tags ?? stored.ToList()).Where(t => !string.IsNullOrWhiteSpace(t)).Select(Norm).ToList();
+        foreach (var t in patch.AddTags ?? new())
+            if (!string.IsNullOrWhiteSpace(t) && !tags.Contains(Norm(t))) tags.Add(Norm(t));
+        var remove = (patch.RemoveTags ?? new()).Where(t => !string.IsNullOrWhiteSpace(t)).Select(Norm).ToHashSet();
+        tags.RemoveAll(remove.Contains);
+
+        var given = SystemTags.Seeds.ToDictionary(x => x.Name);
+        if (source == NoteSource.Mcp)
+        {
+            foreach (var t in new[] { "source:mcp", "review:pending" }) if (!tags.Contains(t)) tags.Add(t);
+        }
+        else
+        {
+            tags.RemoveAll(t => given.TryGetValue(t, out var spec) && !spec.UserAssignable && !stored.Contains(t));
+            if (patch.ChangesText) tags.Remove("review:pending");
+        }
+        foreach (var t in stored)
+            if (given.TryGetValue(t, out var spec) && !spec.UserRemovable && !tags.Contains(t)) tags.Add(t);
+        return tags.Distinct().ToList();
+    }
+
+    // The note as it was before an agent's write; the newest few a note.
+    private static async Task KeepVersionAsync(IDbConnection db, IDbTransaction tx, Note before, Note after, string? actor, CancellationToken ct)
+    {
+        if (before.Title == after.Title && before.Content == after.Content && before.Tags.ToHashSet().SetEquals(after.Tags)) return;
+        await db.ExecuteAsync(new CommandDefinition(@"
+            INSERT INTO note_versions (id, note_id, title, content, tags, saved_at, saved_by, source)
+            VALUES (@id, @noteId, @title, @content, @tags, @at, @by, 'mcp');
+            DELETE FROM note_versions WHERE note_id = @noteId AND id NOT IN (
+                SELECT id FROM note_versions WHERE note_id = @noteId ORDER BY saved_at DESC, id DESC LIMIT @kept);",
+            new
+            {
+                id = Ulid.NewUlid().ToString(),
+                noteId = before.Id,
+                title = before.Title,
+                content = before.Content,
+                tags = System.Text.Json.JsonSerializer.Serialize(before.Tags),
+                at = DateTime.UtcNow.ToString("o"),
+                by = actor,
+                kept = NoteVersionLimits.Kept,
+            }, transaction: tx, cancellationToken: ct));
+    }
+
+    public async Task<IReadOnlyList<NoteVersion>> ListVersionsAsync(ContextRef ctx, string noteId, CancellationToken ct = default)
+    {
+        using var db = _dbFactory.CreateContextConnection(ctx);
+        return (await db.QueryAsync<NoteVersion>(new CommandDefinition(
+            "SELECT * FROM note_versions WHERE note_id = @noteId ORDER BY saved_at DESC, id DESC",
+            new { noteId }, cancellationToken: ct))).ToList();
+    }
+
+    public async Task<NoteVersion?> GetVersionAsync(ContextRef ctx, string noteId, string versionId, CancellationToken ct = default)
+    {
+        using var db = _dbFactory.CreateContextConnection(ctx);
+        return await db.QuerySingleOrDefaultAsync<NoteVersion>(new CommandDefinition(
+            "SELECT * FROM note_versions WHERE note_id = @noteId AND id = @versionId",
+            new { noteId, versionId }, cancellationToken: ct));
+    }
+
+    private static ResourceValidationException Locked() => new(new ResourceValidationError(
+        NoteLimits.Resource, "locked", "this note is locked — its title and text don't change; text can only be appended",
+        ResourceValidationKind.Conflict, "note_locked"));
+
+    // A slug another note has: the unique index answers, a 409 says so.
+    private static async Task<T> SlugGuard<T>(Func<Task<T>> write)
+    {
+        try { return await write(); }
+        catch (SqliteException ex) when (ex.SqliteErrorCode == 19 && ex.Message.Contains("slug", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new ResourceValidationException(new ResourceValidationError(NoteLimits.Resource, "slug",
+                "another note of this workspace has that slug", ResourceValidationKind.Conflict, "slug_taken"));
+        }
+    }
+
+    private static async Task SlugGuard(Func<Task> write) => await SlugGuard(async () => { await write(); return true; });
 
     public async Task ReindexAsync(ContextRef ctx, string id, CancellationToken ct = default)
     {

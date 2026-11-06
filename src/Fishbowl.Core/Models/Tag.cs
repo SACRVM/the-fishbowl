@@ -13,6 +13,10 @@ public class Tag
     public int MailCount { get; set; }
     /// <summary>Mail rules that add the tag.</summary>
     public int RuleCount { get; set; }
+    /// <summary>Todos carrying the tag (user/space schema v31).</summary>
+    public int TodoCount { get; set; }
+    /// <summary>What the tag means — one line, for people and agents (v31).</summary>
+    public string? Description { get; set; }
 
     // Protection flags — see SystemTags for semantics.
     public bool IsSystem { get; set; }

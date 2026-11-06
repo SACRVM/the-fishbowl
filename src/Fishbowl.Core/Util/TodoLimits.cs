@@ -29,6 +29,18 @@ public static class TodoLimits
         if (item.Source is { Length: > MaxSourceLength })
             return new ResourceValidationError(Resource, "source", $"exceeds {MaxSourceLength} characters");
 
+        // Tags under the notes' rules (user/space schema v31).
+        if (item.Tags is { Count: > NoteLimits.MaxTagCount })
+            return new ResourceValidationError(Resource, "tags", $"exceeds {NoteLimits.MaxTagCount} entries");
+        foreach (var tag in item.Tags ?? new())
+        {
+            if (string.IsNullOrWhiteSpace(tag)) continue;
+            if (!TagName.IsValid(tag))
+                return new ResourceValidationError(Resource, "tags",
+                    $"a tag must be 1–{NoteLimits.MaxTagLength} characters of a–z, 0–9, _, : and -",
+                    ResourceValidationKind.Invalid);
+        }
+
         return null;
     }
 }

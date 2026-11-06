@@ -29,6 +29,8 @@ public class RememberTool : IMcpTool
             title = new { type = "string" },
             content = new { type = "string" },
             tags = new { type = "array", items = new { type = "string" } },
+            slug = new { type = "string", description = "A stable external key, unique in the workspace (a file name in a mirror)" },
+            locked = new { type = "boolean", description = "true: the note's title and text never change; text can only be appended" },
         },
         required = new[] { "title" },
     };
@@ -51,6 +53,8 @@ public class RememberTool : IMcpTool
             Title = title!,
             Content = content,
             Tags = tags,
+            Slug = McpArgs.String(arguments, "slug"),
+            Locked = McpArgs.Bool(arguments, "locked") ?? false,
         };
 
         var id = await _notes.CreateAsync(ctx, actor, note, NoteSource.Mcp, ct);

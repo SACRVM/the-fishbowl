@@ -42,6 +42,12 @@ class FbNotesView extends HTMLElement {
         // after each click to only show tags that appear on the remaining
         // notes (plus currently-selected ones), so no UI toggle is needed.
         this.tagFilter = { tags: [] };
+        // Saved filters (a name + a tag expression, the workspace's — in a
+        // space everyone's), the one in use per browser and workspace, and
+        // the board: null = the list, else the tag namespace it groups by.
+        this.filters = [];
+        this.activeFilter = null;
+        this.boardNs = null;
         // Clamp + "more"/"less" tab is owned by <sac-collapsible> around
         // the chip strip; expanded state lives on that element, not here.
         this._saveDebounce = null;
@@ -68,6 +74,9 @@ class FbNotesView extends HTMLElement {
         this._unhookLock = fb.vault?.onBeforeLock?.(() => this.flushSave());
         // A space Reader gets no write actions (the server would refuse them).
         this.writable = await fb.access.canWrite();
+        this.canAdmin = await fb.access.canAdmin();
+        this.ws = fb.api.workspace();
+        this._readPrefs();
         this.toggleAttribute("readonly", !this.writable);
         this.querySelector("#new-btn").hidden = !this.writable;
         this.querySelector("#empty-new-btn").hidden = !this.writable;
@@ -81,8 +90,10 @@ class FbNotesView extends HTMLElement {
         });
         this.paintHead();
         this._setViewToolbar();
+        await this._loadFilters();
         await this.loadNotes();
         if (!this.isConnected) return;   // left during the load — don't hook a dead view
+        this._setViewToolbar();          // the board's namespaces come from the notes
         this._renderTagFilter();
         this._refreshTagSuggestions();
         // "New note" / a note picked in the Ctrl-K palette (fb.desktop.go).
@@ -122,6 +133,22 @@ class FbNotesView extends HTMLElement {
                 icon:    "sync",
                 title:   fb.t("fb.notes.refresh", "Refresh notes"),
                 onClick: () => this.loadNotes(),
+            },
+            // List or board, grouped by a tag namespace (status:, kind: …).
+            {
+                id:    "nv-view-menu",
+                icon:  this.boardNs ? "fb-board" : "note",
+                title: fb.t("fb.notes.view", "View: list or board"),
+                menu: [
+                    { action: "list", label: fb.t("fb.notes.view-list", "List"), icon: "note", checked: !this.boardNs },
+                    ...this._boardNamespaces().map((ns) => ({
+                        action: "board:" + ns,
+                        label: fb.t("fb.notes.view-board", "Board by {ns}", { ns }),
+                        icon: "fb-board",
+                        checked: this.boardNs === ns,
+                    })),
+                ],
+                onSelect: (action) => this._setView(action === "list" ? null : action.slice(6)),
             },
             ...(this.writable === false ? [] : [{
                 icon:    "settings",
@@ -168,6 +195,7 @@ class FbNotesView extends HTMLElement {
     }
 
     async loadNotes({ prompt = true } = {}) {
+        this._linkPool = null;
         try {
             const opts = this.tagFilter.tags.length > 0
                 ? { tags: this.tagFilter.tags, match: "all" }
@@ -646,6 +674,76 @@ class FbNotesView extends HTMLElement {
                     flex: 1 0 auto;
                 }
                 fb-notes-view .nv-editor[hidden] { display: none; }
+
+                /* A saved filter in use: its funnel wears the accent. */
+                fb-notes-view #filters-btn.active { color: var(--accent); }
+                fb-notes-view .nv-slug { font-size: 11px; color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 30%; }
+                fb-notes-view .nv-slug[hidden], fb-notes-view .nv-links[hidden] { display: none; }
+                fb-notes-view .nv-history-btn { width: auto; flex: none; gap: 6px; font-size: 12px; }
+                fb-notes-view .nv-history-btn sac-icon { --icon-size: 14px; }
+
+                /* The note's links and the notes that link to it (fb.noteLinks). */
+                fb-notes-view .nv-links {
+                    display: flex;
+                    flex-direction: column;
+                    gap: 6px;
+                    padding: 10px clamp(1rem, 4vw, 20px);
+                    border-top: 1px solid var(--border);
+                    background: var(--panel);
+                    flex-shrink: 0;
+                }
+                fb-notes-view .nv-links-group { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+                fb-notes-view .nv-links-group[hidden] { display: none; }
+                fb-notes-view .nv-links-label {
+                    font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em;
+                    color: var(--text-muted); margin-right: 4px;
+                }
+                fb-notes-view .nv-link-missing { font-size: 12px; color: var(--text-muted); text-decoration: line-through dotted; }
+
+                /* The board (fb.notesBoard) in place of the editor: columns
+                   side by side, scrolling sideways; each column scrolls its cards. */
+                fb-notes-view .nv-board {
+                    flex: 1;
+                    min-height: 0;
+                    display: flex;
+                    align-items: stretch;
+                    gap: 12px;
+                    padding: 16px 24px;
+                    overflow-x: auto;
+                }
+                fb-notes-view .nv-board[hidden] { display: none; }
+                fb-notes-view .nb-col {
+                    flex: 0 0 260px;
+                    display: flex;
+                    flex-direction: column;
+                    min-height: 0;
+                    border: 1px solid var(--border);
+                    border-radius: var(--radius-l);
+                    background: var(--panel);
+                }
+                fb-notes-view .nb-col.drop { border-color: var(--accent); background: var(--accent-tint); }
+                fb-notes-view .nb-col-head {
+                    display: flex; align-items: center; gap: 8px;
+                    padding: 10px 12px;
+                    font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em;
+                    color: var(--text-muted);
+                    border-bottom: 1px solid var(--border);
+                }
+                fb-notes-view .nb-col-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+                fb-notes-view .nb-cards { flex: 1; min-height: 60px; overflow-y: auto; padding: 8px; display: flex; flex-direction: column; gap: 8px; }
+                fb-notes-view .nb-card {
+                    padding: 10px 12px;
+                    border: 1px solid var(--border);
+                    border-radius: var(--radius-m);
+                    background: var(--field);
+                    cursor: pointer;
+                }
+                fb-notes-view .nb-card:hover { border-color: var(--border-strong); background: var(--hover); }
+                fb-notes-view .nb-card:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+                fb-notes-view .nb-card.dragging { opacity: 0.5; }
+                fb-notes-view .nb-card.pending { border-left: 3px solid var(--accent-warm); }
+                fb-notes-view .nb-card-title { font-weight: 600; font-size: 13px; overflow-wrap: anywhere; }
+                fb-notes-view .nb-card-tags { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
             </style>
 
             <sac-split class="nv-split" id="split" collapse show="start"
@@ -666,6 +764,9 @@ class FbNotesView extends HTMLElement {
                         <span class="nv-list-title" id="list-title">${fb.t("fb.notes.all", "All Notes")}</span>
                         <button type="button" class="icon-btn danger" id="delete-marked-btn" hidden title="${fb.t("fb.notes.delete-marked", "Delete selected")}" aria-label="${fb.t("fb.notes.delete-marked", "Delete selected")}"><sac-icon name="trash"></sac-icon></button>
                         <button type="button" class="icon-btn" id="clear-marks-btn" hidden title="${fb.t("fb.notes.clear-marks", "Clear selection")}" aria-label="${fb.t("fb.notes.clear-marks", "Clear selection")}"><sac-icon name="close"></sac-icon></button>
+                        <sac-menu id="filters-menu">
+                            <button slot="trigger" type="button" class="icon-btn" id="filters-btn" title="${fb.t("fb.notes.filters", "Saved filters")}" aria-label="${fb.t("fb.notes.filters", "Saved filters")}"><sac-icon name="fb-filter"></sac-icon></button>
+                        </sac-menu>
                         <button class="icon-btn" id="toggle-archived-btn" title="${fb.t("fb.notes.show-archived", "Show archived")}" aria-label="${fb.t("fb.notes.show-archived", "Show archived")}">
                             <sac-icon name="archive"></sac-icon>
                         </button>
@@ -677,6 +778,7 @@ class FbNotesView extends HTMLElement {
                 </aside>
 
                 <main class="nv-editor-pane" slot="end">
+                    <div class="nv-board" id="board" hidden></div>
                     <div class="nv-editor-body">
                         <div class="empty-state nv-empty" id="editor-empty">
                             <sac-icon name="note"></sac-icon>
@@ -688,12 +790,20 @@ class FbNotesView extends HTMLElement {
                             <sac-md-editor id="content" class="nv-content-input" placeholder="${fb.t("fb.notes.placeholder", "Start writing — the first line is the title")}"></sac-md-editor>
                         </div>
                     </div>
+                    <section class="nv-links" id="links" hidden>
+                        <div class="nv-links-group" id="links-out"><span class="nv-links-label">${fb.t("fb.notes.links", "Links")}</span></div>
+                        <div class="nv-links-group" id="links-in"><span class="nv-links-label">${fb.t("fb.notes.linked-from", "Linked from")}</span></div>
+                    </section>
                     <section class="nv-editor-tagbar" id="tagbar" hidden>
                         <sac-chip-input id="tag-input" add-label="${fb.t("fb.notes.add-tag", "Add tag")}" allow-create></sac-chip-input>
                     </section>
                     <footer class="nv-editor-footer" id="editor-footer" hidden>
                         <span class="nv-editor-footer-meta">
                             ${fb.t("fb.notes.updated", "Updated")} <span id="timestamp"></span>
+                        </span>
+                        <code class="nv-slug" id="slug" hidden title="${fb.t("fb.notes.slug", "The note's stable key")}"></code>
+                        <span class="nv-archived-pill" id="note-locked-pill" hidden title="${fb.t("fb.notes.locked-title", "Locked: the title and text don't change; text can only be added at the end")}">
+                            <sac-icon name="lock"></sac-icon> ${fb.t("fb.notes.locked-note", "Locked")}
                         </span>
                         <span class="nv-archived-pill" id="archived-pill" hidden>
                             <sac-icon name="archive"></sac-icon> ${fb.t("fb.notes.archived-ro", "Archived · Read-only")}
@@ -703,6 +813,9 @@ class FbNotesView extends HTMLElement {
                             <sac-icon name="lock"></sac-icon> ${fb.t("fb.notes.locked-pill", "Secrets locked · Unlock")}
                         </button>
                         <div class="nv-editor-footer-spacer"></div>
+                        <button type="button" class="icon-btn tool" id="back-to-board-btn" hidden title="${fb.t("fb.notes.back-to-board", "Back to the board")}" aria-label="${fb.t("fb.notes.back-to-board", "Back to the board")}"><sac-icon name="fb-board"></sac-icon></button>
+                        <button type="button" class="btn nv-history-btn" id="history-btn" hidden><sac-icon name="clock"></sac-icon><span></span></button>
+                        <button type="button" class="icon-btn tool" id="lock-btn" hidden><sac-icon name="lock"></sac-icon></button>
                     </footer>
                 </main>
             </sac-split>
@@ -802,6 +915,20 @@ class FbNotesView extends HTMLElement {
         });
         // Pin, archive and delete live on each list row (see renderList's
         // action buttons).
+
+        this.querySelector("#filters-menu").addEventListener("sac:select", (e) => this._onFilterMenu(e.detail.action));
+        this.querySelector("#lock-btn").addEventListener("click", () => this._toggleLock());
+        this.querySelector("#history-btn").addEventListener("click", () => this._openHistory());
+        this.querySelector("#back-to-board-btn").addEventListener("click", () => this._showBoard());
+        // A link to another note (fb.noteLinks): its chip under the text, or
+        // Ctrl/⌘+click on it in the text — the editor renders none of the
+        // note-link forms itself. In a read-only note a plain click on a
+        // rendered link opens it too (it would open "#" in a new tab).
+        this.querySelector("#links").addEventListener("click", (e) => {
+            const chip = e.target.closest("sac-chip[data-note]");
+            if (chip) this.select(chip.dataset.note);
+        });
+        contentEl.addEventListener("click", (e) => this._linkClick(e), true);
     }
 
     /** Suggestions for the tag input: every tag the user may assign, most
@@ -839,6 +966,9 @@ class FbNotesView extends HTMLElement {
         } catch {
             allTags = [];
         }
+        // The board's columns are the namespace's tags, also when empty.
+        this._allTags = allTags;
+        if (this.boardNs && !this._openNote) this._renderBoard();
 
         const selected = new Set(this.tagFilter.tags);
         let visible;
@@ -946,20 +1076,27 @@ class FbNotesView extends HTMLElement {
     // Delete and Clear in place of the archive toggle and "+".
     paintHead() {
         const n = this.sel?.marked.length || 0;
+        const filter = this.filters.find((f) => f.id === this.activeFilter);
         this.querySelector("#list-title").textContent = n
             ? (n === 1 ? fb.t("fb.notes.marked-1", "1 selected") : fb.t("fb.notes.marked", "{n} selected", { n }))
-            : this.showArchived
-                ? fb.t("fb.notes.all-archived", "All + Archived")
-                : fb.t("fb.notes.all", "All Notes");
+            : filter
+                ? filter.name
+                : this.showArchived
+                    ? fb.t("fb.notes.all-archived", "All + Archived")
+                    : fb.t("fb.notes.all", "All Notes");
         this.querySelector("#toggle-archived-btn").hidden = n > 0;
+        this.querySelector("#filters-menu").hidden = n > 0;
+        this.querySelector("#filters-btn").classList.toggle("active", !!filter);
         this.querySelector("#new-btn").hidden = this.writable === false || n > 0;
         this.querySelector("#delete-marked-btn").hidden = n === 0;
         this.querySelector("#clear-marks-btn").hidden = n === 0;
     }
 
     renderList() {
+        const expr = this._filterExpr();
         const filtered = this.notes.filter(n => {
             if (!this.showArchived && n.archived) return false;
+            if (expr && !expr.test(n.tags)) return false;
             // Tag filter is server-side in browse mode (loadNotes passes it
             // as a query param) but search results come back unfiltered,
             // so apply it here whenever a search is active.
@@ -981,6 +1118,8 @@ class FbNotesView extends HTMLElement {
         // Search mode: preserve the server's score order — pinned boost
         // would hide the relevance signal that's the whole point of search.
 
+        this._shown = filtered;
+        if (this.boardNs && !this._openNote) this._renderBoard();
         const list = this.querySelector("#note-list");
         if (filtered.length === 0) {
             list.innerHTML = `<div class="nv-empty-list">${fb.t("fb.notes.empty-list", "No notes.")}</div>`;
@@ -1078,6 +1217,8 @@ class FbNotesView extends HTMLElement {
             this.renderList();
             return;
         }
+        this.querySelector("#board").hidden         = true;
+        this.querySelector(".nv-editor-body").hidden = false;
         this.querySelector("#editor-empty").hidden  = true;
         this.querySelector("#editor").hidden        = false;
         this.querySelector("#tagbar").hidden        = false;
@@ -1085,6 +1226,10 @@ class FbNotesView extends HTMLElement {
         this._showInEditor(note);
         this.querySelector("#tag-input").value = note.tags || [];
         this.querySelector("#timestamp").textContent = this.formatFullTimestamp(note.updatedAt);
+        this.querySelector("#back-to-board-btn").hidden = !this.boardNs;
+        this._paintNoteMeta(note);
+        this._renderLinks(note);
+        this._refreshHistory(note);
         this.updateToolbar(note);
         // sac-md-editor autosizes itself on value-set (deferred to next
         // frame internally), so no explicit autosize hook needed here.
@@ -1206,7 +1351,7 @@ class FbNotesView extends HTMLElement {
     _applyReadOnly(note) {
         const locked = hasLockedSecrets(note) || !!note._hit;
         this.querySelector("#locked-pill").hidden = !locked;
-        const ro = !!note.archived || locked || this.writable === false;
+        const ro = !!note.archived || locked || !!note.locked || this.writable === false;
         this.querySelector("#tag-input")?.toggleAttribute("disabled", this.writable === false || !!note._hit);
         const editor = this.querySelector("#editor");
         editor.classList.toggle("readonly", ro);
@@ -1226,7 +1371,12 @@ class FbNotesView extends HTMLElement {
         this.querySelector("#timestamp").textContent = "";
         const tagInput = this.querySelector("#tag-input");
         if (tagInput) tagInput.value = [];
+        this.querySelector("#links").hidden = true;
         // Toolbar stays — manage-tags is view-scoped, not per-note.
+        if (this.boardNs) {
+            this.querySelector("#split").show = "end";
+            this._renderBoard();
+        }
     }
 
     async saveSelected() {
@@ -1251,7 +1401,7 @@ class FbNotesView extends HTMLElement {
         if (text === this._loadedText && !tagsChanged) return;
         const previousText = this._loadedText;
         this._loadedText = text;
-        if (!locked) {
+        if (!locked && text !== previousText) {
             note.title   = titleFromText(text);
             note.content = text;
         }
@@ -1276,6 +1426,7 @@ class FbNotesView extends HTMLElement {
             this._swapIn(note);
             this._updateRowInPlace(note);
             this._lastSaveError = null;
+            if (this._openNote === note) this._renderLinks(note);
         } catch (err) {
             // Not saved: the next edit or flush must try again.
             if (this._openNote === note && this._loadedText === text) this._loadedText = previousText;
@@ -1532,6 +1683,377 @@ class FbNotesView extends HTMLElement {
             console.error("[fb-notes-view] create failed:", err);
             window.sac?.toast?.(fb.errors.text(err, fb.t("fb.notes.create-failed", "Couldn't create the note.")), { kind: "error" });
         }
+    }
+
+    // ── Saved filters, the board, links, the lock, history ───────────────
+    // (spec 2026-11-06-notes-for-agents)
+
+    _prefsKey(what) { return `fb.notes.${what}.${this.ws}`; }
+
+    /** The filter in use and the board, per browser and workspace. */
+    _readPrefs() {
+        try {
+            this.activeFilter = localStorage.getItem(this._prefsKey("filter")) || null;
+            this.boardNs = localStorage.getItem(this._prefsKey("board")) || null;
+        } catch { /* storage off: the list, unfiltered */ }
+    }
+
+    _writePrefs() {
+        try {
+            for (const [what, value] of [["filter", this.activeFilter], ["board", this.boardNs]]) {
+                if (value) localStorage.setItem(this._prefsKey(what), value);
+                else localStorage.removeItem(this._prefsKey(what));
+            }
+        } catch { /* storage off: this visit only */ }
+    }
+
+    async _loadFilters() {
+        try { this.filters = await this.api.filters.list(); }
+        catch (err) { console.warn("[fb-notes-view] saved filters unavailable:", err); this.filters = []; }
+        if (this.activeFilter && !this.filters.some((f) => f.id === this.activeFilter)) this.activeFilter = null;
+        this._renderFilterMenu();
+        this.paintHead();
+    }
+
+    /** The saved filter in use, compiled — null when none (or unreadable). */
+    _filterExpr() {
+        const f = this.filters.find((x) => x.id === this.activeFilter);
+        if (!f) return null;
+        try { return fb.tagExpr.compile(f.expr); } catch { return null; }
+    }
+
+    _renderFilterMenu() {
+        const menu = this.querySelector("#filters-menu");
+        if (!menu) return;
+        for (const el of [...menu.children]) if (el.getAttribute("slot") !== "trigger") el.remove();
+        const item = (action, icon, label, checked, danger) => {
+            const b = document.createElement("button");
+            b.dataset.action = action;
+            if (danger) b.setAttribute("data-danger", "");
+            b.innerHTML = `<sac-icon name="${icon}"></sac-icon><span></span>`;
+            b.querySelector("span").textContent = label;
+            if (checked) {
+                b.setAttribute("aria-checked", "true");
+                b.insertAdjacentHTML("beforeend", `<sac-icon class="fb-context-check" name="check"></sac-icon>`);
+            }
+            return b;
+        };
+        const active = this.filters.find((f) => f.id === this.activeFilter);
+        const nodes = [item("filter:", "note", fb.t("fb.notes.filter-none", "All notes"), !active)];
+        if (this.filters.length) {
+            nodes.push(document.createElement("hr"));
+            for (const f of this.filters) {
+                const b = item("filter:" + f.id, "fb-filter", f.name, f.id === this.activeFilter);
+                b.title = f.expr;
+                nodes.push(b);
+            }
+        }
+        if (this.writable !== false) {
+            nodes.push(document.createElement("hr"), item("new", "plus", fb.t("fb.notes.filter-new", "New filter…")));
+            if (active) nodes.push(
+                item("edit", "pencil", fb.t("fb.notes.filter-edit", "Edit “{name}”…", { name: active.name })),
+                item("delete", "trash", fb.t("fb.notes.filter-delete", "Delete “{name}”", { name: active.name }), false, true));
+        }
+        menu.append(...nodes);
+    }
+
+    async _onFilterMenu(action) {
+        if (action.startsWith("filter:")) {
+            this.activeFilter = action.slice(7) || null;
+            this._writePrefs();
+            this._renderFilterMenu();
+            this.paintHead();
+            this.renderList();
+            return;
+        }
+        const active = this.filters.find((f) => f.id === this.activeFilter);
+        if (action === "new") return this._filterDialog(null);
+        if (action === "edit" && active) return this._filterDialog(active);
+        if (action === "delete" && active) {
+            const answer = await sac.dialog.confirm({
+                title: fb.t("fb.notes.filter-delete-title", "Delete the filter “{name}”?", { name: active.name }),
+                message: fb.t("fb.notes.filter-delete-msg", "Only the filter goes; the notes stay as they are."),
+                buttons: [
+                    { action: "cancel", label: fb.t("fb.common.cancel", "Cancel"), kind: "default" },
+                    { action: "delete", label: fb.t("fb.common.delete", "Delete"), kind: "destructive" },
+                ],
+            });
+            if (answer !== "delete") return;
+            try {
+                await this.api.filters.remove(active.id);
+                this.activeFilter = null;
+                this._writePrefs();
+                await this._loadFilters();
+                this.renderList();
+            } catch (err) {
+                sac.toast?.(fb.errors.text(err, fb.t("fb.notes.filter-failed", "Couldn't change the filter.")), { kind: "error" });
+            }
+        }
+    }
+
+    /** New or edited filter: a name and a tag expression, with how many of
+     *  the notes here match while it is typed. */
+    async _filterDialog(filter) {
+        let saved = null;
+        const ok = await fb.mailAccounts.formDialog({
+            title: filter ? fb.t("fb.notes.filter-edit-title", "Edit the filter") : fb.t("fb.notes.filter-new-title", "New filter"),
+            primary: fb.t("fb.notes.filter-save", "Save"),
+            width: "520px",
+            html: `
+                <label>${fb.t("fb.notes.filter-name", "Name")}<input name="name" type="text" maxlength="100"></label>
+                <label>${fb.t("fb.notes.filter-expr", "Tags")}<input name="expr" type="text" maxlength="1000" spellcheck="false"
+                    placeholder="kind:decision AND NOT status:superseded"></label>
+                <p class="fb-filter-hint">${fb.t("fb.notes.filter-hint", "Tags with AND, OR and NOT (or a leading -), brackets to group; side by side means AND. status:* is any status.")}</p>
+                <p class="fb-filter-count" aria-live="polite"></p>`,
+            init: (form) => {
+                const name = form.querySelector("[name=name]"), expr = form.querySelector("[name=expr]");
+                const count = form.querySelector(".fb-filter-count");
+                name.value = filter?.name || "";
+                expr.value = filter?.expr || "";
+                const paint = () => {
+                    if (!expr.value.trim()) { count.textContent = ""; return; }
+                    try {
+                        const f = fb.tagExpr.compile(expr.value);
+                        const n = this.notes.filter((x) => (this.showArchived || !x.archived) && f.test(x.tags)).length;
+                        count.textContent = n === 1 ? fb.t("fb.notes.filter-count-1", "1 note here matches")
+                            : fb.t("fb.notes.filter-count", "{n} notes here match", { n });
+                    } catch (err) { count.textContent = err.message; }
+                };
+                expr.addEventListener("input", paint);
+                paint();
+                setTimeout(() => (filter ? expr : name).focus(), 50);
+            },
+            submit: async (dlg) => {
+                const name = dlg.querySelector("[name=name]").value.trim();
+                const expr = dlg.querySelector("[name=expr]").value.trim();
+                if (!name) return fb.t("fb.notes.filter-need-name", "Give the filter a name.");
+                const problem = fb.tagExpr.check(expr);
+                if (problem) return problem;
+                try {
+                    saved = filter ? await this.api.filters.update(filter.id, { name, expr })
+                        : await this.api.filters.create({ name, expr });
+                    return null;
+                } catch (err) {
+                    return fb.errors.text(err, fb.t("fb.notes.filter-failed", "Couldn't change the filter."));
+                }
+            },
+        });
+        if (!ok || !saved) return;
+        this.activeFilter = saved.id;
+        this._writePrefs();
+        await this._loadFilters();
+        this.renderList();
+    }
+
+    /** Namespaces to group a board by: status first, then the most used. */
+    _boardNamespaces() {
+        const list = fb.notesBoard.namespaces(this.notes, this._allTags || []);
+        if (this.boardNs && !list.includes(this.boardNs)) list.unshift(this.boardNs);
+        return list;
+    }
+
+    async _setView(ns) {
+        await this.flushSave();
+        this.boardNs = ns || null;
+        this._writePrefs();
+        this._setViewToolbar();
+        if (this.boardNs) this.clearSelection();
+        else {
+            this.querySelector("#board").hidden = true;
+            this.querySelector(".nv-editor-body").hidden = false;
+            this.querySelector("#split").show = "start";
+        }
+    }
+
+    async _showBoard() {
+        await this.flushSave();
+        this.clearSelection();
+    }
+
+    _renderBoard() {
+        const board = this.querySelector("#board");
+        if (!board || !this.boardNs) return;
+        const ns = this.boardNs;
+        board.hidden = false;
+        this.querySelector(".nv-editor-body").hidden = true;
+        fb.notesBoard.render(board, {
+            notes: this._shown || [],
+            ns,
+            values: (this._allTags || []).filter((t) => t.name.startsWith(ns + ":")).map((t) => t.name.slice(ns.length + 1)),
+            writable: this.writable !== false,
+            storageKey: `fb.notes.board-order.${this.ws}.${ns}`,
+            onOpen: (id) => this.select(id),
+            onMove: (note, to, opts) => this._moveCard(note, to, opts),
+        });
+    }
+
+    /** A card to another column: the namespace's tags off, the column's on —
+     *  one patch, tags in place, so review:pending stays. */
+    async _moveCard(note, to, { focus } = {}) {
+        const ns = this.boardNs;
+        const add = to ? [`${ns}:${to}`] : [];
+        const remove = (note.tags || []).filter((t) => t.startsWith(ns + ":") && !add.includes(t));
+        try {
+            const updated = await this.api.patch(note.id, { addTags: add, removeTags: remove });
+            note.tags = updated.tags || [];
+            note.updatedAt = updated.updatedAt;
+            this.renderList();
+            if (focus) this.querySelector(`.nb-card[data-id="${CSS.escape(note.id)}"]`)?.focus();
+        } catch (err) {
+            sac.toast?.(fb.errors.text(err, fb.t("fb.notes.board.move-failed", "Couldn't move the note.")), { kind: "error" });
+        }
+    }
+
+    /** Every note, for resolving links and finding who links here — the
+     *  list itself unless a tag filter or a search narrowed it. */
+    async _linkPoolFor() {
+        if (!this.searchActive && this.tagFilter.tags.length === 0) return this.notes;
+        if (!this._linkPool) this._linkPool = this.api.list(undefined, { prompt: false }).catch(() => this.notes);
+        return this._linkPool;
+    }
+
+    async _renderLinks(note) {
+        const box = this.querySelector("#links");
+        if (!box) return;
+        const pool = await this._linkPoolFor();
+        if (this._openNote?.id !== note.id) return;
+        this._pool = pool;
+        const out = fb.noteLinks.outgoing(note, pool);
+        const back = fb.noteLinks.backlinks(note, pool);
+        const fill = (group, entries) => {
+            const label = group.querySelector(".nv-links-label");
+            group.replaceChildren(label, ...entries.map(({ link, note: target }) => {
+                if (!target) {
+                    const span = document.createElement("span");
+                    span.className = "nv-link-missing";
+                    span.textContent = link.label;
+                    span.title = fb.t("fb.notes.link-missing", "No note with this title or slug");
+                    return span;
+                }
+                const chip = document.createElement("sac-chip");
+                chip.setAttribute("clickable", "");
+                chip.setAttribute("label", target.title || fb.t("fb.notes.untitled", "Untitled"));
+                chip.setAttribute("color", "gray");
+                chip.dataset.note = target.id;
+                return chip;
+            }));
+            group.hidden = entries.length === 0;
+        };
+        fill(this.querySelector("#links-out"), out);
+        fill(this.querySelector("#links-in"), back.map((n) => ({ link: null, note: n })));
+        box.hidden = !out.length && !back.length;
+    }
+
+    /** Ctrl/⌘+click on a note link in the text (or a plain click on a
+     *  rendered one in a read-only note) opens the note it names. */
+    _linkClick(e) {
+        const editor = this.querySelector("#content");
+        const path = e.composedPath();
+        const anchor = path.find((n) => n.tagName === "A");
+        const ro = editor.hasAttribute("readonly");
+        if (!(e.ctrlKey || e.metaKey) && !(ro && anchor)) return;
+        const line = path.find((n) => n.classList?.contains?.("line"));
+        if (!line) return;
+        const text = line.textContent;
+        let link = null;
+        const pos = document.caretPositionFromPoint?.(e.clientX, e.clientY, { shadowRoots: [editor.shadowRoot] });
+        if (pos && line.contains(pos.offsetNode)) {
+            const walker = document.createTreeWalker(line, NodeFilter.SHOW_TEXT);
+            let col = 0;
+            for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+                if (node === pos.offsetNode) { col += pos.offset; break; }
+                col += node.textContent.length;
+            }
+            link = fb.noteLinks.at(text, col);
+        }
+        const all = fb.noteLinks.parse(text);
+        if (!link && anchor) link = all.find((l) => l.label === anchor.textContent.trim()) || null;
+        if (!link && !anchor && all.length === 1) link = all[0];
+        if (!link) return;
+        e.preventDefault();
+        e.stopPropagation();
+        const target = fb.noteLinks.resolve(link, this._openNote, this._pool || this.notes);
+        if (target) this.select(target.id);
+        else sac.toast?.(fb.t("fb.notes.link-missing", "No note with this title or slug"), { kind: "error" });
+    }
+
+    /** Footer: the slug, the lock (a pill while locked; locking for any
+     *  writer, unlocking for the owner or a space's Admin). */
+    _paintNoteMeta(note) {
+        const slug = this.querySelector("#slug");
+        slug.textContent = note.slug || "";
+        slug.hidden = !note.slug;
+        this.querySelector("#note-locked-pill").hidden = !note.locked;
+        const btn = this.querySelector("#lock-btn");
+        btn.hidden = this.writable === false || !!note._hit || (note.locked && !this.canAdmin);
+        btn.querySelector("sac-icon").setAttribute("name", note.locked ? "unlock" : "lock");
+        btn.title = note.locked ? fb.t("fb.notes.unlock-note", "Unlock this note") : fb.t("fb.notes.lock-note", "Lock this note");
+        btn.setAttribute("aria-label", btn.title);
+    }
+
+    async _toggleLock() {
+        const note = this._openNote;
+        if (!note || note._hit) return;
+        await this.flushSave();
+        const next = !note.locked;
+        if (next) {
+            const answer = await sac.dialog.confirm({
+                title: fb.t("fb.notes.lock-title", "Lock this note?"),
+                message: this.canAdmin
+                    ? fb.t("fb.notes.lock-msg-admin", "Its title and text won't change any more — text can only be added at the end. Tags still can. You can unlock it again.")
+                    : fb.t("fb.notes.lock-msg", "Its title and text won't change any more — text can only be added at the end. Tags still can. Only the space's admins can unlock it."),
+                buttons: [
+                    { action: "cancel", label: fb.t("fb.common.cancel", "Cancel"), kind: "default" },
+                    { action: "lock", label: fb.t("fb.notes.lock", "Lock"), kind: "primary" },
+                ],
+            });
+            if (answer !== "lock") return;
+        }
+        try {
+            const updated = await this.api.patch(note.id, { locked: next });
+            note.locked = !!updated.locked;
+            note.updatedAt = updated.updatedAt;
+            if (this._openNote === note) {
+                this._applyReadOnly(note);
+                this._paintNoteMeta(note);
+            }
+            this._swapIn(note);
+            this._updateRowInPlace(note);
+        } catch (err) {
+            sac.toast?.(fb.errors.text(err, fb.t("fb.notes.lock-failed", "Couldn't change the lock.")), { kind: "error" });
+        }
+    }
+
+    /** The footer's "N agent changes" — what agents changed, kept as versions. */
+    async _refreshHistory(note) {
+        const btn = this.querySelector("#history-btn");
+        btn.hidden = true;
+        if (note._hit) return;
+        let versions = [];
+        try { versions = await this.api.versions(note.id); } catch { versions = []; }
+        if (this._openNote?.id !== note.id) return;
+        btn.hidden = versions.length === 0;
+        btn.querySelector("span").textContent = versions.length === 1
+            ? fb.t("fb.notes.history-1", "1 agent change")
+            : fb.t("fb.notes.history-n", "{n} agent changes", { n: versions.length });
+        btn.title = fb.t("fb.notes.history", "What agents changed in this note");
+    }
+
+    async _openHistory() {
+        const note = this._openNote;
+        if (!note) return;
+        await this.flushSave();
+        fb.noteHistory.open({
+            api: this.api,
+            note,
+            writable: this.writable !== false,
+            onRestored: async (restored) => {
+                this.selectedId = null;
+                this._openNote = null;
+                await this.loadNotes({ prompt: false });
+                await this.select(restored.id);
+            },
+        });
     }
 
     formatDate(iso) {

@@ -134,6 +134,13 @@ public class McpEndpointTests : IClassFixture<WebApplicationFactory<Program>>, I
         Assert.Contains("get_memory", names);
         Assert.Contains("update_memory", names);
         Assert.Contains("list_pending", names);
+        Assert.Contains("note_list", names);
+        Assert.Contains("todo_list", names);
+        Assert.Contains("todo_create", names);
+        Assert.Contains("todo_update", names);
+        Assert.Contains("todo_delete", names);
+        Assert.Contains("tag_list", names);
+        Assert.Contains("tag_update", names);
         Assert.Contains("list_contacts", names);
         Assert.Contains("find_contact", names);
         Assert.Contains("list_events", names);
@@ -710,6 +717,201 @@ public class McpEndpointTests : IClassFixture<WebApplicationFactory<Program>>, I
             .Select(n => n.GetProperty("title").GetString()).ToHashSet();
         Assert.Contains("pending-1", titles);
         Assert.DoesNotContain("approved-1", titles);
+    }
+
+    // ────────── note_list: a copy kept in sync ──────────
+
+    private static JsonElement ToolResult(JsonElement rpc)
+    {
+        Assert.False(rpc.TryGetProperty("error", out var error), error.ToString());
+        var text = rpc.GetProperty("result").GetProperty("content")[0].GetProperty("text").GetString()!;
+        return JsonDocument.Parse(text).RootElement.Clone();
+    }
+
+    private static List<string> Ids(JsonElement result) =>
+        result.GetProperty("notes").EnumerateArray().Select(n => n.GetProperty("id").GetString()!).ToList();
+
+    [Fact]
+    public async Task Mcp_NoteList_PagesInChangeOrder_ThenOnlyWhatChangedOrWentSince()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var ctx = ContextRef.User(AliceId);
+        var notes = new NoteRepository(_dbFactory, new TagRepository(_dbFactory));
+        var trash = new TrashRepository(_dbFactory, notes);
+        var made = new List<string>();
+        for (var i = 1; i <= 5; i++)
+            made.Add(await notes.CreateAsync(ctx, AliceId, new Note { Title = $"doc {i}", Content = $"body {i}" }, ct));
+
+        var client = await BearerClientAsync("read:notes");
+
+        // Every note, oldest change first, two a page; light: no content.
+        var seen = new List<string>();
+        string? cursor = null;
+        var pages = 0;
+        JsonElement page;
+        do
+        {
+            page = ToolResult(await CallToolAsync(client, "note_list", cursor is null ? new { limit = 2 } : new { limit = 2, cursor }));
+            seen.AddRange(Ids(page));
+            Assert.All(page.GetProperty("notes").EnumerateArray(), n =>
+            {
+                Assert.False(n.TryGetProperty("content", out _));
+                Assert.EndsWith("Z", n.GetProperty("updatedAt").GetString());
+            });
+            // The last page has no nextCursor (nulls stay off the wire).
+            cursor = page.TryGetProperty("nextCursor", out var next) ? next.GetString() : null;
+            pages++;
+        } while (cursor is not null);
+        Assert.Equal(made, seen);
+        Assert.Equal(3, pages);
+        var newest = page.GetProperty("notes").EnumerateArray().Last().GetProperty("updatedAt").GetString()!;
+
+        // Nothing changed since the newest: an empty page, nothing deleted.
+        var none = ToolResult(await CallToolAsync(client, "note_list", new { updated_since = newest }));
+        Assert.Empty(Ids(none));
+        Assert.Empty(none.GetProperty("deleted").EnumerateArray());
+
+        // One edited, one deleted: the edit is the change, the delete is listed.
+        var second = (await notes.GetByIdAsync(ctx, made[1], ct))!;
+        second.Content = "body 2, edited";
+        await notes.UpdateAsync(ctx, second, ct);
+        await notes.DeleteAsync(ctx, made[3], ct);
+        var changed = ToolResult(await CallToolAsync(client, "note_list", new { updated_since = newest, include_content = true }));
+        Assert.Equal(new[] { made[1] }, Ids(changed));
+        Assert.Equal("body 2, edited", changed.GetProperty("notes")[0].GetProperty("content").GetString());
+        var deleted = changed.GetProperty("deleted").EnumerateArray().ToList();
+        Assert.Single(deleted);
+        Assert.Equal(made[3], deleted[0].GetProperty("id").GetString());
+        Assert.Equal("doc 4", deleted[0].GetProperty("title").GetString());
+
+        // Restored, it changed again: a copy that dropped it sees it come back.
+        var since = changed.GetProperty("notes")[0].GetProperty("updatedAt").GetString()!;
+        var item = (await trash.ListAsync(ctx, ct)).Single(t => t.ItemId == made[3]);
+        Assert.Equal(TrashRestore.Restored, (await trash.RestoreAsync(ctx, item.Id, ct)).Result);
+        var back = ToolResult(await CallToolAsync(client, "note_list", new { updated_since = since }));
+        Assert.Equal(new[] { made[3] }, Ids(back));
+        Assert.Empty(back.GetProperty("deleted").EnumerateArray());
+    }
+
+    [Fact]
+    public async Task Mcp_NoteList_FiltersByTags_AndRefusesAForeignCursor()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var ctx = ContextRef.User(AliceId);
+        var notes = new NoteRepository(_dbFactory, new TagRepository(_dbFactory));
+        var plan = await notes.CreateAsync(ctx, AliceId, new Note { Title = "plan", Tags = new() { "kind:plan", "status:draft" } }, ct);
+        var decision = await notes.CreateAsync(ctx, AliceId, new Note { Title = "decision", Tags = new() { "kind:decision", "status:draft" } }, ct);
+        await notes.CreateAsync(ctx, AliceId, new Note { Title = "untagged" }, ct);
+
+        var client = await BearerClientAsync("read:notes");
+        var any = ToolResult(await CallToolAsync(client, "note_list", new { tags = new[] { "kind:plan", "kind:decision" } }));
+        Assert.Equal(new[] { plan, decision }, Ids(any));
+        var all = ToolResult(await CallToolAsync(client, "note_list", new { tags = new[] { "kind:plan", "status:draft" }, match = "all" }));
+        Assert.Equal(new[] { plan }, Ids(all));
+        Assert.Contains("kind:plan", all.GetProperty("notes")[0].GetProperty("tags").EnumerateArray().Select(t => t.GetString()));
+
+        var bad = await CallToolAsync(client, "note_list", new { cursor = "not-a-cursor" });
+        Assert.Equal(-32602, bad.GetProperty("error").GetProperty("code").GetInt32());
+        Assert.Contains("cursor", bad.GetProperty("error").GetProperty("message").GetString());
+        var badTime = await CallToolAsync(client, "note_list", new { updated_since = "yesterday" });
+        Assert.Equal(-32602, badTime.GetProperty("error").GetProperty("code").GetInt32());
+    }
+
+    [Fact]
+    public async Task Mcp_UpdateMemory_AddsAndRemovesTags_FindsBySlug_AppendsToALockedNote()
+    {
+        var client = await BearerClientAsync("read:notes", "write:notes");
+        var made = ToolResult(await CallToolAsync(client, "remember",
+            new { title = "Decision 3", content = "Forward rendering.", tags = new[] { "kind:decision", "status:draft" }, slug = "decisions/0003-forward" }));
+        var id = made.GetProperty("id").GetString()!;
+
+        // A status change in place: the other tags stay.
+        var moved = ToolResult(await CallToolAsync(client, "update_memory",
+            new { by_slug = "Decisions/0003-FORWARD", add_tags = new[] { "status:approved" }, remove_tags = new[] { "status:draft" } }));
+        var tags = moved.GetProperty("note").GetProperty("tags").EnumerateArray().Select(t => t.GetString()).ToList();
+        Assert.Contains("status:approved", tags);
+        Assert.DoesNotContain("status:draft", tags);
+        Assert.Contains("kind:decision", tags);
+        Assert.Contains("review:pending", tags);
+        Assert.Equal("decisions/0003-forward", moved.GetProperty("note").GetProperty("slug").GetString());
+
+        // Locked: the text holds, an append goes through, an agent can't unlock.
+        ToolResult(await CallToolAsync(client, "update_memory", new { id, @lock = true }));
+        var refused = await CallToolAsync(client, "update_memory", new { id, content = "Deferred rendering." });
+        Assert.Equal(-32602, refused.GetProperty("error").GetProperty("code").GetInt32());
+        Assert.Contains("locked", refused.GetProperty("error").GetProperty("message").GetString());
+        var appended = ToolResult(await CallToolAsync(client, "update_memory", new { id, append = "Superseded by Decision 9." }));
+        Assert.Equal("Forward rendering.\n\nSuperseded by Decision 9.", appended.GetProperty("note").GetProperty("content").GetString());
+        var unlock = await CallToolAsync(client, "update_memory", new { id, @lock = false });
+        Assert.Equal(-32602, unlock.GetProperty("error").GetProperty("code").GetInt32());
+
+        // get_memory by slug; a second note can't take the slug.
+        var got = ToolResult(await CallToolAsync(client, "get_memory", new { slug = "decisions/0003-forward" }));
+        Assert.Equal(id, got.GetProperty("note").GetProperty("id").GetString());
+        Assert.True(got.GetProperty("note").GetProperty("locked").GetBoolean());
+        var taken = await CallToolAsync(client, "remember", new { title = "Other", slug = "decisions/0003-forward" });
+        Assert.Contains("slug", taken.GetProperty("error").GetProperty("message").GetString());
+    }
+
+    [Fact]
+    public async Task Mcp_TodoTools_CreateListUpdateDelete_WithTags()
+    {
+        var client = await BearerClientAsync("read:tasks", "write:tasks");
+        var made = ToolResult(await CallToolAsync(client, "todo_create",
+            new { title = "Bake lightmaps", due = "2026-11-10", tags = new[] { "area:lighting", "feature:night" } }));
+        var id = made.GetProperty("id").GetString()!;
+        var todo = made.GetProperty("todo");
+        Assert.Equal("2026-11-10T09:00:00Z", todo.GetProperty("dueAt").GetString());
+        Assert.Contains("source:mcp", todo.GetProperty("tags").EnumerateArray().Select(t => t.GetString()));
+        ToolResult(await CallToolAsync(client, "todo_create", new { title = "Write the README" }));
+
+        var lighting = ToolResult(await CallToolAsync(client, "todo_list", new { tags = new[] { "area:lighting" } }));
+        Assert.Equal(1, lighting.GetProperty("count").GetInt32());
+
+        var done = ToolResult(await CallToolAsync(client, "todo_update",
+            new { id, done = true, add_tags = new[] { "status:done" }, remove_tags = new[] { "feature:night" }, due = "" }));
+        var t = done.GetProperty("todo");
+        Assert.True(t.GetProperty("done").GetBoolean());
+        Assert.False(t.TryGetProperty("dueAt", out _));
+        var tags = t.GetProperty("tags").EnumerateArray().Select(x => x.GetString()).ToList();
+        Assert.Contains("area:lighting", tags);
+        Assert.Contains("status:done", tags);
+        Assert.DoesNotContain("feature:night", tags);
+
+        Assert.Equal(1, ToolResult(await CallToolAsync(client, "todo_list", new { })).GetProperty("count").GetInt32());
+        Assert.Equal(1, ToolResult(await CallToolAsync(client, "todo_list", new { state = "done" })).GetProperty("count").GetInt32());
+        var reopened = ToolResult(await CallToolAsync(client, "todo_update", new { id, done = false }));
+        Assert.False(reopened.GetProperty("todo").GetProperty("done").GetBoolean());
+
+        Assert.True(ToolResult(await CallToolAsync(client, "todo_delete", new { id })).GetProperty("deleted").GetBoolean());
+        Assert.Equal(1, ToolResult(await CallToolAsync(client, "todo_list", new { state = "all" })).GetProperty("count").GetInt32());
+
+        // A key without write:tasks writes nothing.
+        var reader = await BearerClientAsync("read:tasks");
+        var refused = await CallToolAsync(reader, "todo_create", new { title = "x" });
+        Assert.True(refused.TryGetProperty("error", out _));
+    }
+
+    [Fact]
+    public async Task Mcp_TagTools_ListUsage_SetColourAndMeaning_Rename()
+    {
+        var client = await BearerClientAsync("read:tags", "write:tags", "write:tasks", "write:notes");
+        ToolResult(await CallToolAsync(client, "remember", new { title = "n", tags = new[] { "status:draft" } }));
+        ToolResult(await CallToolAsync(client, "todo_create", new { title = "t", tags = new[] { "status:draft" } }));
+
+        var set = ToolResult(await CallToolAsync(client, "tag_update",
+            new { name = "status:draft", color = "orange", description = "Written, not yet approved" }));
+        Assert.Equal("orange", set.GetProperty("tag").GetProperty("color").GetString());
+        var renamed = ToolResult(await CallToolAsync(client, "tag_update", new { name = "status:draft", rename_to = "status:wip" }));
+        Assert.Equal("status:wip", renamed.GetProperty("tag").GetProperty("name").GetString());
+        Assert.Equal("Written, not yet approved", renamed.GetProperty("tag").GetProperty("description").GetString());
+
+        var list = ToolResult(await CallToolAsync(client, "tag_list", new { }));
+        var wip = list.GetProperty("tags").EnumerateArray().Single(t => t.GetProperty("name").GetString() == "status:wip");
+        Assert.Equal(1, wip.GetProperty("notes").GetInt32());
+        Assert.Equal(1, wip.GetProperty("todos").GetInt32());
+        var system = await CallToolAsync(client, "tag_update", new { name = "source:mcp", rename_to = "origin" });
+        Assert.True(system.TryGetProperty("error", out _));
     }
 
     [Fact]

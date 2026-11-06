@@ -23,6 +23,14 @@ class FbTodosView extends HTMLElement {
         this.hideCompleted = true;
         this.searchQuery = "";
         this._saveDebounce = null;
+        // Tags (user/space schema v31): the strip above the list narrows to
+        // todos carrying every picked one, like the Notes app's.
+        this.tagFilter = [];
+        this._onTagsInvalidated = () => fb.tags.all().then(() => {
+            if (!this.isConnected) return;
+            this._refreshTagSuggestions();
+            this.renderList();
+        }, () => {});
     }
 
     async connectedCallback() {
@@ -35,6 +43,9 @@ class FbTodosView extends HTMLElement {
         this.paintHead();
         this.querySelector("#empty-new-btn").hidden = !this.writable;
         for (const id of ["#title", "#description"]) this.querySelector(id)?.toggleAttribute("readonly", !this.writable);
+        this.querySelector("#tag-input")?.toggleAttribute("disabled", !this.writable);
+        window.addEventListener("fb-tags-invalidated", this._onTagsInvalidated);
+        this._refreshTagSuggestions();
         this.querySelector("#due-at")?.toggleAttribute("disabled", !this.writable);
         this.toggleAttribute("readonly", !this.writable);   // CSS hides #due-clear
         // Drag an open todo to reorder (the kit's sortable: mouse drags after
@@ -67,6 +78,7 @@ class FbTodosView extends HTMLElement {
         this.sel?.destroy();
         this._rowMenu?.destroy();
         this._fieldSizer?.disconnect();
+        window.removeEventListener("fb-tags-invalidated", this._onTagsInvalidated);
         this.flushSave();
         if (window.fb?.toolbar) fb.toolbar.clear();
     }
@@ -419,6 +431,21 @@ class FbTodosView extends HTMLElement {
                 }
                 /* Nothing open: the kit's .empty-state, centred in the pane. */
                 fb-todos-view .tv-empty { flex: 1; justify-content: center; }
+                /* Tags (v31): the strip above the list and a quiet line under a row's title. */
+                fb-todos-view .tv-tag-filter { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; padding: 10px 12px 8px; }
+                fb-todos-view .tv-tag-collapsible[hidden] { display: none !important; }
+                @media (max-width: 768px) {
+                    fb-todos-view .tv-tag-filter { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }
+                    fb-todos-view .tv-tag-filter > * { flex: none; }
+                }
+                fb-todos-view .tv-item-tagline {
+                    display: flex; align-items: center; gap: 4px; margin-top: 4px;
+                    font-size: 11px; color: var(--text-muted); overflow: hidden; white-space: nowrap;
+                }
+                fb-todos-view .tv-item-tagline .tag-dot { flex-shrink: 0; width: 7px; height: 7px; border-radius: 50%; }
+                fb-todos-view .tv-item-tagline .tag-name { overflow: hidden; text-overflow: ellipsis; }
+                fb-todos-view .tv-item-tagline .tag-sep { opacity: 0.4; margin: 0 2px; }
+                fb-todos-view .tv-field sac-chip-input { flex: 1 1 200px; min-width: min(200px, 100%); }
             </style>
 
             <sac-split class="tv-split" id="split" collapse show="start"
@@ -429,6 +456,9 @@ class FbTodosView extends HTMLElement {
                         <sac-icon name="search"></sac-icon>
                         <input type="search" id="search-input" placeholder="${fb.t("fb.todos.search", "Search all todos")}"/>
                     </div>
+                    <sac-collapsible class="tv-tag-collapsible" id="tag-filter-wrapper" max-height="82px" hidden>
+                        <div class="tv-tag-filter" id="tag-filter"></div>
+                    </sac-collapsible>
                     <div class="tv-list-header">
                         <span class="tv-list-title" id="list-title">${fb.t("fb.todos.open", "Open Todos")}</span>
                         <button type="button" class="icon-btn danger" id="delete-marked-btn" hidden title="${fb.t("fb.todos.delete-marked", "Delete selected")}" aria-label="${fb.t("fb.todos.delete-marked", "Delete selected")}"><sac-icon name="trash"></sac-icon></button>
@@ -457,6 +487,10 @@ class FbTodosView extends HTMLElement {
                                 <label for="due-at">${fb.t("fb.todos.due", "Due")}</label>
                                 <input id="due-at" class="tv-date-input"/>
                                 <button class="icon-btn tv-date-clear-btn" id="due-clear" title="${fb.t("fb.todos.clear-due", "Clear due date")}" aria-label="${fb.t("fb.todos.clear-due", "Clear due date")}" hidden><sac-icon name="close"></sac-icon></button>
+                            </div>
+                            <div class="tv-field">
+                                <label for="tag-input">${fb.t("fb.todos.tags", "Tags")}</label>
+                                <sac-chip-input id="tag-input" add-label="${fb.t("fb.notes.add-tag", "Add tag")}" allow-create></sac-chip-input>
                             </div>
                             <div class="tv-field">
                                 <label for="description">${fb.t("fb.todos.notes", "Notes")}</label>
@@ -547,6 +581,17 @@ class FbTodosView extends HTMLElement {
         });
         this._fieldSizer.observe(titleEl);
         this._fieldSizer.observe(descEl);
+
+        const tagInput = this.querySelector("#tag-input");
+        tagInput.addEventListener("sac:change", () => this.saveSelected());
+        // A tag made here (name + colour from its picker) is the workspace's
+        // at once, so its colour sticks before the todo saves.
+        tagInput.addEventListener("sac:create", async (e) => {
+            try {
+                await fb.api.tags.upsertColor(e.detail.name, e.detail.color);
+                fb.tags.invalidate();
+            } catch (err) { console.warn("[fb-todos-view] creating tag failed:", err?.status); }
+        });
 
         const dueEl = fb.format.attachInput(this.querySelector("#due-at"), { time: true });
         // Clear sits in the field row, after the time.
@@ -659,11 +704,13 @@ class FbTodosView extends HTMLElement {
         const filtered = this.todos.filter(t => {
             if (this.hideCompleted && t.completedAt && !this._leaving?.has(t.id)) return false;
             if (this.searchQuery) {
-                const haystack = ((t.title || "") + " " + (t.description || "")).toLowerCase();
+                const haystack = ((t.title || "") + " " + (t.description || "") + " " + (t.tags || []).join(" ")).toLowerCase();
                 if (!haystack.includes(this.searchQuery)) return false;
             }
+            if (this.tagFilter.length && !this.tagFilter.every((g) => (t.tags || []).includes(g))) return false;
             return true;
         });
+        this._renderTagFilter(filtered);
 
         // Sort: open before done, then the user's own order (position —
         // drag to change it; a new todo is appended). Ticking one off and
@@ -701,6 +748,7 @@ class FbTodosView extends HTMLElement {
                             title="${isDone ? fb.t("fb.todos.mark-undone", "Mark as not done") : fb.t("fb.todos.mark-done", "Mark as done")}"
                             aria-label="${isDone ? fb.t("fb.todos.mark-undone", "Mark as not done") : fb.t("fb.todos.mark-done", "Mark as done")}">${checkSvg}</button>
                     <div class="tv-item-title">${escapeHtml(t.title || fb.t("fb.todos.untitled", "Untitled"))}</div>
+                    ${this._tagLine(t.tags)}
                     ${dueInfo.text ? `
                         <div class="tv-item-meta">
                             <span class="tv-item-due ${dueInfo.urgency}">
@@ -797,6 +845,7 @@ class FbTodosView extends HTMLElement {
         this.querySelector("#title").value       = todo.title       || "";
         requestAnimationFrame(() => this.autosizeTitle());
         this.querySelector("#description").value = todo.description || "";
+        this.querySelector("#tag-input").value = (todo.tags || []).filter((x) => x !== "source:mcp");
         fb.format.writeInput(this.querySelector("#due-at"), todo.dueAt ? new Date(todo.dueAt) : null);
         this.querySelector("#due-clear").hidden  = !todo.dueAt;
         this.querySelector("#timestamp").textContent = this.formatFullTimestamp(todo.updatedAt);
@@ -827,15 +876,22 @@ class FbTodosView extends HTMLElement {
         const newDesc  = this.querySelector("#description").value;
         const due      = fb.format.readInput(this.querySelector("#due-at"));
         const newDue   = due ? due.toISOString() : null;
+        // source:mcp isn't shown in the input (nobody adds or takes it); the
+        // server keeps it.
+        const kept = (todo.tags || []).filter((x) => x === "source:mcp");
+        const newTags = [...kept, ...this.querySelector("#tag-input").value];
+        const sameTags = newTags.length === (todo.tags || []).length && newTags.every((x) => (todo.tags || []).includes(x));
 
         if (newTitle === todo.title
             && newDesc === (todo.description || "")
-            && newDue === (todo.dueAt || null)) return;
+            && newDue === (todo.dueAt || null)
+            && sameTags) return;
 
-        const before = { title: todo.title, description: todo.description, dueAt: todo.dueAt };
+        const before = { title: todo.title, description: todo.description, dueAt: todo.dueAt, tags: todo.tags };
         todo.title       = newTitle;
         todo.description = newDesc;
         todo.dueAt       = newDue;
+        todo.tags        = newTags;
 
         try {
             await this.api.update(todo.id, todo);
@@ -843,12 +899,64 @@ class FbTodosView extends HTMLElement {
             this.querySelector("#timestamp").textContent = this.formatFullTimestamp(todo.updatedAt);
             this.querySelector("#due-clear").hidden = !todo.dueAt;
             this._updateRowInPlace(todo);
+            if (!sameTags) {
+                fb.tags.invalidate();   // a new tag is the workspace's now
+                this.renderList();
+            }
         } catch (err) {
             console.error("[fb-todos-view] update failed:", err);
             // Back to what the server has, so the next change saves it again.
             Object.assign(todo, before);
             window.sac?.toast?.(fb.errors.text(err, fb.t("fb.todos.save-failed", "Couldn't save the todo.")), { kind: "error" });
         }
+    }
+
+    /** A row's tags as a quiet line of coloured dots (as in Notes). */
+    _tagLine(tags) {
+        const shown = (tags || []).filter((x) => x !== "source:mcp");
+        if (!shown.length) return "";
+        const parts = shown.map((name, i) => {
+            const color = `var(--tag-${fb.tags.colorFor(name)}, var(--tag-gray))`;
+            const sep = i === 0 ? "" : `<span class="tag-sep">·</span>`;
+            return `${sep}<span class="tag-dot" style="background:${color}"></span><span class="tag-name">${escapeHtml(name)}</span>`;
+        }).join("");
+        return `<div class="tv-item-tagline" title="${escapeHtml(shown.join(", "))}">${parts}</div>`;
+    }
+
+    /** The strip: the tags on the todos shown (plus the picked ones), most
+     *  used first; a pick narrows to todos with every picked tag. */
+    _renderTagFilter(shown) {
+        const wrapper = this.querySelector("#tag-filter-wrapper");
+        const strip = this.querySelector("#tag-filter");
+        if (!strip) return;
+        const count = new Map();
+        for (const t of shown) for (const g of t.tags || []) if (g !== "source:mcp") count.set(g, (count.get(g) || 0) + 1);
+        for (const g of this.tagFilter) if (!count.has(g)) count.set(g, 0);
+        const names = [...count.keys()].sort((a, b) => count.get(b) - count.get(a) || a.localeCompare(b));
+        wrapper.hidden = names.length === 0;
+        strip.replaceChildren(...names.map((name) => {
+            const chip = document.createElement("sac-chip");
+            chip.setAttribute("label", name);
+            chip.setAttribute("color", fb.tags.colorFor(name));
+            chip.setAttribute("clickable", "");
+            if (this.tagFilter.includes(name)) chip.setAttribute("selected", "");
+            chip.addEventListener("click", () => {
+                this.querySelector("#todo-list")?.focus({ preventScroll: true });
+                this.tagFilter = this.tagFilter.includes(name) ? this.tagFilter.filter((x) => x !== name) : [...this.tagFilter, name];
+                this.renderList();
+            });
+            return chip;
+        }));
+    }
+
+    async _refreshTagSuggestions() {
+        const input = this.querySelector("#tag-input");
+        if (!input) return;
+        try {
+            const tags = await fb.tags.all();
+            input.suggestions = tags.filter((t) => t.userAssignable !== false)
+                .map((t) => ({ name: t.name, color: t.color, count: (t.usageCount || 0) + (t.todoCount || 0) }));
+        } catch (err) { console.warn("[fb-todos-view] tag suggestions unavailable:", err); }
     }
 
     /** Update one row in place — avoids wiping the list during autosave. */

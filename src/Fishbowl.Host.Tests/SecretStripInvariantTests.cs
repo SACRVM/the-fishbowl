@@ -172,6 +172,19 @@ public class SecretStripInvariantTests : IClassFixture<WebApplicationFactory<Pro
     }
 
     [Fact]
+    public async Task NoteList_WithContent_DoesNotLeakSecret()
+    {
+        var (client, _) = await SetupClientWithSecretNoteAsync();
+        var resp = await client.PostAsync("/mcp",
+            RpcBody("note_list", new { include_content = true }),
+            TestContext.Current.CancellationToken);
+        resp.EnsureSuccessStatusCode();
+        var body = await resp.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
+        Assert.Contains("note-with-secret", body);
+        AssertNoSecretLeak(body);
+    }
+
+    [Fact]
     public async Task UpdateMemory_EchoDoesNotLeakSecret()
     {
         var (client, id) = await SetupClientWithSecretNoteAsync();

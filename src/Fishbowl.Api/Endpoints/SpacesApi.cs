@@ -319,6 +319,26 @@ public static class SpacesApi
         .WithName("UpsertSpaceTagColor")
         .RequireScope("write:tags");
 
+        group.MapPut("/{slug}/tags/{name}/description", async (
+            string slug, string name, TagsApi.DescriptionRequest body,
+            ClaimsPrincipal user, ISpaceRepository spaces, ITagRepository tags, CancellationToken ct) =>
+        {
+            var resolved = await ResolveSpaceAsync(slug, user, spaces, ct);
+            if (resolved.Error is not null) return resolved.Error;
+            if (!resolved.Role!.Value.CanWrite()) return Results.Forbid();
+            try
+            {
+                return await tags.SetDescriptionAsync(ContextRef.Space(resolved.Space!.Id), name, body.Description, ct)
+                    ? Results.NoContent() : Results.NotFound();
+            }
+            catch (ArgumentException ex)
+            {
+                return ApiErrors.BadRequest("invalid_value", ex.Message, new { reason = ex.Message });
+            }
+        })
+        .WithName("SetSpaceTagDescription")
+        .RequireScope("write:tags");
+
         group.MapPost("/{slug}/tags/{name}/rename", async (
             string slug, string name, TagsApi.RenameRequest body,
             ClaimsPrincipal user, ISpaceRepository spaces, ITagRepository tags, CancellationToken ct) =>

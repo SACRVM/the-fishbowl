@@ -12,8 +12,11 @@ namespace Fishbowl.Api;
 public static class ValidationResults
 {
     public static IResult From(ResourceValidationException ex)
-        => ex.Error.Kind == ResourceValidationKind.Invalid
-            ? ApiErrors.Json(StatusCodes.Status400BadRequest, "resource_invalid", $"{ex.Error.Resource} rejected",
+        => ex.Error.Kind == ResourceValidationKind.Conflict
+            ? ApiErrors.Json(StatusCodes.Status409Conflict, ex.Error.Code ?? "resource_conflict", ex.Error.Reason,
+                new { resource = ex.Error.Resource, field = ex.Error.Field })
+        : ex.Error.Kind == ResourceValidationKind.Invalid
+            ? ApiErrors.Json(StatusCodes.Status400BadRequest, ex.Error.Code ?? "resource_invalid", $"{ex.Error.Resource} rejected",
                 new { resource = ex.Error.Resource, field = ex.Error.Field, reason = ex.Error.Reason })
             : ApiErrors.Json(StatusCodes.Status413PayloadTooLarge, "resource_too_large", $"{ex.Error.Resource} exceeds size limits",
                 new { resource = ex.Error.Resource, field = ex.Error.Field, reason = ex.Error.Reason });

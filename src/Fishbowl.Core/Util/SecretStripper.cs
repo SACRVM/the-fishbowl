@@ -108,6 +108,8 @@ public static class SecretStripper
             UpdatedAt = note.UpdatedAt,
             Pinned = note.Pinned,
             Archived = note.Archived,
+            Slug = note.Slug,
+            Locked = note.Locked,
         };
     }
 }

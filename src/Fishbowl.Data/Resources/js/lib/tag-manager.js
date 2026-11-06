@@ -3,8 +3,9 @@
  * the workspace's, not an app's.
  *
  * Built from kit parts, no component of its own: a <sac-window> whose
- * light-DOM body lists every tag with an inline rename field, where it is
- * used (notes, mail conversations, mail rules), the palette as a
+ * light-DOM body lists every tag with an inline rename field and, under it,
+ * what the tag means (one line, saved on leaving the field), where it is
+ * used (notes, todos, mail conversations, mail rules), the palette as a
  * <sac-swatch-grid> and a delete button (sac.dialog confirms when the tag
  * is used anywhere); a system tag carries a <sac-chip>.
  * Row layout lives in app.css under .fb-tags-*.
@@ -69,16 +70,25 @@
         row.className = "fb-tags-row";
         row.innerHTML = `
             ${system ? `<sac-chip class="fb-tags-badge" label="${fb.t("fb.notes.tags.system-chip", "system")}" title="${fb.t("fb.notes.tags.system", "System tag")}"></sac-chip>` : ""}
-            <input class="fb-tags-name" type="text" aria-label="${fb.t("fb.notes.tags.name", "Tag name")}"
-                   ${system ? `readonly title="${fb.t("fb.notes.tags.protected", "System tag — the name is protected")}"` : ""}>
+            <div class="fb-tags-text">
+                <input class="fb-tags-name" type="text" aria-label="${fb.t("fb.notes.tags.name", "Tag name")}"
+                       ${system ? `readonly title="${fb.t("fb.notes.tags.protected", "System tag — the name is protected")}"` : ""}>
+                <input class="fb-tags-desc" type="text" maxlength="200"
+                       placeholder="${fb.t("fb.notes.tags.desc-placeholder", "What it means")}"
+                       aria-label="${fb.t("fb.notes.tags.desc", "Description")}">
+            </div>
             <span class="fb-tags-count"></span>
             <sac-swatch-grid selectable columns="${fb.tags.SLOTS.length}" aria-label="${fb.t("fb.notes.tags.colour", "Tag colour")}"></sac-swatch-grid>
             ${system ? "" : `<button type="button" class="icon-btn tool fb-tags-delete" title="${fb.t("fb.notes.tags.delete", "Delete tag")}" aria-label="${fb.t("fb.notes.tags.delete", "Delete tag")}">
                                  <sac-icon name="trash"></sac-icon></button>`}`;
 
         // User-sourced strings go in through properties, never markup.
+        row.dataset.tag = tag.name;
         const nameInput = row.querySelector(".fb-tags-name");
         nameInput.value = tag.name;
+        const descInput = row.querySelector(".fb-tags-desc");
+        descInput.value = tag.description || "";
+        let currentDesc = tag.description || "";
         const uses = usesOf(tag);
         row.querySelector(".fb-tags-count").replaceChildren(...uses.map((u) => {
             const part = document.createElement("span");
@@ -104,6 +114,7 @@
                 try {
                     await fb.api.tags.rename(currentName, next);
                     currentName = next;
+                    row.dataset.tag = next;
                     nameInput.value = next;
                     nameInput.classList.remove("invalid");
                     dirty = true;
@@ -113,6 +124,21 @@
                 }
             });
         }
+
+        descInput.addEventListener("keydown", (e) => { if (e.key === "Enter") descInput.blur(); });
+        descInput.addEventListener("blur", async () => {
+            const next = descInput.value.trim();
+            if (next === currentDesc) return;
+            try {
+                await fb.api.tags.describe(currentName, next);
+                currentDesc = next;
+                descInput.classList.remove("invalid");
+                dirty = true;
+            } catch (err) {
+                console.warn("[fb.tagManager] description failed:", err);
+                descInput.classList.add("invalid");
+            }
+        });
 
         // The palette slots, the tag's own selected. A failed save puts the
         // old selection back.
@@ -165,10 +191,11 @@
         return row;
     }
 
-    /** Where a tag is used: notes, mail conversations, mail rules — the kinds it is on. */
+    /** Where a tag is used: notes, todos, mail conversations, mail rules — the kinds it is on. */
     function usesOf(tag) {
         const kinds = [
             { n: tag.usageCount || 0, icon: "note", one: ["fb.tags.notes-1", "1 note"], many: ["fb.tags.notes", "{n} notes"] },
+            { n: tag.todoCount || 0, icon: "check", one: ["fb.tags.todos-1", "1 todo"], many: ["fb.tags.todos", "{n} todos"] },
             { n: tag.mailCount || 0, icon: "mail", one: ["fb.tags.mails-1", "1 conversation"], many: ["fb.tags.mails", "{n} conversations"] },
             { n: tag.ruleCount || 0, icon: "fb-rule", one: ["fb.tags.rules-1", "1 mail rule"], many: ["fb.tags.rules", "{n} mail rules"] },
         ];

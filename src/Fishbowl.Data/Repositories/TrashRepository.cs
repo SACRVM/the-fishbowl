@@ -162,6 +162,12 @@ public class TrashRepository : ITrashRepository
                 // A note's full-text row comes back with it (the vector after commit).
                 if (item.Kind == TrashKinds.Note)
                 {
+                    // Coming back is a change: a copy kept in sync by
+                    // updated_at (MCP note_list) dropped it and must see it again.
+                    await db.ExecuteAsync(new CommandDefinition(
+                        "UPDATE notes SET updated_at = @now WHERE id = @id",
+                        new { id = item.ItemId, now = DateTime.UtcNow.ToString("o") },
+                        transaction: tx, cancellationToken: token));
                     var tags = snapshot["tags"] is JsonValue tv && tv.TryGetValue<string>(out var tj)
                         ? string.Join(' ', JsonSerializer.Deserialize<List<string>>(tj) ?? new()) : "";
                     // Indexed secret-stripped, like every note write (NoteRepository.FtsContent).
@@ -231,20 +237,34 @@ public class TrashRepository : ITrashRepository
     public async Task<bool> DeleteAsync(ContextRef ctx, string id, CancellationToken ct = default)
     {
         using var db = _dbFactory.CreateContextConnection(ctx);
-        return await db.ExecuteAsync(new CommandDefinition("DELETE FROM trash WHERE id = @id", new { id }, cancellationToken: ct)) > 0;
+        var gone = await db.ExecuteAsync(new CommandDefinition("DELETE FROM trash WHERE id = @id", new { id }, cancellationToken: ct)) > 0;
+        await DropOrphanVersionsAsync(db, ct);
+        return gone;
     }
+
+    // A note's kept versions (note_versions, v31) stay while the note is here
+    // or in the trash — a restore brings its history back — and go with it.
+    private static Task DropOrphanVersionsAsync(System.Data.IDbConnection db, CancellationToken ct) =>
+        db.ExecuteAsync(new CommandDefinition(@"
+            DELETE FROM note_versions
+            WHERE note_id NOT IN (SELECT id FROM notes)
+              AND note_id NOT IN (SELECT item_id FROM trash WHERE kind = 'note')", cancellationToken: ct));
 
     public async Task<int> EmptyAsync(ContextRef ctx, CancellationToken ct = default)
     {
         using var db = _dbFactory.CreateContextConnection(ctx);
-        return await db.ExecuteAsync(new CommandDefinition("DELETE FROM trash", cancellationToken: ct));
+        var gone = await db.ExecuteAsync(new CommandDefinition("DELETE FROM trash", cancellationToken: ct));
+        await DropOrphanVersionsAsync(db, ct);
+        return gone;
     }
 
     public async Task<int> PurgeAsync(ContextRef ctx, DateTime cutoff, CancellationToken ct = default)
     {
         using var db = _dbFactory.CreateContextConnection(ctx);
-        return await db.ExecuteAsync(new CommandDefinition(
+        var gone = await db.ExecuteAsync(new CommandDefinition(
             "DELETE FROM trash WHERE deleted_at < @cutoff", new { cutoff = cutoff.ToUniversalTime().ToString("o") }, cancellationToken: ct));
+        if (gone > 0) await DropOrphanVersionsAsync(db, ct);
+        return gone;
     }
 }
 

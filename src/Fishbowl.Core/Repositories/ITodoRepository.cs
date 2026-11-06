@@ -10,7 +10,12 @@ public interface ITodoRepository
     Task<TodoItem?> GetByIdAsync(ContextRef ctx, string id, CancellationToken ct = default);
     Task<IEnumerable<TodoItem>> GetAllAsync(ContextRef ctx, bool includeCompleted = false, CancellationToken ct = default);
     Task<string> CreateAsync(ContextRef ctx, string actorUserId, TodoItem item, CancellationToken ct = default);
+    // An agent's todo (NoteSource.Mcp) carries source:mcp, like its notes.
+    Task<string> CreateAsync(ContextRef ctx, string actorUserId, TodoItem item, NoteSource source, CancellationToken ct = default);
     Task<bool> UpdateAsync(ContextRef ctx, TodoItem item, CancellationToken ct = default);
+    // One change applied to what is stored, in one transaction (TodoPatch):
+    // tags added and removed in place, done / reopened. Null when it isn't there.
+    Task<TodoItem?> PatchAsync(ContextRef ctx, string id, TodoPatch patch, NoteSource source, CancellationToken ct = default);
     // The row goes to the workspace trash (TrashSnapshots) in the same
     // transaction. `deletedBy` defaults to the personal workspace's owner.
     Task<bool> DeleteAsync(ContextRef ctx, string id, CancellationToken ct = default, string? deletedBy = null);

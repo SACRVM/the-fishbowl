@@ -8,9 +8,13 @@ namespace Fishbowl.Core.Util;
 // `Kind` separates "too big" (413) from "not acceptable as sent" (400) —
 // e.g. a malformed secret envelope, or a secret in a space. Defaults to
 // SizeLimit so every existing cap keeps its meaning.
+//
+// `Conflict` (409) is a write the stored state refuses — a locked note, a
+// slug another note has — and names its `Code` for the client to translate.
 public sealed record ResourceValidationError(
     string Resource, string Field, string Reason,
-    ResourceValidationKind Kind = ResourceValidationKind.SizeLimit)
+    ResourceValidationKind Kind = ResourceValidationKind.SizeLimit,
+    string? Code = null)
 {
     public override string ToString() => $"{Resource}.{Field}: {Reason}";
 }
@@ -19,4 +23,5 @@ public enum ResourceValidationKind
 {
     SizeLimit,
     Invalid,
+    Conflict,
 }

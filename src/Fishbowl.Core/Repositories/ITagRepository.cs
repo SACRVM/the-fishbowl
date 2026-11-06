@@ -11,6 +11,9 @@ public interface ITagRepository
     Task<IEnumerable<Tag>> GetAllAsync(ContextRef ctx, CancellationToken ct = default);
     Task<Tag> UpsertColorAsync(ContextRef ctx, string name, string color, CancellationToken ct = default);
     Task<bool> RenameAsync(ContextRef ctx, string oldName, string newName, CancellationToken ct = default);
+    // What the tag means, one line (≤ 200 characters; empty clears it).
+    // False when there is no such tag.
+    Task<bool> SetDescriptionAsync(ContextRef ctx, string name, string? description, CancellationToken ct = default);
     Task<bool> DeleteAsync(ContextRef ctx, string name, CancellationToken ct = default);
 
     // Legacy (personal-context) aliases. Kept so existing cookie-auth call

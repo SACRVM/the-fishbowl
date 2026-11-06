@@ -291,6 +291,23 @@
             create: async (body)     => transformNoteInbound(await raw.create(await transformNoteOutbound(body, ws))),
             update: async (id, body) => raw.update(id, await transformNoteOutbound(body, ws)),
             delete: raw.delete,
+            // One change in place, atomically (NoteToolsApi): { addTags,
+            // removeTags, tags, append, slug, locked, pinned, archived } — a
+            // board move, the lock. Never the text of a note with secrets.
+            patch: async (id, body) => transformNoteInbound(await request(wsPath(ws, `/notes/${encodeURIComponent(id)}`),
+                { method: "PATCH", body: JSON.stringify(body) }), { prompt: false }),
+            // What agents changed: the note before each of their writes.
+            versions:       (id)      => request(wsPath(ws, `/notes/${encodeURIComponent(id)}/versions`)),
+            version:        (id, vid) => request(wsPath(ws, `/notes/${encodeURIComponent(id)}/versions/${encodeURIComponent(vid)}`)),
+            restoreVersion: async (id, vid) => transformNoteInbound(await request(
+                wsPath(ws, `/notes/${encodeURIComponent(id)}/versions/${encodeURIComponent(vid)}/restore`), { method: "POST" }), { prompt: false }),
+            // The workspace's saved filters (a name and a tag expression).
+            filters: {
+                list:   ()            => request(wsPath(ws, "/notes/filters")),
+                create: ({ name, expr }) => request(wsPath(ws, "/notes/filters"), { method: "POST", body: JSON.stringify({ name, expr }) }),
+                update: (id, fields)  => request(wsPath(ws, `/notes/filters/${encodeURIComponent(id)}`), { method: "PATCH", body: JSON.stringify(fields) }),
+                remove: (id)          => request(wsPath(ws, `/notes/filters/${encodeURIComponent(id)}`), { method: "DELETE" }),
+            },
         };
     }
     const notes = { ...notesIn(), in: (ws) => notesIn(ws) };
@@ -731,7 +748,10 @@
             rename:      (name, newName)     => request(ctx(`/tags/${encodeURIComponent(name)}/rename`),
                                                         { method: "POST", body: JSON.stringify({ newName }) }),
             delete:      (name)              => request(ctx(`/tags/${encodeURIComponent(name)}`),
-                                                        { method: "DELETE" })
+                                                        { method: "DELETE" }),
+            // What the tag means, one line ("" clears it).
+            describe:    (name, description) => request(ctx(`/tags/${encodeURIComponent(name)}/description`),
+                                                        { method: "PUT", body: JSON.stringify({ description }) }),
         },
         // Hybrid notes search (CONCEPT.md "one search bar for everything").
         // `query` returns { notes: [{…, score}], degraded: boolean }. Reindex

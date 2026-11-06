@@ -178,6 +178,10 @@ public class I18nKeyTableTests
         "js/views/fb-calendar-view.js",
         "js/views/fb-files-view.js",
         "js/lib/tag-manager.js",
+        "js/lib/tag-expr.js",
+        "js/lib/note-links.js",
+        "js/lib/note-history.js",
+        "js/lib/notes-board.js",
         // Phase 3: settings, admin, vault (German in js/i18n/de-settings.js).
         "js/views/fb-spaces-settings-view.js",
         "js/views/fb-keys-settings-view.js",

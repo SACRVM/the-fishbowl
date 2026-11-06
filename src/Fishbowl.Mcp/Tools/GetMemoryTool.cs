@@ -14,23 +14,18 @@ public class GetMemoryTool : IMcpTool
     public GetMemoryTool(INoteRepository notes) { _notes = notes; }
 
     public string Name => "get_memory";
-    public string Description => "Fetch a single note by id. Secrets stripped on the way out.";
+    public string Description => "Fetch a single note by `id` or by its `slug`. Secrets stripped on the way out.";
     public string RequiredScope => "read:notes";
     public object InputSchema => new
     {
         type = "object",
-        properties = new { id = new { type = "string" } },
-        required = new[] { "id" },
+        properties = new { id = new { type = "string" }, slug = new { type = "string" } },
     };
 
     public async Task<object> InvokeAsync(
         ContextRef ctx, string actor, JsonElement arguments, ClaimsPrincipal principal, CancellationToken ct)
     {
-        var id = arguments.TryGetProperty("id", out var i) ? i.GetString() : null;
-        if (string.IsNullOrWhiteSpace(id))
-            throw new ArgumentException("id is required", nameof(arguments));
-
-        var note = await _notes.GetByIdAsync(ctx, id!, ct);
+        var note = await NoteArgs.FindAsync(_notes, ctx, arguments, "slug", ct);
         if (note is null) return new { found = false };
 
         return new { found = true, note = SecretStripper.StripNote(note) };
