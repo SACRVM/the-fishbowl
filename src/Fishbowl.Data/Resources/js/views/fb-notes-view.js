@@ -762,6 +762,7 @@ class FbNotesView extends HTMLElement {
                     </sac-collapsible>
                     <div class="nv-list-header">
                         <span class="nv-list-title" id="list-title">${fb.t("fb.notes.all", "All Notes")}</span>
+                        <button type="button" class="icon-btn" id="approve-marked-btn" hidden title="${fb.t("fb.notes.approve-marked", "Approve selected")}" aria-label="${fb.t("fb.notes.approve-marked", "Approve selected")}"><sac-icon name="check"></sac-icon></button>
                         <button type="button" class="icon-btn danger" id="delete-marked-btn" hidden title="${fb.t("fb.notes.delete-marked", "Delete selected")}" aria-label="${fb.t("fb.notes.delete-marked", "Delete selected")}"><sac-icon name="trash"></sac-icon></button>
                         <button type="button" class="icon-btn" id="clear-marks-btn" hidden title="${fb.t("fb.notes.clear-marks", "Clear selection")}" aria-label="${fb.t("fb.notes.clear-marks", "Clear selection")}"><sac-icon name="close"></sac-icon></button>
                         <sac-menu id="filters-menu">
@@ -853,6 +854,7 @@ class FbNotesView extends HTMLElement {
         });
         list.addEventListener("sac:request-remove", (e) => this.removeMany(e.detail.ids));
         this.querySelector("#delete-marked-btn").addEventListener("click", () => this.removeMany(this.sel.marked));
+        this.querySelector("#approve-marked-btn").addEventListener("click", () => this.approveMany(this.sel.marked));
         this.querySelector("#clear-marks-btn").addEventListener("click", () => this.sel.clear());
         this.querySelector("#new-btn").addEventListener("click", () => this.createNote());
         this.querySelector("#empty-new-btn").addEventListener("click", () => this.createNote());
@@ -1072,7 +1074,8 @@ class FbNotesView extends HTMLElement {
     }
 
     // The header names the list — or, while notes are marked, how many, with
-    // Delete and Clear in place of the archive toggle and "+".
+    // Approve (when any awaits review), Delete and Clear in place of the
+    // archive toggle and "+".
     paintHead() {
         const n = this.sel?.marked.length || 0;
         const filter = this.filters.find((f) => f.id === this.activeFilter);
@@ -1087,6 +1090,8 @@ class FbNotesView extends HTMLElement {
         this.querySelector("#filters-menu").hidden = n > 0;
         this.querySelector("#filters-btn").classList.toggle("active", !!filter);
         this.querySelector("#new-btn").hidden = this.writable === false || n > 0;
+        this.querySelector("#approve-marked-btn").hidden = n === 0 || this.writable === false
+            || !this.sel.marked.some((id) => isPending(this.notes.find((x) => x.id === id)));
         this.querySelector("#delete-marked-btn").hidden = n === 0;
         this.querySelector("#clear-marks-btn").hidden = n === 0;
     }
@@ -1136,14 +1141,12 @@ class FbNotesView extends HTMLElement {
                 "reveal-on-hover",
                 isSelected  ? "selected" : "",
                 n.archived  ? "archived" : "",
-                (n.tags || []).includes("review:pending") ? "pending" : "",
+                isPending(n) ? "pending" : "",
             ].filter(Boolean).join(" ");
             const tagLine = this._renderRowTagLine(n.tags);
-            const isPending = (n.tags || []).includes("review:pending");
             // Approve only surfaces when the note needs review. One click
-            // strips review:pending via the existing Human-update path
-            // (NoteRepository.ApplySourceTags does the strip server-side).
-            const approveBtnHtml = isPending
+            // takes review:pending off (approveMany: a patch, tags in place).
+            const approveBtnHtml = isPending(n)
                 ? `<button class="icon-btn hover-reveal nv-item-action approve" data-action="approve" title="${fb.t("fb.notes.approve-title", "Approve (clear review:pending)")}" aria-label="${fb.t("fb.notes.approve", "Approve")}"><sac-icon name="check"></sac-icon></button>`
                 : "";
             return `
@@ -1239,7 +1242,15 @@ class FbNotesView extends HTMLElement {
     _showInEditor(note) {
         this._openNote = note;
         this._loadedText = editorTextFor(note);
-        this.querySelector("#content").value = this._loadedText;
+        // A note from elsewhere is shown with its title on top (editorTextFor);
+        // a save puts that line back into the title, never into the text.
+        this._titleOnTop = this._loadedText !== displayContent(note);
+        const editor = this.querySelector("#content");
+        editor.value = this._loadedText;
+        // What the editor reads back for the text as loaded. Unchanged from
+        // that is not an edit, even where the editor reads it back otherwise
+        // than it was given — opening a note never writes it.
+        this._editorBaseline = editor.value;
         this._applyReadOnly(note);
     }
 
@@ -1393,16 +1404,19 @@ class FbNotesView extends HTMLElement {
         // with the placeholder. Only a tag change goes out; content and
         // ciphertext stay exactly as the server has them.
         const locked = hasLockedSecrets(note);
-        const text     = locked ? this._loadedText : this.querySelector("#content").value;
-        // Compare against what was loaded, not note.content: a note whose
-        // title was prepended for display (see editorTextFor) must not be
-        // rewritten just because it was opened.
-        if (text === this._loadedText && !tagsChanged) return;
-        const previousText = this._loadedText;
-        this._loadedText = text;
-        if (!locked && text !== previousText) {
-            note.title   = titleFromText(text);
-            note.content = text;
+        const text     = locked ? this._editorBaseline : this.querySelector("#content").value;
+        // Compare against what the editor gave back when the note was
+        // loaded, not note.content: a note shown with its title on top (see
+        // editorTextFor) must not be rewritten just because it was opened.
+        const edited = text !== this._editorBaseline;
+        if (!edited && !tagsChanged) return;
+        const previous = { baseline: this._editorBaseline, titleOnTop: this._titleOnTop };
+        this._editorBaseline = text;
+        if (edited) {
+            const saved = fromEditorText(text, this._titleOnTop, note.title);
+            note.title   = saved.title;
+            note.content = saved.content;
+            this._titleOnTop = saved.titleOnTop;
         }
         note.tags    = newTags;
         try {
@@ -1428,7 +1442,10 @@ class FbNotesView extends HTMLElement {
             if (this._openNote === note) this._renderLinks(note);
         } catch (err) {
             // Not saved: the next edit or flush must try again.
-            if (this._openNote === note && this._loadedText === text) this._loadedText = previousText;
+            if (this._openNote === note && this._editorBaseline === text) {
+                this._editorBaseline = previous.baseline;
+                this._titleOnTop = previous.titleOnTop;
+            }
             console.error("[fb-notes-view] update failed:", err);
             this._reportSaveError(err);
         }
@@ -1499,7 +1516,10 @@ class FbNotesView extends HTMLElement {
         if (this.writable === false) return items;
         items.push("-");
         const marked = this.sel?.marked || [];
-        if ((n.tags || []).includes("review:pending"))
+        const several = marked.length > 1 && marked.includes(n.id);
+        if (several && marked.some((id) => isPending(this.notes.find((x) => x.id === id))))
+            items.push({ id: "approve", label: fb.t("fb.notes.approve-marked", "Approve selected"), icon: "check", onClick: () => this.approveMany(marked) });
+        else if (!several && isPending(n))
             items.push({ id: "approve", label: fb.t("fb.notes.approve", "Approve"), icon: "check", onClick: () => this.approveById(n.id) });
         items.push(
             { id: "pin", label: n.pinned ? fb.t("fb.notes.unpin", "Unpin") : fb.t("fb.notes.pin", "Pin to top"), icon: "pin",
@@ -1507,7 +1527,7 @@ class FbNotesView extends HTMLElement {
             { id: "archive", label: n.archived ? fb.t("fb.notes.unarchive", "Unarchive") : fb.t("fb.notes.archive", "Archive"), icon: "archive",
               onClick: () => this.toggleArchivedById(n.id) },
             "-",
-            marked.length > 1 && marked.includes(n.id)
+            several
                 ? { id: "delete", label: fb.t("fb.notes.delete-marked", "Delete selected"), icon: "trash", danger: true, onClick: () => this.removeMany(marked) }
                 : { id: "delete", label: fb.t("fb.common.delete", "Delete"), icon: "trash", danger: true, onClick: () => this.deleteById(n.id) },
         );
@@ -1559,32 +1579,84 @@ class FbNotesView extends HTMLElement {
         }
     }
 
-    async approveById(id) {
-        // Editing is implicit approval; this button is just an explicit UX
-        // handle for users filtering on `review:pending`. Flush any pending
-        // autosave first so our tag change rides in the same PUT.
-        if (id === this._openNote?.id) await this.flushSave();
+    /** Approve: review:pending off and nothing else — one patch a note,
+     *  tags in place, so the text stays as stored (a locked note's too, and
+     *  a note with secrets needs no key). Editing is approval as well; this
+     *  is the explicit handle for whoever reviews by tag. */
+    approveById(id) { return this.approveMany([id]); }
 
-        const note = await this._noteFor(id);
-        if (!note || !(note.tags || []).includes("review:pending")) return;
-
-        const previousTags = [...note.tags];
-        note.tags = note.tags.filter(t => t !== "review:pending");
-        try {
-            await this.api.update(note.id, note);
-            // If the selected note just lost review:pending and the current
-            // filter selects that tag, it'll vanish from the list on the
-            // next render — renderList handles that. For the editor's
-            // tag-input we just re-apply the new list.
-            if (note === this._openNote) {
-                this.querySelector("#tag-input").value = note.tags;
+    /** Several at once — the marked notes, or every note the list shows
+     *  (`_approveShown`). A few patches run side by side; a refusal leaves
+     *  that note as it was and says so once. The marks go when it is done. */
+    async approveMany(ids) {
+        if (this.writable === false) return;
+        const notes = ids.map((id) => this.notes.find((n) => n.id === id)
+            || (this._openNote?.id === id ? this._openNote : null)).filter(isPending);
+        if (notes.length === 0) return;
+        // A pending autosave goes first, so its PUT can't carry the tag back.
+        if (notes.some((n) => n.id === this._openNote?.id)) await this.flushSave();
+        const queue = [...notes];
+        let done = 0, firstError = null;
+        const worker = async () => {
+            for (let n; (n = queue.shift()); ) {
+                try {
+                    const updated = await this.api.patch(n.id, { removeTags: ["review:pending"] });
+                    this._approved(n.id, updated);
+                    done++;
+                } catch (err) { firstError ??= err; }
             }
-            this.renderList();
-        } catch (err) {
-            console.error("[fb-notes-view] approve failed:", err);
-            window.sac?.toast?.(fb.errors.text(err, fb.t("fb.notes.change-failed", "Couldn't save that change.")), { kind: "error" });
-            note.tags = previousTags;
+        };
+        await Promise.all([worker(), worker(), worker()]);
+        if (ids.length > 1) this.sel?.clear();
+        this.renderList();
+        this.paintHead();
+        if (firstError) {
+            console.error("[fb-notes-view] approve failed:", firstError);
+            const reason = fb.errors.text(firstError, fb.t("fb.notes.change-failed", "Couldn't save that change."));
+            window.sac?.toast?.(notes.length === 1 ? reason
+                : fb.t("fb.notes.approve-some-failed", "{done} approved; {failed} couldn't be: {reason}",
+                    { done, failed: notes.length - done, reason }), { kind: "error" });
+        } else if (done > 1) {
+            window.sac?.toast?.(fb.t("fb.notes.approved-n", "{n} notes approved.", { n: done }));
         }
+    }
+
+    /** A note's tags as the server has them after an approval, wherever the
+     *  view holds it — the list, a search hit, the open note and its tags. */
+    _approved(id, updated) {
+        for (const note of new Set([...this.notes.filter((n) => n.id === id), this._openNote?.id === id ? this._openNote : null])) {
+            if (!note) continue;
+            note.tags = updated.tags || (note.tags || []).filter((t) => t !== "review:pending");
+            if (updated.updatedAt) note.updatedAt = updated.updatedAt;
+        }
+        if (this._openNote?.id === id) this.querySelector("#tag-input").value = this._openNote.tags;
+        const row = this.querySelector(`.nv-item[data-id="${CSS.escape(id)}"]`);
+        if (row) {
+            row.classList.remove("pending");
+            row.querySelector('[data-action="approve"]')?.remove();
+            const note = this.notes.find((n) => n.id === id);
+            if (note) this._updateRowInPlace(note);
+        }
+    }
+
+    /** Every note the list shows that awaits review — the saved filter, the
+     *  tag strip and a search narrow it — after one question. */
+    async _approveShown() {
+        const ids = (this._shown || []).filter(isPending).map((n) => n.id);
+        if (ids.length === 0) {
+            window.sac?.toast?.(fb.t("fb.notes.approve-none", "Nothing here awaits review."));
+            return;
+        }
+        const answer = await sac.dialog.confirm({
+            title: ids.length === 1 ? fb.t("fb.notes.approve-shown-title-1", "Approve 1 note?")
+                : fb.t("fb.notes.approve-shown-title", "Approve {n} notes?", { n: ids.length }),
+            message: fb.t("fb.notes.approve-shown-msg", "Every note shown here that awaits review loses review:pending. Their text and their other tags stay as they are."),
+            buttons: [
+                { action: "cancel", label: fb.t("fb.common.cancel", "Cancel"), kind: "default" },
+                { action: "approve", label: fb.t("fb.notes.approve", "Approve"), kind: "primary" },
+            ],
+        });
+        if (answer === "approve") await this.approveMany(ids);
     }
 
     async deleteById(id) {
@@ -1748,6 +1820,7 @@ class FbNotesView extends HTMLElement {
             }
         }
         if (this.writable !== false) {
+            nodes.push(document.createElement("hr"), item("approve-shown", "check", fb.t("fb.notes.approve-shown", "Approve all shown…")));
             nodes.push(document.createElement("hr"), item("new", "plus", fb.t("fb.notes.filter-new", "New filter…")));
             if (active) nodes.push(
                 item("edit", "pencil", fb.t("fb.notes.filter-edit", "Edit “{name}”…", { name: active.name })),
@@ -1765,6 +1838,7 @@ class FbNotesView extends HTMLElement {
             this.renderList();
             return;
         }
+        if (action === "approve-shown") return this._approveShown();
         const active = this.filters.find((f) => f.id === this.activeFilter);
         if (action === "new") return this._filterDialog(null);
         if (action === "edit" && active) return this._filterDialog(active);
@@ -2098,6 +2172,9 @@ function splitTitle(text) {
 
 function titleFromText(text) { return splitTitle(text).title; }
 
+/** The note awaits review (an agent wrote it or changed it). */
+const isPending = (note) => !!note && (note.tags || []).includes("review:pending");
+
 /** List snippet: the text under the title line, so the row doesn't repeat
  *  its own title. Notes from elsewhere (title not in content) use it all. */
 function snippetFor(note) {
@@ -2170,15 +2247,42 @@ function hasLockedSecrets(note) {
  *  top as a heading so the first-line rule holds for them too. */
 function editorTextFor(note) {
     const title = (note.title || "").trim();
-    // Locked secrets show as ordinary (blurred) secret blocks with a
-    // placeholder body, not as the raw `:::secret#N:::end` storage marker.
-    // Display only: saveSelected never writes a locked note's text back.
-    const placeholder = note.secretsUnreadable ? unreadablePlaceholder() : lockedPlaceholder();
-    const content = hasLockedSecrets(note)
-        ? (note.content || "").replace(SECRET_MARKER_RE, `:::secret\n${placeholder}\n:::end`)
-        : note.content || "";
+    const content = displayContent(note);
     if (!title || titleFromText(content) === title) return content;
     return content ? `# ${title}\n\n${content}` : `# ${title}\n`;
+}
+
+/** The note's text as the editor shows it, without a title put on top.
+ *  Locked secrets show as ordinary (blurred) secret blocks with a
+ *  placeholder body, not as the raw `:::secret#N:::end` storage marker.
+ *  Display only: saveSelected never writes a locked note's text back. */
+function displayContent(note) {
+    const placeholder = note.secretsUnreadable ? unreadablePlaceholder() : lockedPlaceholder();
+    return hasLockedSecrets(note)
+        ? (note.content || "").replace(SECRET_MARKER_RE, `:::secret\n${placeholder}\n:::end`)
+        : note.content || "";
+}
+
+/** The editor's text → what is saved. A note written here is its text,
+ *  titled by its first line. A note shown with its title on top keeps its
+ *  title out of its text: while the first line is still a heading, that
+ *  line is the title and the text is the rest, exactly as editorTextFor
+ *  joined them — so a note an agent wrote never gains a copy of its title.
+ *  A first line that is no heading any more makes it a note like any other. */
+function fromEditorText(text, titleOnTop, shownTitle) {
+    if (titleOnTop) {
+        const lines = text.split("\n");
+        if (/^#{1,6}[ \t]/.test(lines[0])) {
+            const rest = lines.slice(1);
+            if (rest[0] === "") rest.shift();
+            const content = rest.join("\n");
+            // The heading as it was put there keeps the title as stored.
+            const title = lines[0] === `# ${(shownTitle || "").trim()}` ? shownTitle
+                : titleFromText(lines[0]) || titleFromText(content);
+            if (title) return { title, content, titleOnTop: true };
+        }
+    }
+    return { title: titleFromText(text), content: text, titleOnTop: false };
 }
 
 customElements.define("fb-notes-view", FbNotesView);

@@ -195,6 +195,193 @@ public class NotesForAgentsTests
         finally { await context.CloseAsync(); }
     }
 
+    // A note written elsewhere keeps its title apart from its text. Opening it
+    // in the Notes app shows the title on top; clicking in and out and leaving
+    // writes nothing (a save compares with what the editor reads back — its
+    // 11524c6 turned the "~" of "about" into "~~"), an edit keeps the title out
+    // of the text, and a lone "~" is text: never struck through, kept as typed.
+    [Fact]
+    public async Task AnAgentsNote_OpenedOrEdited_KeepsItsTextAndItsTitleApart_Test()
+    {
+        var (context, page, errors) = await OpenAsync();
+        try
+        {
+            var tag = Guid.NewGuid().ToString("N")[..6];
+            var notes = $"{_fixture.BaseUrl}/api/v1/notes";
+            const string costs = "A dedicated box (~€39/month) or a cloud VPS (~€32) will do.\n\nThe rest.";
+            var a = await PostAsync(page, notes, new { title = $"Costs {tag}", content = costs });
+            var b = await PostAsync(page, notes, new { title = $"Plan {tag}", content = "First line.\n\nSecond line." });
+            async Task<JsonElement> NoteAsync(string id) => (await (await page.APIRequest.GetAsync($"{notes}/{id}")).JsonAsync())!.Value;
+            var before = await NoteAsync(a);
+
+            await page.GotoAsync($"{_fixture.BaseUrl}/#/notes");
+            var rowA = page.Locator("fb-notes-view .nv-item", new() { HasText = $"Costs {tag}" });
+            var rowB = page.Locator("fb-notes-view .nv-item", new() { HasText = $"Plan {tag}" });
+            await Assertions.Expect(rowA).ToBeVisibleAsync(new() { Timeout = 15000 });
+            await rowA.ClickAsync();
+            var line = page.Locator("fb-notes-view #content .line", new() { HasText = "cloud VPS" });
+            await Assertions.Expect(line).ToBeVisibleAsync();
+            Assert.Equal($"# Costs {tag}", await page.Locator("fb-notes-view #content .line").First.TextContentAsync());
+            Assert.Equal($"# Costs {tag}\n\n{costs}", await page.Locator("fb-notes-view #content").EvaluateAsync<string>("e => e.value"));
+            await Assertions.Expect(line.Locator("del")).ToHaveCountAsync(0);
+
+            // In and out of the text, then another note: nothing is written.
+            await line.ClickAsync();
+            await page.Locator("fb-notes-view #search-input").ClickAsync();
+            await rowB.ClickAsync();
+            await page.WaitForTimeoutAsync(1200);
+            var after = await NoteAsync(a);
+            Assert.Equal(costs, after.GetProperty("content").GetString());
+            Assert.Equal($"Costs {tag}", after.GetProperty("title").GetString());
+            Assert.Equal(before.GetProperty("updatedAt").GetString(), after.GetProperty("updatedAt").GetString());
+
+            // An edit: the text changes, the title stays the title, not a line of it.
+            var second = page.Locator("fb-notes-view #content .line", new() { HasText = "Second line." });
+            await second.ClickAsync();
+            await page.Keyboard.PressAsync("End");
+            await page.Keyboard.TypeAsync(" Edited.");
+            await rowA.ClickAsync();
+            JsonElement edited = default;
+            for (var i = 0; i < 30; i++)
+            {
+                edited = await NoteAsync(b);
+                if (edited.GetProperty("content").GetString()!.Contains("Edited.")) break;
+                await Task.Delay(100, TestContext.Current.CancellationToken);
+            }
+            Assert.Equal("First line.\n\nSecond line. Edited.", edited.GetProperty("content").GetString());
+            Assert.Equal($"Plan {tag}", edited.GetProperty("title").GetString());
+
+            // Its heading renamed in the editor: a new title, still apart.
+            await rowB.ClickAsync();
+            var heading = page.Locator("fb-notes-view #content .line").First;
+            await Assertions.Expect(heading).ToHaveTextAsync($"# Plan {tag}");
+            await heading.ClickAsync();
+            await page.Keyboard.PressAsync("End");
+            await page.Keyboard.TypeAsync(" v2");
+            await rowA.ClickAsync();
+            for (var i = 0; i < 30; i++)
+            {
+                edited = await NoteAsync(b);
+                if (edited.GetProperty("title").GetString()!.EndsWith("v2")) break;
+                await Task.Delay(100, TestContext.Current.CancellationToken);
+            }
+            Assert.Equal($"Plan {tag} v2", edited.GetProperty("title").GetString());
+            Assert.Equal("First line.\n\nSecond line. Edited.", edited.GetProperty("content").GetString());
+
+            // An edit beside the tildes keeps them as they were.
+            var rest = page.Locator("fb-notes-view #content .line", new() { HasText = "The rest." });
+            await rest.ClickAsync();
+            await page.Keyboard.PressAsync("End");
+            await page.Keyboard.TypeAsync(" Edited.");
+            await rowB.ClickAsync();
+            for (var i = 0; i < 30; i++)
+            {
+                edited = await NoteAsync(a);
+                if (edited.GetProperty("content").GetString()!.Contains("Edited.")) break;
+                await Task.Delay(100, TestContext.Current.CancellationToken);
+            }
+            Assert.Equal(costs.Replace("The rest.", "The rest. Edited."), edited.GetProperty("content").GetString());
+            Assert.Equal($"Costs {tag}", edited.GetProperty("title").GetString());
+            Assert.Empty(errors);
+        }
+        finally { await context.CloseAsync(); }
+    }
+
+    // Reviewing many at once: the marked notes (one of them locked) lose
+    // review:pending in one go, and so does every note a filter shows, after
+    // a question — their text and their other tags as they were.
+    [Fact]
+    public async Task ApproveSelected_AndEveryNoteAFilterShows_Test()
+    {
+        var (context, page, errors) = await OpenAsync();
+        try
+        {
+            var slug = await SpaceAsync(page, "Review");
+            var api = $"{_fixture.BaseUrl}/api/v1/spaces/{slug}";
+            var key = await page.APIRequest.PostAsync($"{_fixture.BaseUrl}/api/v1/keys", new()
+            {
+                DataObject = new { name = "review " + slug, contextType = "space", contextId = slug, scopes = new[] { "read:notes", "write:notes" } },
+            });
+            Assert.True(key.Ok, await key.TextAsync());
+            var agent = await _fixture.Playwright!.APIRequest.NewContextAsync(new()
+            {
+                BaseURL = _fixture.BaseUrl,
+                IgnoreHTTPSErrors = true,
+                ExtraHTTPHeaders = new Dictionary<string, string> { ["Authorization"] = "Bearer " + (await key.JsonAsync())!.Value.GetProperty("rawToken").GetString() },
+            });
+            async Task<string> AgentNoteAsync(string title, string area)
+            {
+                var res = await agent.PostAsync("/api/v1/notes", new() { DataObject = new { title, content = $"{title}: about ~€5 (~3 days).", tags = new[] { area } } });
+                Assert.True(res.Ok, await res.TextAsync());
+                return (await res.JsonAsync())!.Value.GetProperty("id").GetString()!;
+            }
+            var a = await AgentNoteAsync("Review A", "area:one");
+            var b = await AgentNoteAsync("Review B", "area:one");
+            var c = await AgentNoteAsync("Review C", "area:one");
+            var locked = await agent.PatchAsync($"/api/v1/notes/{c}", new() { DataObject = new { locked = true } });
+            Assert.True(locked.Ok, await locked.TextAsync());
+            var d = await AgentNoteAsync("Later D", "area:two");
+            var e = await AgentNoteAsync("Later E", "area:two");
+            var f = await AgentNoteAsync("Other F", "area:three");
+            await agent.DisposeAsync();
+            async Task<JsonElement> NoteAsync(string id) => (await (await page.APIRequest.GetAsync($"{api}/notes/{id}")).JsonAsync())!.Value;
+            async Task<bool> PendingAsync(string id) => (await TagsAsync(page, $"{api}/notes/{id}")).Contains("review:pending");
+            async Task UntilApprovedAsync(params string[] ids)
+            {
+                for (var i = 0; i < 50; i++)
+                {
+                    var any = false;
+                    foreach (var id in ids) any |= await PendingAsync(id);
+                    if (!any) return;
+                    await Task.Delay(100, TestContext.Current.CancellationToken);
+                }
+                Assert.Fail("still awaiting review");
+            }
+
+            await page.GotoAsync($"{_fixture.BaseUrl}/#/space/{slug}/notes");
+            var rows = page.Locator("fb-notes-view .nv-item");
+            await Assertions.Expect(rows).ToHaveCountAsync(6, new() { Timeout = 15000 });
+            ILocator Row(string title) => page.Locator("fb-notes-view .nv-item", new() { HasText = title });
+
+            // Three marked (the open one comes along): Approve in the list head.
+            await Row("Review A").ClickAsync();
+            await Row("Review B").ClickAsync(new() { Modifiers = new[] { KeyboardModifier.ControlOrMeta } });
+            await Row("Review C").ClickAsync(new() { Modifiers = new[] { KeyboardModifier.ControlOrMeta } });
+            await Assertions.Expect(page.Locator("fb-notes-view #list-title")).ToHaveTextAsync("3 selected");
+            await page.Locator("fb-notes-view #approve-marked-btn").ClickAsync();
+            await UntilApprovedAsync(a, b, c);
+            foreach (var (id, title) in new[] { (a, "Review A"), (b, "Review B"), (c, "Review C") })
+            {
+                var note = await NoteAsync(id);
+                Assert.Equal($"{title}: about ~€5 (~3 days).", note.GetProperty("content").GetString());
+                var tags = note.GetProperty("tags").EnumerateArray().Select(t => t.GetString()).ToList();
+                Assert.Contains("area:one", tags);
+                Assert.Contains("source:mcp", tags);
+            }
+            Assert.True((await NoteAsync(c)).GetProperty("locked").GetBoolean());
+            await Assertions.Expect(page.Locator("fb-notes-view #approve-marked-btn")).ToBeHiddenAsync();
+            await Assertions.Expect(page.Locator("fb-notes-view #list-title")).Not.ToHaveTextAsync("3 selected");
+            await Assertions.Expect(page.Locator("fb-notes-view .nv-item.pending")).ToHaveCountAsync(3);
+
+            // Everything a filter shows, after a question; the rest awaits review still.
+            var filter = await PostAsync(page, $"{api}/notes/filters", new { name = "Area two", expr = "area:two" });
+            await page.ReloadAsync();
+            await Assertions.Expect(rows).ToHaveCountAsync(6, new() { Timeout = 15000 });
+            await page.Locator("fb-notes-view #filters-btn").ClickAsync();
+            await page.Locator($"fb-notes-view #filters-menu button[data-action='filter:{filter}']").ClickAsync();
+            await Assertions.Expect(rows).ToHaveCountAsync(2);
+            await page.Locator("fb-notes-view #filters-btn").ClickAsync();
+            await page.Locator("fb-notes-view #filters-menu button[data-action='approve-shown']").ClickAsync();
+            var dialog = page.Locator("sac-dialog[open]");
+            await Assertions.Expect(dialog).ToContainTextAsync("Approve 2 notes?");
+            await dialog.GetByRole(AriaRole.Button, new() { Name = "Approve" }).ClickAsync();
+            await UntilApprovedAsync(d, e);
+            Assert.True(await PendingAsync(f));
+            Assert.Empty(errors);
+        }
+        finally { await context.CloseAsync(); }
+    }
+
     [Fact]
     public async Task TodoTags_ShowAndFilter_AndATagSaysWhatItMeans_Test()
     {
