@@ -1,6 +1,7 @@
 using System.Net;
 using System.Text;
 using Markdig;
+using Markdig.Extensions.EmphasisExtras;
 using MimeKit;
 using MimeKit.Utils;
 
@@ -45,7 +46,10 @@ public static class MailComposer
     private static readonly MarkdownPipeline Pipeline = new MarkdownPipelineBuilder()
         .UsePipeTables()
         .UseAutoLinks()
-        .UseEmphasisExtras()
+        // ~~x~~ strikes, nothing else: a lone ~ is "about" (as in the editor,
+        // sac-md-editor's strikethrough "double"), never a subscript, and
+        // ^ ++ == stay what they were typed as.
+        .UseEmphasisExtras(EmphasisExtraOptions.Strikethrough)
         .UseTaskLists()
         .UseSoftlineBreakAsHardlineBreak()
         .DisableHtml()

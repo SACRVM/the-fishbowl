@@ -25,6 +25,17 @@ public class MailComposerTests
     }
 
     [Fact]
+    public void Only_a_double_tilde_strikes_a_lone_one_is_about()
+    {
+        var msg = MailComposer.Build(Request("A box (~€39/month) or a VPS (~€32), ~~not this~~, 2^10 and ==so=="));
+        Assert.Contains("<del>not this</del>", msg.HtmlBody);
+        Assert.Contains("(~€39/month) or a VPS (~€32)", msg.HtmlBody);
+        Assert.DoesNotContain("<sub>", msg.HtmlBody);
+        Assert.DoesNotContain("<sup>", msg.HtmlBody);
+        Assert.DoesNotContain("<mark>", msg.HtmlBody);
+    }
+
+    [Fact]
     public void Raw_html_in_the_markdown_is_escaped_never_passed_on()
     {
         var msg = MailComposer.Build(Request("<img src=x onerror=alert(1)> and <b>tags</b>"));

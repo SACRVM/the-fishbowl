@@ -129,8 +129,12 @@
     fb.noteLinks = { parse, resolve, outgoing, backlinks, fromHref };
 
     // The editor shows them as links (page-wide: its registry and schemes
-    // belong to the element class; the editor loads after this file).
+    // belong to the element class; the editor loads after this file). And
+    // Fishbowl's markdown, in every editor of the page (notes, mail): a lone
+    // ~ is "about", only ~~x~~ strikes — as the list's preview and a mail's
+    // HTML (MailComposer) read it.
     customElements.whenDefined("sac-md-editor").then((Editor) => {
+        if ("strikethrough" in Editor) Editor.strikethrough = "double";
         if (typeof Editor.registerInline !== "function") return;
         Editor.linkSchemes = ["note:", "wiki:"];
         Editor.registerInline({

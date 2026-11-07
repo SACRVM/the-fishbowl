@@ -35,7 +35,9 @@
  *                 allow (see Links below).
  *
  * Properties:
- *   value - string; markdown source (getter + setter).
+ *   value - string; markdown source (getter + setter). Lossless: after
+ *           `el.value = s`, `el.value === s` - only line endings are
+ *           normalised, \r\n and a lone \r read back as \n.
  *
  * Events - the kit convention (CustomEvent, detail { value }, bubbles, NOT
  * composed; never fired by a programmatic `value` set):
@@ -144,6 +146,16 @@
  *
  * Any other href keeps the look of a link but gets no href: a click goes
  * nowhere (it used to open a blank tab at #).
+ *
+ * Strikethrough: GFM by default - ~x~ and ~~x~~ both strike. Page-wide, on
+ * the element class:
+ *
+ *   Editor.strikethrough = "double";         // only ~~x~~ strikes; a lone ~
+ *                                            // ("about": ~40 EUR) is text
+ *   Editor.strikethrough                     // "gfm" (default) or "double"
+ *
+ * Either way the source keeps its tildes; setting it re-renders every
+ * editor on the page.
  *
  * Inline links (registry), the inline twin of registerBlock - a host link
  * form inside a line, page-wide on the element class:
@@ -356,6 +368,15 @@ class SacMdEditor extends HTMLElement {
         purifyConfig = purifyConfigFor(linkSchemes);
         refreshBlocks();
     }
+    static get strikethrough() { return strikethrough; }
+    static set strikethrough(mode) {
+        if (mode !== "gfm" && mode !== "double") {
+            throw new TypeError(`sac-md-editor: strikethrough is "gfm" or "double", not ${JSON.stringify(mode)}`);
+        }
+        if (mode === strikethrough) return;
+        strikethrough = mode;
+        refreshBlocks();
+    }
 
     connectedCallback() {
         mdAddStrings();
@@ -476,7 +497,7 @@ class SacMdEditor extends HTMLElement {
      *  _history/_historyIdx - caller decides. */
     _applyValue(v) {
         if (!this.shadowRoot.firstChild) this._render();
-        const text = v == null ? "" : String(v);
+        const text = v == null ? "" : normalizeEol(String(v));
         const lines = text.split("\n");
         // Always at least one line - an empty document still needs a caret target.
         if (lines.length === 0) lines.push("");
@@ -658,7 +679,22 @@ class SacMdEditor extends HTMLElement {
      *  otherwise change the output. */
     _renderLine(line, src = null, state = null, ahead) {
         if (src === null) src = line.textContent;
+        this._paintLine(line, src, state, ahead);
+        // The invariant's last line of defence: a render whose text is not
+        // the source (a tokenizer quirk we have not met yet) shows the plain
+        // source instead. A lost style is cosmetic; a changed value is data
+        // loss on the next save. data-fallback lets the round-trip page
+        // (test/) report it.
+        if (line.textContent !== src) {
+            line.textContent = src;
+            line.dataset.fallback = "";
+        } else if (line.dataset.fallback !== undefined) {
+            delete line.dataset.fallback;
+        }
+    }
 
+    /** _renderLine's body: the line's markup for `src`. */
+    _paintLine(line, src, state, ahead) {
         // No state passed = unknown context: render as a top-of-document
         // line and leave the key unset, so the next sweep redoes it.
         const known = !!state;
@@ -1354,7 +1390,7 @@ class SacMdEditor extends HTMLElement {
     }
 
     _insertTextAtCaret(text) {
-        const lines = text.replace(/\r\n/g, "\n").split("\n");
+        const lines = normalizeEol(text).split("\n");
         if (!this._activeLine) {
             // No active line - drop onto the first line.
             const first = this._editor.firstElementChild;
@@ -2697,8 +2733,8 @@ function setBlockLabel(line, def) {
     else line.style.setProperty("--mdb-label", JSON.stringify(String(label)));
 }
 
-/** Any registry change - blocks, inlines, link schemes: new CSS for every
- *  shadow root and every line re-derived. */
+/** Any registry change - blocks, inlines, link schemes, strikethrough: new
+ *  CSS for every shadow root and every line re-derived. */
 function refreshBlocks() {
     blockCss = [...BLOCKS.values(), ...INLINES.values()].map((d) => d.css).filter(Boolean).join("\n");
     inlineExt = inlineExtensions();
@@ -2997,6 +3033,32 @@ function purifyConfigFor(schemes) {
 }
 let purifyConfig = purifyConfigFor([]);
 
+// Editor.strikethrough: "gfm" (marked's rule: ~x~ and ~~x~~) or "double"
+// (~~x~~ only - cmark-gfm's DOUBLE_TILDE option). A lone ~ that does not
+// strike is left to marked's text rule, so it stays plain text.
+let strikethrough = "gfm";
+let DoubleTilde = null;
+/** A fresh tokenizer per render, like the options object: marked's Lexer
+ *  writes its options, rules and itself into the one it is given. */
+function doubleTildeTokenizer() {
+    if (!DoubleTilde) {
+        DoubleTilde = class extends marked.Tokenizer {
+            del(src) {
+                const t = super.del(src);
+                return t && t.raw.startsWith("~~") ? t : undefined;
+            }
+        };
+    }
+    return new DoubleTilde();
+}
+
+/** Line endings as the document keeps them: \r\n and a lone \r are \n
+ *  (CommonMark's line endings). The HTML parser would turn a \r inside a
+ *  line into \n anyway - one line would read back as two. */
+function normalizeEol(text) {
+    return text.replace(/\r\n?/g, "\n");
+}
+
 const SAFE_HREF_RE = /^(https?:|mailto:|#)/i;
 // Images: http/https only. Block data: URIs (SVG-XSS, canvas leaks),
 // javascript:, and anything else that could exfil or execute.
@@ -3022,6 +3084,7 @@ function renderInline(text, ctx = null) {
     // tokenizer into the one it is given.
     const options = { gfm: true, breaks: false };
     if (inlineExt) options.extensions = inlineExt;
+    if (strikethrough === "double") options.tokenizer = doubleTildeTokenizer();
     let tokens;
     try {
         if (defs && Object.keys(defs).length) {
@@ -3169,12 +3232,19 @@ function renderInlineToken(t) {
             const delim = t.raw.charAt(0); // "*" or "_"
             return `<span class="marker">${delim}</span><em>${walkInlineTokens(t.tokens || [])}</em><span class="marker">${delim}</span>`;
         }
-        case "del":
-            return `<span class="marker">~~</span><del>${walkInlineTokens(t.tokens || [])}</del><span class="marker">~~</span>`;
+        case "del": {
+            const delim = t.raw.startsWith("~~") ? "~~" : "~";   // GFM: one or two
+            return `<span class="marker">${delim}</span><del>${walkInlineTokens(t.tokens || [])}</del><span class="marker">${delim}</span>`;
+        }
         case "codespan": {
             const m = t.raw.match(/^(`+)/);
             const delim = m ? m[1] : "`";
-            return `<span class="marker">${delim}</span><code>${escapeHtml(t.text)}</code><span class="marker">${delim}</span>`;
+            // marked strips one space from each end of `` ` a ` `` (CommonMark);
+            // the source keeps them, so they join the markers.
+            const inner = t.raw.slice(delim.length, t.raw.length - delim.length);
+            const pad = inner.length - t.text.length === 2 ? " " : "";
+            const code = inner.slice(pad.length, inner.length - pad.length);
+            return `<span class="marker">${delim}${pad}</span><code>${escapeHtml(code)}</code><span class="marker">${pad}${delim}</span>`;
         }
         case "br":
             // Hard break — keep the raw source chars visible as a marker so
