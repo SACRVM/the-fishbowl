@@ -1,8 +1,20 @@
+using System.Runtime.InteropServices;
+using System.Text.Json;
+using System.Text.RegularExpressions;
 using Microsoft.Data.Sqlite;
 
 // Operator utility: hot-snapshot of `fishbowl-data/` to a timestamped folder.
 // Uses SQLite's online backup API for every .db file so the snapshot is safe
 // to run against a live host (no locking, no half-written rows).
+//
+// Differential: every snapshot writes a manifest (snapshot.files.jsonl — each
+// copied file's path, size and modification time). A file whose size and
+// time are still what the newest earlier snapshot in --out recorded is not
+// copied again: the new snapshot gets a hardlink to that snapshot's copy —
+// no space, and every snapshot is still a complete folder on its own (delete
+// any of them and the others keep their files). Where the target can't link
+// (a filesystem without hardlinks, too many links to one file) the file is
+// copied. The databases are always backed up whole.
 //
 // What's included:
 //   system.db                              → SQLite backup
@@ -21,28 +33,42 @@ using Microsoft.Data.Sqlite;
 // preserved, so individual users/spaces can also be restored by copying just
 // that subfolder.
 //
+// Retention (only when asked for — deleting backups is never a default):
+// --keep-daily N keeps the newest N snapshots, --keep-monthly M also the
+// newest snapshot of each of the last M months that have one. Everything
+// else named snapshot-<yyyyMMdd>-<HHmmss> in --out goes, after a snapshot
+// that succeeded; the one just made always stays.
+//
 // Usage:
 //   dotnet run --project tools/snapshot-data -- \
-//       [--data <path>] [--out <path>] [--include-models] [--quiet]
+//       [--data <path>] [--out <path>] [--include-models] [--full]
+//       [--keep-daily <n>] [--keep-monthly <n>] [--quiet]
 //
 // Defaults:
 //   --data            fishbowl-data
 //   --out             fishbowl-backups
 //   --include-models  off (models re-download)
+//   --full            off (copy every file, link none)
+//   --keep-*          off (nothing is deleted)
 //   --quiet           off
 //
 // Exit codes:
 //   0  success
+//   1  bad arguments
 //   2  source data dir missing
 //   3  system.db not readable
 //   4  destination dir already exists (same timestamp run twice in the same second)
 //   5  one or more file operations failed (partial snapshot left on disk for inspection)
+//   6  the snapshot succeeded, but an old one couldn't be deleted
 
 var args_ = args;
 var dataPath = GetArg("--data") ?? "fishbowl-data";
 var outRoot = GetArg("--out") ?? "fishbowl-backups";
 var includeModels = HasFlag("--include-models");
+var full = HasFlag("--full");
 var quiet = HasFlag("--quiet");
+if (!TryCount("--keep-daily", 1, out var keepDaily) || !TryCount("--keep-monthly", 0, out var keepMonthly))
+    return 1;
 
 if (!Directory.Exists(dataPath))
 {
@@ -63,12 +89,19 @@ if (Directory.Exists(snapshotDir))
     Console.Error.WriteLine($"error: destination already exists: {snapshotDir}");
     return 4;
 }
+
+// The base: the newest earlier snapshot with a manifest (older ones, from
+// before snapshots were differential, have none — the first run copies all).
+var (baseDir, baseFiles) = full ? (null, new Dictionary<string, ManifestEntry>(StringComparer.Ordinal)) : FindBase(outRoot);
 Directory.CreateDirectory(snapshotDir);
 
 var failures = new List<string>();
 var stats = new Stats();
+var manifest = new List<ManifestEntry>();
+string? linkProblem = null;     // why linking stopped being tried, once
 
 Log($"# snapshot start — source={Path.GetFullPath(dataPath)} dest={Path.GetFullPath(snapshotDir)}");
+Log(baseDir is null ? "  (no earlier snapshot with a manifest: every file is copied)" : $"  (unchanged files link to {Path.GetFileName(baseDir)})");
 
 // 1. system.db
 TryBackup(systemDbPath, Path.Combine(snapshotDir, "system.db"), "system.db");
@@ -144,8 +177,12 @@ if (Directory.Exists(modelsRoot))
     }
 }
 
-// 6. metadata sidecar — small JSON next to the snapshot so the operator (or
-//    a restore script) can sanity-check what's inside without scanning files.
+// 6. the manifest — what the next snapshot links against — and a metadata
+//    sidecar, so the operator (or a restore script) can sanity-check what's
+//    inside without scanning files. Written last: a snapshot without them
+//    never serves as a base.
+using (var w = new StreamWriter(Path.Combine(snapshotDir, ManifestEntry.FileName)))
+    foreach (var e in manifest) w.WriteLine(JsonSerializer.Serialize(e));
 var meta = new
 {
     snapshotAt = DateTime.UtcNow.ToString("o"),
@@ -153,14 +190,20 @@ var meta = new
     fishbowlVersion = typeof(Program).Assembly.GetName().Version?.ToString() ?? "dev",
     databases = stats.DbCount,
     bytes = stats.BytesWritten,
+    files = manifest.Count,
+    linkedFiles = stats.LinkedFiles,
+    linkedBytes = stats.LinkedBytes,
+    linkedTo = baseDir is null ? null : Path.GetFileName(baseDir),
     includedModels = includeModels,
 };
 File.WriteAllText(
     Path.Combine(snapshotDir, "snapshot.json"),
-    System.Text.Json.JsonSerializer.Serialize(meta, new System.Text.Json.JsonSerializerOptions { WriteIndented = true }));
+    JsonSerializer.Serialize(meta, new JsonSerializerOptions { WriteIndented = true }));
 
 Console.Error.WriteLine();
-Console.Error.WriteLine($"# done — {stats.DbCount} DB(s) backed up, {FormatBytes(stats.BytesWritten)} written");
+Console.Error.WriteLine($"# done — {stats.DbCount} DB(s) backed up, {FormatBytes(stats.BytesWritten)} written, "
+    + $"{stats.LinkedFiles} unchanged file(s) linked ({FormatBytes(stats.LinkedBytes)} not copied again)");
+if (linkProblem is not null) Console.Error.WriteLine($"# note — files were copied instead of linked: {linkProblem}");
 Console.Error.WriteLine($"# snapshot at: {Path.GetFullPath(snapshotDir)}");
 
 if (failures.Count > 0)
@@ -171,8 +214,10 @@ if (failures.Count > 0)
     return 5;
 }
 
+var pruned = keepDaily > 0 || keepMonthly > 0 ? Prune(outRoot, snapshotDir, keepDaily, keepMonthly) : true;
+
 Console.WriteLine(snapshotDir);
-return 0;
+return pruned ? 0 : 6;
 
 void TryBackup(string src, string dest, string label)
 {
@@ -214,24 +259,44 @@ void CopyContextExtras(string contextDir, string destDir, string label)
             rel => !Path.GetFileName(rel).StartsWith(".~fb-", StringComparison.OrdinalIgnoreCase));
 }
 
+// A tree, file by file: linked to the base snapshot's copy when the file is
+// what the base recorded, else copied. One file that fails is reported and
+// the rest go on.
 void TryCopyTree(string srcRoot, string destRoot, string label, Func<string, bool>? include = null)
 {
+    long copied = 0, linked = 0;
     try
     {
         Directory.CreateDirectory(destRoot);
-        long copied = 0;
         foreach (var src in Directory.EnumerateFiles(srcRoot, "*", SearchOption.AllDirectories))
         {
             var rel = Path.GetRelativePath(srcRoot, src);
             if (include is not null && !include(rel)) continue;
             var dest = Path.Combine(destRoot, rel);
-            var destDir = Path.GetDirectoryName(dest);
-            if (!string.IsNullOrEmpty(destDir)) Directory.CreateDirectory(destDir);
-            File.Copy(src, dest, overwrite: false);
-            copied += new FileInfo(dest).Length;
+            var key = Path.GetRelativePath(snapshotDir, dest).Replace('\\', '/');
+            try
+            {
+                // Read before the copy: a file changed while it is copied gets
+                // a newer time than the one recorded, so the next run copies it again.
+                var info = new FileInfo(src);
+                var entry = new ManifestEntry(key, info.Length, info.LastWriteTimeUtc.Ticks);
+                var destDir = Path.GetDirectoryName(dest);
+                if (!string.IsNullOrEmpty(destDir)) Directory.CreateDirectory(destDir);
+                if (TryLink(entry, dest)) linked += entry.Size;
+                else
+                {
+                    File.Copy(src, dest, overwrite: false);
+                    copied += new FileInfo(dest).Length;
+                }
+                manifest.Add(entry);
+            }
+            catch (Exception ex)
+            {
+                var msg = $"{label}{rel}: {ex.GetType().Name} — {ex.Message}";
+                failures.Add(msg);
+                Console.Error.WriteLine($"  ! {msg}");
+            }
         }
-        stats.BytesWritten += copied;
-        Log($"  + {label} ({FormatBytes(copied)})");
     }
     catch (Exception ex)
     {
@@ -239,6 +304,85 @@ void TryCopyTree(string srcRoot, string destRoot, string label, Func<string, boo
         failures.Add(msg);
         Console.Error.WriteLine($"  ! {msg}");
     }
+    stats.BytesWritten += copied;
+    Log($"  + {label} ({FormatBytes(copied)} copied{(linked > 0 ? $", {FormatBytes(linked)} linked" : "")})");
+}
+
+// A hardlink to the base snapshot's copy, when the file is still what the
+// base recorded and that copy is still there with its size.
+bool TryLink(ManifestEntry entry, string dest)
+{
+    if (baseDir is null || linkProblem is not null) return false;
+    if (!baseFiles.TryGetValue(entry.Path, out var was) || was.Size != entry.Size || was.Mtime != entry.Mtime) return false;
+    var existing = Path.Combine(baseDir, entry.Path);
+    var old = new FileInfo(existing);
+    if (!old.Exists || old.Length != entry.Size) return false;
+    if (HardLink.TryCreate(existing, dest, out var why))
+    {
+        stats.LinkedFiles++;
+        stats.LinkedBytes += entry.Size;
+        return true;
+    }
+    // Too many links to this one file: copy it — it is the next base. Any
+    // other refusal means the target doesn't link at all; stop trying.
+    if (!why.TooManyLinks) linkProblem = why.Message;
+    return false;
+}
+
+// The newest snapshot-* folder in `root` with a manifest, and that manifest.
+static (string? Dir, Dictionary<string, ManifestEntry> Files) FindBase(string root)
+{
+    var files = new Dictionary<string, ManifestEntry>(StringComparer.Ordinal);
+    if (!Directory.Exists(root)) return (null, files);
+    foreach (var dir in SnapshotDirs(root).Select(d => d.Dir))
+    {
+        var path = Path.Combine(dir, ManifestEntry.FileName);
+        if (!File.Exists(path) || !File.Exists(Path.Combine(dir, "snapshot.json"))) continue;
+        foreach (var line in File.ReadLines(path))
+        {
+            if (string.IsNullOrWhiteSpace(line)) continue;
+            var e = JsonSerializer.Deserialize<ManifestEntry>(line);
+            if (e is not null) files[e.Path] = e;
+        }
+        return (dir, files);
+    }
+    return (null, files);
+}
+
+// snapshot-<yyyyMMdd>-<HHmmss> folders, newest first (the name is the time).
+static IEnumerable<(string Dir, string Stamp)> SnapshotDirs(string root) =>
+    Directory.EnumerateDirectories(root)
+        .Select(d => (Dir: d, Match: SnapshotName().Match(Path.GetFileName(d))))
+        .Where(x => x.Match.Success)
+        .Select(x => (x.Dir, Stamp: x.Match.Groups[1].Value))
+        .OrderByDescending(x => x.Stamp, StringComparer.Ordinal);
+
+// Keeps the newest `daily`, plus the newest of each of the last `monthly`
+// months; deletes the other snapshot folders. Never the one just made.
+bool Prune(string root, string current, int daily, int monthly)
+{
+    var all = SnapshotDirs(root).ToList();
+    var keep = new HashSet<string>(StringComparer.Ordinal) { Path.GetFullPath(current) };
+    foreach (var (dir, _) in all.Take(daily)) keep.Add(Path.GetFullPath(dir));
+    foreach (var month in all.GroupBy(x => x.Stamp[..6]).Take(monthly))
+        keep.Add(Path.GetFullPath(month.First().Dir));
+    var ok = true;
+    foreach (var (dir, _) in all)
+    {
+        if (keep.Contains(Path.GetFullPath(dir))) continue;
+        try
+        {
+            Directory.Delete(dir, recursive: true);
+            Log($"  - deleted {Path.GetFileName(dir)} (retention)");
+        }
+        catch (Exception ex)
+        {
+            ok = false;
+            Console.Error.WriteLine($"  ! couldn't delete {Path.GetFileName(dir)}: {ex.GetType().Name} — {ex.Message}");
+        }
+    }
+    Console.Error.WriteLine($"# retention — kept {keep.Count} snapshot(s) (newest {daily}, monthly {monthly})");
+    return ok;
 }
 
 void Log(string line)
@@ -254,6 +398,16 @@ string? GetArg(string flag)
 }
 
 bool HasFlag(string flag) => Array.IndexOf(args_, flag) >= 0;
+
+// A count flag: absent = 0 (off); present = a whole number ≥ min.
+bool TryCount(string flag, int min, out int value)
+{
+    value = 0;
+    if (!HasFlag(flag)) return true;
+    if (int.TryParse(GetArg(flag), out value) && value >= min) return true;
+    Console.Error.WriteLine($"error: {flag} needs a whole number ≥ {min}");
+    return false;
+}
 
 static string FormatBytes(long bytes)
 {
@@ -319,4 +473,56 @@ sealed class Stats
 {
     public int DbCount;
     public long BytesWritten;
+    public int LinkedFiles;
+    public long LinkedBytes;
+}
+
+// One file of a snapshot: its path in the snapshot ('/'-separated), and the
+// size and modification time (UTC ticks) its source had when it was copied.
+sealed record ManifestEntry(
+    [property: System.Text.Json.Serialization.JsonPropertyName("p")] string Path,
+    [property: System.Text.Json.Serialization.JsonPropertyName("s")] long Size,
+    [property: System.Text.Json.Serialization.JsonPropertyName("m")] long Mtime)
+{
+    public const string FileName = "snapshot.files.jsonl";
+}
+
+static partial class Program
+{
+    [GeneratedRegex(@"^snapshot-(\d{8}-\d{6})$")]
+    private static partial Regex SnapshotName();
+}
+
+// A hardlink, by the operating system's own call (.NET has none).
+static class HardLink
+{
+    public readonly record struct Refusal(string Message, bool TooManyLinks);
+
+    [DllImport("libc", EntryPoint = "link", SetLastError = true)]
+    private static extern int UnixLink(string existing, string link);
+
+    [DllImport("kernel32.dll", EntryPoint = "CreateHardLinkW", SetLastError = true, CharSet = CharSet.Unicode)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool WindowsLink(string link, string existing, IntPtr security);
+
+    private const int EMLINK = 31;                       // Linux, macOS
+    private const int ERROR_TOO_MANY_LINKS = 1142;
+
+    public static bool TryCreate(string existing, string link, out Refusal why)
+    {
+        why = default;
+        try
+        {
+            if (OperatingSystem.IsWindows() ? WindowsLink(link, existing, IntPtr.Zero) : UnixLink(existing, link) == 0)
+                return true;
+            var code = Marshal.GetLastPInvokeError();
+            why = new Refusal($"the target refused a hardlink (error {code})",
+                code == (OperatingSystem.IsWindows() ? ERROR_TOO_MANY_LINKS : EMLINK));
+        }
+        catch (Exception ex) when (ex is DllNotFoundException or EntryPointNotFoundException)
+        {
+            why = new Refusal($"no hardlinks on this system ({ex.GetType().Name})", false);
+        }
+        return false;
+    }
 }

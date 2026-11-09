@@ -11,6 +11,16 @@ trash included, upload temps not), the `archive/` of archived spaces, and
 snapshot is a best-effort copy — the reconcile after a restore journals any
 drift.
 
+**Differential.** Every snapshot writes `snapshot.files.jsonl`: each file's
+path, size and modification time. The next snapshot into the same `--out`
+links a file whose size and time are unchanged to the earlier copy (a
+hardlink) instead of copying it again — a photo library costs its space once,
+and a night costs the databases and what changed. Each snapshot is still a
+complete folder: delete any of them and the others keep their files. A target
+that can't link (or a file with too many links) gets copies; the summary says
+why. Snapshots from before this have no manifest, so the first run after it
+copies everything. `--full` copies every file regardless.
+
 ## Usage
 
 ```bash
@@ -25,6 +35,9 @@ Flags:
 | `--data <path>`     | `fishbowl-data`    | Source data directory.                                       |
 | `--out <path>`      | `fishbowl-backups` | Parent of `snapshot-<timestamp>/`.                           |
 | `--include-models`  | off                | Bundle the ONNX embedding model (~470 MB). Off by default — models re-download from HuggingFace on next host start. |
+| `--full`            | off                | Copy every file; link none.                                  |
+| `--keep-daily <n>`  | off                | After a snapshot that succeeded, keep the newest n (≥ 1) …   |
+| `--keep-monthly <n>`| off                | … and the newest of each of the last n months; delete the other `snapshot-*` folders in `--out`. |
 | `--quiet`           | off                | Suppress per-file logs. Final summary still goes to stderr.  |
 
 stdout gets the absolute snapshot path on success — pipe-friendly for scripts.
@@ -58,18 +71,17 @@ $trigger = New-ScheduledTaskTrigger -Daily -At 03:00
 Register-ScheduledTask -TaskName "Fishbowl daily snapshot" -Action $action -Trigger $trigger
 ```
 
-Snapshots are never deleted by the tool. To keep only the newest seven, run
-after the snapshot — on Linux:
+Snapshots are deleted only when `--keep-daily` / `--keep-monthly` say which
+to keep, e.g. two weeks of nights and a year of months:
 
 ```bash
-ls -1d /mnt/nas/backup/Fishbowl/snapshot-* | sort -r | tail -n +8 | xargs -r rm -rf --
+dotnet run --project tools/snapshot-data -- --data … --out … --keep-daily 14 --keep-monthly 12 --quiet
 ```
 
-and on Windows:
-
-```powershell
-Get-ChildItem D:\fishbowl-backups -Directory | Sort-Object Name -Descending | Select-Object -Skip 7 | Remove-Item -Recurse -Force
-```
+Only folders named `snapshot-<yyyyMMdd>-<HHmmss>` are ever deleted, never the
+one just made, and nothing after a snapshot that failed. Because unchanged
+files are hardlinks, deleting an old snapshot frees only what no newer one
+still links.
 
 ## Restore
 
@@ -84,7 +96,9 @@ so partial restores work by copying just the affected subfolder.
 | Code | Meaning                                                           |
 | ---- | ----------------------------------------------------------------- |
 | 0    | Success.                                                          |
+| 1    | A bad argument (`--keep-*` needs a whole number).                 |
 | 2    | Source data dir not found.                                        |
 | 3    | `system.db` missing.                                              |
 | 4    | Snapshot dir already exists (same-second re-run).                 |
 | 5    | One or more file operations failed — partial snapshot left on disk for inspection. |
+| 6    | The snapshot succeeded, but an old one couldn't be deleted.       |

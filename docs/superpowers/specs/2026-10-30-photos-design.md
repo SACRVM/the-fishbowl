@@ -1,6 +1,6 @@
 # Photos
 
-Status: **phase 3 (the look) and the upload of phase 4 built (2026-11-09)**; the export, the import, duplicates and search to come.
+Status: **phase 3 (the look) and the upload of phase 4 built (2026-11-09); phase 1's differential snapshots too**; quotas, the export, the import, duplicates and search to come.
 A Photos app for a workspace: the whole library as a timeline, with albums,
 favourites and a viewer, shared with everyone in the space. The photos are
 real files in the workspace's Files. A one-time import brings an iCloud
@@ -225,8 +225,6 @@ The next context schema version:
   licence.
 - **Places.** Whether GPS is shown to every member of a space, or can be
   switched off per space.
-- **The snapshot target.** The form of differential snapshots on an SMB
-  share that may not support hardlinks.
 
 ## Decided on 2026-10-30
 
@@ -247,6 +245,13 @@ The next context schema version:
 
 ## Decided on 2026-11-09
 
+- **Snapshots are differential by hardlinks.** The NAS share (SMB 2.1)
+  takes hardlinks (probed: one inode, link count 2). Each snapshot writes a
+  manifest (path, size, mtime); a file unchanged since the newest earlier
+  snapshot is a hardlink to its copy, so the library costs its space once
+  and a night costs the databases and what changed. Every snapshot stays a
+  complete folder. Retention (`--keep-daily`, `--keep-monthly`) deletes
+  only when configured.
 - **The look comes first** (phase 3 with the upload of phase 4), before the
   export: the app shows what is in the folder and what is uploaded, and the
   import fills the same tables later.

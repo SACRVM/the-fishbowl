@@ -20,7 +20,7 @@ tools/local-host/fishbowl-local deploy    # build and start
 
 ## The backup
 
-`fishbowl-backup.timer` runs `fishbowl-local backup` every day at 03:00. A day the machine was off is caught up on its next start. The backup is `tools/snapshot-data` into `FISHBOWL_BACKUP_DIR`. It refuses to run if that folder is on the same disk as the data, for example when the share isn't mounted and its mount point is an empty folder. Snapshots are never deleted automatically. Run one by hand with `systemctl --user start fishbowl-backup`.
+`fishbowl-backup.timer` runs `fishbowl-local backup` every day at 03:00. A day the machine was off is caught up on its next start. The backup is `tools/snapshot-data` into `FISHBOWL_BACKUP_DIR`. It refuses to run if that folder is on the same disk as the data, for example when the share isn't mounted and its mount point is an empty folder. Snapshots are differential: a file unchanged since the last snapshot becomes a hardlink to it, so a night costs the databases and what changed. Snapshots are deleted only when `FISHBOWL_BACKUP_KEEP_DAILY` / `FISHBOWL_BACKUP_KEEP_MONTHLY` say which to keep. Run one by hand with `systemctl --user start fishbowl-backup`.
 
 ## The app window
 
@@ -40,6 +40,8 @@ Settings are in `~/.config/fishbowl/local.conf`:
 | --- | --- | --- |
 | `FISHBOWL_URL` | `https://localhost:7180` | What the window opens. |
 | `FISHBOWL_BACKUP_DIR` | `/mnt/nas/backup/Fishbowl` | Where snapshots go. |
+| `FISHBOWL_BACKUP_KEEP_DAILY` | empty (keep all) | Keep the newest N snapshots. |
+| `FISHBOWL_BACKUP_KEEP_MONTHLY` | empty | Also keep the newest of each of the last M months. |
 | `FISHBOWL_BROWSER` | `chromium` | A Chromium-based browser. |
 
 **Moving to a server:**

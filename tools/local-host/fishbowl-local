@@ -21,6 +21,8 @@ health="http://localhost:7181/api/v1/version"
 # Defaults; local.conf overrides them.
 FISHBOWL_URL=https://localhost:7180
 FISHBOWL_BACKUP_DIR=/mnt/nas/backup/Fishbowl
+FISHBOWL_BACKUP_KEEP_DAILY=
+FISHBOWL_BACKUP_KEEP_MONTHLY=
 FISHBOWL_BROWSER=chromium
 if [[ -f $conf ]]; then . "$conf"; fi
 
@@ -53,6 +55,13 @@ FISHBOWL_URL=$FISHBOWL_URL
 
 # Where the daily snapshot goes: another disk than the data's.
 FISHBOWL_BACKUP_DIR=$FISHBOWL_BACKUP_DIR
+
+# Which snapshots stay (empty: all of them). Unchanged files are hardlinks
+# to the snapshot before, so an old snapshot costs only what changed then.
+# DAILY keeps the newest N, MONTHLY also the newest of each of the last M
+# months; the rest is deleted after a snapshot that succeeded.
+FISHBOWL_BACKUP_KEEP_DAILY=$FISHBOWL_BACKUP_KEEP_DAILY
+FISHBOWL_BACKUP_KEEP_MONTHLY=$FISHBOWL_BACKUP_KEEP_MONTHLY
 
 # A Chromium-based browser for the app window.
 FISHBOWL_BROWSER=$FISHBOWL_BROWSER
@@ -315,8 +324,11 @@ cmd_backup() {
     if [[ $(device_of "$data") == "$(device_of "$target")" ]]; then
         die "the backup target is on the data's own disk: $target"
     fi
+    local keep=()
+    if [[ -n $FISHBOWL_BACKUP_KEEP_DAILY ]]; then keep+=(--keep-daily "$FISHBOWL_BACKUP_KEEP_DAILY"); fi
+    if [[ -n $FISHBOWL_BACKUP_KEEP_MONTHLY ]]; then keep+=(--keep-monthly "$FISHBOWL_BACKUP_KEEP_MONTHLY"); fi
     cd "$repo"
-    dotnet run --project tools/snapshot-data -- --data "$data" --out "$target" --quiet
+    dotnet run --project tools/snapshot-data -- --data "$data" --out "$target" "${keep[@]}" --quiet
 }
 
 cmd_app() {
