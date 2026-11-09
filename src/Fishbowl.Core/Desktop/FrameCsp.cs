@@ -2,8 +2,9 @@ using System.Text.RegularExpressions;
 
 namespace Fishbowl.Core.Desktop;
 
-// The Content-Security-Policy of a sandboxed app's frame document — the
-// kit's harness contract (kit/js/lib/app-bridge.js, THE HARNESS) as a real
+// The Content-Security-Policy of a sandboxed app's frame document (an app
+// installed from a URL; a space's own apps are trusted and run in the page,
+// AppModes.Trusted) — the kit's harness contract (kit/js/lib/app-bridge.js, THE HARNESS) as a real
 // header. The frame has an opaque origin (sandbox without allow-same-origin);
 // this policy says what it may load and whom it may talk to: the host's kit
 // (scripts, styles, fonts), the folder of the app's entry, and exactly the
@@ -23,9 +24,7 @@ public static partial class FrameCsp
     /// Null writes 'self' (tests, and a host that can't tell).</param>
     /// <param name="entryUrl">The app's entry script; its folder is what the
     /// frame may load app files from. Null allows the whole app origin.</param>
-    /// <param name="hostScripts">A folder of the host's own scripts the frame
-    /// loads too (a space app's data grid), a path like "/js/vendor/x/".</param>
-    public static string Build(string appOrigin, IEnumerable<string>? connect, string? hostOrigin = null, string? entryUrl = null, string? hostScripts = null)
+    public static string Build(string appOrigin, IEnumerable<string>? connect, string? hostOrigin = null, string? entryUrl = null)
     {
         if (!AppOrigins.IsSafe(appOrigin))
             throw new ArgumentException("Not a safe origin.", nameof(appOrigin));
@@ -41,12 +40,10 @@ public static partial class FrameCsp
         var appDir = appOrigin;
         if (entryUrl is not null)
         {
-            // An app's entry is https (loopback http for development) — or,
-            // for a space's own app, on Fishbowl's own origin, plain HTTP too
-            // on a LAN install without TLS. The entry stays on appOrigin.
+            // An app's entry is https (loopback http for development), on
+            // the app's own origin.
             if (!Uri.TryCreate(entryUrl, UriKind.Absolute, out var entry)
-                || !(AppOrigins.TryOriginOf(entry, out var entryOrigin)
-                     || (hostOrigin is not null && AppOrigins.TryOriginOf(entry, out entryOrigin, anyHttp: true) && entryOrigin == hostOrigin))
+                || !AppOrigins.TryOriginOf(entry, out var entryOrigin)
                 || entryOrigin != appOrigin)
                 throw new ArgumentException("The entry must live on the app's origin.", nameof(entryUrl));
             var folder = entry.AbsolutePath[..(entry.AbsolutePath.LastIndexOf('/') + 1)];
@@ -55,17 +52,13 @@ public static partial class FrameCsp
             appDir = appOrigin + folder;
         }
 
-        if (hostScripts is not null && !(hostScripts.StartsWith('/') && hostScripts.EndsWith('/') && SafePath().IsMatch(hostScripts)))
-            throw new ArgumentException("Not a folder path the header can carry.", nameof(hostScripts));
-
         string Kit(string sub) => hostOrigin is null ? "'self'" : $"{hostOrigin}/kit/{sub}/";
-        var extraScripts = hostScripts is null ? "" : " " + (hostOrigin is null ? "'self'" : hostOrigin + hostScripts);
         var connectSrc = string.Join(' ', connectList.Distinct(StringComparer.Ordinal).Concat(new[] { "blob:", "data:" }));
         var ancestors = hostOrigin ?? "'self'";
 
         return string.Join("; ",
             "default-src 'none'",
-            $"script-src {Kit("js")} {appDir}{extraScripts}",
+            $"script-src {Kit("js")} {appDir}",
             $"style-src {Kit("css")} {appDir} 'unsafe-inline'",
             $"font-src {Kit("fonts")} {appDir}",
             $"img-src {appDir} blob: data:",

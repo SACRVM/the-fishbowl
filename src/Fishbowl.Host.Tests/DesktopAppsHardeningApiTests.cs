@@ -220,11 +220,9 @@ public class DesktopAppsHardeningApiTests : IClassFixture<WebApplicationFactory<
         var entry = app.GetProperty("entryUrl").GetString()!;
         Assert.StartsWith($"http://192.168.1.5/apps/code/{space.Id}/hello/", entry);
 
-        var frame = await lan.GetAsync($"/apps/frame/space/{space.Slug}/space.hello", Ct);
-        Assert.Equal(HttpStatusCode.OK, frame.StatusCode);
-        var csp = string.Join(" ", frame.Headers.GetValues("Content-Security-Policy"));
-        Assert.Contains($"script-src http://192.168.1.5/kit/js/ {entry[..^"app.js".Length]} http://192.168.1.5/js/vendor/sac-data-grid/js/;", csp);
-        Assert.Contains("frame-ancestors http://192.168.1.5", csp);
+        // The page loads it from there (a trusted app has no frame).
+        Assert.Equal(HttpStatusCode.OK, (await lan.GetAsync(entry, Ct)).StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, (await lan.GetAsync($"/apps/frame/space/{space.Slug}/space.hello", Ct)).StatusCode);
     }
 
     [Fact]

@@ -4,20 +4,20 @@ using Xunit;
 
 namespace Fishbowl.Core.Tests;
 
-// Review fixes 2026-10-04 (desktop and space apps): the host's own plain-HTTP
-// origin for space apps only, icons as kit names only, one data folder per
-// app, the per-account identity salt, and error texts quoted in the guide.
+// Review fixes 2026-10-04 (desktop and space apps): icons as kit names only,
+// one data folder per app, the per-account identity salt, and error texts
+// quoted in the guide. A frame is an installed app's alone (space apps are
+// trusted and run in the page since 2026-11-09).
 public class DesktopAppsHardeningTests
 {
     [Fact]
-    public void FrameCsp_PlainHttpHost_AllowedForItsOwnEntryOnly()
+    public void FrameCsp_PlainHttpOffLoopback_Refused()
     {
-        // A LAN install without TLS: the space app's code lives on the host.
+        // A LAN install without TLS: no frame for an entry on plain HTTP —
+        // the host's own (a space app was, until it ran in the page) or
+        // anyone else's.
         const string Host = "http://192.168.1.5";
-        var csp = FrameCsp.Build(Host, null, Host, Host + "/apps/code/S1/board/sig/app.js");
-        Assert.Contains($"script-src {Host}/kit/js/ {Host}/apps/code/S1/board/sig/;", csp);
-
-        // Not for anyone else's origin: an http app off loopback stays refused.
+        Assert.Throws<ArgumentException>(() => FrameCsp.Build(Host, null, Host, Host + "/apps/code/S1/board/sig/app.js"));
         Assert.Throws<ArgumentException>(() => FrameCsp.Build("http://10.0.0.9", null, Host, "http://10.0.0.9/app.js"));
         Assert.Throws<ArgumentException>(() => FrameCsp.Build("http://10.0.0.9", null, "https://fish.example", "http://10.0.0.9/app.js"));
         // An installed app's https entry still has to be on its own origin.
@@ -63,19 +63,6 @@ public class DesktopAppsHardeningTests
         Assert.Null(p2);
         Assert.Equal("window", Parse(",\"kind\":\"page\"", out var p3).Kind);
         Assert.Contains("kind", p3);
-    }
-
-    [Fact]
-    public void FrameCsp_HostScripts_AFolderOfTheHostOnly()
-    {
-        const string Host = "https://fish.example";
-        var csp = FrameCsp.Build(Host, null, Host, Host + "/apps/code/S1/board/sig/app.js", "/js/vendor/sac-data-grid/js/");
-        Assert.Contains($"script-src {Host}/kit/js/ {Host}/apps/code/S1/board/sig/ {Host}/js/vendor/sac-data-grid/js/;", csp);
-        // Without it, as before.
-        Assert.Contains($"script-src {Host}/kit/js/ {Host}/apps/code/S1/board/sig/;", FrameCsp.Build(Host, null, Host, Host + "/apps/code/S1/board/sig/app.js"));
-        // Nothing but a plain folder path reaches the header.
-        foreach (var bad in new[] { "js/vendor/", "/js/vendor", "/js/ 'unsafe-inline'/", "/js;script-src *;/", "https://evil.example/" })
-            Assert.Throws<ArgumentException>(() => FrameCsp.Build(Host, null, Host, Host + "/apps/code/S1/board/sig/app.js", bad));
     }
 
     [Fact]

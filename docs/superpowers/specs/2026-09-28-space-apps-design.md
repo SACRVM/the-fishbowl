@@ -72,21 +72,34 @@ files, tables or other people's spaces — the privacy rule stays).
 | Kind | Sees | Runs |
 | --- | --- | --- |
 | Sandboxed (third-party, installed from a URL) | its own folder `Apps/<name>`, plus what the person picks | isolated frame |
-| **Spaceboxed** (the space's own apps) | **everything of its space**: notes, events, todos, contacts, files, tables, search, members | isolated frame, broad grant |
+| **Trusted** (the space's own apps, `.apps/<folder>/`) | what the user may: its space through `context.space`, everything else through `fb.api` | in the page |
 | Fishbowl's own | what the user may | in the page |
 
-- **Spaceboxed** apps may do anything inside their space without asking —
-  that is what spaces are for (a booking app puts its events in the space
-  calendar). They act **with the viewer's role** (a Reader's session can't
-  write through an app) and must never break out of the space; that is why
-  they still run in the opaque-origin frame and the host page answers their
-  calls, limited to the space.
+- **Trusted** apps are the space's own code, built for that space and into
+  it — no different from Fishbowl's own apps (a photo gallery, Finance).
+  They run in Fishbowl's page with the viewer's session and role (a
+  Reader's session can't write through an app), fully integrated: calendar,
+  contacts, notes, files through `fb.api`, the space's tables and the rest
+  through `context.space`. *Changed 2026-11-09 (the user's decision):* until
+  then they were "spaceboxed" — the opaque-origin frame with a broad grant,
+  so they could never break out of the space. The user: "dieses sandboxing
+  sollte nur im personal space sein … ein space ist eh dann nicht mehr
+  geschützt sobald ich andere mit einlade … es ist UNSER CODE". Accepted
+  with the consequence spelled out first: their code acts as every member
+  who opens them — beyond the space, too (the person's own notes, mail, keys,
+  secrets while the vault is open); whoever writes `.apps` (a Designer, a key
+  with `design:apps`, an agent) writes code that runs that way. The frame,
+  its CSP and the data grid loaded into it are gone for them; the code still
+  comes from the signed URL (`/apps/code/…`), which the page loads like any
+  of its scripts. The trigger was the Claude desktop app's built-in browser,
+  which blocks every frame sandboxed without `allow-same-origin`.
 - **Sandboxed** apps: storage stays jailed to `Apps/<name>`; the **file picker
   opens up again** to the whole workspace — the app gets only the file the
   person picks (undoes the picker jail of `d867ac6`). Plus **"Open with"**
   from the Files app for the types an app declares (`opens`).
-- The current **trusted** mode (third-party code in the page, personal only)
-  is an open question — spaceboxed may make it unnecessary.
+- The old **trusted** mode for installed apps (third-party code in the
+  page, personal only) went on 2026-10-03; the name now means a space's own
+  apps (2026-11-09) — an install can't ask for it.
 
 ### Tables
 
@@ -188,8 +201,8 @@ files, tables or other people's spaces — the privacy rule stays).
 
 ## The space API (apps, triggers, MCP)
 
-One surface, three callers — spaceboxed apps (`context.*` over the kit
-bridge), trigger scripts (`ctx.*`), agents (MCP tools / REST). To be detailed
+One surface, three callers — trusted apps (`context.*`, in the page; over
+the kit bridge while they ran in the frame), trigger scripts (`ctx.*`), agents (MCP tools / REST). To be detailed
 in the implementation plan; the shape:
 
 - `db` — tables: list, describe, query, get, insert, update, delete, count,
@@ -261,7 +274,9 @@ in the implementation plan; the shape:
 
 Settled 2026-10-03:
 - The **trusted** mode for third-party apps goes — spaceboxed apps cover
-  what it was for; third-party code only runs isolated.
+  what it was for; third-party code only runs isolated. (2026-11-09: a
+  space's own apps became trusted apps and run in the page; third-party code
+  still only runs isolated.)
 - Table names: a hidden `t_` prefix (phase 3).
 - Contacts: **one table** per workspace, `kind` = person | organisation; a
   person points at its organisation.

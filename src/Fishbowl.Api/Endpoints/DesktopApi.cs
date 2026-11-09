@@ -366,10 +366,8 @@ public static class DesktopApi
             return Results.NotFound();
         }
 
-        // A space's own app (.apps/<folder>, SpaceAppsApi).
-        if (ctx.Type == ContextType.Space && SpaceApps.FolderOf(appId) is { } folder)
-            return await SpaceAppsApi.FrameAsync(http, ctx.Id, folder, http.RequestServices.GetRequiredService<IFileService>());
-
+        // A space's own app (.apps/<folder>) is trusted: it runs in the
+        // page and has no frame — only an installed app gets one.
         var app = await repo.GetAppAsync(ctx, appId, ct);
         if (app is null || app.Mode != AppModes.Sandboxed || !AppManifestValidator.IsValidIntegrity(app.EntryIntegrity))
             return Results.NotFound();
@@ -390,7 +388,7 @@ public static class DesktopApi
         return Frame(http, csp, m.Name, m.Tag);
     }
 
-    internal static IResult Frame(HttpContext http, string csp, string? name, string? tag, IReadOnlyList<string>? scripts = null)
+    private static IResult Frame(HttpContext http, string csp, string? name, string? tag)
     {
         var headers = http.Response.Headers;
         headers.ContentSecurityPolicy = csp;
@@ -398,17 +396,15 @@ public static class DesktopApi
         headers["Referrer-Policy"] = "no-referrer";
         headers.XFrameOptions = "SAMEORIGIN";
         headers.CacheControl = "no-store";
-        return Results.Content(FrameHtml(name, tag, scripts), "text/html; charset=utf-8", Encoding.UTF8);
+        return Results.Content(FrameHtml(name, tag), "text/html; charset=utf-8", Encoding.UTF8);
     }
 
     // The kit's harness shape: <html data-sac-guest>, ui.css, all.js, then
     // the guest runtime. No entry script — the guest injects it from the
-    // boot message, with the pin, once the kit is ready. `scripts` are the
-    // host's own extras (a space app's data grid), between the two.
-    private static string FrameHtml(string? name, string? tag, IReadOnlyList<string>? scripts)
+    // boot message, with the pin, once the kit is ready.
+    private static string FrameHtml(string? name, string? tag)
     {
         static string E(string? s) => WebUtility.HtmlEncode(s ?? "");
-        var extras = string.Concat((scripts ?? []).Select(src => $"<script src=\"{E(src)}\"></script>\n"));
         return $"""
             <!DOCTYPE html>
             <html lang="en" data-sac-guest data-app-tag="{E(tag)}">
@@ -418,7 +414,7 @@ public static class DesktopApi
             <title>{E(name)}</title>
             <link rel="stylesheet" href="/kit/css/ui.css">
             <script src="/kit/js/all.js"></script>
-            {extras}<script src="{GuestScript}"></script>
+            <script src="{GuestScript}"></script>
             </head>
             <body></body>
             </html>

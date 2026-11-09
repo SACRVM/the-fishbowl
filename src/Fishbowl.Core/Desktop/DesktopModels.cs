@@ -4,15 +4,16 @@ namespace Fishbowl.Core.Desktop;
 
 public static class AppModes
 {
-    // The default: an opaque-origin frame, host-granted capabilities, the
-    // entry pinned by its SRI hash.
+    // An app installed from a URL: an opaque-origin frame, host-granted
+    // capabilities, the entry pinned by its SRI hash.
     public const string Sandboxed = "sandboxed";
-    // The retired same-realm mode (gone 2026-10-03): only the v19 migration
-    // still looks for it.
+    // A space's own app from its .apps folder (SpaceApps) — the space's
+    // code, not a stranger's: it runs in Fishbowl's page like the built-in
+    // apps, with the viewer's session; never pinned, never installed —
+    // listed by the desktop, not stored (decided 2026-11-09). An install
+    // can't ask for it (IsValid); installed apps were trusted once too, until
+    // 2026-10-03 — the v19 migration made those rows sandboxed.
     public const string Trusted = "trusted";
-    // A space's own app from its .apps folder (SpaceApps): sandboxed, never
-    // pinned, never installed — listed by the desktop, not stored.
-    public const string Space = "space";
 
     // What an install may ask for.
     public static bool IsValid(string? mode) => mode is Sandboxed;

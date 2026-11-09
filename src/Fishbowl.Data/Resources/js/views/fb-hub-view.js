@@ -767,7 +767,7 @@ class FbHubView extends HTMLElement {
                 const meta = document.createElement("p");
                 meta.className = "tile-meta";
                 const version = e.app.version ? ` · v${e.app.version}` : "";
-                meta.textContent = e.app.mode === "space"
+                meta.textContent = fb.desktopApps.isTrusted(e.app)
                     ? `${e.app.folder}${version}`
                     : `${hostOf(e.app.origin)}${version} · ${fb.t(`fb.apps.page-mode-${e.app.mode}`, e.app.mode)}`;
                 body.appendChild(meta);
@@ -897,7 +897,7 @@ class FbHubView extends HTMLElement {
                 checked: on, onClick: () => this._toggleContent(e) });
         }
         items.push("-", { id: "hide", label: fb.t("fb.desk.hide", "Hide from this desktop"), onClick: () => this._update(e, { hidden: true }) });
-        if (e.app && e.app.mode !== "space") {
+        if (e.app && !fb.desktopApps.isTrusted(e.app)) {
             const fresh = fb.desktopApps.updateFor(e.app.id);
             items.push("-");
             if (fresh) items.push({ id: "app:update", label: fb.t("fb.desk.update-to", "Update to v{version}…", { version: fresh.version || "?" }),

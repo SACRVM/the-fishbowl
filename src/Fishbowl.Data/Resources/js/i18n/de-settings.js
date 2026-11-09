@@ -249,7 +249,7 @@ window.sac?.i18n?.add?.("de", {
     "fb.apps.page-empty": "Noch keine Apps",
     "fb.apps.page-empty-install": "Installier eine über die URL ihres Repositorys — sie läuft abgeschirmt.",
     "fb.apps.page-empty-none": "Auf diesem Desktop ist nichts installiert.",
-    "fb.apps.page-mode-space": "Space-App",
+    "fb.apps.page-mode-trusted": "vertrauenswürdig",
     "fb.apps.errors": "Fehler",
     "fb.apps.errors-none": "Keine Fehler.",
     "fb.apps.errors-clear": "Leeren",

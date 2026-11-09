@@ -36,24 +36,33 @@
  *   connect    the servers the manifest declared — shown, not choosable;
  *              the frame's CSP allows exactly those.
  *
- * A space's own apps (mode "space", id "space.<folder>") come with the
+ * A space's own apps (mode "trusted", id "space.<folder>") come with the
  * desktop too: the code in the space's files/.apps/<folder>/, served by the
- * server under a signed URL (the frame has no cookie). They run sandboxed
- * and unpinned — a Designer changes the code, the next open runs it — and
- * aren't installed, so there is nothing to update, grant or remove here.
+ * server under a signed URL. They are TRUSTED APPS (decided 2026-11-09):
+ * the space's own code, not a stranger's, so they run in this page like
+ * Fishbowl's own apps — the kit's same-realm runtime, no frame, no pin, the
+ * viewer's session (window.fb.api and everything else in the page), name
+ * and picture, the picker over the space's Files. A Designer changes the
+ * code, the next page load runs it; they aren't installed, so there is
+ * nothing to update, grant or remove here. The data grid is in the page;
+ * SacDataGrid.arraySource (sac-data-grid-source.js, which Fishbowl's own
+ * Tables app doesn't need) is loaded before the first trusted app starts.
  * They get the space's data as context.space (grant.api, kit 2.25):
  * fb.api.spaceData(<slug>) — tables and rows, read-only notes, todos,
  * events, contacts, members, a file of its Files by path (fileInfo,
- * readFile; openFile shows it in a window of this page) — as the signed-in
- * user, so the server's role checks hold (a Reader's app can't write); a
- * refusal reaches the app as { code, message } with the server's code
- * (underscores as dashes).
+ * readFile; openFile shows it in a window) — as the signed-in user, so the
+ * server's role checks hold (a Reader's app can't write); a refusal reaches
+ * the app as { code, message } with the server's code (underscores as
+ * dashes).
  * What breaks goes to the space's error store (fb.api.appErrors) for its
  * Designers: an entry that doesn't start (load), a refused call (call),
- * context.space.error(message, detail) (reported) — the server adds an
- * app.json it can't read itself. context.space.notify(to, text) sends
- * members of the space a message from the app (to: member ids or "all");
- * the server sets the sender, skips who muted it and limits the rate.
+ * context.space.error(message, detail) (reported), an uncaught error or
+ * rejection from the app's own code folder (runtime — in the page the kit
+ * leaves those to the host, so they are matched by the script's address) —
+ * the server adds an app.json it can't read itself. context.space.notify(to,
+ * text) sends members of the space a message from the app (to: member ids
+ * or "all"); the server sets the sender, skips who muted it and limits the
+ * rate.
  *
  * Every installed app opens as a kit window above the desktop (the host's
  * choice, whatever `kind` the manifest says): a "view" app would take over
@@ -87,6 +96,10 @@
         return s.type === "scoped" ? `space:${s.slug}` : "personal";
     };
     const byId = (id) => state.apps.find((a) => a.id === id) || null;
+    // A space's own app: the space's code, run in this page (AppModes.Trusted).
+    // A host whose server isn't updated yet still says "space" — the UI is
+    // served from disk before the server is deployed; same app, same code URL.
+    const isTrusted = (app) => app?.mode === "trusted" || app?.mode === "space";
     const nameOf = (app) => app?.manifest?.name || app?.id || fb.t("fb.apps.app", "App");
     const hostOf = (url) => { try { return new URL(url).host; } catch { return url; } };
     const has = (app, g) => (app.granted || []).includes(g);
@@ -141,8 +154,12 @@
         const files = allowed(app) && window.sac?.files?.virtual
             ? { provider: () => sac.files.virtual({ store: fb.filesStore({ workspace: ws }), label: fb.t("fb.apps.picker-label", "Files") }) }
             : false;
-        if (app.mode === "space") {
-            return { isolated: true, integrity: false, grant: { files: false, identity: false, connect: [], api: { space: spaceApi(ws, app), tile: tileApi(ws, app) } } };
+        if (isTrusted(app)) {
+            // In the page, like Fishbowl's own apps: no frame, no pin.
+            const picker = window.sac?.files?.virtual
+                ? { provider: () => sac.files.virtual({ store: fb.filesStore({ workspace: ws }), label: fb.t("fb.apps.picker-label", "Files") }) }
+                : false;
+            return { isolated: false, integrity: false, grant: { files: picker, identity: true, connect: [], api: { space: spaceApi(ws, app), tile: tileApi(ws, app) } } };
         }
         return { isolated: true, integrity: app.entryIntegrity, grant: { files, identity, connect, api: { tile: tileApi(ws, app) } } };
     }
@@ -210,7 +227,7 @@
     /** Into the space's error store; never in the way of the app. */
     function report(app, kind, message, detail = null) {
         const slug = state.ws?.startsWith("space:") ? state.ws.slice(6) : null;
-        if (!slug || app?.mode !== "space" || !message) return;
+        if (!slug || !isTrusted(app) || !message) return;
         fb.api.appErrors(slug).report({ app: app.folder.replace(/^\.apps\//, ""), kind, message: message.slice(0, 1000), detail: detail?.slice(0, 4000) ?? null })
             .catch(() => { /* the store is best effort */ });
     }
@@ -219,8 +236,9 @@
     // frame that doesn't start (kit 2.35.1, "load" with the kit's code —
     // network, timeout, integrity — whoever opened it: a tile, the palette or
     // its address) and a mount that throws didn't start ("load"); an uncaught
-    // error, a rejection or a failing unmount is "runtime". Only a space app's
-    // reach the store (report() checks) — an installed app isn't the space's code.
+    // error, a rejection or a failing unmount is "runtime". Only a trusted
+    // app's reach the store (report() checks) — an installed app isn't the
+    // space's code.
     document.addEventListener("sac:app-error", (e) => {
         const d = e.detail || {};
         const app = byId(d.appId);
@@ -234,6 +252,60 @@
         report(app, d.kind === "mount" ? "load" : "runtime", `${what}${d.message || "Script error."}${at}`,
             typeof d.stack === "string" ? d.stack : null);
     });
+
+    // A trusted app runs in the page: what it throws and leaves uncaught is
+    // the page's (the kit only reports a frame's), so it is told by where it
+    // came from — the app's code folder, in the error's file or its stack.
+    // At most 10 a minute per app go to the store.
+    const codeBase = (app) => {
+        const u = typeof app?.entryUrl === "string" ? app.entryUrl : "";
+        return u.slice(0, u.lastIndexOf("/") + 1);
+    };
+    const trustedFrom = (...texts) => {
+        for (const text of texts) {
+            if (typeof text !== "string" || !text) continue;
+            const app = state.apps.find((a) => isTrusted(a) && codeBase(a) && text.includes(codeBase(a)));
+            if (app) return app;
+        }
+        return null;
+    };
+    const runtimeBudget = new Map();      // app id → { left, at }
+    function reportRuntime(app, message, stack) {
+        const now = Date.now();
+        const b = runtimeBudget.get(app.id);
+        const budget = b && now - b.at < 60000 ? b : { left: 10, at: now };
+        if (budget.left <= 0) return;
+        budget.left -= 1;
+        runtimeBudget.set(app.id, budget);
+        report(app, "runtime", message, typeof stack === "string" ? stack : null);
+    }
+    window.addEventListener("error", (e) => {
+        const app = trustedFrom(e.filename, e.error?.stack);
+        if (!app) return;
+        const at = e.filename ? ` (${e.filename}${e.lineno ? `:${e.lineno}${e.colno ? `:${e.colno}` : ""}` : ""})` : "";
+        reportRuntime(app, `${e.message || "Script error."}${at}`, e.error?.stack);
+    });
+    window.addEventListener("unhandledrejection", (e) => {
+        const app = trustedFrom(e.reason?.stack);
+        if (!app) return;
+        reportRuntime(app, `Unhandled rejection: ${e.reason?.message || String(e.reason)}`, e.reason?.stack);
+    });
+
+    /* SacDataGrid.arraySource for trusted apps — the grid itself is in the
+       page already (index.html), its in-memory source only they need. */
+    let gridSource = null;
+    function loadGridSource() {
+        if (window.SacDataGrid?.arraySource) return Promise.resolve();
+        if (!window.SacDataGrid) return Promise.resolve();   // no grid in this page: nothing to extend
+        gridSource ??= new Promise((resolve) => {
+            const s = document.createElement("script");
+            s.src = "/js/vendor/sac-data-grid/js/sac-data-grid-source.js";
+            s.onload = () => resolve();
+            s.onerror = () => { gridSource = null; resolve(); };   // the app starts anyway; a later one tries again
+            document.head.appendChild(s);
+        });
+        return gridSource;
+    }
 
     function spaceError(err) {
         let body = null;
@@ -261,7 +333,7 @@
     // the route stays out of sac-nav's panel and the palette (nav, palette:
     // false). The kit opens the view from its address, a reload or a link
     // included, and parks it when the address names another page.
-    const isPage = (app) => app?.mode === "space" && app?.manifest?.kind === "view";
+    const isPage = (app) => isTrusted(app) && app?.manifest?.kind === "view";
 
     let stageBound = false;
     function bindStage() {
@@ -321,8 +393,12 @@
         }
         for (const app of state.apps) {
             if (registered.has(app.id)) continue;
-            registered.set(app.id, want.get(app.id));
-            const p = sac.apps.add(kitManifest(app), kitOptions(app))
+            const sig = want.get(app.id);
+            registered.set(app.id, sig);
+            // A trusted app waits for the grid's source; a switch meanwhile
+            // (another workspace, a changed app) leaves it unregistered.
+            const p = (isTrusted(app) ? loadGridSource() : Promise.resolve())
+                .then(() => registered.get(app.id) === sig ? sac.apps.add(kitManifest(app), kitOptions(app)) : undefined)
                 .catch((err) => {
                     registered.delete(app.id);
                     console.warn("[fb.desktopApps] couldn't register", app.id, err?.message || err);
@@ -382,7 +458,7 @@
         const ws = state.ws;
         for (const app of state.apps) {
             const key = `${ws}|${app.id}`;
-            if (app.mode === "space" || checked.has(key)) continue;
+            if (isTrusted(app) || checked.has(key)) continue;
             checked.add(key);
             let fresh;
             try { fresh = await sac.apps.inspect(app.manifestUrl); }
@@ -907,7 +983,7 @@
         sync, open, install, update, permissions, remove,
         isPage,
         get state() { return state; },
-        updateFor, frameUrlOf, dataSize, formatBytes, identityOf,
+        updateFor, frameUrlOf, dataSize, formatBytes, identityOf, isTrusted,
         get byId() { return byId; },
     };
 })();

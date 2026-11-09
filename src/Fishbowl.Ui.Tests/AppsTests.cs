@@ -10,8 +10,9 @@ namespace Fishbowl.Ui.Tests;
 // the network outside `connect` blocked by the frame's CSP), the update
 // found on the next visit and re-pinned through review, permissions,
 // remove keeping or deleting the data, the admin's policy hiding every
-// install control, and the space owner installing. Every test leaves no
-// app behind (other classes count desktop tiles).
+// install control, and the space owner installing — and a space's own apps,
+// trusted apps that run in the page (no frame). Every test leaves no app
+// behind (other classes count desktop tiles).
 [Collection(UiCollection.Name)]
 public class AppsTests : IAsyncLifetime
 {
@@ -355,7 +356,7 @@ public class AppsTests : IAsyncLifetime
             Assert.True(Array.IndexOf(order, "app:space.kanban") > Array.IndexOf(order, "builtin:tables"), string.Join(", ", order));
             // Live or not, an app's tile opens the app in its window.
             await kanban.ClickAsync();
-            await Assertions.Expect(page.FrameLocator("sac-window iframe[title='Kanban']").Locator("kanban-tile-app")).ToHaveTextAsync("kanban", new() { Timeout = 15000 });
+            await Assertions.Expect(page.Locator("sac-window kanban-tile-app")).ToHaveTextAsync("kanban", new() { Timeout = 15000 });
             await WindowApp.CloseAllAsync(page);
 
             // Plain until the app ran; then what it set, also after a reload.
@@ -363,7 +364,7 @@ public class AppsTests : IAsyncLifetime
             await Assertions.Expect(pusher.Locator(".tl-main")).ToHaveCountAsync(0);
             await Assertions.Expect(pusher.Locator(".tile-meta")).ToHaveTextAsync(new System.Text.RegularExpressions.Regex(@"^\.apps/pusher"));   // a plain tile keeps it
             await pusher.ClickAsync();
-            await Assertions.Expect(page.FrameLocator("sac-window iframe[title='Pusher']").Locator("#done")).ToHaveTextAsync("set", new() { Timeout = 15000 });
+            await Assertions.Expect(page.Locator("sac-window pusher-tile-app #done")).ToHaveTextAsync("set", new() { Timeout = 15000 });
             await WindowApp.CloseAllAsync(page);
             await Assertions.Expect(pusher.Locator(".tl-main")).ToHaveTextAsync("pushed main", new() { Timeout = 10000 });
             await Assertions.Expect(pusher.Locator(".tl-text")).ToHaveTextAsync("pushed row");
@@ -378,7 +379,7 @@ public class AppsTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task Apps_SpaceApp_FromDotApps_OpensSandboxed_Test()
+    public async Task Apps_SpaceApp_FromDotApps_RunsInThePage_Test()
     {
         var (context, page, errors) = await OpenAsync();
         string? slug = null;
@@ -397,7 +398,8 @@ public class AppsTests : IAsyncLifetime
                 Assert.True(put.Ok, $"PUT {path}: {put.Status} {await put.TextAsync()}");
             }
             await Put(".apps/hello/app.json", "{\"name\":\"Hello\",\"tag\":\"hello-space-app\",\"version\":\"0.1.0\",\"icon\":\"star\"}");
-            // The app reads and writes the space's data over the bridge (context.space).
+            // The app reads and writes the space's data (context.space) and, being
+            // the space's own code, anything else of Fishbowl (window.fb.api).
             var table = await page.APIRequest.PostAsync($"{_fixture.BaseUrl}/api/v1/spaces/{slug}/tables",
                 new() { DataObject = new { name = "tasks", columns = Array.Empty<object>() } });
             Assert.True(table.Ok, await table.TextAsync());
@@ -413,24 +415,32 @@ public class AppsTests : IAsyncLifetime
                     await context.space.error('boom from the app', 'detail');
                     const members = await context.space.members();
                     await context.space.notify([members.items.find((m) => m.you).userId], 'hello members');
-                    this.querySelector('#data').textContent = `${rows.length} ${rows[0]?.title} ${refused}`;
-                    setTimeout(() => { throw new Error('uncaught in the frame'); });
+                    const info = await context.space.info();
+                    await fb.api.events.in('space:' + info.slug).create({ title: 'from the app', startAt: new Date().toISOString() });
+                    this.querySelector('#data').textContent = `${rows.length} ${rows[0]?.title} ${refused} ${context.isolated}`;
+                    setTimeout(() => { throw new Error('uncaught in the app'); });
                   }
                 });
                 """);
 
-            // A tile on the space's desktop, opened in the sandboxed frame.
+            // A tile on the space's desktop, opened in the page: a trusted app.
+            var frames = new List<string>();
+            context.Request += (_, r) => { if (r.Url.Contains("/apps/frame/")) frames.Add(r.Url); };
             await page.GotoAsync($"{_fixture.BaseUrl}/#/space/{slug}/");
             var tile = page.Locator("fb-hub-view a.tile[data-key='app:space.hello']");
             await Assertions.Expect(tile).ToBeVisibleAsync(new() { Timeout = 15000 });
             await tile.ClickAsync();
-            var frame = page.FrameLocator("sac-window iframe");
-            await Assertions.Expect(frame.Locator("#hi")).ToHaveTextAsync("hello from .apps", new() { Timeout = 15000 });
-            await Assertions.Expect(frame.Locator("#data")).ToHaveTextAsync(new System.Text.RegularExpressions.Regex("^1 from the app [a-z-]+$"), new() { Timeout = 15000 });
+            var app = page.Locator("sac-window hello-space-app");
+            await Assertions.Expect(app.Locator("#hi")).ToHaveTextAsync("hello from .apps", new() { Timeout = 15000 });
+            await Assertions.Expect(app.Locator("#data")).ToHaveTextAsync(new System.Text.RegularExpressions.Regex("^1 from the app [a-z-]+ false$"), new() { Timeout = 15000 });
             Assert.Equal(1, (await (await page.APIRequest.PostAsync($"{_fixture.BaseUrl}/api/v1/spaces/{slug}/tables/tasks/count",
                 new() { DataObject = new { } })).JsonAsync())!.Value.GetProperty("count").GetInt32());
-            Assert.Equal("allow-scripts allow-forms allow-popups allow-downloads",
-                await page.Locator("sac-window iframe").GetAttributeAsync("sandbox"));
+            // The event it wrote through Fishbowl's own client is in the space's calendar.
+            var events = await (await page.APIRequest.GetAsync($"{_fixture.BaseUrl}/api/v1/spaces/{slug}/events")).TextAsync();
+            Assert.Contains("\"title\":\"from the app\"", events);
+            // No frame: the app is in the page, and no frame document was asked for.
+            await Assertions.Expect(page.Locator("sac-window iframe")).ToHaveCountAsync(0);
+            Assert.Empty(frames);
             await page.ScreenshotAsync(new() { Path = Path.Combine(Shots, "desk-5-space-app.png") });
 
             // The app's three errors go to the store on their own, a moment
@@ -439,7 +449,7 @@ public class AppsTests : IAsyncLifetime
             for (var i = 0; i < 50; i++)
             {
                 stored = await (await page.APIRequest.GetAsync($"{_fixture.BaseUrl}/api/v1/spaces/{slug}/apps/errors")).TextAsync();
-                if (stored.Contains("boom from the app") && stored.Contains("describe:") && stored.Contains("uncaught in the frame")) break;
+                if (stored.Contains("boom from the app") && stored.Contains("describe:") && stored.Contains("uncaught in the app")) break;
                 await page.WaitForTimeoutAsync(200);
             }
 
@@ -450,11 +460,11 @@ public class AppsTests : IAsyncLifetime
             await Assertions.Expect(row).ToContainTextAsync(".apps/hello · v0.1.0");
             await Assertions.Expect(row.Locator("button[data-action]")).ToHaveCountAsync(0);
             // Its Designer sees what broke: the refused call, its own report and
-            // the uncaught error the kit forwards from the frame (sac:app-error).
+            // the uncaught error, told by the app's code folder in its stack.
             var errorsCard = page.Locator("#fb-apps-errors-card");
             await Assertions.Expect(errorsCard).ToContainTextAsync("boom from the app");
             await Assertions.Expect(errorsCard).ToContainTextAsync("describe:");
-            await Assertions.Expect(errorsCard).ToContainTextAsync("uncaught in the frame");
+            await Assertions.Expect(errorsCard).ToContainTextAsync("uncaught in the app");
             await errorsCard.Locator("button[data-action='clear-errors']").ClickAsync();
             await Assertions.Expect(errorsCard).ToContainTextAsync("No errors.");
 
@@ -473,7 +483,7 @@ public class AppsTests : IAsyncLifetime
             await dialog.Locator("button[data-action='unmute']").ClickAsync();
             await Assertions.Expect(mutedBtn).ToHaveCountAsync(0);
             // The one page error is the app's own, thrown on purpose above.
-            Assert.DoesNotContain(errors, (e) => !e.Contains("uncaught in the frame"));
+            Assert.DoesNotContain(errors, (e) => !e.Contains("uncaught in the app"));
         }
         finally
         {
@@ -483,8 +493,8 @@ public class AppsTests : IAsyncLifetime
     }
 
     // A space app reaches the space's files by path: fileInfo, readFile (a
-    // Blob over the bridge) and openFile — a tab the top page opens, so a
-    // PDF gets the browser's viewer instead of the frame's sandbox.
+    // Blob) and openFile — Fishbowl's file window, or a tab where the
+    // browser has no PDF viewer.
     [Fact]
     public async Task Apps_SpaceApp_ReadsAndOpensAFile_Test()
     {
@@ -531,7 +541,7 @@ public class AppsTests : IAsyncLifetime
             var tile = page.Locator("fb-hub-view a.tile[data-key='app:space.reader']");
             await Assertions.Expect(tile).ToBeVisibleAsync(new() { Timeout = 15000 });
             await tile.ClickAsync();
-            var frame = page.FrameLocator("sac-window iframe");
+            var frame = page.Locator("sac-window reader-space-app");
             await Assertions.Expect(frame.Locator("#text")).ToHaveTextAsync("hello from the space's files", new() { Timeout = 15000 });
             await Assertions.Expect(frame.Locator("#info")).ToHaveTextAsync("2026 receipt.pdf file");
             await Assertions.Expect(frame.Locator("#refused")).ToHaveTextAsync("not-a-file not-found invalid-value");
@@ -568,8 +578,8 @@ public class AppsTests : IAsyncLifetime
     // A space app with "kind": "view" is a page of its space: its own address
     // (the kit's view address, back/forward and bookmarks work), full screen
     // on the kit's stage below the nav, named in the ribbon, its row in the
-    // burger marked, kept running while you look elsewhere, the data grid in
-    // its frame — and a window app stays a window.
+    // burger marked, kept running while you look elsewhere, the data grid
+    // with its in-memory source — and a window app stays a window.
     [Fact]
     public async Task Apps_SpaceApp_KindView_IsAPageOfTheSpace_Test()
     {
@@ -621,7 +631,7 @@ public class AppsTests : IAsyncLifetime
             var stage = page.Locator("#fb-app-stage");
             await Assertions.Expect(stage).ToBeVisibleAsync();
             await Assertions.Expect(page.Locator("fb-hub-view")).ToBeHiddenAsync();
-            var frame = page.FrameLocator("#fb-app-stage iframe");
+            var frame = page.Locator("#fb-app-stage ledger-page");
             await Assertions.Expect(frame.Locator("#mounts")).ToHaveTextAsync("mounts:1", new() { Timeout = 15000 });
             await Assertions.Expect(frame.Locator("#route")).ToHaveTextAsync("route:");
             await Assertions.Expect(frame.Locator("#grid")).ToHaveTextAsync("grid:yes");
@@ -668,7 +678,7 @@ public class AppsTests : IAsyncLifetime
 
             // A reload on its address opens it again.
             await page.ReloadAsync();
-            await Assertions.Expect(page.FrameLocator("#fb-app-stage iframe").Locator("#route")).ToHaveTextAsync("route:other", new() { Timeout = 15000 });
+            await Assertions.Expect(page.Locator("#fb-app-stage ledger-page #route")).ToHaveTextAsync("route:other", new() { Timeout = 15000 });
 
             // The desktop: back, the stage gone.
             await page.GotoAsync(desk);
@@ -677,7 +687,7 @@ public class AppsTests : IAsyncLifetime
 
             // A window app stays a window.
             await page.Locator("fb-hub-view a.tile[data-key='app:space.tool']").ClickAsync();
-            await Assertions.Expect(page.FrameLocator("sac-window iframe").Locator("#tool")).ToHaveTextAsync("a window", new() { Timeout = 15000 });
+            await Assertions.Expect(page.Locator("sac-window tool-app #tool")).ToHaveTextAsync("a window", new() { Timeout = 15000 });
             Assert.EndsWith($"#/space/{slug}/", page.Url);
 
             // A page that doesn't start, opened from its address: the kit says

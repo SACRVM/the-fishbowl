@@ -17,15 +17,14 @@ using Microsoft.Net.Http.Headers;
 namespace Fishbowl.Api.Endpoints;
 
 // A space's own apps, from its files/.apps/<folder>/app.json (SpaceApps):
-// the desktop lists them next to the installed apps (mode "space"), the
-// frame document is DesktopApi's (/apps/frame/space/<slug>/space.<folder>,
-// cookie), and the code comes from GET /apps/code/<spaceId>/<folder>/<sig>/<file>
-// — no cookie (the frame is opaque), the signature is the key. Anything it
-// can't serve is a 404.
+// the desktop lists them next to the installed apps as trusted apps (mode
+// "trusted" — they run in Fishbowl's page, no frame), and the code comes
+// from GET /apps/code/<spaceId>/<folder>/<sig>/<file> — the signature is the
+// key, no cookie needed. Anything it can't serve is a 404.
 //
 // The error store (AppErrors) under /api/v1/spaces/<slug>/apps/errors:
 // GET and DELETE for a Designer (a key needs design:apps), POST for any
-// member's browser (cookie) — what broke in the frame, for an app that is
+// member's browser (cookie) — what broke in an app, for an app that is
 // there, at most ReportsPerHour per person and space.
 public static class SpaceAppsApi
 {
@@ -342,7 +341,7 @@ public static class SpaceAppsApi
         origin = HostOrigin(http),
         entryUrl = CodeBase(http, key, spaceId, m.Folder) + m.Entry,
         version = m.Version,
-        mode = AppModes.Space,
+        mode = AppModes.Trusted,
         folder = $"{AppsFolder.Name}/{m.Folder}",
         granted = Array.Empty<string>(),
         updatedAt = changed,
@@ -366,31 +365,16 @@ public static class SpaceAppsApi
         var headers = http.Response.Headers;
         headers[HeaderNames.XContentTypeOptions] = "nosniff";
         // Opened on its own it is inert: no script, no plugin, its own origin.
+        // (Loaded by the page as a script, a stylesheet or an image, the
+        // policy of the response doesn't apply — the page's does.)
         headers[HeaderNames.ContentSecurityPolicy] = "default-src 'none'; sandbox";
         headers["Referrer-Policy"] = "no-referrer";
-        // The frame is an opaque origin: fonts, modules and fetches are CORS.
+        // What it holds every member may read; a module or font asked for
+        // in CORS mode loads too.
         headers[HeaderNames.AccessControlAllowOrigin] = "*";
-        // A Designer's change shows on the next open.
+        // A Designer's change shows on the next page load.
         headers[HeaderNames.CacheControl] = "no-cache";
         return Results.File(h.Stream, type, lastModified: h.Entry.Mtime,
             entityTag: new EntityTagHeaderValue($"\"{h.Entry.Etag}\""));
-    }
-
-    // The frame document of a space app (from DesktopApi's frame route,
-    // the caller already resolved as a member): the kit's harness, its CSP
-    // limited to the app's own code folder.
-    internal static async Task<IResult> FrameAsync(HttpContext http, string spaceId, string folder, IFileService files)
-    {
-        var ct = http.RequestAborted;
-        var app = await SpaceAppCatalog.ReadAsync(files, ContextRef.Space(spaceId), folder, ct);
-        if (app is null) return Results.NotFound();
-        var system = http.RequestServices.GetRequiredService<ISystemRepository>();
-        var key = await KeyAsync(system, ct);
-        var origin = HostOrigin(http);
-
-        string csp;
-        try { csp = FrameCsp.Build(origin, null, origin, CodeBase(http, key, spaceId, folder) + app.Value.Manifest.Entry, SpaceApps.FrameScriptFolder); }
-        catch (ArgumentException) { return Results.NotFound(); }
-        return DesktopApi.Frame(http, csp, app.Value.Manifest.Name, app.Value.Manifest.Tag, SpaceApps.FrameScripts);
     }
 }

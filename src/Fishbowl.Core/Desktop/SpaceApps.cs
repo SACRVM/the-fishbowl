@@ -6,16 +6,18 @@ using System.Text.RegularExpressions;
 namespace Fishbowl.Core.Desktop;
 
 // A space's own apps (space-apps spec phase 4): each folder `.apps/<folder>/`
-// with an `app.json` is an app of that space — a tile on its desktop, opened
-// in the kit's sandboxed frame, never pinned (the code is the space's, a
-// Designer changes it, the next open runs it).
+// with an `app.json` is an app of that space — a tile on its desktop. They
+// are trusted apps (AppModes.Trusted, decided 2026-11-09): the space's own
+// code, run in Fishbowl's page like the built-in apps, with the viewer's
+// session — no frame, never pinned (a Designer changes the code, the next
+// page load runs it).
 //
-// The frame has an opaque origin and sends no cookies, so the code is served
-// under an unguessable URL: /apps/code/<spaceId>/<folder>/<sig>/<file>, sig =
-// HMAC-SHA256 over "<spaceId>/<folder>" with the instance's Apps:CodeKey. A
-// member gets it with the desktop; whoever holds it can read that app's code
-// — which every member may read anyway — and nothing else: data reaches an
-// app only through the bridge, as the signed-in user.
+// The code is served under an unguessable URL: /apps/code/<spaceId>/<folder>/
+// <sig>/<file>, sig = HMAC-SHA256 over "<spaceId>/<folder>" with the
+// instance's Apps:CodeKey (made for the sandboxed frame they ran in until
+// then, which sent no cookie; the page loads it the same way). A member gets
+// it with the desktop; whoever holds it can read that app's code — which
+// every member may read anyway — and nothing else.
 public static partial class SpaceApps
 {
     public const string IdPrefix = "space.";
@@ -33,23 +35,6 @@ public static partial class SpaceApps
     // the nav, kept running while you look elsewhere.
     public const string KindWindow = "window";
     public const string KindView = "view";
-
-    // What a space app's frame loads after the kit, before the app: the
-    // data grid Fishbowl vendors for its Tables app (it needs nothing of the
-    // kit at load and takes its German once the kit is ready), with its
-    // in-memory source, SacDataGrid.arraySource — the Tables app has its own
-    // source, an app usually holds its rows. The frame's CSP allows exactly
-    // this folder of Fishbowl's own origin.
-    public const string FrameScriptFolder = "/js/vendor/sac-data-grid/js/";
-    public static readonly IReadOnlyList<string> FrameScripts =
-    [
-        FrameScriptFolder + "sac-data-grid-types.js",
-        FrameScriptFolder + "sac-data-grid.js",
-        FrameScriptFolder + "sac-data-grid-source.js",
-        FrameScriptFolder + "sac-data-grid-edit.js",
-        FrameScriptFolder + "sac-data-grid-form.js",
-        FrameScriptFolder + "sac-data-grid.de.js",
-    ];
 
     [GeneratedRegex("^[a-z0-9][a-z0-9-]{0,39}$")]
     private static partial Regex FolderShape();
