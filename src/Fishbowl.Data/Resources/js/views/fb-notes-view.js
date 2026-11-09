@@ -560,17 +560,11 @@ class FbNotesView extends HTMLElement {
                 }
                 /* The editor's formatting toolbar is sticky (sac-md-editor
                    v1.1.0). Collapsed, the note scrolls under the split's
-                   sticky back bar, so the toolbar sticks just below it — at
-                   the bar's height in the kit's numbers (sac-split: a 36px
-                   button, 44px on touch, 0.35rem above and below, a 1px
-                   line). Guarded by Phone_LongNote_EditorToolbarStaysBelowTheBackBar_Test. */
-                fb-notes-view sac-split[collapsed] sac-md-editor::part(toolbar) {
-                    top: calc(36px + 0.7rem + 1px);
-                }
-                @media (pointer: coarse) {
-                    fb-notes-view sac-split[collapsed] sac-md-editor::part(toolbar) {
-                        top: calc(44px + 0.7rem + 1px);
-                    }
+                   sticky back bar, so the toolbar sticks just below it — the
+                   split says how tall the bar is (kit 2.37, 0px while it
+                   doesn't show). Guarded by Phone_LongNote_EditorToolbarStaysBelowTheBackBar_Test. */
+                fb-notes-view sac-md-editor::part(toolbar) {
+                    top: var(--split-back-height, 0px);
                 }
                 fb-notes-view .nv-editor-footer {
                     display: flex;
