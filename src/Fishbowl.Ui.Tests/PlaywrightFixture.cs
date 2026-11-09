@@ -64,6 +64,18 @@ public class PlaywrightFixture : IAsyncLifetime
         // This is the magic marker that enables auto-auth in the Host's middleware
         psi.Environment["FISHBOWL_PLAYWRIGHT_TEST"] = "true";
 
+        // FISHBOWL_UI_TEST_HOST_LOG (CI sets it beside the .trx report) keeps
+        // the host's whole log in that file, each line with the UTC time it
+        // came in — a red run then shows what the server was doing while the
+        // browser waited, not only what it waited for.
+        var hostLogPath = Environment.GetEnvironmentVariable("FISHBOWL_UI_TEST_HOST_LOG");
+        if (!string.IsNullOrEmpty(hostLogPath))
+        {
+            hostLogPath = Path.GetFullPath(hostLogPath);
+            Directory.CreateDirectory(Path.GetDirectoryName(hostLogPath)!);
+            _hostLogFile = new StreamWriter(new FileStream(hostLogPath, FileMode.Append, FileAccess.Write, FileShare.Read)) { AutoFlush = true };
+        }
+
         _hostProcess = new Process { StartInfo = psi };
         // Drain stdout/stderr continuously. Redirected but unread, the pipe
         // buffer fills up after enough logging and every host thread that
@@ -104,11 +116,17 @@ public class PlaywrightFixture : IAsyncLifetime
             await _hostProcess.WaitForExitAsync();
             _hostProcess.Dispose();
         }
+        lock (_hostLog)
+        {
+            _hostLogFile?.Dispose();
+            _hostLogFile = null;
+        }
         try { if (Directory.Exists(_dataDir)) Directory.Delete(_dataDir, recursive: true); }
         catch (IOException) { /* a straggling file handle — the OS temp cleaner gets it */ }
     }
 
     private readonly Queue<string> _hostLog = new();
+    private StreamWriter? _hostLogFile;   // guarded by _hostLog
 
     private void Remember(string? line)
     {
@@ -117,6 +135,7 @@ public class PlaywrightFixture : IAsyncLifetime
         {
             _hostLog.Enqueue(line);
             while (_hostLog.Count > 200) _hostLog.Dequeue();
+            _hostLogFile?.WriteLine($"{DateTime.UtcNow:yyyy-MM-ddTHH:mm:ss.fffZ} {line}");
         }
     }
 

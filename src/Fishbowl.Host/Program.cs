@@ -76,6 +76,14 @@ var logConfig = new Serilog.LoggerConfiguration()
     .Enrich.FromLogContext()
     .WriteTo.Console();
 
+// The UI tests' host also logs each request as it starts and as it ends, with
+// its time — the fixture keeps that log for a red CI run, where a request the
+// browser waited on then shows whether it arrived, and when it came back.
+// Behind the same double gate as the sample mailbox below; nowhere else.
+if (builder.Environment.IsEnvironment("Testing")
+    && !string.IsNullOrEmpty(Environment.GetEnvironmentVariable("FISHBOWL_PLAYWRIGHT_TEST")))
+    logConfig.MinimumLevel.Override("Microsoft.AspNetCore.Hosting.Diagnostics", Serilog.Events.LogEventLevel.Information);
+
 if (!builder.Environment.IsEnvironment("Testing"))
 {
     var logsDir = Path.Combine(dataPath, "logs");

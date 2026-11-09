@@ -65,7 +65,11 @@ jobs:
       - name: Install Playwright browsers
         run: pwsh src/Fishbowl.Ui.Tests/bin/Release/net10.0/playwright.ps1 install --with-deps chromium
 
+      # The test server's whole log, each line with the time it came in, goes
+      # beside the .trx report — uploaded below when a test failed.
       - name: Run smoke test
+        env:
+          FISHBOWL_UI_TEST_HOST_LOG: ${{ github.workspace }}/TestResults/ui-host.log
         run: dotnet test src/Fishbowl.Ui.Tests -c Release --no-build --logger "trx;LogFileName=ui-smoke.trx" --results-directory TestResults
 
       - name: Upload results
@@ -74,3 +78,11 @@ jobs:
         with:
           name: ui-smoke-results-${{ matrix.os }}
           path: TestResults/*.trx
+
+      - name: Upload the test server's log
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ui-host-log-${{ matrix.os }}
+          path: TestResults/ui-host.log
+          if-no-files-found: warn
