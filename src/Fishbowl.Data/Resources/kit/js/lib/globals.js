@@ -229,16 +229,25 @@
      * exposes the OS regional format (anti-fingerprinting — Intl follows the
      * browser's UI language), so this is an explicit app / host setting.
      * Fields without their own `format` / `hour-cycle` attribute follow it,
-     * and so does every <sac-number-field>.
+     * and so does every <sac-number-field> and <sac-stepper>.
      * Not persisted by the kit: the app (or the host) owns the user setting
      * and calls set() on load.
      *
-     *   get()          { date, hourCycle, number } — date: "iso" | "dmy." |
-     *                  "dmy/" | "mdy/"; hourCycle: "h23" | "h12"; number:
-     *                  "1,234.5" | "1.234,5" | "1 234,5" | "1'234.5" (the
-     *                  identifier IS the pattern: group, then decimal
-     *                  separator). Default iso / h23 / "1,234.5".
+     * Until a key is set, it FOLLOWS THE LANGUAGE (sac.lang), live: German
+     * → date "dmy.", number "1.234,5"; every other language → "iso",
+     * "1,234.5". The hour cycle stays "h23" either way. A standalone app
+     * that never calls set() so reads "25.09.2026" and "1.234,5" in German.
+     * set() pins a key (per key: set({ hourCycle: "h12" }) leaves date and
+     * number following the language); "auto" un-pins it again.
+     *
+     *   get()          { date, hourCycle, number } — the EFFECTIVE format.
+     *                  date: "iso" | "dmy." | "dmy/" | "mdy/"; hourCycle:
+     *                  "h23" | "h12"; number: "1,234.5" | "1.234,5" |
+     *                  "1 234,5" | "1'234.5" (the identifier IS the pattern:
+     *                  group, then decimal separator). Default: by language
+     *                  (above).
      *   set(partial)   merge, e.g. set({ date: "dmy.", number: "1.234,5" });
+     *                  "auto" for a key returns it to the language default;
      *                  unknown values are ignored
      *   onChange(cb)   cb({ date, hourCycle, number }); returns an unsubscribe
      *   separators()   { decimal, group } of the current number format (the
@@ -259,7 +268,9 @@
      *                  Tolerant like <sac-date-field>: an ISO date always
      *                  works; otherwise day / month / year in the format's
      *                  order, any of . / - between, single digits, a two-digit
-     *                  year (00–68 → 20xx, 69–99 → 19xx). opts.format.
+     *                  year (00–68 → 20xx, 69–99 → 19xx). Under "iso" a
+     *                  dotted day.month.year ("25.09.2026", "25.9.26") is
+     *                  read too — dots always mean that order. opts.format.
      *   formatTime(hhmm, opts)  "14:30" → "14:30" under h23, "02:30 PM" under
      *                  h12 (AM / PM translated). "" for empty or garbage.
      *                  opts.hourCycle overrides the page hour cycle.
@@ -279,7 +290,22 @@
         "1 234,5": { decimal: ",", group: " " },
         "1'234.5": { decimal: ".", group: "'" },
     };
-    const regional = { date: "iso", hourCycle: "h23", number: "1,234.5" };
+    // The language defaults, for the languages with a convention the kit
+    // knows; every other language gets REGIONAL_BASE.
+    const REGIONAL_BASE = { date: "iso", hourCycle: "h23", number: "1,234.5" };
+    const REGIONAL_BY_LANG = { de: { date: "dmy.", number: "1.234,5" } };
+    // What set() pinned, per key; null = follow the language.
+    const pinnedRegional = { date: null, hourCycle: null, number: null };
+    /** The effective format: pinned keys, else the current language's default. */
+    function effectiveRegional() {
+        const byLang = REGIONAL_BY_LANG[window.sac.lang.get()] || {};
+        const out = {};
+        for (const k of ["date", "hourCycle", "number"]) {
+            out[k] = pinnedRegional[k] || byLang[k] || REGIONAL_BASE[k];
+        }
+        return out;
+    }
+    const regional = effectiveRegional();
     const regionalListeners = new Set();
 
     /**
@@ -372,8 +398,11 @@
             !!parseTime(t.replace(/\s*(?:Z|[+-]\d{2}:?\d{2})$/i, ""));
         let m = /^(\d{4})-(\d{1,2})-(\d{1,2})(?:(?:T|\s+)(.+))?$/.exec(s);
         if (m) return time(m[4]) ? isoDate(+m[1], +m[2], +m[3]) : null;
-        if (fmt === "iso") return null;
-        m = /^(\d{1,2})\s*[./-]\s*(\d{1,2})\s*[./-]\s*(\d{4}|\d{2})(?:\s+(.+))?$/.exec(s);
+        // ISO still reads a dotted day.month.year: dots mean that order in
+        // every convention, so "25.09.2026" is never ambiguous.
+        m = fmt === "iso"
+            ? /^(\d{1,2})\s*\.\s*(\d{1,2})\s*\.\s*(\d{4}|\d{2})(?:\s+(.+))?$/.exec(s)
+            : /^(\d{1,2})\s*[./-]\s*(\d{1,2})\s*[./-]\s*(\d{4}|\d{2})(?:\s+(.+))?$/.exec(s);
         if (!m || !time(m[4])) return null;
         let y = +m[3];
         if (m[3].length === 2) y += y <= 68 ? 2000 : 1900;
@@ -441,23 +470,33 @@
     const pick = (opts, key, known, fallback) =>
         (opts && known.includes(opts[key])) ? opts[key] : fallback;
 
+    /** Re-derive the effective format; announce it when it moved. */
+    function syncRegional() {
+        const next = effectiveRegional();
+        if (next.date === regional.date && next.hourCycle === regional.hourCycle && next.number === regional.number) return;
+        Object.assign(regional, next);
+        const now = window.sac.regional.get();
+        for (const cb of regionalListeners) {
+            try { cb(now); }
+            catch (err) { console.error("[sac.regional] a listener threw:", err); }
+        }
+        document.dispatchEvent(new CustomEvent("sac:regional", { detail: now, bubbles: true }));
+    }
+
     window.sac.regional = {
         get() { return { date: regional.date, hourCycle: regional.hourCycle, number: regional.number }; },
         set(partial) {
             const p = partial || {};
-            const date = DATE_FORMATS.includes(p.date) ? p.date : regional.date;
-            const hourCycle = HOUR_CYCLES.includes(p.hourCycle) ? p.hourCycle : regional.hourCycle;
-            const number = Object.prototype.hasOwnProperty.call(NUMBER_FORMATS, p.number) ? p.number : regional.number;
-            if (date === regional.date && hourCycle === regional.hourCycle && number === regional.number) return;
-            regional.date = date;
-            regional.hourCycle = hourCycle;
-            regional.number = number;
-            const now = this.get();
-            for (const cb of regionalListeners) {
-                try { cb(now); }
-                catch (err) { console.error("[sac.regional] a listener threw:", err); }
+            const known = {
+                date: (v) => DATE_FORMATS.includes(v),
+                hourCycle: (v) => HOUR_CYCLES.includes(v),
+                number: (v) => Object.prototype.hasOwnProperty.call(NUMBER_FORMATS, v),
+            };
+            for (const k of Object.keys(known)) {
+                if (p[k] === "auto") pinnedRegional[k] = null;          // back to the language default
+                else if (known[k](p[k])) pinnedRegional[k] = p[k];
             }
-            document.dispatchEvent(new CustomEvent("sac:regional", { detail: now, bubbles: true }));
+            syncRegional();
         },
         onChange(cb) {
             if (typeof cb !== "function") return () => {};
@@ -475,6 +514,10 @@
         formatTime(hhmm, opts) { return formatTime(hhmm, pick(opts, "hourCycle", HOUR_CYCLES, regional.hourCycle)); },
         parseTime(text) { return parseTime(text); },
     };
+
+    // Unpinned keys follow the language — including "auto" resolving anew
+    // when a table arrives (de.js loads after this file).
+    window.sac.lang.onChange(syncRegional);
 
     // Press states (:active) answer a finger on iOS Safari only where a
     // touchstart listener exists — this empty one makes every control in

@@ -61,7 +61,7 @@ public class VaultTests
             await OpenNoteAsync(page, baseUrl, "Vault smoke");
             // A label on the opener and text after the closer are part of
             // the block: encrypted with it, and back exactly as written.
-            await page.Locator("fb-notes-view #content").EvaluateAsync(
+            await page.Locator("fb-notes-view sac-md-editor#content").EvaluateAsync(
                 $"e => {{ e.value = '# Vault smoke\\n\\n:::secret {Label}\\n{Secret}\\n:::end {Trailer}\\n'; e.dispatchEvent(new Event('change')); }}");
 
             var setup = page.Locator("sac-dialog[title='Set up secrets']");
@@ -155,7 +155,7 @@ public class VaultTests
             var victim = await EditorValueAsync(page);
             Assert.DoesNotContain(Secret, victim);
             Assert.Contains(":::secret\ncan't be decrypted — left as it is\n:::end", victim);
-            Assert.Equal("", await page.Locator("fb-notes-view #content").GetAttributeAsync("readonly"));
+            Assert.Equal("", await page.Locator("fb-notes-view sac-md-editor#content").GetAttributeAsync("readonly"));
 
             // The list preview never shows a decrypted secret.
             var row = page.Locator(".nv-item", new PageLocatorOptions { HasText = "Vault smoke" }).First;
@@ -165,10 +165,10 @@ public class VaultTests
             await OpenNoteAsync(page, baseUrl, "Vault smoke", navigate: false);
             await page.EvaluateAsync("() => fb.vault.lock()");
             await page.WaitForFunctionAsync(
-                "() => !document.querySelector('fb-notes-view #content').value.includes('" + Secret + "')");
+                "() => !document.querySelector('fb-notes-view sac-md-editor#content').value.includes('" + Secret + "')");
             var pill = page.Locator("#locked-pill");
             Assert.True(await pill.IsVisibleAsync());
-            Assert.Equal("", await page.Locator("fb-notes-view #content").GetAttributeAsync("readonly"));
+            Assert.Equal("", await page.Locator("fb-notes-view sac-md-editor#content").GetAttributeAsync("readonly"));
             // Read-only because locked, not archived: no "Archived" label.
             Assert.False(await page.Locator("#archived-pill").IsVisibleAsync());
 
@@ -205,7 +205,7 @@ public class VaultTests
             await unlock.Locator("input[name='pass']").FillAsync(Passphrase);
             await unlock.GetByRole(AriaRole.Button, new() { Name = "Unlock" }).ClickAsync();
             await page.WaitForFunctionAsync(
-                "() => document.querySelector('fb-notes-view #content').value.includes('" + Secret + "')");
+                "() => document.querySelector('fb-notes-view sac-md-editor#content').value.includes('" + Secret + "')");
             await page.WaitForFunctionAsync(
                 "() => document.getElementById('fb-lock-secrets-item')?.hidden === false && document.getElementById('fb-unlock-secrets-item')?.hidden === true");
 
@@ -217,7 +217,7 @@ public class VaultTests
             await unlock.Locator("input[name='pass']").FillAsync(Passphrase);
             await unlock.GetByRole(AriaRole.Button, new() { Name = "Unlock" }).ClickAsync();
             await page.WaitForFunctionAsync(
-                "() => document.querySelector('fb-notes-view #content').value.includes('" + Secret + "')");
+                "() => document.querySelector('fb-notes-view sac-md-editor#content').value.includes('" + Secret + "')");
             Assert.False(await pill.IsVisibleAsync());
 
             // ── Lock + reload, then unlock with the recovery key. ──
@@ -300,7 +300,7 @@ public class VaultTests
             noteId = (await created.JsonAsync())!.Value.GetProperty("id").GetString()!;
 
             await OpenNoteAsync(page, baseUrl, "Vault archived");
-            await page.Locator("fb-notes-view #content").EvaluateAsync(
+            await page.Locator("fb-notes-view sac-md-editor#content").EvaluateAsync(
                 $"e => {{ e.value = '# Vault archived\\n\\n:::secret\\n{Secret}\\n:::end\\n'; e.dispatchEvent(new Event('change')); }}");
             var setup = page.Locator("sac-dialog[title='Set up secrets']");
             await setup.WaitForAsync(new LocatorWaitForOptions { Timeout = 5000 });
@@ -356,12 +356,12 @@ public class VaultTests
             await unlock.Locator("input[name='pass']").FillAsync(Passphrase);
             await unlock.GetByRole(AriaRole.Button, new() { Name = "Unlock" }).ClickAsync();
             await page.WaitForFunctionAsync(
-                "() => document.querySelector('fb-notes-view #content').value.includes('" + Secret + "')",
+                "() => document.querySelector('fb-notes-view sac-md-editor#content').value.includes('" + Secret + "')",
                 null, new PageWaitForFunctionOptions { Timeout = KdfTimeout });
 
             // Read-only (archived): a click on the masked block shows it, a
             // second hides it again (sac-md-editor #3) — no caret needed.
-            var body = page.Locator("fb-notes-view #content .line.block-body").First;
+            var body = page.Locator("fb-notes-view sac-md-editor#content .line.block-body").First;
             await Assertions.Expect(body).Not.ToHaveClassAsync(new Regex(@"block-revealed"));
             await body.ClickAsync();
             await Assertions.Expect(body).ToHaveClassAsync(new Regex(@"block-revealed"));
@@ -664,11 +664,11 @@ public class VaultTests
         if (navigate) await page.GotoAsync(baseUrl + "/#/notes");
         await page.Locator(".nv-item", new PageLocatorOptions { HasText = title }).First.ClickAsync();
         await page.WaitForFunctionAsync(
-            $"() => (document.querySelector('fb-notes-view #content')?.value || '').startsWith('# {title}')");
+            $"() => (document.querySelector('fb-notes-view sac-md-editor#content')?.value || '').startsWith('# {title}')");
     }
 
     private static Task<string> EditorValueAsync(IPage page)
-        => page.Locator("fb-notes-view #content").EvaluateAsync<string>("e => e.value");
+        => page.Locator("fb-notes-view sac-md-editor#content").EvaluateAsync<string>("e => e.value");
 
     private static async Task<JsonElement> GetNoteAsync(IAPIRequestContext api, string baseUrl, string id)
         => (await (await api.GetAsync($"{baseUrl}/api/v1/notes/{id}")).JsonAsync())!.Value;

@@ -63,7 +63,7 @@
         try { usage = await fb.api.files.in(ws).usage(); } catch { usage = null; }
 
         const section = document.createElement("sac-section");
-        section.setAttribute("title", title);
+        section.setAttribute("heading", title);
         section.dataset.workspace = ws;
         if (usage) section.append(...storage(usage, inSpace));
 

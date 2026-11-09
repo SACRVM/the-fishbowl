@@ -165,13 +165,13 @@ public class NotesForAgentsTests
 
             // In the text the editor shows the wikilink as a link; Ctrl/⌘+click
             // on it opens its note (the editor's sac:link).
-            var wiki = page.Locator($"fb-notes-view #content a.inline-wikilink[title='Target {tag}']");
+            var wiki = page.Locator($"fb-notes-view sac-md-editor#content a.inline-wikilink[title='Target {tag}']");
             await Assertions.Expect(wiki).ToBeVisibleAsync();
             await wiki.ClickAsync(new() { Modifiers = new[] { KeyboardModifier.ControlOrMeta } });
             await Assertions.Expect(page.Locator("fb-notes-view .nv-item.selected")).ToContainTextAsync($"Target {tag}");
             await row.ClickAsync();
             // A link by id (a host scheme of the editor's) the same way.
-            await page.Locator($"fb-notes-view #content a[href='note:{target}']").ClickAsync(new() { Modifiers = new[] { KeyboardModifier.ControlOrMeta } });
+            await page.Locator($"fb-notes-view sac-md-editor#content a[href='note:{target}']").ClickAsync(new() { Modifiers = new[] { KeyboardModifier.ControlOrMeta } });
             await Assertions.Expect(page.Locator("fb-notes-view .nv-item.selected")).ToContainTextAsync($"Target {tag}");
             await row.ClickAsync();
             await Assertions.Expect(outLinks.Locator("sac-chip")).ToHaveCountAsync(1);
@@ -184,12 +184,12 @@ public class NotesForAgentsTests
             await page.Locator("fb-notes-view #lock-btn").ClickAsync();
             await page.Locator("sac-dialog[open]").GetByRole(AriaRole.Button, new() { Name = "Lock" }).ClickAsync();
             await Assertions.Expect(page.Locator("fb-notes-view #note-locked-pill")).ToBeVisibleAsync();
-            await Assertions.Expect(page.Locator("fb-notes-view #content")).ToHaveAttributeAsync("readonly", "");
+            await Assertions.Expect(page.Locator("fb-notes-view sac-md-editor#content")).ToHaveAttributeAsync("readonly", "");
             var stored = (await (await page.APIRequest.GetAsync($"{notes}/{target}")).JsonAsync())!.Value;
             Assert.True(stored.GetProperty("locked").GetBoolean());
             await page.Locator("fb-notes-view #lock-btn").ClickAsync();
             await Assertions.Expect(page.Locator("fb-notes-view #note-locked-pill")).ToBeHiddenAsync();
-            await Assertions.Expect(page.Locator("fb-notes-view #content")).Not.ToHaveAttributeAsync("readonly", "");
+            await Assertions.Expect(page.Locator("fb-notes-view sac-md-editor#content")).Not.ToHaveAttributeAsync("readonly", "");
             Assert.Empty(errors);
         }
         finally { await context.CloseAsync(); }
@@ -219,10 +219,10 @@ public class NotesForAgentsTests
             var rowB = page.Locator("fb-notes-view .nv-item", new() { HasText = $"Plan {tag}" });
             await Assertions.Expect(rowA).ToBeVisibleAsync(new() { Timeout = 15000 });
             await rowA.ClickAsync();
-            var line = page.Locator("fb-notes-view #content .line", new() { HasText = "cloud VPS" });
+            var line = page.Locator("fb-notes-view sac-md-editor#content .line", new() { HasText = "cloud VPS" });
             await Assertions.Expect(line).ToBeVisibleAsync();
-            Assert.Equal($"# Costs {tag}", await page.Locator("fb-notes-view #content .line").First.TextContentAsync());
-            Assert.Equal($"# Costs {tag}\n\n{costs}", await page.Locator("fb-notes-view #content").EvaluateAsync<string>("e => e.value"));
+            Assert.Equal($"# Costs {tag}", await page.Locator("fb-notes-view sac-md-editor#content .line").First.TextContentAsync());
+            Assert.Equal($"# Costs {tag}\n\n{costs}", await page.Locator("fb-notes-view sac-md-editor#content").EvaluateAsync<string>("e => e.value"));
             await Assertions.Expect(line.Locator("del")).ToHaveCountAsync(0);
 
             // In and out of the text, then another note: nothing is written.
@@ -236,7 +236,7 @@ public class NotesForAgentsTests
             Assert.Equal(before.GetProperty("updatedAt").GetString(), after.GetProperty("updatedAt").GetString());
 
             // An edit: the text changes, the title stays the title, not a line of it.
-            var second = page.Locator("fb-notes-view #content .line", new() { HasText = "Second line." });
+            var second = page.Locator("fb-notes-view sac-md-editor#content .line", new() { HasText = "Second line." });
             await second.ClickAsync();
             await page.Keyboard.PressAsync("End");
             await page.Keyboard.TypeAsync(" Edited.");
@@ -253,7 +253,7 @@ public class NotesForAgentsTests
 
             // Its heading renamed in the editor: a new title, still apart.
             await rowB.ClickAsync();
-            var heading = page.Locator("fb-notes-view #content .line").First;
+            var heading = page.Locator("fb-notes-view sac-md-editor#content .line").First;
             await Assertions.Expect(heading).ToHaveTextAsync($"# Plan {tag}");
             await heading.ClickAsync();
             await page.Keyboard.PressAsync("End");
@@ -269,7 +269,7 @@ public class NotesForAgentsTests
             Assert.Equal("First line.\n\nSecond line. Edited.", edited.GetProperty("content").GetString());
 
             // An edit beside the tildes keeps them as they were.
-            var rest = page.Locator("fb-notes-view #content .line", new() { HasText = "The rest." });
+            var rest = page.Locator("fb-notes-view sac-md-editor#content .line", new() { HasText = "The rest." });
             await rest.ClickAsync();
             await page.Keyboard.PressAsync("End");
             await page.Keyboard.TypeAsync(" Edited.");

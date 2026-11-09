@@ -44,8 +44,10 @@
  * out of it (no body-level ghost), so the component's own styles keep
  * applying to the item in flight.
  *
- * Keyboard reordering (Alt+Arrow and friends) is the component's job — this
- * helper is pointer-only on purpose, and it calls nothing for keys.
+ * Keyboard reordering (Alt+Arrow and friends) is the component's job — the
+ * list helper is pointer-only on purpose, and it calls nothing for keys.
+ * sac.tiles.sortable is the exception: its arrange mode IS the keyboard
+ * path to moving a tile, so it handles Alt+Arrow itself (below).
  *
  * Reduced motion: the item follows the pointer 1:1 either way; the list
  * helper animates nothing on its own (sac.tiles.sortable slides and settles,
@@ -452,6 +454,9 @@
      *       onReorder(from, to, tile) { … },   // flat indices, once per drop
      *       disabled: () => !isOwner,          // boolean or function
      *       ignore: "…",                       // presses that never drag
+     *       label: (tile) => tile.dataset.name, // optional — a tile's name
+     *                          // for announcements (default: its
+     *                          // aria-label, title, heading, text)
      *   });
      *   s.repack();   // after the host added / removed tiles itself
      *   s.arrange(true);  s.arranging;   // the arrange mode, see below
@@ -467,6 +472,19 @@
      * ends it. sac:arrange { arranging } fires on the grid either way.
      * A mouse drags tiles any time (the desktop convention); a finger only
      * while arranging.
+     *
+     * Keyboard (2.36.0): Shift+F10 / the Menu key on a focused tile → Arrange
+     * enters the mode. While arranging, Alt+←/↑ moves the focused tile one
+     * place earlier in the flat order and Alt+→/↓ one place later (the
+     * sac-layer-list convention; on a tile, Alt+←/→ no longer goes Back /
+     * Forward). A key move commits exactly as a drop does — packs re-form,
+     * the neighbours slide, onReorder(from, to, tile) fires once per step —
+     * and focus stays on the tile. A visually hidden live region in the pill
+     * says how the mode works on entry ("Arrange mode. Alt+arrow keys move
+     * the focused tile. Escape or Done ends.") and announces every move
+     * ("Moved Notes to position 3 of 12"); at either end it says where the
+     * tile is. The pill's visible text stays "Arrange · Done". Outside
+     * arrange mode no key moves a tile.
      *
      * Feel (the home-screen kind):
      *   lift    — the tile follows the pointer 1:1 at its grab offset, a
@@ -501,6 +519,7 @@
             onReorder = null,
             disabled = false,
             ignore = IGNORE + ", button, sac-menu",
+            label = null,
         } = opts;
 
         const isPack = (el) => el.classList.contains("tile-pack");
@@ -635,8 +654,73 @@
 
         let arranging = false;
         let pill = null;
+        let live = null;          // the pill's hidden live region (announcements)
+        let liveTimer = null;
         let offLang = null;
         const t = (k, fb) => (sac.t ? sac.t(k, fb) : fb);
+        const isDisabled = () => (typeof disabled === "function" ? disabled() : !!disabled);
+
+        /** Say something to a screen reader through the pill's live region.
+         *  Cleared first, set a beat later — so the same words twice (a tile
+         *  already at the end) are spoken twice, and a region made a moment
+         *  ago is registered before it changes. */
+        function announce(msg) {
+            if (!live) return;
+            clearTimeout(liveTimer);
+            live.textContent = "";
+            liveTimer = setTimeout(() => { if (live) live.textContent = msg; }, 120);
+        }
+
+        /** A tile's name for an announcement: the host's `label(tile)`, else
+         *  its aria-label, its title (a small tile's name), its heading, its
+         *  text. */
+        function nameOf(tile) {
+            if (typeof label === "function") {
+                const s = label(tile);
+                if (s) return String(s);
+            }
+            const head = tile.querySelector("h1, h2, h3, h4, h5, h6");
+            return (tile.getAttribute("aria-label") || tile.getAttribute("title") ||
+                    (head && head.textContent) || tile.textContent || "").trim();
+        }
+
+        /** Keyboard, while arranging: Alt+←/↑ moves the focused tile one place
+         *  earlier in the flat order, Alt+→/↓ one place later (sac-layer-list's
+         *  Alt+Arrow reorder). Committed as a drop is: the DOM re-packs (the
+         *  neighbours slide), onReorder(from, to, tile) fires once per step,
+         *  and focus stays on the tile. */
+        function onArrangeKey(e) {
+            if (!arranging || !e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
+            const step = { ArrowLeft: -1, ArrowUp: -1, ArrowRight: 1, ArrowDown: 1 }[e.key];
+            if (!step || isDisabled() || grid.hasAttribute("data-sortable-active")) return;
+            const order = flat();
+            const tile = e.composedPath().find((n) => n.nodeType === 1 && order.includes(n));
+            if (!tile) return;
+            e.preventDefault();      // Alt+←/→ is also the browser's Back / Forward
+            e.stopPropagation();
+            const from = order.indexOf(tile);
+            const to = from + step;
+            const name = nameOf(tile);
+            if (to < 0 || to >= order.length) {
+                announce(t("tiles.at-position", "{name} is at position {pos} of {count}")
+                    .replace("{name}", name).replace("{pos}", from + 1).replace("{count}", order.length));
+                return;
+            }
+            const focused = e.composedPath()[0];
+            const next = order.slice();
+            next.splice(from, 1);
+            next.splice(to, 0, tile);
+            relayout(() => pack(next, fixed()), null);
+            markArrangeable();
+            // Re-packing moved the node, and a moved node drops its focus:
+            // give it back to whatever had it (the tile, or a control in it).
+            const back = focused && focused.nodeType === 1 && tile.contains(focused) ? focused : tile;
+            if (typeof back.focus === "function") back.focus({ preventScroll: true });
+            if (typeof tile.scrollIntoView === "function") tile.scrollIntoView({ block: "nearest", inline: "nearest" });
+            announce(t("tiles.moved", "Moved {name} to position {pos} of {count}")
+                .replace("{name}", name).replace("{pos}", to + 1).replace("{count}", order.length));
+            if (typeof onReorder === "function") onReorder(from, to, tile);
+        }
         // A tap on a tile opens nothing while arranging.
         const noOpen = (e) => {
             const tile = e.composedPath().find((n) => n.nodeType === 1 && isItem(n));
@@ -672,20 +756,35 @@
             if (on) {
                 pill = document.createElement("div");
                 pill.className = "sac-arrange-pill";
-                pill.setAttribute("role", "status");
                 pill.innerHTML = `<span class="sac-arrange-label"></span><button type="button" class="btn primary"></button>`;
                 pill.querySelector("button").addEventListener("click", () => arrange(false));
+                // The announcements' live region: visually hidden, out of the
+                // pill's flex flow (absolute), gone with the pill. It — not
+                // the pill — is the status: the pill's own text stays
+                // "Arrange · Done", the region says how the mode works.
+                live = document.createElement("div");
+                live.className = "sac-arrange-live";
+                live.setAttribute("role", "status");
+                live.style.cssText = "position:absolute;width:1px;height:1px;margin:-1px;padding:0;" +
+                    "border:0;overflow:hidden;clip-path:inset(50%);white-space:nowrap;";
+                pill.appendChild(live);
                 labelPill();
                 document.body.appendChild(pill);
+                announce(t("tiles.arrange-help",
+                    "Arrange mode. Alt+arrow keys move the focused tile. Escape or Done ends."));
                 if (sac.lang) offLang = sac.lang.onChange(labelPill);
                 grid.addEventListener("click", noOpen, true);
+                grid.addEventListener("keydown", onArrangeKey);
                 document.addEventListener("keydown", onEsc);
                 // Not the click that chose "Arrange": from the next one on.
                 setTimeout(() => { if (arranging) document.addEventListener("click", freeTap, true); }, 0);
             } else {
+                clearTimeout(liveTimer);
+                live = null;
                 if (pill) { pill.remove(); pill = null; }
                 if (offLang) { offLang(); offLang = null; }
                 grid.removeEventListener("click", noOpen, true);
+                grid.removeEventListener("keydown", onArrangeKey);
                 document.removeEventListener("keydown", onEsc);
                 document.removeEventListener("click", freeTap, true);
             }

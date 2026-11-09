@@ -66,6 +66,17 @@
  *             (z-index walk over all sac-windows, base 10000),
  *             minimize(), maximize(), restore()
  *             — restore() returns to the normal rect from either state.
+ *             A window comes forward by itself the moment it is pressed
+ *             anywhere (pointerdown, before a drag starts) or focus moves
+ *             into it (focusin: Tab, a dialog handing focus back) — a
+ *             covered window is never typed into unseen.
+ *
+ * Traffic lights: three dots in --accent-warm / --ok / --danger with their
+ *             glyphs drawn in (minimise −, maximise / restore as two
+ *             triangles pointing out / in, close ×), inked in the dot's own
+ *             colour sunk dark. The glyphs show while the dot group is
+ *             hovered or holds keyboard focus, and always on touch
+ *             (hover: none) and under prefers-contrast: more.
  * Events:     sac:open / sac:close — detail { window }.
  *             sac:minimize / sac:maximize / sac:restore — detail { window }.
  *             All bubble + composed; the restore event covers the return from
@@ -486,9 +497,9 @@ class SacWindow extends HTMLElement {
                 gap: 8px;
             }
 
-            /* Traffic lights: three plain colored dots, no glyphs — the color
-               carries the meaning, the state-aware title/aria-label carries
-               the words. */
+            /* Traffic lights: three colored dots; the state-aware
+               title/aria-label carries the words, a glyph in each dot the
+               meaning (below) — colour alone never does. */
             .ctrl-btn {
                 --btn-color: var(--danger);
                 width: 15px;
@@ -515,6 +526,36 @@ class SacWindow extends HTMLElement {
             .min-btn { --btn-color: var(--accent-warm); }
             .max-btn { --btn-color: var(--ok); }
             .close-btn { --btn-color: var(--danger); }
+
+            /* Glyphs: −, maximise / restore (triangles out / in), ×. Shown
+               while the group is hovered or keyboard-focused (always on
+               touch and under more contrast — the media blocks below). Ink
+               = the dot's own colour sunk dark, the kit's --on-warm /
+               --on-ok recipe, so every theme and seed follows. 60% of the
+               dot, on a 9-unit grid: 9px in a 15px dot, 12px in a 20px. */
+            .ctrl-btn { --glyph-ink: color-mix(in srgb, var(--sink) 62%, var(--btn-color)); }
+            .glyph {
+                position: absolute;
+                left: 20%;
+                top: 20%;
+                width: 60%;
+                height: 60%;
+                fill: none;
+                stroke: var(--glyph-ink);
+                stroke-width: 1.25;
+                stroke-linecap: round;
+                opacity: 0;
+                transition: opacity 0.12s var(--ease-smooth);
+                pointer-events: none;
+            }
+            .glyph .g-fill { fill: var(--glyph-ink); stroke: none; }
+            .max-btn .g-restore { display: none; }
+            :host([maximized]) .max-btn .g-max,
+            :host([minimized]) .max-btn .g-max { display: none; }
+            :host([maximized]) .max-btn .g-restore,
+            :host([minimized]) .max-btn .g-restore { display: inline; }
+            .controls:hover .glyph { opacity: 1; }
+            .controls:has(:focus-visible) .glyph { opacity: 1; }
 
             /* [controls] opts into an explicit subset: hide all three, then
                re-show per space-separated token. No attribute = all three. */
@@ -610,10 +651,12 @@ class SacWindow extends HTMLElement {
             }
             @media (hover: none) {
                 .ctrl-btn:hover { transform: none; background: var(--btn-color); }
+                .glyph { opacity: 1; }
             }
 
             @media (prefers-reduced-motion: reduce) {
-                .ctrl-btn {
+                .ctrl-btn,
+                .glyph {
                     transition: none;
                 }
                 .ctrl-btn:hover {
@@ -638,15 +681,16 @@ class SacWindow extends HTMLElement {
             }
             @media (prefers-contrast: more) {
                 .window-container { background: var(--glass-solid); backdrop-filter: none; -webkit-backdrop-filter: none; border-color: var(--border-contrast); }
+                .glyph { opacity: 1; }
             }
         </style>
         <div class="window-container">
             <div class="title-bar">
                 <span class="title" id="window-title-text"></span>
                 <div class="controls">
-                    <button class="ctrl-btn min-btn" id="window-min-btn" type="button" title="${L.minimize}" aria-label="${L.minimize}"></button>
-                    <button class="ctrl-btn max-btn" id="window-max-btn" type="button" title="${L.maximize}" aria-label="${L.maximize}"></button>
-                    <button class="ctrl-btn close-btn" id="window-close-btn" title="${L.close}" aria-label="${L.close}"></button>
+                    <button class="ctrl-btn min-btn" id="window-min-btn" type="button" title="${L.minimize}" aria-label="${L.minimize}"><svg class="glyph" viewBox="0 0 9 9" aria-hidden="true" focusable="false"><path d="M1.5 4.5h6"/></svg></button>
+                    <button class="ctrl-btn max-btn" id="window-max-btn" type="button" title="${L.maximize}" aria-label="${L.maximize}"><svg class="glyph" viewBox="0 0 9 9" aria-hidden="true" focusable="false"><path class="g-fill g-max" d="M1.5 1.5h3.6L1.5 5.1zM7.5 7.5H3.9L7.5 3.9z"/><path class="g-fill g-restore" d="M4 4H.9L4 .9zM5 5h3.1L5 8.1z"/></svg></button>
+                    <button class="ctrl-btn close-btn" id="window-close-btn" type="button" title="${L.close}" aria-label="${L.close}"><svg class="glyph" viewBox="0 0 9 9" aria-hidden="true" focusable="false"><path d="M2 2l5 5M7 2L2 7"/></svg></button>
                 </div>
             </div>
             <div class="toolbar" part="toolbar"><slot name="toolbar"></slot></div>
@@ -840,6 +884,14 @@ class SacWindow extends HTMLElement {
         content.addEventListener('scroll', () => {
             container.classList.toggle('scrolled', content.scrollTop > 0);
         }, { passive: true });
+
+        // A covered window comes forward the moment it is pressed — anywhere
+        // in it, in the capture phase, so before a drag or a click handler
+        // runs (z-index never touches the pointer capture a drag takes) —
+        // or the moment focus moves into it (Tab, a dialog handing focus
+        // back): nobody types into a window they cannot see.
+        this.addEventListener('pointerdown', () => this.bringToFront(), true);
+        this.addEventListener('focusin', () => this.bringToFront());
 
         const titleBar = this.shadowRoot.querySelector('.title-bar');
         const closeBtn = this.shadowRoot.getElementById('window-close-btn');

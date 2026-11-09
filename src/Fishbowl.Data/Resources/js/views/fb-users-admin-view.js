@@ -135,7 +135,7 @@ class FbUsersAdminView extends HTMLElement {
         const card = document.createElement("div");
         card.className = "fb-block";
         const panel = document.createElement("sac-section");
-        panel.setAttribute("title", title);
+        panel.setAttribute("heading", title);
         card.appendChild(panel);
         return { card, panel };
     }

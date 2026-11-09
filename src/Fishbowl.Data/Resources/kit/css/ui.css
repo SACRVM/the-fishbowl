@@ -563,6 +563,39 @@ input[type="checkbox"], input[type="radio"] {
     accent-color: var(--accent);
 }
 
+/* Field errors — the look of an invalid kit field, for plain fields too:
+   red text and a 1px --danger hairline under the field (never a thick
+   coloured border), and a line under it that says what IS expected
+   ("At most 100", "Not a valid date – e.g. 25.09.2026"). Wire it:
+     <input aria-invalid="true" aria-describedby="qty-error">
+     <div class="field-error" id="qty-error" aria-live="polite">At most 100</div>
+   Keep the .field-error element in the page and empty while the field is
+   valid (it collapses to nothing): a live region that is already there
+   announces new text reliably, one that appears with its text does not.
+   The kit fields (<sac-number-field>, <sac-date-field>, <sac-time-field>,
+   <sac-color-field>) do all of this themselves. Style guide → CSS Patterns
+   → Field errors. */
+input[aria-invalid="true"],
+textarea[aria-invalid="true"] {
+    color: var(--danger-text);
+    border-bottom-color: var(--danger);
+}
+input[aria-invalid="true"]:focus,
+textarea[aria-invalid="true"]:focus {
+    border-color: var(--accent);
+    border-bottom-color: var(--danger);
+}
+select[aria-invalid="true"] { border-bottom-color: var(--danger); }
+.field-error {
+    margin-top: 0.3rem;
+    font-size: 0.8rem;
+    line-height: 1.35;
+    color: var(--danger-text);
+    text-transform: none;
+    letter-spacing: 0;
+}
+.field-error:empty { margin: 0; }
+
 /* .cell-input — a plain <input> / <textarea> as a cell editor (the
    size="cell" look of the kit fields): borderless, fills its cell, the
    cell's font, no own focus ring — the grid draws the cell's. A plain input
@@ -597,7 +630,9 @@ th {
     font-size: 0.68rem;
     text-transform: uppercase;
     letter-spacing: 0.08em;
-    color: var(--text-dim);
+    /* --text-muted: a column heading names what the column holds — real
+       information, so not the tertiary --text-dim. */
+    color: var(--text-muted);
     font-weight: 700;
     padding: 0.45rem 0.9rem 0.45rem 0;
     border-bottom: 1px solid var(--border-strong);
@@ -1109,7 +1144,9 @@ a.nav-icon-btn { text-decoration: none; }
     font-weight: 600;
 }
 .empty-state p {
-    color: var(--text-dim);
+    /* --text-muted: the line that explains the empty panel (and usually how
+       to fill it) carries information — not the tertiary --text-dim. */
+    color: var(--text-muted);
     font-size: 0.85rem;
     margin: 0;
     max-width: 32ch;

@@ -34,6 +34,8 @@
  * the app's About look related by construction — the point of shipping the
  * surface in the kit rather than letting every app reinvent it.
  *
+ * Escape closes the About while focus is in it (`escape-closes`, 2.36.0).
+ *
  * Returns the <sac-window>. Re-opening the same About (matched by name) brings
  * the existing one to front instead of stacking a duplicate. All text is set
  * via textContent — notice text is third-party and is never trusted as markup.
@@ -65,6 +67,8 @@
             // resizing it is meaningless, and the resize grip would otherwise
             // sit on the scroll track of a long notice list. Drop it.
             win.setAttribute("no-resize", "");
+            // Read-only, nothing to lose: Escape closes it like any dialog.
+            win.setAttribute("escape-closes", "");
             win.dataset.about = key;
 
             const el = (tag, cls, text) => {

@@ -168,8 +168,12 @@
     }
 
     /** Date (+ time) from the fields: a Date, or null without a date. No
-     *  time on a timed field saves as 09:00. The kit fields reject invalid
-     *  entries themselves, so there is no invalid state to report. */
+     *  time on a timed field saves as 09:00. Text a kit field can't read
+     *  never commits: since kit 2.36 the field keeps it, marks it and says
+     *  under it what it expects (its validationMessage), while `value`
+     *  stays the last valid date and no change fires — so this is always
+     *  what was last valid, and the editors (Todos, Calendar, all saved as
+     *  you type) save the rest without the half-typed date. */
     function readInput(field) {
         const iso = field.value;
         if (!iso) return null;

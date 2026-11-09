@@ -110,8 +110,8 @@ public class UiSmokeTests
         await page.WaitForFunctionAsync("() => document.querySelector('fb-notes-view sac-split').getAttribute('show') === 'end'");
         // No title field: an API-made note opens with its title as the first line.
         Assert.Equal("# Phone smoke note\n\nBody",
-            await page.Locator("fb-notes-view #content").EvaluateAsync<string>("e => e.value"));
-        Assert.True(await page.Locator("fb-notes-view #content").IsVisibleAsync());
+            await page.Locator("fb-notes-view sac-md-editor#content").EvaluateAsync<string>("e => e.value"));
+        Assert.True(await page.Locator("fb-notes-view sac-md-editor#content").IsVisibleAsync());
 
         // The split's back bar returns to the list.
         await split.Locator(".back button").TapAsync();
@@ -139,13 +139,13 @@ public class UiSmokeTests
         await page.GotoAsync(_fixture.BaseUrl + "/#/notes");
         await page.Locator(".nv-item", new PageLocatorOptions { HasText = "Swipe smoke note" }).First.TapAsync();
         await page.WaitForFunctionAsync("() => document.querySelector('fb-notes-view sac-split').getAttribute('show') === 'end'");
-        var editor = page.Locator("fb-notes-view #content");
+        var editor = page.Locator("fb-notes-view sac-md-editor#content");
         var before = await editor.EvaluateAsync<string>("e => e.value");
 
         // A touch drag of 300px to the right, slow enough to read as a drag
         // (the release comes after a pause, so it carries no flick).
         const string drag = @"async (inner) => {
-            const host = document.querySelector('fb-notes-view #content');
+            const host = document.querySelector('fb-notes-view sac-md-editor#content');
             const target = inner ? host.shadowRoot.querySelector('[contenteditable]') : host;
             const r = target.getBoundingClientRect();
             const x0 = r.left + 20, y = r.top + Math.min(40, r.height / 2);
@@ -739,7 +739,7 @@ public class UiSmokeTests
         await Assertions.Expect(page.Locator("#key-context")).ToHaveValueAsync($"space::{slug}");
         var firstGroup = page.Locator("#key-list .key-group").First;
         await Assertions.Expect(firstGroup).ToHaveAttributeAsync("data-context", $"space:{slug}");
-        await Assertions.Expect(firstGroup).ToHaveAttributeAsync("title", name);
+        await Assertions.Expect(firstGroup).ToHaveAttributeAsync("heading", name);
         // Each row names its context too, not only the group heading.
         await Assertions.Expect(page.Locator(".key-row", new PageLocatorOptions { HasText = "space key" }).Locator(".key-ctx"))
             .ToHaveTextAsync(name);
@@ -996,9 +996,9 @@ public class UiSmokeTests
 
         await page.GotoAsync(_fixture.BaseUrl + "/#/notes");
         await page.Locator(".nv-item", new PageLocatorOptions { HasText = "Title line smoke" }).First.ClickAsync();
-        var editor = page.Locator("fb-notes-view #content");
+        var editor = page.Locator("fb-notes-view sac-md-editor#content");
         await page.WaitForFunctionAsync(
-            "() => document.querySelector('fb-notes-view #content')?.value === '# Title line smoke\\n'");
+            "() => document.querySelector('fb-notes-view sac-md-editor#content')?.value === '# Title line smoke\\n'");
 
         // The title travels in plain text (FTS, embeddings, MCP), so a leading
         // secret block is skipped whole and never becomes it. Checked on the

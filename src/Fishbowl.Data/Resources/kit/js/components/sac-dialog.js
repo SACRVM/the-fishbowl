@@ -33,7 +33,8 @@
  *   - Enter / Space     → presses the focused button (native). A focus ring
  *                         marks it — also when script set the focus, where
  *                         :focus-visible stays dark — never after a click.
- *   - Escape            → close with action=null. Something inside the dialog
+ *   - Escape            → dismiss (action=null, asked first — see Dismissal).
+ *                         Something inside the dialog
  *                         that handles Escape itself goes first: an open field
  *                         popover (sac-select list, sac-date-field calendar),
  *                         a menu, a field reverting its typing. It consumes
@@ -61,11 +62,31 @@
  *            makes `label` the English fallback of sac.t(labelKey): the
  *            button then follows a runtime language switch in place.
  *
- * Validation: dlg.beforeAction = (action) => boolean | Promise<boolean>.
+ * Validation: dlg.beforeAction = (action, info) => boolean | Promise<boolean>.
  *   Called on every BUTTON click (and trigger(action)); answering false keeps
  *   the dialog open — an overwrite question, an empty required field.
- *   Escape and the backdrop always cancel (action=null) without asking.
  *   trigger(action) runs a button's action from code, e.g. Enter in a field.
+ *   Since 2.36 it is also asked on every dismissal (see below) with
+ *   action=null and info = { via: "escape" | "backdrop" | "swipe" }, so an
+ *   app can confirm ("Discard changes?") or refuse. While an answer is
+ *   pending, further buttons and dismissals wait. A beforeAction that throws
+ *   on a dismissal lets it close (one written before null was passed must
+ *   not trap anyone); on a button it keeps the dialog open, as before.
+ *   close(action) from code never asks.
+ *
+ * Dismissal (Escape, a backdrop tap, pulling the bottom sheet down):
+ *   - All three go through beforeAction(null, { via }) first.
+ *   - Edit guard: once a field in the body has been edited since open() — an
+ *     input, change or sac:change event from the body — the backdrop and the
+ *     swipe no longer dismiss: a backdrop tap only nudges the panel, a pulled
+ *     sheet resists and springs back. Escape and an explicit Cancel / close
+ *     button still close, so a typed text is never thrown away by a stray
+ *     tap. Attribute light-dismiss: absent = this guard (the default);
+ *     "always" = backdrop and swipe always dismiss (the pre-2.36 behaviour);
+ *     "never" = only Escape and the buttons close.
+ *   - Property edited (boolean): true once the guard has seen an edit. An
+ *     app may set it (content changed by other means: a canvas, a drop) or
+ *     clear it (a draft was just saved).
  *
  * Width: --dialog-width (default 420px) on the element — a dialog holding a
  *   file list wants more room than a question.
@@ -76,7 +97,9 @@
  * the primary one, on top). Focus trap and Escape are unchanged.
  *   The grabber bar and the title row pull the sheet: it follows the finger
  *   1:1 (and resists upwards); let go past its middle — or flick it down —
- *   and it leaves (action=null, like Escape), else it springs back. Caught
+ *   and it leaves (a dismissal, like Escape: asked first), else it springs
+ *   back. Held by the edit guard (see Dismissal) it resists downwards too
+ *   and always springs back. Caught
  *   mid-flight, it carries on from where it is. Needs sac.motion
  *   (lib/motion.js); without it the sheet does not pull.
  *
@@ -97,10 +120,20 @@ class SacDialog extends HTMLElement {
         this._armTimer = null;
         this._resolved = false;
         this._pointer = false;        // the last focus came from the pointer: no ring
+        this._edited = false;         // the edit guard (see Dismissal)
         this._onKeydown = this._onKeydown.bind(this);
         // Escape from inside the dialog, bubble phase: see _onKeydown.
         this.addEventListener("keydown", (e) => this._onInnerEscape(e));
+        // The edit guard: a field in the body changed since open(). Native
+        // input/change are composed, so a kit field's inner input counts;
+        // kit fields that only speak sac:change count through that.
+        const edited = () => { if (this.hasAttribute("open") && !this._resolved) this._edited = true; };
+        for (const type of ["input", "change", "sac:change"]) this.addEventListener(type, edited);
     }
+
+    /** True once a field in the body was edited since open() (see Dismissal). */
+    get edited() { return !!this._edited; }
+    set edited(v) { this._edited = !!v; }
 
     static get observedAttributes() { return ["title"]; }
 
@@ -140,6 +173,7 @@ class SacDialog extends HTMLElement {
 
     open() {
         this._resolved = false;
+        this._edited = false;
         this._swiped = false;
         this._sheetY = 0;
         this.removeAttribute("closing");
@@ -278,7 +312,7 @@ class SacDialog extends HTMLElement {
             if (e.composedPath().includes(this)) return;
             e.stopPropagation();
             e.preventDefault();
-            this.close(null);
+            this._dismiss("escape");
             return;
         }
         if (e.key === "Tab") {
@@ -300,14 +334,67 @@ class SacDialog extends HTMLElement {
         }
     }
 
-    /** Escape that bubbled out of the dialog's content unconsumed closes it.
-     *  preventDefault here keeps sac.hotkeys (document, bubble) out of it. */
+    /** Escape that bubbled out of the dialog's content unconsumed dismisses
+     *  it. preventDefault here keeps sac.hotkeys (document, bubble) out of it. */
     _onInnerEscape(e) {
         if (e.key !== "Escape" || e.defaultPrevented || this._resolved) return;
         if (!this.hasAttribute("open") || SacDialog._open[SacDialog._open.length - 1] !== this) return;
         e.stopPropagation();
         e.preventDefault();
-        this.close(null);
+        this._dismiss("escape");
+    }
+
+    /** Backdrop and swipe may dismiss: light-dismiss="always" / "never",
+     *  else only while nothing in the body was edited (the edit guard). */
+    _lightDismiss() {
+        const mode = this.getAttribute("light-dismiss");
+        if (mode === "always") return true;
+        if (mode === "never") return false;
+        return !this._edited;
+    }
+
+    /** beforeAction(null, { via }) for a dismissal: true / false, or a
+     *  Promise of that when the answer is async. A guard that throws lets
+     *  the dismissal through (see Validation). */
+    _askDismiss(via) {
+        if (typeof this.beforeAction !== "function") return true;
+        let answer;
+        try { answer = this.beforeAction(null, { via }); }
+        catch (err) { console.error("[sac-dialog] beforeAction threw:", err); return true; }
+        if (!answer || typeof answer.then !== "function") return answer !== false;
+        this._asking = true;
+        return Promise.resolve(answer)
+            .then((ok) => ok !== false, (err) => { console.error("[sac-dialog] beforeAction threw:", err); return true; })
+            .finally(() => { this._asking = false; });
+    }
+
+    /** Escape or a backdrop tap (the swipe asks in _wireSheet): the edit
+     *  guard first (backdrop only), then beforeAction, then close(null).
+     *  A refusal on the spot nudges the panel, so the key or tap is seen to
+     *  land; an async answer is the app's own to show. */
+    _dismiss(via) {
+        if (this._resolved || this._asking) return;
+        if (via !== "escape" && !this._lightDismiss()) { this._nudge(); return; }
+        const ok = this._askDismiss(via);
+        if (ok === true) this.close(null);
+        else if (ok === false) this._nudge();
+        else ok.then((yes) => { if (yes && !this._resolved) this.close(null); });
+    }
+
+    /** A short give of the panel (Bootstrap's "static backdrop" cue): the
+     *  dismissal was refused. Nothing under reduced motion or mid-pull. */
+    _nudge() {
+        const panel = this.shadowRoot.querySelector(".panel");
+        if (!panel || typeof panel.animate !== "function" || this._sheetSpring) return;
+        if (window.matchMedia && matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+        const base = getComputedStyle(panel).transform;
+        const at = base === "none" ? "" : base + " ";
+        const origin = SacDialog._sheet && SacDialog._sheet.matches ? "50% 100%" : "50% 50%";
+        panel.animate([
+            { transform: `${at}scale(1)`, transformOrigin: origin },
+            { transform: `${at}scale(1.02)`, transformOrigin: origin },
+            { transform: `${at}scale(1)`, transformOrigin: origin },
+        ], { duration: 220, easing: "ease-out" });
     }
 
     /** Run a button's action as if clicked: ask beforeAction, then close. */
@@ -649,12 +736,19 @@ class SacDialog extends HTMLElement {
         `;
         this._renderHeader();
         this._renderButtons();
-        this.shadowRoot.querySelector(".backdrop").addEventListener("click", () => this.close(null));
+        const backdrop = this.shadowRoot.querySelector(".backdrop");
+        // A held dialog stays open under a backdrop tap — so the tap must not
+        // take focus out of it either (a mouse press on a non-focusable node
+        // would blur the field to <body>, and the next keystroke goes nowhere).
+        backdrop.addEventListener("mousedown", (e) => e.preventDefault());
+        backdrop.addEventListener("click", () => this._dismiss("backdrop"));
         this._wireSheet();
     }
 
     /** Compact: the grabber and the title row pull the sheet down. Let go
-     *  past its middle — or flicked down — it leaves; else it springs back. */
+     *  past its middle — or flicked down — it leaves (when beforeAction
+     *  agrees); else it springs back. Held by the edit guard it resists
+     *  downwards as well and always springs back. */
     _wireSheet() {
         const panel = this.shadowRoot.querySelector(".panel");
         const backdrop = this.shadowRoot.querySelector(".backdrop");
@@ -668,7 +762,7 @@ class SacDialog extends HTMLElement {
         const down = (e) => {
             const m = SacDialog._motion();
             if (!m || !SacDialog._sheet || !SacDialog._sheet.matches) return;
-            if (this._resolved || !this.hasAttribute("open")) return;
+            if (this._resolved || this._asking || !this.hasAttribute("open")) return;
             if (e.pointerType === "mouse" && e.button !== 0) return;
             if (this._sheetSpring) { this._sheetSpring.stop(); this._sheetSpring = null; }
             // The entry animation holds the panel (a fill beats inline
@@ -682,24 +776,38 @@ class SacDialog extends HTMLElement {
                 place(y);
             }
             e.currentTarget.setPointerCapture(e.pointerId);
-            drag = { id: e.pointerId, y0: e.clientY - this._sheetY, track: m.tracker() };
+            // free = the swipe may dismiss at all (the edit guard).
+            drag = { id: e.pointerId, y0: e.clientY - this._sheetY, track: m.tracker(), free: this._lightDismiss() };
             drag.track.add(this._sheetY, e.timeStamp);
             e.preventDefault();
         };
         const move = (e) => {
             if (!drag || e.pointerId !== drag.id || this._resolved) return;
             const raw = e.clientY - drag.y0;
-            place(raw < 0 ? SacDialog._motion().rubberband(raw, panel.offsetHeight) : raw);
+            const h = panel.offsetHeight;
+            // Upwards it always resists; downwards too while held, harder,
+            // so it reads as "this will not go" from the first pixel.
+            place(raw < 0 ? SacDialog._motion().rubberband(raw, h)
+                : drag.free ? raw : SacDialog._motion().rubberband(raw, h / 3));
             drag.track.add(this._sheetY, e.timeStamp);
         };
         const up = (e) => {
             if (!drag || e.pointerId !== drag.id) return;
             const v = e.type === "pointerup" ? drag.track.velocity(e.timeStamp) : 0;
+            const free = drag.free;
             drag = null;
             if (this._resolved) return;
             const m = SacDialog._motion();
             const h = panel.offsetHeight;
-            const dismiss = this._sheetY + m.project(v) > h / 2;
+            let dismiss = free && this._sheetY + m.project(v) > h / 2;
+            // A dismissal: beforeAction first. An async answer lets the
+            // sheet spring home meanwhile; a yes then carries it down from
+            // wherever it is (_leave).
+            let pending = null;
+            if (dismiss) {
+                const ok = this._askDismiss("swipe");
+                if (ok !== true) { dismiss = false; if (ok !== false) pending = ok; }
+            }
             const s = this._sheetSpring = m.spring({
                 from: this._sheetY, to: dismiss ? h : 0, velocity: v,
                 damping: !dismiss && Math.abs(v) > SacDialog.FLICK ? 0.8 : 1,
@@ -710,6 +818,9 @@ class SacDialog extends HTMLElement {
                     this._sheetSpring = null;
                     if (dismiss) { this._swiped = true; this.close(null); }
                 },
+            });
+            if (pending) pending.then((yes) => {
+                if (yes && !this._resolved) { this._swiped = true; this.close(null); }
             });
         };
         for (const g of grips) {

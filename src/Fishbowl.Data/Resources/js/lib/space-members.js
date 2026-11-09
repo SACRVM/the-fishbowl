@@ -53,7 +53,7 @@
         current = { space, onChanged: opts.onChanged || null };
         const w = ensureWindow();
         w.setAttribute("title", fb.t("fb.spaces.members-title", "Members — {name}", { name: space.name }));
-        w.querySelector(".fb-members-invites").setAttribute("title", fb.t("fb.spaces.invites-open", "Open invitations"));
+        w.querySelector(".fb-members-invites").setAttribute("heading", fb.t("fb.spaces.invites-open", "Open invitations"));
         await paint();
         requestAnimationFrame(() => w.open());
     }

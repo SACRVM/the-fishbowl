@@ -395,7 +395,7 @@ class FbContactsView extends HTMLElement {
                 <h2 id="cv-name"></h2>
                 <sac-chip label="${person ? t("person", "Person") : t("organisation", "Organisation")}"></sac-chip>
             </div>
-            <sac-section title="${t("names", "Name")}"></sac-section>
+            <sac-section heading="${t("names", "Name")}"></sac-section>
             <div class="cv-grid${person ? " cv-names" : ""}">
                 ${person
                     ? this.field(t("salutation", "Salutation"), "salutation") + this.field(t("honorific", "Title"), "honorific")
@@ -403,13 +403,13 @@ class FbContactsView extends HTMLElement {
                     : this.field(t("org-name", "Name"), "name") + this.field(t("legal-form", "Legal form"), "legalForm")}
             </div>
             ${person ? `
-            <sac-section title="${t("work", "Work")}"></sac-section>
+            <sac-section heading="${t("work", "Work")}"></sac-section>
             <div class="cv-grid">
                 <label>${t("organisation", "Organisation")}<sac-select id="cv-org" size="regular" ${this.writable ? "" : "disabled"}></sac-select></label>
                 ${this.field(t("role", "Role"), "role")}
                 <label>${t("birthday", "Birthday")}<sac-date-field id="cv-birthday" size="regular" ${this.writable ? "" : "disabled"}></sac-date-field></label>
             </div>` : ""}
-            <sac-section title="${t("reach", "Email, phone, address")}"></sac-section>
+            <sac-section heading="${t("reach", "Email, phone, address")}"></sac-section>
             <div class="cv-list" id="cv-emails"></div>
             <div class="cv-list" id="cv-phones"></div>
             <div class="cv-list" id="cv-addresses"></div>
@@ -419,7 +419,7 @@ class FbContactsView extends HTMLElement {
                 <button type="button" class="btn" data-add="addresses"><sac-icon name="plus"></sac-icon> ${t("add-address", "Address")}</button>
             </div>
             <div class="cv-grid">${this.field(t("website", "Website"), "website", { wide: true })}</div>
-            <sac-section title="${t("business", "Business")}"></sac-section>
+            <sac-section heading="${t("business", "Business")}"></sac-section>
             <div class="cv-grid">
                 ${!person ? this.field(t("industry", "Industry"), "industry") : ""}
                 ${this.field(t("customer-number", "Customer number"), "customerNumber")}
@@ -427,11 +427,11 @@ class FbContactsView extends HTMLElement {
                 ${this.field(t("tax-number", "Tax number"), "taxNumber")}
                 ${!person ? this.field(t("trade-register", "Trade register"), "tradeRegister") : ""}
             </div>
-            <sac-section title="${t("bank", "Bank")}"></sac-section>
+            <sac-section heading="${t("bank", "Bank")}"></sac-section>
             <div class="cv-grid">
                 ${this.field("IBAN", "iban")}${this.field("BIC", "bic")}${this.field(t("account-holder", "Account holder"), "accountHolder")}
             </div>
-            <sac-section title="${t("more", "More")}"></sac-section>
+            <sac-section heading="${t("more", "More")}"></sac-section>
             <div class="cv-grid">
                 ${this.field(t("language", "Language"), "language")}
                 <label>${t("tags", "Tags (comma-separated)")}<input data-tags value="" ${this.writable ? "" : "readonly"}/></label>
@@ -458,7 +458,11 @@ class FbContactsView extends HTMLElement {
             org.addEventListener("sac:change", (e) => { this.editing.organisationId = e.detail.value || null; this.changed(); });
             const bday = ed.querySelector("#cv-birthday");
             bday.value = c.birthday || "";
-            bday.addEventListener("change", () => { this.editing.birthday = bday.value || null; this.changed(); });
+            // sac:change too: the kit's date field never lets a native change
+            // out, and fires nothing for text it can't read (2.36: it keeps
+            // that text and says under it what it expects), so `value` is
+            // always the last valid date.
+            bday.addEventListener("sac:change", () => { this.editing.birthday = bday.value || null; this.changed(); });
         }
         for (const btn of ed.querySelectorAll("[data-add]")) {
             btn.addEventListener("click", () => {
@@ -532,7 +536,7 @@ class FbContactsView extends HTMLElement {
         // An organisation's people: a click opens the person.
         if (data.people?.length) {
             const head = document.createElement("sac-section");
-            head.setAttribute("title", t("people", "People"));
+            head.setAttribute("heading", t("people", "People"));
             const list = document.createElement("div");
             list.className = "cv-link-list";
             for (const p of data.people) {
@@ -546,7 +550,7 @@ class FbContactsView extends HTMLElement {
         // Table rows that link here: a click opens the table.
         if (data.links?.length) {
             const head = document.createElement("sac-section");
-            head.setAttribute("title", t("history", "Linked here"));
+            head.setAttribute("heading", t("history", "Linked here"));
             const list = document.createElement("div");
             list.className = "cv-link-list";
             for (const l of data.links) {
@@ -559,7 +563,7 @@ class FbContactsView extends HTMLElement {
         // The latest conversations with this person: a click opens it in Mail.
         if (threads.length) {
             const head = document.createElement("sac-section");
-            head.setAttribute("title", t("mail", "Mail"));
+            head.setAttribute("heading", t("mail", "Mail"));
             const list = document.createElement("div");
             list.className = "cv-link-list";
             for (const th of threads) {

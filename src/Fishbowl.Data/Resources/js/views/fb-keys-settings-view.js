@@ -223,13 +223,13 @@ class FbKeysSettingsView extends HTMLElement {
             </div></header>
 
             <div class="fb-block" id="agent-guide">
-                <sac-section title="${fb.t("fb.keys.agent", "Connect an agent")}">
+                <sac-section heading="${fb.t("fb.keys.agent", "Connect an agent")}">
                     <div id="guide-mount"></div>
                 </sac-section>
             </div>
 
             <div class="fb-block">
-                <sac-section title="${fb.t("fb.keys.new", "New key")}">
+                <sac-section heading="${fb.t("fb.keys.new", "New key")}">
                     <sac-status-banner id="form-status"></sac-status-banner>
                     <div id="form-mount"></div>
                 </sac-section>
@@ -376,7 +376,7 @@ class FbKeysSettingsView extends HTMLElement {
         // One card per workspace, headed by its name.
         list.innerHTML = ordered.map(g => `
             <div class="fb-block">
-                <sac-section class="key-group" data-context="${escapeAttr(g.key)}" title="${escapeAttr(g.label)}">
+                <sac-section class="key-group" data-context="${escapeAttr(g.key)}" heading="${escapeAttr(g.label)}">
                     ${g.keys.map(row).join("")}
                 </sac-section>
             </div>

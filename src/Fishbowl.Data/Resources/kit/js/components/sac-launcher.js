@@ -141,11 +141,26 @@
  *   screen), via a container query on the grid. In edit mode each tile grows keyboard-reachable
  *   controls: move left / move right / hide (or show, on grayed hidden
  *   tiles) and — for custom apps only — remove; they take the tile's top-right
- *   corner while editing. Built-in (host-registered)
+ *   corner while editing. Each control's label ("Move Notes left") is its
+ *   aria-label AND its title (tooltip). Built-in (host-registered)
  *   apps can only be hidden, never removed.
- *   A dashed "Add app" tile opens a <sac-dialog> form: name, icon, tag,
- *   script URL, width, height. The form stays lean by design — user-added
+ *   Remove acts at once — no confirmation — and offers Undo instead: a
+ *   sac.toast "“Notes” removed" with an Undo action that puts the app back
+ *   (re-registered in sac.apps, as the Add flow does) at its order
+ *   position with its size, colour and hidden state. An app removed while
+ *   open loses its window; Undo brings the tile back, not the window.
+ *   A dashed "Add app" tile opens a <sac-dialog> form in plain language:
+ *   name, icon (optional), element name, address, window width / height
+ *   (optional) — plus a trust note under the address ("This runs code from
+ *   that address inside this app, with your data. Only add apps you
+ *   trust."). The form stays lean by design — user-added
  *   apps are always medium tiles.
+ *
+ * Opening: a window or view tile carries aria-busy="true" while its app
+ *   loads, and a small sac-spinner shows in its corner once the wait passes
+ *   200ms (no flash on a quick open; under reduced motion the ring stands
+ *   still). Cleared on success and on failure — a failed load is the
+ *   runtime's error toast, with Try again (sac.apps).
  *
  * Drag reorder (sac.sortable, axis "grid"): mouse/pen lift after 4px, touch
  * after a 250ms long-press (a swipe keeps scrolling the page), Escape puts
@@ -170,10 +185,13 @@
  * it opens — sac.apps creates them and sac-window maximizes itself on
  * compact.
  *
- * Portability note: the "Add app" script URL may be a full cross-origin URL —
+ * Portability note: the "Add app" address may be a full cross-origin URL —
  * sac.apps injects it as a classic <script> tag, and classic script tags need
  * no CORS. Any origin serving a guarded single-tag web component (the app
- * contract) can be pulled into a user's launcher.
+ * contract) can be pulled into a user's launcher — which is exactly why the
+ * form says so in its trust note: the script runs same-realm, with the
+ * page's data. A host that wants a safer path takes over the Add tile
+ * (sac:request-add) and installs isolated (sac.apps, `isolated`).
  */
 (function () {
 
@@ -783,8 +801,14 @@ class SacLauncher extends HTMLElement {
                     ? (getComputedStyle(cell._tile).getPropertyValue("--accent").trim() || t2.accent)
                     : t2.accent;
                 if (window.sac && sac.apps) {
-                    sac.apps.open(t2.appId, t2.params,
-                        { route: t2.route, accent }).catch(() => {});
+                    // Busy while the app loads (its script may take a moment
+                    // to arrive): aria-busy, and a small spinner that shows
+                    // only once the wait is noticeable (CSS delay). Cleared
+                    // either way — a failure is the runtime's toast to tell.
+                    this._setBusy(cell, true);
+                    sac.apps.open(t2.appId, t2.params, { route: t2.route, accent })
+                        .catch(() => {})
+                        .finally(() => this._setBusy(cell, false));
                 }
             }
         });
@@ -824,6 +848,25 @@ class SacLauncher extends HTMLElement {
         cell._del = mk("del", "trash", () => this._removeCustom(cell._entry.appId));
         cell.appendChild(controls);
         return cell;
+    }
+
+    /** A tile's app is loading: aria-busy on the tile plus a small spinner
+     *  (sac-spinner, decorative — aria-busy is the semantics). Nested opens
+     *  of the same tile count, so the first to settle does not clear it. */
+    _setBusy(cell, on) {
+        cell._busy = Math.max(0, (cell._busy || 0) + (on ? 1 : -1));
+        const busy = cell._busy > 0;
+        if (busy) cell._tile.setAttribute("aria-busy", "true");
+        else cell._tile.removeAttribute("aria-busy");
+        if (busy && !cell._spin) {
+            cell._spin = document.createElement("sac-spinner");
+            cell._spin.className = "sac-launcher-busy";
+            cell._spin.setAttribute("aria-hidden", "true");
+            cell._tile.appendChild(cell._spin);
+        } else if (!busy && cell._spin) {
+            cell._spin.remove();
+            cell._spin = null;
+        }
     }
 
     _updateCell(cell, entry, f) {
@@ -919,15 +962,15 @@ class SacLauncher extends HTMLElement {
     _labelCell(cell) {
         const entry = cell._entry;
         const name = entry.name || entry.appId;
-        cell._left.setAttribute("aria-label",
-            t("launcher.move-left", "Move {name} left").replace("{name}", name));
-        cell._right.setAttribute("aria-label",
-            t("launcher.move-right", "Move {name} right").replace("{name}", name));
-        cell._vis.setAttribute("aria-label", (cell.classList.contains("hidden-app")
+        // One label, two readers: aria-label for assistive tech, title for
+        // the pointer (the controls are bare icons).
+        const label = (btn, text) => { btn.setAttribute("aria-label", text); btn.title = text; };
+        label(cell._left, t("launcher.move-left", "Move {name} left").replace("{name}", name));
+        label(cell._right, t("launcher.move-right", "Move {name} right").replace("{name}", name));
+        label(cell._vis, (cell.classList.contains("hidden-app")
             ? t("launcher.show", "Show {name}")
             : t("launcher.hide", "Hide {name}")).replace("{name}", name));
-        cell._del.setAttribute("aria-label",
-            t("launcher.remove", "Remove {name}").replace("{name}", name));
+        label(cell._del, t("launcher.remove", "Remove {name}").replace("{name}", name));
     }
 
     _syncEditUI() {
@@ -1042,15 +1085,74 @@ class SacLauncher extends HTMLElement {
         this._afterChange();
     }
 
+    /**
+     * Remove a user-added app at once — forgiveness, not confirmation: a
+     * toast offers Undo, which puts back the manifest and every tile of it
+     * where it was (order position, size, colour, hidden). Focus that sat
+     * on the removed tile moves to the tile now in its place.
+     */
     _removeCustom(id) {
-        const i = this._state.custom.findIndex(m => m.id === id);
+        const st = this._state;
+        const i = st.custom.findIndex(m => m.id === id);
         if (i < 0) return; // built-in — only hideable
-        this._state.custom.splice(i, 1);
-        this._state.hidden = this._state.hidden.filter(x => x !== id);
-        this._state.order = this._state.order.filter(x => x !== id);
-        delete this._state.sizes[id];
-        delete this._state.colors[id];
+        const mine = (key) => key === id || key.startsWith(id + "::");
+        const keys = this._order.filter(mine);
+        const snap = {
+            manifest: st.custom[i],
+            index: i,
+            at: keys.map(k => [k, this._order.indexOf(k)]),
+            hidden: st.hidden.filter(mine),
+            sizes: {}, colors: {},
+        };
+        keys.forEach((k) => {
+            if (st.sizes[k]) snap.sizes[k] = st.sizes[k];
+            if (st.colors[k]) snap.colors[k] = st.colors[k];
+        });
+        const cell = this._tiles.get(keys[0] || id);
+        const hadFocus = !!(cell && cell.contains(document.activeElement));
+        const slot = cell ? this._order.indexOf(cell.dataset.id) : -1;
+
+        st.custom.splice(i, 1);
+        st.hidden = st.hidden.filter(x => !mine(x));
+        st.order = st.order.filter(x => !mine(x));
+        keys.forEach((k) => { delete st.sizes[k]; delete st.colors[k]; });
         if (window.sac && sac.apps) sac.apps.remove(id);
+        this._afterChange();
+
+        if (hadFocus) {
+            const next = this._tiles.get(this._order[Math.min(slot, this._order.length - 1)]);
+            const to = next && this.hasAttribute("edit") ? next._vis
+                : (this.hasAttribute("edit") ? this._addBtn : null);
+            if (to) to.focus();
+        }
+
+        if (window.sac && typeof sac.toast === "function") {
+            const name = snap.manifest.name || id;
+            sac.toast(t("launcher.removed", "“{name}” removed").replace("{name}", name), {
+                action: { label: "Undo", labelKey: "launcher.undo", onClick: () => this._restoreCustom(snap) },
+            });
+        }
+    }
+
+    /** Undo a removal: the manifest back into the layer (at its old index)
+     *  and the registry, each tile back at its order position with its
+     *  size, colour and hidden state. Skipped when the id was taken again
+     *  in the meantime (a re-add under the same name). */
+    _restoreCustom(snap) {
+        const st = this._state;
+        const m = snap.manifest;
+        if (st.custom.some(x => x.id === m.id) || (window.sac && sac.apps && sac.apps.get(m.id))) return;
+        st.custom.splice(Math.min(snap.index, st.custom.length), 0, m);
+        const order = st.order.filter(k => !snap.at.some(([key]) => key === k));
+        snap.at.slice().sort((a, b) => a[1] - b[1])
+            .forEach(([key, pos]) => order.splice(Math.min(pos, order.length), 0, key));
+        st.order = order;
+        snap.hidden.forEach((k) => { if (!st.hidden.includes(k)) st.hidden.push(k); });
+        Object.assign(st.sizes, snap.sizes);
+        Object.assign(st.colors, snap.colors);
+        // State first: the register below re-syncs the grid (sac:apps-changed)
+        // and must find the tile's place already there.
+        if (window.sac && sac.apps) sac.apps.register(Object.assign({}, m));
         this._afterChange();
     }
 
@@ -1132,6 +1234,19 @@ class SacLauncher extends HTMLElement {
             return wrap;
         };
         form.append(field("name"), field("icon"), field("tag"), field("src"));
+        // The trust note sits right under the address it is about, and the
+        // address field points at it (aria-describedby): what adding does,
+        // then what to do about it.
+        this._trust = document.createElement("p");
+        this._trust.className = "sac-launcher-trust";
+        this._trust.id = `${this._uid}-trust`;
+        const trustIcon = document.createElement("sac-icon");
+        trustIcon.setAttribute("name", "warn");
+        trustIcon.setAttribute("aria-hidden", "true");
+        this._trustText = document.createElement("span");
+        this._trust.append(trustIcon, this._trustText);
+        this._form.src.parentNode.appendChild(this._trust);
+        this._form.src.setAttribute("aria-describedby", this._trust.id);
         const row = document.createElement("div");
         row.className = "sac-launcher-form-row";
         row.append(field("width"), field("height"));
@@ -1152,7 +1267,9 @@ class SacLauncher extends HTMLElement {
     _labelForm() {
         this._dialog.setAttribute("title", t("launcher.add-app", "Add app"));
         this._formHint.textContent = t("launcher.add-hint",
-            "The script is loaded on first open and must define the tag. Any URL works — including other sites.");
+            "Add an app made for this launcher. Its maker gives you its address and its element name.");
+        this._trustText.textContent = t("launcher.trust-note",
+            "This runs code from that address inside this app, with your data. Only add apps you trust.");
         for (const [key, [label, placeholder]] of Object.entries(SacLauncher.FIELDS)) {
             this._formLabels[key].textContent = t(`launcher.field-${key}`, label);
             this._form[key].placeholder = t(`launcher.placeholder-${key}`, placeholder);
@@ -1570,12 +1687,50 @@ class SacLauncher extends HTMLElement {
             }
             .sac-launcher-form-error[hidden] { display: none; }
             .sac-launcher-form input[aria-invalid="true"] { border-color: var(--danger); }
+            /* The trust note under the address: attention (--accent-warm)
+               carried by the icon and a whisper of tint — never a stripe. */
+            .sac-launcher-trust {
+                display: flex;
+                align-items: flex-start;
+                gap: 8px;
+                margin: 6px 0 0;
+                padding: 8px 10px;
+                border-radius: var(--radius-m);
+                background: color-mix(in srgb, var(--accent-warm) 7%, transparent);
+                color: var(--text-muted);
+                font-size: 0.8rem;
+                line-height: 1.4;
+            }
+            .sac-launcher-trust sac-icon {
+                --icon-size: 16px;
+                flex: none;
+                margin-top: 1px;
+                color: var(--accent-warm-text);
+            }
+
+            /* Opening: a small spinner in the tile's corner — shown only once
+               the wait is noticeable (200ms), so a quick open never flashes
+               it. Under reduced motion it appears without the fade and
+               sac-spinner itself stands still (a static ring). */
+            sac-launcher .sac-launcher-tile[aria-busy="true"] { cursor: progress; }
+            sac-launcher .sac-launcher-busy {
+                position: absolute;
+                top: 12px;
+                right: 12px;
+                --spinner-size: 18px;
+                opacity: 0;
+                pointer-events: none;
+                animation: sac-launcher-busy-in 0.15s var(--ease-smooth) 0.2s forwards;
+            }
+            sac-launcher .size-small .sac-launcher-busy { top: 6px; right: 6px; --spinner-size: 14px; }
+            @keyframes sac-launcher-busy-in { to { opacity: 1; } }
 
             @media (prefers-reduced-motion: reduce) {
                 sac-launcher .sac-launcher-ctrl,
                 sac-launcher .sac-launcher-edit,
                 sac-launcher .sac-launcher-add,
                 sac-launcher .sac-launcher-drop.placed { transition: none; }
+                sac-launcher .sac-launcher-busy { animation-duration: 0s; }
             }
         `;
         document.head.appendChild(style);
@@ -1635,17 +1790,17 @@ SacLauncher.DRAG_ITEMS =
  *  (keys launcher.field-<key> / launcher.placeholder-<key>). */
 SacLauncher.FIELDS = {
     name:   ["Name", "My App"],
-    icon:   ["Icon", "shapes (a sac-icon name)"],
-    tag:    ["Tag", "app-my-app"],
-    src:    ["Script URL", "apps/my-app.js or https://…"],
-    width:  ["Width", "500px"],
-    height: ["Height", "600px"],
+    icon:   ["Icon (optional)", "e.g. star or note"],
+    tag:    ["Element name", "app-my-app"],
+    src:    ["Address", "https://… or apps/my-app.js"],
+    width:  ["Window width (optional)", "500px"],
+    height: ["Window height (optional)", "600px"],
 };
 /** Add-dialog validation problems: key → fallback (launcher.error-<key>). */
 SacLauncher.PROBLEMS = {
     name: "a name",
-    tag:  "a tag containing a dash",
-    src:  "a script URL",
+    tag:  "an element name with a dash and no spaces (like app-notes)",
+    src:  "an address",
 };
 
 customElements.define("sac-launcher", SacLauncher);

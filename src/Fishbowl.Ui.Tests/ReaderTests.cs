@@ -47,7 +47,7 @@ public class ReaderTests
             var row = notes.Locator(".nv-item", new() { HasText = "House rules" });
             await row.ClickAsync();
             await Assertions.Expect(row.Locator(".nv-item-actions")).ToBeHiddenAsync();
-            await Assertions.Expect(notes.Locator("#content")).ToHaveAttributeAsync("readonly", "");
+            await Assertions.Expect(notes.Locator("sac-md-editor#content")).ToHaveAttributeAsync("readonly", "");
             await Assertions.Expect(page.Locator("#fb-nav [title='Manage tags']")).ToHaveCountAsync(0);
 
             await page.GotoAsync($"{_fixture.BaseUrl}/#/space/{slug}/todos");

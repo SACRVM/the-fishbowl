@@ -90,13 +90,13 @@ class FbSpacesSettingsView extends HTMLElement {
             </div></header>
 
             <div class="fb-block">
-                <sac-section title="${fb.t("fb.spaces.personal", "Personal workspace")}">
+                <sac-section heading="${fb.t("fb.spaces.personal", "Personal workspace")}">
                     <div id="personal-row"></div>
                 </sac-section>
             </div>
 
             <div class="fb-block">
-                <sac-section title="${fb.t("fb.spaces.new", "New space")}">
+                <sac-section heading="${fb.t("fb.spaces.new", "New space")}">
                     <sac-status-banner id="form-status"></sac-status-banner>
                     <div class="create-row">
                         <input type="text" id="name-input" placeholder="${fb.t("fb.spaces.name-placeholder", "New space name (e.g. 'Fishbowl Dev')")}" maxlength="60"/>
@@ -108,13 +108,13 @@ class FbSpacesSettingsView extends HTMLElement {
             </div>
 
             <div class="fb-block">
-                <sac-section title="${fb.t("fb.spaces.yours", "Your spaces")}">
+                <sac-section heading="${fb.t("fb.spaces.yours", "Your spaces")}">
                     <div id="space-list"></div>
                 </sac-section>
             </div>
 
             <div class="fb-block" id="archive-section" hidden>
-                <sac-section title="${fb.t("fb.spaces.archived", "Archived spaces")}">
+                <sac-section heading="${fb.t("fb.spaces.archived", "Archived spaces")}">
                     <div id="archive-list"></div>
                 </sac-section>
             </div>

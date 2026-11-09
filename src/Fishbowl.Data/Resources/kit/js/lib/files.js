@@ -108,9 +108,14 @@
  *       opts: { name, type, accept, handle, title, onProgress }
  *       onProgress(loaded, total) hears the write when the provider's store
  *       reports it (virtual: a store whose write() takes { onProgress }). The
- *       virtual save dialog shows the same progress itself: it stays up with
- *       a bar while such a store uploads, and closes at once, as before, when
- *       the store reports nothing.
+ *       virtual save dialog shows the same progress itself, and stays up
+ *       until the write landed (2.36.0 — it used to close at once when the
+ *       store reported nothing): a quiet store gets an indeterminate bar
+ *       after 250ms. A write that fails keeps the dialog open with the typed
+ *       name and the reason under it ("Couldn't save “x”. Try again, or pick
+ *       another folder or name."); Save tries again, Cancel answers null —
+ *       the failure is no longer thrown to the app. In the dialog's file
+ *       list a tap selects (the Save / Open button confirms).
  *   kind                the active provider's kind — "browser", "virtual",
  *                       or a host's own — e.g. to word a toast ("Downloaded"
  *                       vs "Saved")
@@ -412,6 +417,11 @@
             .sac-files-device:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: var(--radius-s); }
             .sac-files-device svg { width: 14px; height: 14px; }
             .sac-files-progress[hidden] { display: none; }
+            /* A failed save: the reason under the name (ui.css .field-error
+               — danger ink, 0.8rem, collapses while empty); the store's own
+               words below it, quieter. */
+            .sac-files-error:not(:empty) { display: flex; flex-direction: column; gap: 2px; }
+            .sac-files-error-detail { color: var(--text-muted); overflow-wrap: anywhere; }
             .sac-files-body[inert] > :not(.sac-files-progress) { opacity: 0.55; }
         `;
         document.head.appendChild(style);
@@ -424,9 +434,9 @@
 
     const extOf = (name) => { const m = /\.[^./]+$/.exec(name || ""); return m ? m[0].toLowerCase() : ""; };
 
-    /* How long a save waits for the store to report progress before closing
-       the dialog the old way — an opaque await. A store that reports in time
-       keeps the dialog up with a progress bar until the write lands. */
+    /* How long a save waits for the store to report progress before the bar
+       shows as indeterminate ("busy") — the dialog itself waits for the
+       write either way. */
     const PROGRESS_GRACE_MS = 250;
 
     /**
@@ -434,10 +444,12 @@
      * (the user asked for the device instead) or null (cancelled).
      *
      * Save with `commit(path, onProgress)`: the write runs while the dialog
-     * is still up, and it resolves { path, result } or { path, error }. If
-     * the store reports progress (loaded < total) within the grace period the
-     * dialog shows it and closes when the write lands; otherwise it closes at
-     * once, as it always did, and the answer still waits for the write.
+     * is still up and the dialog closes only once it landed, resolving
+     * { path, result }. Progress the store reports shows as a bar; a quiet
+     * store gets an indeterminate one after the grace period. A failed write
+     * keeps the dialog open (2.36.0): the typed name stays, the reason shows
+     * under it, Save tries again and Cancel resolves null. ({ path, error }
+     * only if the dialog was closed mid-write by other means.)
      */
     function dialog({ mode, store, accept, multiple, name, title, label, pixelated, commit, readonly, device: offerDevice = true }) {
         injectCss();
@@ -464,9 +476,14 @@
             if (pixelated) browserEl.setAttribute("pixelated", "");
             if (label) browserEl.setAttribute("root-label", label);
             if (readonly) browserEl.setAttribute("readonly", "");
+            // A tap picks (the OK button confirms) — it never opens at once.
+            browserEl.setAttribute("tap", "select");
             body.appendChild(browserEl);
 
             let nameInput = null;
+            // A failed save: the reason under the name, the dialog still up.
+            let failure = null;          // { name, detail } while shown
+            let errorEl = null;
             if (saving) {
                 const row = document.createElement("div");
                 row.className = "sac-files-row";
@@ -474,8 +491,40 @@
                     <input id="sac-files-name" type="text" spellcheck="false" autocomplete="off">`;
                 nameInput = row.querySelector("input");
                 nameInput.value = name || "";
-                body.appendChild(row);
+                // The Field errors pattern (ui.css .field-error): a line under
+                // the field, in the page and EMPTY while there is nothing to
+                // say — a live region that is already there announces new
+                // text reliably. Row and line share one box, so the body's
+                // gap does not open around an empty line.
+                const nameBox = document.createElement("div");
+                errorEl = document.createElement("div");
+                errorEl.className = "field-error sac-files-error";
+                errorEl.id = "sac-files-error";
+                errorEl.setAttribute("aria-live", "polite");
+                nameBox.append(row, errorEl);
+                body.appendChild(nameBox);
             }
+            const paintError = () => {
+                if (!errorEl) return;
+                errorEl.textContent = "";
+                if (!failure) {
+                    nameInput.removeAttribute("aria-describedby");
+                    return;
+                }
+                const main = document.createElement("span");
+                main.textContent = t("files.save-failed", "Couldn't save “{name}”. Try again, or pick another folder or name.")
+                    .replace("{name}", failure.name);
+                errorEl.appendChild(main);
+                if (failure.detail) {
+                    // The store's own words, for whoever can act on them.
+                    const why = document.createElement("span");
+                    why.className = "sac-files-error-detail";
+                    why.textContent = failure.detail;
+                    errorEl.appendChild(why);
+                }
+                nameInput.setAttribute("aria-describedby", errorEl.id);
+            };
+            const clearError = () => { if (failure) { failure = null; paintError(); } };
 
             let choice = null;
             const device = document.createElement("button");
@@ -505,6 +554,7 @@
                     ? t("files.to-device", "Save to this device instead…")
                     : t("files.from-device", "Open from this device…");
                 if (bar) bar.setAttribute("label", t("files.saving", "Saving…"));
+                if (failure) paintError();
             };
             relabel();
             const offLang = sac.lang ? sac.lang.onChange(relabel) : () => {};
@@ -531,10 +581,10 @@
                 }
                 sync();
             });
-            browserEl.addEventListener("sac:navigate", sync);
+            browserEl.addEventListener("sac:navigate", () => { clearError(); sync(); });
             browserEl.addEventListener("sac:choose", () => dlg.trigger("ok"));
             if (nameInput) {
-                nameInput.addEventListener("input", sync);
+                nameInput.addEventListener("input", () => { clearError(); sync(); });
                 nameInput.addEventListener("keydown", (e) => {
                     if (e.key === "Enter") { e.preventDefault(); dlg.trigger("ok"); }
                 });
@@ -567,9 +617,15 @@
                 return write(path);
             };
 
-            /* The write, inside the dialog. Everything but the progress bar is
-               frozen meanwhile; Escape is held back (the backdrop cannot be —
-               closing mid-write still answers once the write lands). */
+            /* The write, inside the dialog, which closes only once it LANDED.
+               Everything but the progress bar is frozen meanwhile; Escape is
+               held back (a dismissal waits for a pending beforeAction; were
+               the dialog closed mid-write anyway, the answer still waits for
+               the write). A store that reports progress shows it; one that
+               does not shows an indeterminate bar after the grace period. A
+               failed write keeps the dialog up: unfrozen, the typed name
+               still in the field, the reason under it — Save tries again,
+               Cancel answers null. */
             let writing = null;
             const holdEscape = (e) => {
                 if (e.key === "Escape") { e.stopImmediatePropagation(); e.preventDefault(); }
@@ -589,6 +645,7 @@
                         bar.setAttribute("indeterminate", "");
                     }
                 };
+                clearError();
                 body.inert = true;
                 dlg.setDisabled("cancel", true);
                 dlg.setDisabled("ok", true);
@@ -597,16 +654,32 @@
                 writing = Promise.resolve()
                     .then(() => commit(path, onProgress))
                     .then((result) => ({ path, result }), (error) => ({ path, error }));
-                writing.then(release);
-                const early = await Promise.race([
-                    writing,
-                    new Promise((r) => setTimeout(() => r(null), PROGRESS_GRACE_MS)),
-                ]);
-                if (!early && reported) await writing;
-                // Else no progress from the store: close now, as a save always
-                // did. The answer still waits for the write (sac:action).
+                // A quiet store: after the grace period the bar says "busy".
+                const quiet = setTimeout(() => {
+                    if (reported) return;
+                    bar.hidden = false;
+                    bar.setAttribute("indeterminate", "");
+                }, PROGRESS_GRACE_MS);
+                const outcome = await writing;
+                clearTimeout(quiet);
                 release();
-                return true;
+                if (!outcome.error) return true;
+                // Failed: stay. The answer is no longer this write — a Cancel
+                // now answers null, a Save writes again.
+                console.error("[sac.files] save failed:", outcome.error);
+                writing = null;
+                bar.hidden = true;
+                body.inert = false;
+                dlg.setDisabled("cancel", false);
+                sync();
+                const err = outcome.error;
+                failure = {
+                    name: path.slice(path.lastIndexOf("/") + 1),
+                    detail: String((err && err.message) || err || "").replace(/^\[sac\.[a-z]+\]\s*/i, ""),
+                };
+                paintError();
+                if (nameInput && dlg.hasAttribute("open")) nameInput.focus();
+                return false;
             }
 
             // The exit plays before the element goes (sac:closed).

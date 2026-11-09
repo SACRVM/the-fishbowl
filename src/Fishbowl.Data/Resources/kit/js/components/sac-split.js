@@ -51,6 +51,14 @@
  *                built-in back bar sets it back to "start". Ignored while the
  *                split is not collapsed. Nothing re-renders or moves: the
  *                hidden panel keeps its scroll position, form state, canvas.
+ *                Focus follows (2.36): when focus was in the panel that
+ *                goes (the row that opened the item, the Back button) or
+ *                nowhere, "end" moves it onto the end panel itself (no
+ *                field: no phone keyboard), and "start" returns it to the
+ *                element that had it before — else the selected row
+ *                ([aria-current] / [aria-selected="true"]), else the start
+ *                panel. Focus put elsewhere (by the user, or by the app
+ *                right after setting `show`) stays where it is.
  *   collapsed  — set BY THE COMPONENT while collapsed. Styling hook; the
  *                divider is hidden.
  *   rail-start — set BY THE COMPONENT when the start slot holds a rail that
@@ -157,6 +165,20 @@
     const NO_SWIPE = 'input, textarea, select, [contenteditable]:not([contenteditable="false"]), ' +
         'sac-slider, [role="slider"], [role="separator"], [data-no-swipe]';
 
+    /** The focused element itself, down through every open shadow root. */
+    const deepActive = () => {
+        let a = document.activeElement;
+        while (a && a.shadowRoot && a.shadowRoot.activeElement) a = a.shadowRoot.activeElement;
+        return a;
+    };
+
+    /** `node` sits inside `box` as rendered: slots followed, shadow roots
+     *  left through their host. */
+    const within = (node, box) => {
+        for (let n = node; n; n = n.assignedSlot || n.parentNode || n.host) if (n === box) return true;
+        return false;
+    };
+
 class SacSplit extends HTMLElement {
     static get observedAttributes() {
         return ["direction", "position", "min-start", "min-end", "aria-label", "collapse", "back-label", "show"];
@@ -208,7 +230,7 @@ class SacSplit extends HTMLElement {
         if (!this.shadowRoot.firstChild) return;   // pre-upgrade attribute
         if (this._internal) return;                // our own write-back
         if (name === "aria-label" || name === "back-label") { this._syncLabel(); return; }
-        if (name === "show") { this._onShow(oldValue, newValue); return; }
+        if (name === "show") { this._onShow(oldValue, newValue); this._handFocus(oldValue, newValue); return; }
         if (name === "collapse") { this._syncCollapse(); return; }
         if (name === "position") {
             this._set(this._parse(newValue), { emit: false, reflect: this.hasAttribute("position") });
@@ -409,6 +431,55 @@ class SacSplit extends HTMLElement {
         const w = this._end.getBoundingClientRect().width || this.getBoundingClientRect().width;
         const from = this._slide ? this._slideX : (now === "end" ? w : 0);
         this._slideTo(from, now === "end" ? 0 : w, 0);
+    }
+
+    /** Collapsed, one panel replaces the other: focus must not stay on the
+     *  one that goes (the row that opened the item, the Back button) and
+     *  fall to <body>. To "end": the end panel takes it, and the element
+     *  that had it in the start panel is kept. Back to "start": focus
+     *  returns to that element — else to the selected row
+     *  ([aria-current] / [aria-selected="true"]), else to the start panel.
+     *  Only when focus was in the panel that goes, or nowhere: focus the
+     *  user (or the app) has put elsewhere stays there. */
+    _handFocus(oldValue, newValue) {
+        const was = oldValue === "end" ? "end" : "start";
+        const now = newValue === "end" ? "end" : "start";
+        if (was === now || !this.isConnected) return;
+        if (!this.hasAttribute("collapsed") || this.hasAttribute("rail-start")) return;
+        const act = deepActive();
+        const lost = !act || act === document.body || act === document.documentElement;
+        if (!lost && !within(act, now === "end" ? this._start : this._end)) return;
+        if (now === "end") {
+            this._focusBack = lost ? null : act;
+            this._focusPane(this._end);
+            return;
+        }
+        const back = this._focusBack;
+        this._focusBack = null;
+        const take = (el) => {
+            if (!el || !el.isConnected || !within(el, this._start)) return false;
+            el.focus({ preventScroll: true });
+            const a = deepActive();
+            return !!a && within(a, el);
+        };
+        if (take(back)) return;
+        const sel = '[aria-current]:not([aria-current="false"]), [aria-selected="true"]';
+        const slot = this.shadowRoot.querySelector('slot[name="start"]');
+        for (const el of slot.assignedElements({ flatten: true })) {
+            if (take(el.matches(sel) ? el : el.querySelector(sel))) return;
+        }
+        this._focusPane(this._start);
+    }
+
+    /** Focus a panel itself: tabindex -1 only while it holds the focus, so
+     *  a scrolling panel keeps the browser's own Tab behaviour otherwise. */
+    _focusPane(pane) {
+        if (pane.hasAttribute("tabindex")) { pane.focus({ preventScroll: true }); return; }
+        pane.setAttribute("tabindex", "-1");
+        const drop = () => pane.removeAttribute("tabindex");
+        pane.focus({ preventScroll: true });
+        if (this.shadowRoot.activeElement === pane) pane.addEventListener("blur", drop, { once: true });
+        else drop();
     }
 
     /** The colour behind the split, for the sliding panel to carry. */
@@ -633,6 +704,9 @@ class SacSplit extends HTMLElement {
                     min-height: 0;
                     overflow: auto;
                 }
+                /* A panel focused by script on a collapsed switch (_handFocus)
+                   is a container: no ring. */
+                .pane[tabindex="-1"]:focus { outline: none; }
                 /* Sized panel: flex-basis is written by _set(), never grows or
                    shrinks on its own. */
                 .start { flex: 0 0 auto; }

@@ -209,7 +209,6 @@ window.sac?.i18n?.add?.("de", {
     "fb.apps.updated": "{name} ist auf dem neuesten Stand.",
     "fb.apps.update-failed": "{name} konnte nicht aktualisiert werden",
     "fb.apps.perms-failed": "{name} konnte nicht geändert werden",
-    "fb.apps.changed": "{name} hat sich seit der Installation geändert — sieh dir zuerst das Update an.",
     "fb.apps.no-start": "{name} konnte nicht starten.",
     "fb.apps.no-storage": "{name} hat keinen Speicher bekommen — erlaube „Dateien“ unter Einstellungen → Apps.",
     "fb.apps.remove-title": "{name} entfernen?",

@@ -362,12 +362,15 @@
             await adding.get(id);
             await sac.apps.open(id);
         }
-        catch (err) {
-            // The error store hears it from the kit (sac:app-error, "load").
-            const code = err?.code;
-            sac.toast?.(code === "integrity"
-                ? fb.t("fb.apps.changed", "{name} changed since you installed it — review the update first.", { name: nameOf(byId(id)) })
-                : fb.t("fb.apps.no-start", "{name} couldn't start.", { name: nameOf(byId(id)) }), { kind: "error" });
+        catch {
+            // The error store hears it from the kit (sac:app-error, "load"),
+            // and an app the kit knows gets the kit's toast — "could not be
+            // loaded" with Try again, or "has changed since it was installed"
+            // (kit 2.36) — a second one here would say it twice. Only an app
+            // the kit never took (its add() failed) is ours to tell; one
+            // removed meanwhile needs no word.
+            if (registered.has(id) || !byId(id)) return;
+            sac.toast?.(fb.t("fb.apps.no-start", "{name} couldn't start.", { name: nameOf(byId(id)) }), { kind: "error" });
         }
     }
 

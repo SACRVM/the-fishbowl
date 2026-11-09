@@ -79,10 +79,42 @@ public class ContactsTests
             Assert.Equal(street.X + street.Width, country.X + country.Width, 1);
             await page.ScreenshotAsync(new() { Path = Path.Combine(Path.GetTempPath(), "contacts-person.png") });
 
+            async Task<JsonElement> StoredPerson()
+            {
+                var all = (await (await page.APIRequest.GetAsync($"{_fixture.BaseUrl}/api/v1/spaces/{slug}/contacts")).JsonAsync())!.Value;
+                return all.EnumerateArray().Single(c => c.GetProperty("kind").GetString() == "person");
+            }
+            async Task<string?> StoredBirthday()
+            {
+                var p = await StoredPerson();
+                return p.TryGetProperty("birthday", out var b) && b.ValueKind == JsonValueKind.String ? b.GetString() : null;
+            }
+
+            // A birthday typed into the kit's date field is saved — the field
+            // says sac:change, never a native change.
+            var birthdayField = view.Locator("#cv-birthday");
+            var birthday = birthdayField.Locator("input");
+            await birthday.FillAsync("1815-12-10");
+            await birthday.PressAsync("Enter");
+            for (var i = 0; i < 50 && await StoredBirthday() != "1815-12-10"; i++) await page.WaitForTimeoutAsync(100);
+            Assert.Equal("1815-12-10", await StoredBirthday());
+            // Text it can't read stays in the field, marked, with what it
+            // expects under it (kit 2.36); its value — and what is saved —
+            // stays the last valid date.
+            await birthday.FillAsync("1815-02-31");
+            await birthday.PressAsync("Tab");
+            await Assertions.Expect(birthday).ToHaveValueAsync("1815-02-31");
+            await Assertions.Expect(birthday).ToHaveAttributeAsync("aria-invalid", "true");
+            Assert.NotEqual("", await birthdayField.EvaluateAsync<string>("f => f.validationMessage"));
+            Assert.Equal("1815-12-10", await birthdayField.EvaluateAsync<string>("f => f.value"));
+            await view.Locator("#cv-editor input[data-key='role']").FillAsync("Analyst");
+            for (var i = 0; i < 50 && (await StoredPerson()).GetProperty("role").GetString() != "Analyst"; i++) await page.WaitForTimeoutAsync(100);
+            Assert.Equal("1815-12-10", await StoredBirthday());
+
             // The server has it; the organisation lists its person.
-            var list = (await (await page.APIRequest.GetAsync($"{_fixture.BaseUrl}/api/v1/spaces/{slug}/contacts")).JsonAsync())!.Value;
-            var ada = list.EnumerateArray().Single(c => c.GetProperty("kind").GetString() == "person");
+            var ada = await StoredPerson();
             Assert.Equal("ada@acme.test", ada.GetProperty("email").GetString());
+            Assert.Equal("Analyst", ada.GetProperty("role").GetString());
             await view.Locator(".cv-item").Filter(new() { Has = page.Locator(".cv-item-name", new() { HasTextString = "Acme GmbH" }) }).ClickAsync();
             // The organisation lists its people at the end; a click opens the person.
             var person = view.Locator("#cv-links .cv-link-row", new() { HasText = "Ada Lovelace" });

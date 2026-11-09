@@ -16,7 +16,8 @@
  *                 Empty or absent = no value (null). Garbage is rejected and
  *                 the last valid value put back.
  *   min / max   — inclusive bounds. A typed number outside them is invalid
- *                 and never commits; stepping clamps into them.
+ *                 and never commits ("At most 100"); stepping clamps into
+ *                 them.
  *   step        — what ↑ / ↓ add (default 1); Shift steps 10×.
  *   decimals    — fraction digits: the committed value is rounded to them
  *                 and the text always shows exactly that many. Absent = as
@@ -37,14 +38,30 @@
  *                moved the value: Enter, or focus leaving. Bubbles, not composed.
  *   sac:commit / sac:cancel — size="cell" only, see Cell editors.
  *
- * Keyboard: ↑ / ↓ step (Shift ×10, clamped), Enter commits, Escape reverts.
- * Invalid text shows --danger and reverts on blur. Typing is tolerant: both
- * "," and "." are understood (sac.regional.parseNumber).
+ * Keyboard: ↑ / ↓ step (Shift ×10, clamped), Enter commits, Escape reverts
+ * to the last valid value. Typing is tolerant: both "," and "." are
+ * understood (sac.regional.parseNumber).
+ *
+ * Invalid text (style guide → CSS Patterns → Field errors): while typing it
+ * shows --danger and the input gets aria-invalid="true". Enter or focus
+ * leaving with invalid text shows a line under the field that says what is
+ * expected — "Not a number – e.g. 1,234.5", "At least 0", "At most 100"
+ * (bounds in the sac.regional number format) — wired to the input with
+ * aria-describedby and announced politely. The text and the line STAY
+ * (before 2.36 the text silently reverted on blur): `value` keeps the last
+ * valid number and no sac:change fires for invalid text. Correcting the
+ * text clears the error, Escape goes back to the last valid value, and a
+ * programmatic value set while the field is not focused replaces the text.
+ * size="cell" sets aria-invalid only — no line, and blur / Tab still revert
+ * (the host grid owns commit and cancel there).
+ *
+ * The input also carries the expected format as its accessible description
+ * ("Number format: 1,234.5"), so a screen reader hears it before typing.
  *
  * Compact/touch: inputmode="decimal" brings up the number pad. Under
  * (pointer: coarse) the input is 44px tall with 16px type.
  *
- * CSS parts: label, input.
+ * CSS parts: label, input, error (the message line).
  */
 (function () {
 
@@ -52,6 +69,26 @@
         (window.sac && window.sac.t) ? window.sac.t(key, fallback) : fallback;
 
     const reg = () => (window.sac && sac.regional && sac.regional.parseNumber) ? sac.regional : null;
+
+    /* The blur of a click elsewhere fires on pointer-down. A message line
+       shown right then grows the field and can pull the click's target (a
+       Save button below) out from under the pointer before pointer-up —
+       the click is lost. So while a pointer is down, the line waits until
+       that click has landed. */
+    let pressed = false;
+    document.addEventListener("pointerdown", () => { pressed = true; }, true);
+    document.addEventListener("pointerup", () => { pressed = false; }, true);
+    document.addEventListener("pointercancel", () => { pressed = false; }, true);
+    function whenReleased(fn) {
+        if (!pressed) { fn(); return; }
+        const go = () => {
+            document.removeEventListener("pointerup", go, true);
+            document.removeEventListener("pointercancel", go, true);
+            setTimeout(fn, 0);                 // after the click that follows pointer-up
+        };
+        document.addEventListener("pointerup", go, true);
+        document.addEventListener("pointercancel", go, true);
+    }
 
     /** Fraction digits a number needs ("0.25" → 2). */
     const fracDigits = (n) => {
@@ -76,6 +113,7 @@ class SacNumberField extends HTMLElement {
         this._reflecting = false;
         this._snapshot = null;      // value when focus entered (cell cancel)
         this._inside = false;
+        this._errorShown = false;   // the message line is up (form mode)
     }
 
     connectedCallback() {
@@ -86,8 +124,16 @@ class SacNumberField extends HTMLElement {
             }
             this._adopt();
         }
-        if (window.sac && sac.lang && !this._offLang) this._offLang = sac.lang.onChange(() => this._syncLabel());
-        if (window.sac && sac.regional && !this._offRegional) this._offRegional = sac.regional.onChange(() => this._syncUI());
+        if (window.sac && sac.lang && !this._offLang) {
+            this._offLang = sac.lang.onChange(() => {
+                this._syncLabel();
+                this._syncHint();
+                if (this._dirty) this._markValidity();      // the message in the new language
+            });
+        }
+        if (window.sac && sac.regional && !this._offRegional) {
+            this._offRegional = sac.regional.onChange(() => { this._syncUI(); this._syncHint(); });
+        }
     }
 
     disconnectedCallback() {
@@ -99,9 +145,12 @@ class SacNumberField extends HTMLElement {
         if (!this.shadowRoot.firstChild) return;
         switch (name) {
             case "value":       this._onValueAttr(); break;
-            case "decimals":    this._syncUI(); break;
+            case "decimals":    this._syncUI(); this._syncHint(); break;
             case "min":
-            case "max":         this._syncAria(); break;
+            case "max":
+                this._syncAria();
+                if (this._dirty) this._markValidity();
+                break;
             case "label":       this._syncLabel(); break;
             case "placeholder": this._input.placeholder = this.getAttribute("placeholder") || ""; break;
             case "disabled":    this._input.disabled = this.disabled; break;
@@ -111,6 +160,10 @@ class SacNumberField extends HTMLElement {
     /* ---------------------------------------------------------------- API */
 
     get value() { return this._value; }
+    /** "" while the typed text can commit, else the words the line under the
+     *  field shows ("At most 100"). The field keeps invalid text and `value`
+     *  keeps the last valid number — a form holds its Save on this. */
+    get validationMessage() { return this._input ? (this._judge().error || "") : ""; }
     set value(v) {
         if (v == null || v === "") { this.setAttribute("value", ""); return; }
         const n = typeof v === "number" ? v : Number(String(v).trim());
@@ -178,6 +231,7 @@ class SacNumberField extends HTMLElement {
         this._input.disabled = this.disabled;
         this._reflect();
         this._syncUI();
+        this._syncHint();
     }
 
     _reflect() {
@@ -192,10 +246,12 @@ class SacNumberField extends HTMLElement {
     _onValueAttr() {
         if (this._reflecting) return;
         const raw = this.getAttribute("value");
-        if (raw == null || raw.trim() === "") { this._apply(null, false); return; }
-        const n = Number(raw);
-        if (!Number.isFinite(n)) { this._reflect(); return; }
-        this._apply(this._round(n), false);
+        const n = raw == null || raw.trim() === "" ? null : Number(raw);
+        if (n != null && !Number.isFinite(n)) { this._reflect(); return; }
+        // Invalid text left standing after blur is replaced by an app's
+        // value (a form reset, the next record); typing in progress is not.
+        if (this._dirty && this.shadowRoot.activeElement !== this._input) this._dirty = false;
+        this._apply(n == null ? null : this._round(n), false);
     }
 
     _apply(n, fire) {
@@ -215,9 +271,19 @@ class SacNumberField extends HTMLElement {
         if (!this._dirty) {
             const shown = this._format(this._value);
             if (this._input.value !== shown) this._input.value = shown;
-            this._input.classList.remove("invalid");
+            this._setInvalid(false);
+            this._showError(null);
+        } else {
+            this._markValidity();          // the format or a bound moved under the typed text
         }
         this._syncAria();
+    }
+
+    /** The expected format as the input's accessible description. */
+    _syncHint() {
+        if (!this._hintEl) return;
+        this._hintEl.textContent = t("number-field.format-hint", "Number format: {example}")
+            .replace("{example}", () => this._format(1234.5));
     }
 
     _syncAria() {
@@ -288,6 +354,20 @@ class SacNumberField extends HTMLElement {
                 .num.invalid { color: var(--danger-text); border-bottom-color: var(--danger); }
                 .num.invalid:focus { border-color: var(--accent); border-bottom-color: var(--danger); }
 
+                /* The field-error line (ui.css .field-error, re-stated):
+                   always in the tree so the polite live region announces,
+                   empty — and so nothing — while the text is valid. It
+                   wraps inside the field's width instead of widening the
+                   field (contain: inline-size), so a row never shifts
+                   sideways when a message appears. */
+                .error {
+                    contain: inline-size;
+                    font-size: 0.75rem;
+                    line-height: 1.35;
+                    color: var(--danger-text);
+                }
+                .error:not(:empty) { margin-top: 0.3rem; }
+
                 :host([size="regular"]) .num {
                     padding: 0.6rem;
                     font-family: inherit;
@@ -295,6 +375,7 @@ class SacNumberField extends HTMLElement {
                     line-height: normal;
                     width: 14ch;
                 }
+                :host([size="regular"]) .error { font-size: 0.8rem; }
 
                 @media (pointer: coarse) {
                     .num, :host([size="regular"]) .num { min-height: 44px; font-size: max(16px, 1rem); }
@@ -309,7 +390,8 @@ class SacNumberField extends HTMLElement {
                     font: inherit;
                     color: inherit;
                 }
-                :host([size="cell"]) .label { display: none; }
+                :host([size="cell"]) .label,
+                :host([size="cell"]) .error { display: none; }
                 :host([size="cell"]) .num,
                 :host([size="cell"]) .num:focus,
                 :host([size="cell"]) .num:hover {
@@ -334,10 +416,14 @@ class SacNumberField extends HTMLElement {
             </style>
             <label class="label" part="label" for="num" hidden></label>
             <input class="num" part="input" id="num" type="text" inputmode="decimal" role="spinbutton"
-                   spellcheck="false" autocomplete="off" autocapitalize="off">
+                   spellcheck="false" autocomplete="off" autocapitalize="off" aria-describedby="error hint">
+            <div class="error" part="error" id="error" aria-live="polite"></div>
+            <span id="hint" hidden></span>
         `;
         this._labelEl = this.shadowRoot.querySelector(".label");
         this._input = this.shadowRoot.getElementById("num");
+        this._errorEl = this.shadowRoot.getElementById("error");
+        this._hintEl = this.shadowRoot.getElementById("hint");
 
         this._input.addEventListener("input", (e) => {
             e.stopPropagation();
@@ -361,17 +447,56 @@ class SacNumberField extends HTMLElement {
 
     /* ------------------------------------------------------------ editing */
 
-    /** Text → number, null for empty, NaN for invalid / out of range. */
-    _typed() {
+    /** The typed text judged: { n } — a number, or null for empty — when it
+     *  can commit, else { error } — the message saying what is expected. */
+    _judge() {
         const s = this._input.value.trim();
-        if (s === "") return null;
-        const n = this._parse(s);
-        return Number.isFinite(n) && this._inRange(this._round(n)) ? this._round(n) : NaN;
+        if (s === "") return { n: null };
+        const raw = this._parse(s);
+        if (!Number.isFinite(raw)) {
+            return { error: t("number-field.error-nan", "Not a number – e.g. {example}")
+                .replace("{example}", () => this._format(1234.5)) };
+        }
+        const n = this._round(raw);
+        const min = this._num("min"), max = this._num("max");
+        // Bounds as they are, in the page's number format ("At least 0",
+        // not the decimals-padded "0.00").
+        const bound = (b) => { const r = reg(); return r ? r.formatNumber(b) : String(b); };
+        if (min != null && n < min) {
+            return { error: t("number-field.error-min", "At least {min}").replace("{min}", () => bound(min)) };
+        }
+        if (max != null && n > max) {
+            return { error: t("number-field.error-max", "At most {max}").replace("{max}", () => bound(max)) };
+        }
+        return { n };
     }
 
+    /** Text → number, null for empty, NaN for invalid / out of range. */
+    _typed() {
+        const j = this._judge();
+        return j.error ? NaN : j.n;
+    }
+
+    /** Live while typing: the invalid look + aria-invalid; a message that
+     *  is already showing follows the text (and goes once it is valid).
+     *  A NEW message waits for Enter or blur — not every keystroke. */
     _markValidity() {
-        const n = this._typed();
-        this._input.classList.toggle("invalid", Number.isNaN(n));
+        const j = this._judge();
+        this._setInvalid(!!j.error);
+        if (this._errorShown) this._showError(j.error || null);
+    }
+
+    _setInvalid(bad) {
+        this._input.classList.toggle("invalid", bad);
+        if (bad) this._input.setAttribute("aria-invalid", "true");
+        else this._input.removeAttribute("aria-invalid");
+    }
+
+    /** The message line — form mode only; null clears it. */
+    _showError(msg) {
+        const text = msg && !this._cell() ? String(msg) : "";
+        this._errorShown = !!text;
+        if (this._errorEl && this._errorEl.textContent !== text) this._errorEl.textContent = text;
     }
 
     _onKeydown(e) {
@@ -430,34 +555,51 @@ class SacNumberField extends HTMLElement {
         n = this._round(n);
         this._dirty = true;
         this._input.value = this._format(n);
-        this._input.classList.remove("invalid");
+        this._setInvalid(false);
+        this._showError(null);
         this._input.setAttribute("aria-valuenow", String(n));
     }
 
-    /** @returns true when the text is a valid value (committed or unchanged). */
+    /**
+     * @param {boolean} revertOnInvalid — size="cell" only: true on blur /
+     *   Tab (the cell contract reverts), false on Enter (the editor stays
+     *   open, marked). In form mode invalid text never reverts: it stays,
+     *   with the message line saying what is expected.
+     * @returns true when the text is a valid value (committed or unchanged).
+     */
     _commit(revertOnInvalid) {
         if (!this._dirty) return true;
-        const n = this._typed();
-        if (Number.isNaN(n)) {
-            if (revertOnInvalid) this._revert();
+        const j = this._judge();
+        if (j.error) {
+            if (this._cell()) {
+                if (revertOnInvalid) this._revert();
+                else this._setInvalid(true);
+            } else {
+                this._setInvalid(true);
+                whenReleased(() => {                     // judged again: the click may have fixed it
+                    const now = this._dirty ? this._judge().error : null;
+                    if (now) this._showError(now);
+                });
+            }
             return false;
         }
         this._dirty = false;
-        this._input.classList.remove("invalid");
-        this._apply(n, true);
+        this._setInvalid(false);
+        this._showError(null);
+        this._apply(j.n, true);
         return true;
     }
 
     _revert() {
         this._dirty = false;
-        this._input.classList.remove("invalid");
-        this._syncUI();
+        this._syncUI();                  // the last valid value; clears the error
     }
 
     _cancel() {
         this._dirty = false;
         this._apply(this._snapshot, false);
-        this._input.classList.remove("invalid");
+        this._setInvalid(false);
+        this._showError(null);
         this._emit("sac:cancel", this._value);
     }
 

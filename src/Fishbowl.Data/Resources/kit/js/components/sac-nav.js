@@ -98,6 +98,16 @@
  *   sac:nav-open / sac:nav-close — detail { drawer } — the burger's panel
  *          and/or rail drawer came out / went away. Bubbles + composed.
  *
+ * Focus (2.36): the burger's panel is modal, as the rail drawer is, at every
+ *   width — opening it moves focus onto the panel itself (no field, so no
+ *   phone keyboard; the panel is labelled "Menu"), everything outside the
+ *   nav turns inert (layers above the open menu — dialogs, tooltips, toasts
+ *   — stay live; what was inert already is left alone), and closing it
+ *   (Escape, the scrim, an entry, the burger, a swipe) hands focus back to
+ *   the burger when it was in the panel or nowhere. The entry for where you
+ *   are carries aria-current="page" — a suite entry whose own section is
+ *   the current one gets "true" (it contains the page).
+ *
  * Slots:
  *   panel   — the app's OWN burger-panel content, rendered first, above the
  *             navigation groups: filters, account, settings — the burger is
@@ -173,7 +183,9 @@
  *     page's own theme-color metas are never touched.
  *   - titlebar="own" — (display-mode: borderless): the browser draws no
  *     window buttons, so the nav does — <sac-window>'s three traffic lights
- *     at the right end, in the theme's --accent-warm / --ok / --danger. Each
+ *     at the right end, in the theme's --accent-warm / --ok / --danger, with
+ *     <sac-window>'s glyphs (− / maximise-restore / ×: shown on hover and
+ *     keyboard focus, always on touch and under more contrast). Each
  *     one only where the browser lets a page do it (a control that does
  *     nothing is never rendered): minimise and maximise need
  *     window.minimize() / maximize() (Additional Windowing Controls, with
@@ -215,6 +227,14 @@
         "window.close":    "Close",
     };
     const str = (key) => t(key, STRINGS[key]);
+
+    /** The own window buttons' glyphs (TITLE BAR, own) — <sac-window>'s:
+     *  minimise −, maximise ↖↘ / restore ↘↖ (two triangles), close ×. */
+    const GLYPH = {
+        min:   `<svg class="glyph" viewBox="0 0 9 9" aria-hidden="true" focusable="false"><path d="M1.5 4.5h6"/></svg>`,
+        max:   `<svg class="glyph" viewBox="0 0 9 9" aria-hidden="true" focusable="false"><path class="g-fill g-max" d="M1.5 1.5h3.6L1.5 5.1zM7.5 7.5H3.9L7.5 3.9z"/><path class="g-fill g-restore" d="M4 4H.9L4 .9zM5 5h3.1L5 8.1z"/></svg>`,
+        close: `<svg class="glyph" viewBox="0 0 9 9" aria-hidden="true" focusable="false"><path d="M2 2l5 5M7 2L2 7"/></svg>`,
+    };
 
     /**
      * The colour the browser paints its window buttons on (TITLE BAR,
@@ -433,6 +453,8 @@ class SacNav extends HTMLElement {
         cancelAnimationFrame(this._overflowFrame);
         this._setDrawer(false);
         this._releaseRail();
+        // Removed with the panel out: give the page back.
+        this._setInert(false);
     }
 
     render() {
@@ -536,6 +558,16 @@ class SacNav extends HTMLElement {
         // A kit default (not the host's own label) carries its key for _relabel().
         const keyTitle = hostLabel ? `` : ` data-i18n-title="nav.home"`;
         const keyText  = (key) => hostLabel ? `` : ` data-i18n="${key}"`;
+        // The entry for where you are says so to assistive tech too. The
+        // suite entry whose own section is the current one is "true" (it
+        // contains the page) — "page" belongs to one entry only.
+        const cur = (on, kind = "page") => on ? ` aria-current="${kind}"` : ``;
+
+        // A re-render replaces every node: focus on the burger or inside the
+        // open panel would fall to <body>. Note where it was, put it back.
+        const had = this.shadowRoot.activeElement;
+        const refocus = !had ? null : had.classList.contains("menu-btn") ? "burger"
+            : had.closest(".panel") ? "panel" : null;
 
         this.shadowRoot.innerHTML = `
             <style>
@@ -789,7 +821,15 @@ class SacNav extends HTMLElement {
                 .panel.open {
                     transform: translateX(0);
                     visibility: visible;
+                    /* Visible at once on the way in (it is off-screen until
+                       the slide brings it): focus moves onto it in the same
+                       task, and a visibility transition would still read
+                       "hidden" there. Closing keeps the 0.5s delay above. */
+                    transition: transform 0.5s var(--ease-swift), visibility 0s;
                 }
+                /* Focus lands on the panel itself when it opens (no field,
+                   so no phone keyboard): a container, no ring. */
+                .panel:focus { outline: none; }
                 /* Compact with a rail: the panel's entries stack ABOVE the
                    rail drawer in one column — the rail starts where the
                    panel ends (--drawer-top, measured on open). */
@@ -971,6 +1011,32 @@ class SacNav extends HTMLElement {
                 .win-btn.min-btn { --btn-color: var(--accent-warm); }
                 .win-btn.max-btn { --btn-color: var(--ok); }
                 .win-btn.close-btn { --btn-color: var(--danger); }
+                /* Glyphs in the dots (<sac-window>'s recipe): shown while the
+                   group is hovered or keyboard-focused, always on touch and
+                   under more contrast — colour never carries the meaning
+                   alone. Ink = the dot's own colour sunk dark (the kit's
+                   --on-warm / --on-ok recipe), so every theme follows. */
+                .win-btn { --glyph-ink: color-mix(in srgb, var(--sink) 62%, var(--btn-color)); }
+                .win-btn .glyph {
+                    position: absolute;
+                    left: 20%;
+                    top: 20%;
+                    width: 60%;
+                    height: 60%;
+                    fill: none;
+                    stroke: var(--glyph-ink);
+                    stroke-width: 1.25;
+                    stroke-linecap: round;
+                    opacity: 0;
+                    transition: opacity 0.12s var(--ease-smooth);
+                    pointer-events: none;
+                }
+                .win-btn .glyph .g-fill { fill: var(--glyph-ink); stroke: none; }
+                .win-btn .g-restore,
+                .win-btn.restore .g-max { display: none; }
+                .win-btn.restore .g-restore { display: inline; }
+                .win-ctrls:hover .glyph { opacity: 1; }
+                .win-ctrls:has(:focus-visible) .glyph { opacity: 1; }
                 .ground-probe { background-color: var(--bg); }
 
                 @media (max-width: 768px), (max-height: 480px) and (pointer: coarse) {
@@ -1031,13 +1097,14 @@ class SacNav extends HTMLElement {
                 @media (hover: none) {
                     .menu-btn:hover, .more-btn:hover { background: none; }
                     .win-btn:hover { transform: none; background: var(--btn-color); }
+                    .win-btn .glyph { opacity: 1; }
                     /* …but the press itself still shows (a touch is a hover too). */
                     .menu-btn:active, .more-btn:active { background: var(--hover-strong); }
                     .win-btn:active { transform: scale(0.97); }
                 }
                 @media (prefers-reduced-motion: reduce) {
                     .menu-btn span, .backdrop, .panel, .more-btn, .right,
-                    .cid-home, .cid-icon, .win-btn { transition: none !important; }
+                    .cid-home, .cid-icon, .win-btn, .win-btn .glyph { transition: none !important; }
                     .win-btn:hover { transform: none; }
                 }
                 /* Reduced transparency / more contrast: the blurred ribbon and
@@ -1051,6 +1118,7 @@ class SacNav extends HTMLElement {
                     .panel { background: var(--glass-solid); backdrop-filter: none; -webkit-backdrop-filter: none; }
                     .ribbon { border-bottom-color: var(--border-contrast); }
                     .panel { border-right-color: var(--border-contrast); }
+                    .win-btn .glyph { opacity: 1; }
                 }
             </style>
             <nav class="ribbon${titled ? " titled" : ""}">
@@ -1097,14 +1165,14 @@ class SacNav extends HTMLElement {
                 <!-- The window's own buttons (TITLE BAR, own) — they stay
                      put while the controls slide out on compact. -->
                 <div class="win-ctrls">
-                    ${canMin ? `<button class="win-btn min-btn" type="button" data-win="min" title="${L.minimize}" aria-label="${L.minimize}" data-i18n-label="window.minimize" data-i18n-title="window.minimize"></button>` : ``}
-                    ${canMax ? `<button class="win-btn max-btn" type="button" data-win="max"></button>` : ``}
-                    <button class="win-btn close-btn" type="button" data-win="close" title="${L.close}" aria-label="${L.close}" data-i18n-label="window.close" data-i18n-title="window.close"></button>
+                    ${canMin ? `<button class="win-btn min-btn" type="button" data-win="min" title="${L.minimize}" aria-label="${L.minimize}" data-i18n-label="window.minimize" data-i18n-title="window.minimize">${GLYPH.min}</button>` : ``}
+                    ${canMax ? `<button class="win-btn max-btn" type="button" data-win="max">${GLYPH.max}</button>` : ``}
+                    <button class="win-btn close-btn" type="button" data-win="close" title="${L.close}" aria-label="${L.close}" data-i18n-label="window.close" data-i18n-title="window.close">${GLYPH.close}</button>
                 </div>` : ``}
             </nav>
             <div class="backdrop"></div>
             <span class="ground-probe" hidden></span>
-            <aside class="panel${compact ? " rail-look" : ""}">
+            <aside class="panel${compact ? " rail-look" : ""}" tabindex="-1" aria-label="${L.menu}" data-i18n-label="nav.menu">
                 <!-- The app's own panel content (any use: filters, account,
                      settings…) — first, above the navigation groups. -->
                 <div class="panel-slot"><slot name="panel"></slot></div>
@@ -1117,7 +1185,7 @@ class SacNav extends HTMLElement {
                              only in the ribbon ⌂ — the menu is the place you look
                              to navigate, so the suite's home belongs at the top of
                              its own group. Same data the ribbon jump already has. -->
-                        <a class="nav-item ${isActiveHref(panelHostHref) ? "active" : ""}" href="${esc(panelHostHref)}">
+                        <a class="nav-item ${isActiveHref(panelHostHref) ? "active" : ""}" href="${esc(panelHostHref)}"${cur(isActiveHref(panelHostHref))}>
                             <sac-icon name="${esc(hostIcon)}"></sac-icon>
                             <span data-i18n="nav.home">${escText(str("nav.home"))}</span>
                         </a>
@@ -1126,9 +1194,10 @@ class SacNav extends HTMLElement {
                         // The entry addressing the running app carries the
                         // app's own sections as an indented subtree.
                         const self = isActiveHref(e.href);
+                        const inSection = self && sections.some(s => isActiveHref(s.href));
                         return `
                         <li>
-                            <a class="nav-item ${self ? "active" : ""}" href="${esc(hrefFor(e.href))}">
+                            <a class="nav-item ${self ? "active" : ""}" href="${esc(hrefFor(e.href))}"${cur(self, inSection ? "true" : "page")}>
                                 ${e.icon ? `<sac-icon name="${esc(e.icon)}"></sac-icon>` : ""}
                                 <span>${escText(e.label)}</span>
                             </a>
@@ -1136,7 +1205,7 @@ class SacNav extends HTMLElement {
                             <ul class="sub-list">
                                 ${sections.map(s => `
                                     <li>
-                                        <a class="nav-item ${isActiveHref(s.href) ? "active" : ""}" href="${esc(hrefFor(s.href))}">
+                                        <a class="nav-item ${isActiveHref(s.href) ? "active" : ""}" href="${esc(hrefFor(s.href))}"${cur(isActiveHref(s.href))}>
                                             ${s.icon ? `<sac-icon name="${esc(s.icon)}"></sac-icon>` : ""}
                                             <span>${escText(s.label)}</span>
                                         </a>
@@ -1153,7 +1222,7 @@ class SacNav extends HTMLElement {
                     : `<ul class="nav-list">
                          ${routes.map(r => `
                              <li>
-                                 <a class="nav-item ${!r.open && isActive(r) ? "active" : ""}" href="${esc(hrefFor(r.hash))}"${r.open ? ` data-open-route="${esc(r.hash)}"` : ""}>
+                                 <a class="nav-item ${!r.open && isActive(r) ? "active" : ""}" href="${esc(hrefFor(r.hash))}"${r.open ? ` data-open-route="${esc(r.hash)}"` : ""}${cur(!r.open && isActive(r))}>
                                      ${r.icon ? `<sac-icon name="${esc(r.icon)}"></sac-icon>` : ""}
                                      <span>${escText(r.label)}</span>
                                  </a>
@@ -1164,7 +1233,7 @@ class SacNav extends HTMLElement {
                 <ul class="nav-list">
                     ${sections.map(s => `
                         <li>
-                            <a class="nav-item ${isActiveHref(s.href) ? "active" : ""}" href="${esc(hrefFor(s.href))}">
+                            <a class="nav-item ${isActiveHref(s.href) ? "active" : ""}" href="${esc(hrefFor(s.href))}"${cur(isActiveHref(s.href))}>
                                 ${s.icon ? `<sac-icon name="${esc(s.icon)}"></sac-icon>` : ""}
                                 <span>${escText(s.label)}</span>
                             </a>
@@ -1176,6 +1245,11 @@ class SacNav extends HTMLElement {
 
         // Re-attach handlers on freshly-rendered shadow-root children.
         this.attachEphemeralHandlers();
+        if (refocus) {
+            const sr = this.shadowRoot;
+            const to = refocus === "panel" && this.isOpen ? sr.querySelector(".panel") : sr.querySelector(".menu-btn");
+            to?.focus({ preventScroll: true });
+        }
     }
 
     attachEphemeralHandlers() {
@@ -1210,8 +1284,24 @@ class SacNav extends HTMLElement {
             }
         };
         const setOpen = (open) => {
+            const was = this.isOpen;
             this.isOpen = open;
             panel.classList.toggle("open", open);
+            // Panel mode (no rail drawer out): the menu is modal, as the
+            // drawer is — focus goes into it, the page behind turns inert,
+            // and on close focus comes back to the burger (when it was in
+            // the panel, or nowhere: a tap on the scrim drops it on <body>).
+            // Stacked over the drawer, _syncDrawer does all of this.
+            if (open !== was && !this._drawerOpen) {
+                if (open) {
+                    this._setInert(true);
+                    panel.focus({ preventScroll: true });
+                } else {
+                    const back = this._focusInPanelOrLost();
+                    this._setInert(false);
+                    if (back) menuBtn?.focus({ preventScroll: true });
+                }
+            }
             this._syncChrome();
         };
         this._setOpen = setOpen;
@@ -1264,12 +1354,14 @@ class SacNav extends HTMLElement {
                 // run it instead of following the hash, which is only its key.
                 if (el.dataset.openRoute) {
                     e.preventDefault();
+                    // Close first: while the menu is out the page is inert,
+                    // and a window open() focuses must not be inside it.
+                    this._closeAll();
                     const route = (window.sac?.router?.routes() || []).find(r => r.hash === el.dataset.openRoute);
                     if (route && route.open) {
                         try { route.open(route); }
                         catch (err) { console.error("[sac-nav] a route's open() threw:", err); }
                     }
-                    this._closeAll();
                     return;
                 }
                 const m = /[?&]app=([^&]+)/.exec(el.getAttribute("href") || "");
@@ -1278,7 +1370,9 @@ class SacNav extends HTMLElement {
                     !e.metaKey && !e.ctrlKey && !e.shiftKey && !e.altKey &&
                     window.sac?.apps?.get?.(id)) {
                     e.preventDefault();
+                    this._closeAll();     // first: the window must not open into an inert page
                     Promise.resolve(sac.apps.open(id)).catch(() => {});
+                    return;
                 }
                 this._closeAll();
             });
@@ -1324,9 +1418,11 @@ class SacNav extends HTMLElement {
     _labelWinMax() {
         const btn = this.shadowRoot.querySelector('.win-btn[data-win="max"]');
         if (!btn) return;
-        const label = str(window.matchMedia(SacNav.MAXIMIZED).matches ? "window.restore" : "window.maximize");
+        const maximized = window.matchMedia(SacNav.MAXIMIZED).matches;
+        const label = str(maximized ? "window.restore" : "window.maximize");
         btn.setAttribute("aria-label", label);
         btn.setAttribute("title", label);
+        btn.classList.toggle("restore", maximized);     // its glyph follows
     }
 
     /** An own window button. The browser may still refuse (no
@@ -1453,7 +1549,10 @@ class SacNav extends HTMLElement {
             }
         } else {
             if (rail) rail.removeAttribute("open");
-            const inside = rail && (rail === document.activeElement || rail.contains(document.activeElement));
+            // In the rail, in the stacked panel, or nowhere (a tap on the
+            // scrim drops focus on <body>): it goes back to the burger.
+            const inside = (rail && (rail === document.activeElement || rail.contains(document.activeElement)))
+                || this._focusInPanelOrLost();
             if (this.isOpen) this._setOpen?.(false);
             this.shadowRoot.querySelector(".panel")?.classList.remove("with-rail");
             this._setInert(false);
@@ -1488,20 +1587,45 @@ class SacNav extends HTMLElement {
         }
     }
 
-    /** Focus trap: everything outside the nav and the drawer turns inert. */
+    /** Focus trap: everything outside the nav (and the rail drawer, when it
+     *  is out) turns inert while the menu is out — panel or drawer. What was
+     *  inert already is left alone, and only what this set is given back.
+     *  Layers above the open menu (dialogs, tooltips, toasts: z-index over
+     *  19000) stay live: a dialog opened from the panel must answer. */
     _setInert(on) {
         this._inerted.forEach((el) => { el.inert = false; });
         this._inerted = [];
-        if (!on || !this._rail) return;
-        const keep = [this, this._rail];
-        for (let node = this._rail; node.parentElement && node !== document.body; node = node.parentElement) {
-            for (const sib of node.parentElement.children) {
-                if (sib === node || sib.inert || /^(SCRIPT|STYLE|LINK|TEMPLATE)$/.test(sib.tagName)) continue;
-                if (keep.some((k) => sib === k || sib.contains(k))) continue;
-                sib.inert = true;
-                this._inerted.push(sib);
+        if (!on) return;
+        const keep = [this];
+        if (this._drawerOpen && this._rail) keep.push(this._rail);
+        for (const start of keep) {
+            for (let node = start; node.parentElement && node !== document.body; node = node.parentElement) {
+                for (const sib of node.parentElement.children) {
+                    if (sib === node || sib.inert || /^(SCRIPT|STYLE|LINK|TEMPLATE)$/.test(sib.tagName)) continue;
+                    if (keep.some((k) => sib === k || sib.contains(k))) continue;
+                    if ((parseInt(getComputedStyle(sib).zIndex, 10) || 0) > 19000) continue;
+                    sib.inert = true;
+                    this._inerted.push(sib);
+                }
             }
         }
+    }
+
+    /** Focus is in the panel (or the app's slotted panel content), or
+     *  nowhere: closing must hand it back to the burger. Focus the user has
+     *  put elsewhere (a ribbon control) stays where it is. */
+    _focusInPanelOrLost() {
+        const a = this.getRootNode().activeElement;
+        if (!a) {
+            const d = document.activeElement;
+            return !d || d === document.body || d === document.documentElement;
+        }
+        if (a === document.body || a === document.documentElement) return true;
+        if (a === this) {
+            const s = this.shadowRoot.activeElement;
+            return !s || !!s.closest(".panel");
+        }
+        return this.contains(a) && !!a.closest('[slot="panel"]');
     }
 
     /** What the burger does: on compact with a rail, the drawer (stacked

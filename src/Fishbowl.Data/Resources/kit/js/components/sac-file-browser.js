@@ -90,6 +90,13 @@
  *                   job — nothing marked, or just that row; "none" drops it
  *                   (a host with its own delete action — the Delete key
  *                   stays). The button is part="delete".
+ *   tap           — what a touch / pen tap on a FILE does: "open" opens it
+ *                   (sac:choose, one tap — no double-tap to find), "select"
+ *                   only selects it. Absent = "open", unless the browser
+ *                   sits inside a <sac-dialog>, whose OK button is what
+ *                   confirms a pick (the sac.files dialogs set "select").
+ *                   A mouse click always selects, a double-click opens; a
+ *                   tap on a folder always opens it.
  *
  * Slots:
  *   title — sits in the header row between Up and the breadcrumb: a
@@ -111,7 +118,24 @@
  * bar trades Up / breadcrumb / New folder for "{n} selected" and Done. It
  * ends with Done, Esc, unmarking the last row, a folder change, or the
  * `selecting` property. Ending clears the marks. Mouse and keyboard
- * gestures above are unchanged.
+ * gestures above are unchanged. Under (pointer: coarse) the bar also shows
+ * a visible "Select" button (part="select") that turns mark mode on with
+ * nothing marked yet — the long-press is not the only way in (2.36.0).
+ *
+ * States: a listing slower than 300ms shows "Loading…" (aria-busy on the
+ * list) — a quick one never flashes it, and while the folder in view is
+ * only being re-read its rows stay. A FAILED listing is never shown as
+ * empty: "Couldn't open this folder." (role="alert") with a Try again
+ * button (part="retry") that reloads. Empty stays "This folder is empty.".
+ *
+ * Name fields (rename, New folder) close only when the change landed. A
+ * name starting with "." (New folder too), one already taken, or a store
+ * that refuses the write keeps the field open with the typed name and a
+ * note under it ("Couldn't rename this. Try again, or pick another
+ * name.") — aria-invalid, aria-describedby and role="alert".
+ *
+ * Delete that stops partway (the store refuses one) says so in an error
+ * toast: "2 of 5 items were not deleted." / "Couldn't delete “x”.".
  *
  * Context menu (sac.contextMenu): right-click a row, long-press it on
  * touch, or Shift+F10 / the Menu key on the cursor row. The cursor moves
@@ -150,7 +174,8 @@
  *                   row), for the host's own chord; F2 is built in. Enter
  *                   commits, Esc cancels, leaving the field commits a
  *                   changed name. A name starting with "." or one already
- *                   in the folder keeps the field open. The component
+ *                   in the folder keeps the field open, and so does a
+ *                   rename the store refuses (see Name fields). The component
  *                   performs it (sac.fs.ops.rename, store.rename/move, or
  *                   read + write + remove), like delete and New folder —
  *                   unless a sac:request-rename listener cancels.
@@ -168,7 +193,8 @@
  *                        long-press, Done, Esc, the last unmark, a folder
  *                        change (not by the property setter): show / hide a
  *                        "Delete (3)" action bar with it.
- *   sac:choose         — { paths }: a file was double-clicked / Enter'd.
+ *   sac:choose         — { paths }: a file was double-clicked / Enter'd,
+ *                        or tapped on touch (see `tap`).
  *   sac:navigate       — { path }: the folder changed.
  *   sac:sort           — { key, dir }: a header label changed the sort.
  *   sac:request-remove — CANCELABLE, before anything is deleted:
@@ -225,7 +251,8 @@
  * thumbnail checker is --checker-a/--checker-b. Rows expose
  * part="row file|folder|parent [selected] [marked] [cursor]", so a host can style
  * e.g. ::part(marked) itself; also part="delete" (the trash button),
- * "check" (the mark-mode box), "done" and "count" (the mark-mode bar).
+ * "check" (the mark-mode box), "done" and "count" (the mark-mode bar),
+ * "select" (the touch Select button) and "retry" (Try again).
  */
 (function () {
     const TAG = "sac-file-browser";
@@ -248,6 +275,7 @@
     const OVERSCAN = 8;     // rows rendered beyond the viewport, each side
     const THUMB_JOBS = 4;   // thumbnails fetched at once
     const PRESS_SLOP = 10;      // px a held finger may drift before it is a scroll
+    const SLOW_MS = 300;        // a listing slower than this shows "Loading…"
 
     const ICON_ATTRS = 'viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"';
     const icon = (n) => {
@@ -380,6 +408,12 @@
             this._selecting = false;  // mark mode (touch)
             this._press = null;       // { id, x0, y0, path, el, timer } while a touch hold is pending
             this._eatClick = false;   // the click that ends a long-press is not a tap
+            this._lastPointer = "";   // pointerType of the last press on the list ("touch" taps open)
+            this._loading = false;    // a slow listing is under way (aria-busy, "Loading…")
+            this._failed = false;     // the last listing failed ("Couldn't open this folder")
+            this._shownPath = null;   // the folder whose rows are on screen
+            this._slowTimer = 0;
+            this._msgSeq = 0;         // ids for name-field messages
         }
 
         connectedCallback() {
@@ -401,6 +435,7 @@
             if (this._offLang) { this._offLang(); this._offLang = null; }
             if (this._offRegional) { this._offRegional(); this._offRegional = null; }
             if (this._ro) { this._ro.disconnect(); this._ro = null; }
+            clearTimeout(this._slowTimer);
             this._pressEnd();
         }
 
@@ -422,6 +457,9 @@
             label(".list", t("files.list", "Files"));
             const done = sr.querySelector(".done");
             if (done) done.textContent = t("files.select-done", "Done");
+            const selBtn = sr.querySelector(".bar .sel");
+            if (selBtn) selBtn.textContent = t("files.select", "Select");
+            for (const m of sr.querySelectorAll(".field-msg")) m.textContent = t(m.dataset.key, m._fallback);
             this._count();
             this._crumbs();
             this._head();
@@ -475,6 +513,7 @@
         set store(handle) {
             this._store = handle || null;
             this._path = "";
+            this._shownPath = null;   // the rows on screen belong to the old store
             this._sel.clear();
             this._marks.clear();
             this._mode(false);
@@ -587,23 +626,70 @@
             const input = row.querySelector("input");
             input.focus();
             let settled = false;
+            let pending = false;      // the folder is being written
+            const close = () => { settled = true; row.remove(); this._paint(); };
+            // The field closes only when the folder exists (or on Escape /
+            // an empty name). A dot name or a failed write keeps it open,
+            // the typed name in it, with the reason under it.
             const done = async (commit) => {
-                if (settled) return;
-                settled = true;
+                if (settled || pending) return;
                 const name = input.value.trim().replace(/[\\/]+/g, "-");
-                row.remove();
-                if (!commit || !name || name.startsWith(".") || !this._store) { this._paint(); return; }
+                if (!commit || !name || !this._store) { close(); return; }
+                if (name.startsWith(".")) {
+                    this._fieldMsg(input, "files.rename-dot", "A name cannot start with a dot.");
+                    return;
+                }
                 const path = this._path ? `${this._path}/${name}` : name;
+                pending = true;
+                input.readOnly = true;
                 try { await this._store.write(`${path}/${MARKER}`, {}); }
-                catch (err) { console.error("[sac-file-browser] could not create the folder:", err); this._paint(); return; }
+                catch (err) {
+                    console.error("[sac-file-browser] could not create the folder:", err);
+                    pending = false;
+                    input.readOnly = false;
+                    if (row.isConnected) {
+                        this._fieldMsg(input, "files.new-folder-failed",
+                            "Couldn't create this folder. Try again, or pick another name.");
+                    }
+                    return;
+                }
+                pending = false;
+                if (!row.isConnected) return;   // the folder changed meanwhile
+                close();
                 this._go(path, true);
             };
             input.addEventListener("keydown", (e) => {
                 e.stopPropagation();
                 if (e.key === "Enter") { e.preventDefault(); done(true); }
-                if (e.key === "Escape") { e.preventDefault(); done(false); }
+                if (e.key === "Escape") { e.preventDefault(); if (!pending) close(); }
             });
+            input.addEventListener("input", () => this._fieldMsg(input, null));
             input.addEventListener("blur", () => { if (row.isConnected) done(!!input.value.trim()); });
+        }
+
+        /** A name field's problem: aria-invalid, and a visible note under the
+         *  field (role="alert", so it is also spoken) that the field points
+         *  at. `key` null clears it. The note follows a language switch. */
+        _fieldMsg(input, key, fallback) {
+            let msg = input._msg;
+            if (key == null) {
+                input.removeAttribute("aria-invalid");
+                input.removeAttribute("aria-describedby");
+                if (msg) { msg.remove(); input._msg = null; }
+                return;
+            }
+            if (!msg) {
+                msg = input._msg = document.createElement("span");
+                msg.className = "field-msg";
+                msg.id = `fm${++this._msgSeq}`;
+                msg.setAttribute("role", "alert");
+                input.after(msg);
+            }
+            msg.dataset.key = key;
+            msg._fallback = fallback;
+            msg.textContent = t(key, fallback);
+            input.setAttribute("aria-invalid", "true");
+            input.setAttribute("aria-describedby", msg.id);
         }
 
         rename(path) {
@@ -636,46 +722,60 @@
             input.setSelectionRange(0, dot > 0 ? dot : r.name.length);
 
             let settled = false;
+            let pending = false;      // the rename is being carried out
             const close = () => {
                 settled = true;
+                this._fieldMsg(input, null);
                 input.remove();
                 nameEl.hidden = false;
                 el.draggable = true;
                 el.classList.remove("renaming");
                 if (this._renaming && this._renaming.el === el) this._renaming = null;
             };
-            const refuse = (how, message) => {
+            const refuse = (how, key, fallback) => {
                 if (how === "blur") { close(); return; }
-                input.setAttribute("aria-invalid", "true");
-                input.title = message;
+                this._fieldMsg(input, key, fallback);
             };
             const done = async (how) => {
-                if (settled) return;
+                if (settled || pending) return;
                 const name = input.value.trim().replace(/[\\/]+/g, "-");
                 if (!how || !name || name === r.name) { close(); if (how !== "blur") list.focus({ preventScroll: true }); return; }
-                if (name.startsWith(".")) return refuse(how, t("files.rename-dot", "A name cannot start with a dot."));
+                if (name.startsWith(".")) return refuse(how, "files.rename-dot", "A name cannot start with a dot.");
                 const dir = dirName(r.path);
                 const to = dir ? `${dir}/${name}` : name;
-                if (this._index.has(to)) return refuse(how, t("files.rename-taken", "That name is already taken here."));
-                close();
-                if (how !== "blur") list.focus({ preventScroll: true });
-                await this._doRename(r, to);
+                if (this._index.has(to)) return refuse(how, "files.rename-taken", "That name is already taken here.");
+                // Carried out with the field still up: it closes once the
+                // rename landed (or the host took it over); a failure keeps
+                // it open, the typed name in it, the reason under it.
+                pending = true;
+                input.readOnly = true;
+                const landed = () => { close(); if (how !== "blur") list.focus({ preventScroll: true }); };
+                const ok = await this._doRename(r, to, landed);
+                pending = false;
+                if (ok !== false || settled) return;
+                input.readOnly = false;
+                this._fieldMsg(input, "files.rename-failed", "Couldn't rename this. Try again, or pick another name.");
+                if (how !== "blur") input.focus();
             };
             input.addEventListener("keydown", (e) => {
                 e.stopPropagation();
                 if (e.key === "Enter") { e.preventDefault(); done("enter"); }
-                if (e.key === "Escape") { e.preventDefault(); done(null); }
+                if (e.key === "Escape") { e.preventDefault(); if (!pending) done(null); }
             });
-            input.addEventListener("input", () => { input.removeAttribute("aria-invalid"); input.removeAttribute("title"); });
+            input.addEventListener("input", () => this._fieldMsg(input, null));
             input.addEventListener("blur", () => { if (input.isConnected) done("blur"); });
             this._renaming = { path: r.path, el, cancel: close };
             return true;
         }
 
-        async _doRename(r, to) {
+        /** Carry a rename out. `landed()` runs the moment it is done (or the
+         *  host took it over), before the reload. → true (landed), null (the
+         *  host's — sac:request-rename was cancelled), false (it failed: the
+         *  caller keeps the field open). */
+        async _doRename(r, to, landed) {
             const from = r.path;
             const detail = { from, to, folder: r.kind === "folder" };
-            if (!this._emit("sac:request-rename", detail, true)) return;
+            if (!this._emit("sac:request-rename", detail, true)) { if (landed) landed(); return null; }
             const store = this._store;
             try {
                 const o = ops();
@@ -694,14 +794,16 @@
                 }
             } catch (err) {
                 console.error("[sac-file-browser] rename failed:", err);
-                return;
+                return false;
             }
+            if (landed) landed();
             for (const set of [this._marks, this._sel]) {
                 if (set.has(from)) { set.delete(from); set.add(to); }
             }
             this._pendingCursor = to;
             this._emit("sac:rename", detail);
             await this.refresh();
+            return true;
         }
 
         /* ------------------------------------------------------ loading -- */
@@ -710,13 +812,36 @@
             if (!this.shadowRoot.firstChild) this._render();
             const store = this._store;
             this._crumbs();
-            if (!store) { this._setRows([]); this._paint(); return; }
+            if (!store) { this._failed = false; this._setBusy(false); this._setRows([]); this._paint(); return; }
             const token = ++this._loadToken;
             const prefix = this._path ? this._path + "/" : "";
+            // A slow load says so — after SLOW_MS, never for a quick one (no
+            // flash). Rows of the folder in view stay meanwhile; rows of the
+            // folder just left (or a failure being retried) make way for it.
+            clearTimeout(this._slowTimer);
+            this._slowTimer = setTimeout(() => {
+                if (token !== this._loadToken) return;
+                this._setBusy(true);
+                if (this._shownPath !== this._path || this._failed) {
+                    this._failed = false;
+                    this._setRows([]);
+                    this._paint();
+                }
+            }, SLOW_MS);
             let listing;
+            let failed = false;
             try { listing = await this._load(store, prefix); }
-            catch (err) { console.error("[sac-file-browser] listing failed:", err); listing = { folders: [], files: [] }; }
+            catch (err) {
+                // Not "empty": a failed listing shows itself as one, with Try again.
+                console.error("[sac-file-browser] listing failed:", err);
+                listing = { folders: [], files: [] };
+                failed = true;
+            }
             if (token !== this._loadToken) return;       // a newer load won
+            clearTimeout(this._slowTimer);
+            this._setBusy(false);
+            this._failed = failed;
+            this._shownPath = this._path;
             // The cursor row as it is NOW, after the load — read before the
             // await it lost a click, tap or arrow made meanwhile. A cursor
             // asked for meanwhile (up(), rename, the setter) wins over it.
@@ -754,6 +879,18 @@
             this._paint();
             if (i != null) this._reveal(i);
             this._emitCursor();
+        }
+
+        /** Loading (a slow one): aria-busy on the list, and the "Loading…"
+         *  state when there are no rows to show meanwhile (_paint). */
+        _setBusy(on) {
+            on = !!on;
+            if (on === !!this._loading) return;
+            this._loading = on;
+            const list = this.shadowRoot.querySelector(".list");
+            if (!list) return;
+            if (on) list.setAttribute("aria-busy", "true");
+            else list.removeAttribute("aria-busy");
         }
 
         /** { folders, files: stat[] } for one level — entries() when the
@@ -1179,6 +1316,79 @@
                         font-size: 0.8rem;
                     }
                     .empty[hidden], .new-folder ~ .empty { display: none; }
+                    /* Loading (a slow listing only): a small ring + a word. */
+                    .empty.loading {
+                        display: flex;
+                        align-items: center;
+                        justify-content: center;
+                        gap: 8px;
+                        color: var(--text-muted);
+                    }
+                    .empty.loading sac-spinner { --spinner-size: 16px; }
+                    /* Failed: never mistaken for "empty" — the warning icon
+                       (attention ink), the message in readable ink, and the
+                       way out. */
+                    .empty.failed {
+                        display: flex;
+                        flex-direction: column;
+                        align-items: center;
+                        gap: 10px;
+                        color: var(--text-muted);
+                        font-size: 0.85rem;
+                    }
+                    .state-msg {
+                        margin: 0;
+                        display: flex;
+                        align-items: center;
+                        gap: 6px;
+                    }
+                    .state-msg svg { flex: none; width: 16px; height: 16px; color: var(--danger-text); }
+                    .retry {
+                        font: inherit;
+                        font-weight: 600;
+                        color: var(--text);
+                        background: var(--panel-2);
+                        border: 1px solid var(--border-strong);
+                        border-radius: var(--radius-m);
+                        padding: 5px 14px;
+                        cursor: pointer;
+                        transition: background-color 120ms var(--ease-smooth), transform 0.1s var(--ease-smooth);
+                    }
+                    .retry:hover { background: var(--hover-strong); }
+                    /* Press: a boxed control gives a little. */
+                    .retry:active { transform: scale(0.97); }
+                    .retry:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+                    /* A name field's problem (taken, a dot, a failed write):
+                       a small note under the field, over the row below — the
+                       field's row lifts above its neighbours to carry it. */
+                    .row.renaming { z-index: 3; }
+                    .row.new-folder { position: relative; z-index: 3; }
+                    .field-msg {
+                        position: absolute;
+                        top: calc(100% + 2px);
+                        left: calc(6px + 28px + 0.6rem);
+                        right: 4px;
+                        padding: 4px 8px;
+                        background: var(--panel-2);
+                        border: 1px solid var(--border-strong);
+                        border-radius: var(--radius-m);
+                        box-shadow: var(--shadow-1);
+                        color: var(--danger-text);
+                        font-size: 0.75rem;
+                        line-height: 1.35;
+                        white-space: normal;
+                        cursor: default;
+                    }
+                    /* Touch: "Select" (mark mode) as a visible button, not
+                       only behind a long-press. */
+                    .bar .sel {
+                        display: none;
+                        width: auto;
+                        padding: 0 10px;
+                        font: inherit;
+                        font-weight: 600;
+                        color: var(--accent-text);
+                    }
 
                     /* cursor-style="bar": the commander cursor. Only marks
                        are tinted; the cursor row is a solid accent bar while
@@ -1229,10 +1439,19 @@
                     @container (max-width: 480px) {
                         .meta { display: none; }
                     }
+                    @media (hover: none) {
+                        .retry:hover { background: var(--panel-2); }
+                    }
+                    @media (prefers-reduced-motion: reduce) {
+                        .retry { transition: none; }
+                        .retry:active { transform: none; background: var(--hover-strong); }
+                    }
                     @media (pointer: coarse) {
                         :host { --row-h: 44px; --del-w: 44px; }
                         .tool, .del { width: 44px; height: 44px; }
                         .bar .done { width: auto; min-width: 44px; }
+                        :host([multiple]) .bar:not(.selecting) .sel { display: grid; min-width: 44px; }
+                        .retry { min-height: 44px; }
                         :host(:not([delete-button="hover"])) .del { opacity: 1; }
                         .hcol { min-height: 44px; }
                         .rename { font-size: 16px; }
@@ -1249,6 +1468,7 @@
                     <button class="tool mk" type="button" part="new-folder"
                             title="${esc(t("files.new-folder", "New folder"))}"
                             aria-label="${esc(t("files.new-folder", "New folder"))}">${icon("folder-plus")}</button>
+                    <button class="tool sel" type="button" part="select">${esc(t("files.select", "Select"))}</button>
                     <button class="tool done" type="button" part="done">${esc(t("files.select-done", "Done"))}</button>
                 </div>
                 <div class="head" part="header" hidden></div>
@@ -1259,6 +1479,12 @@
             sr.querySelector(".up").addEventListener("click", () => this.up());
             sr.querySelector(".mk").addEventListener("click", () => this.newFolder());
             sr.querySelector(".done").addEventListener("click", () => this._endMarking());
+            sr.querySelector(".sel").addEventListener("click", () => {
+                if (!this.hasAttribute("multiple")) return;
+                this._endRename();
+                this._userMode(true);
+                this._renderWindow(false);
+            });
             sr.querySelector(".head").addEventListener("click", (e) => this._onHead(e));
             const list = sr.querySelector(".list");
             list.addEventListener("click", (e) => this._onClick(e));
@@ -1276,6 +1502,8 @@
             list.addEventListener("dblclick", (e) => {
                 if (this._selecting) return;
                 if (e.target.closest(".rename, .del")) return;
+                // A tap already opened it — a double-tap must not open it twice.
+                if (this._tapOpens()) return;
                 const row = e.target.closest(".canvas > .row");
                 if (row) this._activate(+row.dataset.i);
             });
@@ -1388,13 +1616,51 @@
             sr.querySelector(".canvas").style.height = n ? `${n * this._pitch() - GAP}px` : "0px";
             const empty = sr.querySelector(".empty");
             empty.hidden = n > 0;
-            if (!n) {
-                empty.textContent = this._path
+            if (!n) this._paintState(empty);
+            if (this._renaming && !this._index.has(this._renaming.path)) this._renaming.cancel();
+            this._renderWindow(true);
+        }
+
+        /** What the list says when it has no rows — three states that must
+         *  never look alike: the listing FAILED ("Couldn't open this folder"
+         *  + Try again), it is still LOADING (a slow load only), or the
+         *  folder is EMPTY. All text via textContent. */
+        _paintState(box) {
+            const sr = this.shadowRoot;
+            const hadFocus = sr.activeElement && box.contains(sr.activeElement);
+            box.className = "empty";
+            box.textContent = "";
+            if (this._failed) {
+                box.classList.add("failed");
+                const msg = document.createElement("p");
+                msg.className = "state-msg";
+                msg.setAttribute("role", "alert");
+                msg.innerHTML = icon("warn");
+                msg.append(t("files.load-failed", "Couldn't open this folder."));
+                const retry = document.createElement("button");
+                retry.type = "button";
+                retry.className = "retry";
+                retry.setAttribute("part", "retry");
+                retry.textContent = t("files.retry", "Try again");
+                // Its own keys: Enter / Space press it, never the list's.
+                retry.addEventListener("keydown", (e) => e.stopPropagation());
+                retry.addEventListener("click", (e) => {
+                    e.stopPropagation();
+                    sr.querySelector(".list").focus({ preventScroll: true });
+                    this.refresh();
+                });
+                box.append(msg, retry);
+                if (hadFocus) retry.focus({ preventScroll: true });
+            } else if (this._loading) {
+                box.classList.add("loading");
+                const spin = document.createElement("sac-spinner");
+                spin.setAttribute("aria-hidden", "true");
+                box.append(spin, t("files.loading", "Loading…"));
+            } else {
+                box.textContent = this._path
                     ? t("files.empty-folder", "This folder is empty.")
                     : t("files.empty", "Nothing here yet.");
             }
-            if (this._renaming && !this._index.has(this._renaming.path)) this._renaming.cancel();
-            this._renderWindow(true);
         }
 
         /**
@@ -1653,12 +1919,30 @@
                 this._renderWindow(false);
                 list.focus({ preventScroll: true });
                 this._after(snap, true);
+                // Touch: one tap opens the file — no double-tap to find —
+                // unless a dialog's OK button is what confirms (see `tap`).
+                if (this._tapOpens()) this._activate(i);
                 return;
             }
             this._renderWindow(false);
             list.focus({ preventScroll: true });
             this._after(snap, false);
             if (this._selecting && !this._marks.size) this._userMode(false);
+        }
+
+        /** Does a tap on a file open it? Only for a touch or pen press, and
+         *  then by `tap`: "open" yes, "select" no, absent = yes unless the
+         *  browser sits in a <sac-dialog> (its OK button confirms the pick —
+         *  the sac.files dialogs). A mouse click always just selects. */
+        _tapOpens() {
+            if (this._lastPointer !== "touch" && this._lastPointer !== "pen") return false;
+            const mode = (this.getAttribute("tap") || "").trim().toLowerCase();
+            if (mode === "open") return true;
+            if (mode === "select") return false;
+            for (let n = this; n; n = n.parentElement || (n.getRootNode && n.getRootNode().host) || null) {
+                if (n.localName === "sac-dialog") return false;
+            }
+            return true;
         }
 
         /** Mark mode: toggle row i's mark; the last unmark ends the mode. */
@@ -1690,6 +1974,7 @@
            touch drag-and-drop would take the long-press from the menu). */
         _pressStart(e) {
             this._eatClick = false;
+            this._lastPointer = e.pointerType || "";
             this._pressEnd();
             if (e.pointerType !== "touch" && e.pointerType !== "pen") return;
             if (e.button > 0 || this._renaming || e.target.closest(".rename, .del")) return;
@@ -1924,6 +2209,7 @@
             }
             if (answer !== "delete") return;
             const snap = this._snapshot();
+            let gone = 0;
             for (const r of targets) {
                 const folder = r.kind === "folder";
                 try {
@@ -1933,9 +2219,20 @@
                         await store.remove(r.path);
                     }
                 } catch (err) { console.error("[sac-file-browser] remove() failed:", err); break; }
+                gone++;
                 this._sel.delete(r.path);
                 this._marks.delete(r.path);
                 this._emit("sac:remove", { path: r.path, folder });
+            }
+            // Stopped partway: say what is still there — the list alone
+            // would only show it by what did not disappear.
+            if (gone < targets.length && window.sac && typeof sac.toast === "function") {
+                const left = targets.length - gone;
+                sac.toast(targets.length === 1
+                    ? t("files.delete-failed-one", "Couldn't delete “{name}”.").replace("{name}", first.name)
+                    : t("files.delete-failed-many", "{n} of {total} items were not deleted.")
+                        .replace("{n}", left).replace("{total}", targets.length),
+                    { kind: "error" });
             }
             if (this._snapshot().marks !== snap.marks) this._emit("sac:mark", { paths: this.marked });
             if (this._selecting && !this._marks.size) this._userMode(false);
