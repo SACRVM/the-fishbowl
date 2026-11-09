@@ -47,7 +47,17 @@ public class TablesTests
                 },
             });
             var hall = (await Post($"{t}/rooms/rows", new { title = "Hall", seats = 80, kind = "hall" })).GetProperty("id").GetString()!;
-            await Post($"{t}/rooms/rows", new { title = "Studio", seats = 12, kind = "studio" });
+            var studio = (await Post($"{t}/rooms/rows", new { title = "Studio", seats = 12, kind = "studio" })).GetProperty("id").GetString()!;
+            async Task<long> Seats(string id)
+            {
+                var r = await context.APIRequest.GetAsync($"{_fixture.BaseUrl}{t}/rooms/rows/{id}");
+                return (await r.JsonAsync())!.Value.GetProperty("seats").GetInt64();
+            }
+            async Task<bool> Until(Func<Task<bool>> ok)
+            {
+                for (var i = 0; i < 50; i++) { if (await ok()) return true; await Task.Delay(100, TestContext.Current.CancellationToken); }
+                return false;
+            }
 
             // The desktop of the space has the Tables tile; it lists the table.
             await page.GotoAsync($"{_fixture.BaseUrl}/#/space/{slug}/");
@@ -79,6 +89,16 @@ public class TablesTests
             var attic = await page.APIRequest.PostAsync($"{_fixture.BaseUrl}{t}/rooms/count", new() { DataObject = new { where = new { title = "Attic" } } });
             Assert.Equal(1, (await attic.JsonAsync())!.Value.GetProperty("count").GetInt32());
 
+            // An edit left unsaved — the cursor still in its row — is saved
+            // when the grid leaves the page with the view (sac-data-grid 1.2).
+            await page.EvaluateAsync("id => document.querySelector('fb-tables-view sac-data-grid').focusCell(id, 'seats')", hall);
+            await page.Keyboard.TypeAsync("95");
+            await page.Keyboard.PressAsync("Tab");
+            Assert.Equal(1, await grid.EvaluateAsync<int>("g => g.dirty"));
+            await page.EvaluateAsync("slug => { location.hash = `#/space/${slug}/notes`; }", slug);
+            await Assertions.Expect(page.Locator("fb-notes-view")).ToHaveCountAsync(1);
+            Assert.True(await Until(async () => await Seats(hall) == 95), "the unsaved row wasn't saved on leaving the view");
+
             // Tables exist only in spaces: the burger lists them there, not in
             // the personal workspace.
             await Assertions.Expect(page.Locator($"sac-nav a[href='#/space/{slug}/tables']")).ToHaveCountAsync(1);
@@ -90,6 +110,35 @@ public class TablesTests
             var keys = page.Locator("sac-nav .nav-item", new() { HasText = "API keys" });
             await keys.ClickAsync();
             await Assertions.Expect(page.Locator("#fb-win-keys[open]")).ToHaveCountAsync(1);
+
+            // Closing the page with a row unsaved asks once — the grid's
+            // question, Fishbowl asks none of its own — and the grid saves
+            // the row meanwhile.
+            var tab = await context.NewPageAsync();
+            tab.PageError += (_, e) => errors.Add(e);
+            await tab.GotoAsync($"{_fixture.BaseUrl}/#/space/{slug}/tables/rooms");
+            var tabGrid = tab.Locator("fb-tables-view sac-data-grid");
+            await Assertions.Expect(tabGrid).ToContainTextAsync("Studio", new() { Timeout = 10000 });
+            await tab.EvaluateAsync("id => document.querySelector('fb-tables-view sac-data-grid').focusCell(id, 'seats')", studio);
+            await tab.Keyboard.TypeAsync("14");
+            await tab.Keyboard.PressAsync("Tab");
+            Assert.Equal(1, await tabGrid.EvaluateAsync<int>("g => g.dirty"));
+            // The grid arms its question with the status line, a frame later.
+            await tab.EvaluateAsync("() => new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)))");
+            var asked = new List<string>();
+            var savedWhileAsking = false;
+            tab.Dialog += async (_, d) =>
+            {
+                asked.Add(d.Type);
+                savedWhileAsking = await Until(async () => await Seats(studio) == 14);
+                await d.AcceptAsync();
+            };
+            var closed = new TaskCompletionSource();
+            tab.Close += (_, _) => closed.TrySetResult();
+            await tab.CloseAsync(new() { RunBeforeUnload = true });
+            await closed.Task.WaitAsync(TimeSpan.FromSeconds(15), TestContext.Current.CancellationToken);
+            Assert.Equal(new[] { "beforeunload" }, asked);
+            Assert.True(savedWhileAsking, "the unsaved row wasn't saved while the page asked");
 
             Assert.Empty(errors);
         }

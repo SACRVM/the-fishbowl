@@ -229,6 +229,13 @@
 
     /** A tags column's options as <sac-chip-input> suggestions: the value is
      *  the name, label / labelKey the shown text (it relabels live). */
+    /** The first options' labels, for "– e.g. Open, Shipped, Closed, …". */
+    function optionList(col) {
+        const opts = (col && col.options) || [];
+        const shown = opts.slice(0, 3).map(optionLabel);
+        return shown.length ? shown.join(", ") + (opts.length > 3 ? ", …" : "") : "";
+    }
+
     const tagSuggestions = (col) => (col.options || []).map((o) => ({
         name: String(o.value),
         color: slot(o.color),
@@ -332,6 +339,8 @@
      *   editor(col)         sheet-mode editor element, or null = no editor
      *   empty(v)            true when the cell counts as empty
      *   numeric             true: sum / avg apply
+     *   example(col)        optional: a value as the column takes it ("25.09.2026"),
+     *                       for the message on text it cannot read
      */
     const base = {
         align: "left",
@@ -374,6 +383,7 @@
         numeric: true,
         text(v, col) { return formatNumber(v, col && col.decimals); },
         copy(v, col) { return formatNumber(v, col && col.decimals, false); },
+        example(col) { return formatNumber(col && col.decimals === 0 ? 1234 : 1234.5, col && col.decimals); },
         parse(text) {
             const n = parseNumber(text);
             return Number.isNaN(n) ? undefined : n;
@@ -390,6 +400,7 @@
         filter: "date",
         text(v) { return formatDate(v); },
         parse(text) { const v = parseDate(text); return v == null ? undefined : v; },
+        example() { return formatDate("2026-09-25"); },
         editor(col) {
             return kitField("sac-date-field", col, { min: col.min && normDate(col.min), max: col.max && normDate(col.max) });
         },
@@ -402,6 +413,7 @@
         filter: "time",
         text(v) { return formatTime(v); },
         parse(text) { const v = parseTime(text); return v == null ? undefined : v; },
+        example() { return formatTime("14:30"); },
         editor(col) {
             return kitField("sac-time-field", col, { step: col.step, min: col.min && normTime(col.min), max: col.max && normTime(col.max) });
         },
@@ -414,6 +426,7 @@
         filter: "date",
         text(v) { return formatDateTime(v); },
         parse(text) { const v = parseDateTime(text); return v == null ? undefined : v; },
+        example() { return formatDateTime("2026-09-25T14:30"); },
         editor: dateTimeEditor,
         editSample() { return "2026-12-28T12:58"; },
     });
@@ -424,6 +437,7 @@
         filter: "bool",
         text(v) { return v ? t("data-grid.yes", "Yes") : t("data-grid.no", "No"); },
         copy(v) { return v ? "TRUE" : "FALSE"; },
+        example() { return `${t("data-grid.yes", "Yes")} / ${t("data-grid.no", "No")}`; },
         parse(text) {
             const s = String(text).trim().toLocaleLowerCase();
             const yes = t("data-grid.yes", "Yes").toLocaleLowerCase();
@@ -477,6 +491,7 @@
             return o ? o.value : v;
         },
         toEditor(v) { return isEmpty(v) ? "" : String(v); },
+        example: optionList,
     });
 
     define("tags", {
@@ -534,6 +549,7 @@
         },
         toEditor(v) { return Array.isArray(v) ? v.slice() : []; },
         fromEditor(v) { return Array.isArray(v) ? v.slice() : []; },
+        example: optionList,
     });
 
     define("color", {
@@ -557,6 +573,7 @@
             cell.append(sw, hex);
         },
         editor(col) { return kitField("sac-color-field", col, {}); },
+        example() { return "#RRGGBB"; },
     });
 
     define("readonly", {

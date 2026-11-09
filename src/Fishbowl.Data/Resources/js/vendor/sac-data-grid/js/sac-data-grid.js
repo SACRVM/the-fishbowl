@@ -8,9 +8,11 @@
  * tokens and fields, so it themes, translates and formats like the rest of
  * the app.
  *
- * Requires kit ≥ 2.22.0 (css/ui.css, lib/globals.js, and the components it
- * uses: sac-icon, sac-menu, sac-spinner, sac-toast, sac-dialog, sac-tooltip,
- * sac-chip, sac-segmented-control and the cell editors) plus the grid's own
+ * Requires kit ≥ 2.22.0 (css/ui.css, lib/globals.js, lib/context-menu.js —
+ * without it a long press on a row opens no row menu on iOS — and the
+ * components it uses: sac-icon, sac-menu, sac-spinner, sac-toast,
+ * sac-dialog, sac-tooltip, sac-chip, sac-segmented-control and the cell
+ * editors; kit/js/all.js has them all) plus the grid's own
  * scripts, in this order:
  *   js/sac-data-grid-types.js, js/sac-data-grid.js, js/sac-data-grid-edit.js
  *   (editing; without it the grid is read-only), js/sac-data-grid-form.js (the
@@ -42,6 +44,14 @@
  *   row-header — the column before the data: "marks" (default: narrow, it
  *                shows only a row's state: new, an error), "numbers" (the
  *                row's position, as in a spreadsheet) or "none".
+ *   rows       — "fixed": the rows can be edited but not added or deleted
+ *                (no new-row line, no New / Delete in the row menu or the
+ *                record form, addRow() returns null, a paste does not add
+ *                rows). Absent: rows can be added and deleted.
+ *   unload-guard — "off": no "leave this page?" question from the grid
+ *                while rows are unsaved (the host app asks itself). The
+ *                grid saves unsaved rows when it is removed or the page
+ *                hides (cell / row save mode) either way.
  *
  * Properties:
  *   columns — [{ field, label, labelKey?, type, width?, minWidth?, frozen?,
@@ -53,6 +63,11 @@
  *   view    — { columns: { field: { width, hidden } }, sort, filter }, get/set.
  *   mode    — get/set, mirrors the attribute.
  *   dirty   — read-only: the number of rows with unsaved changes.
+ *   rowMenu — optional (row, info) → [{ id, label, labelKey?, icon?,
+ *             danger?, disabled?, onClick(row, info) } | "-"]: the host's
+ *             own items, first in the row menu (right-click, long press,
+ *             Shift+F10 / the menu key). info: { id, index, field, rows }
+ *             (rows: the loaded rows of the selected range).
  *
  * Methods: reload(), save(), revert(), addRow(values?), focusCell(id, field).
  *
@@ -114,6 +129,7 @@
     const STATS_CELL_CAP = 2000000;   // selection stats stop scanning past this
     const STATS_BLOCK_CAP = 20;       // …and load at most this many missing blocks (a local
                                       // source's 100k rows are 20 blocks; a server's are not loaded)
+    const LOAD_CAP = 200;             // copy, paste and clear load at most this many missing blocks first
 
     let instances = 0;
 
@@ -402,11 +418,24 @@
             color: var(--text);
             overflow: hidden;
         }
+        .long-pop:popover-open { display: flex; flex-direction: column; }
         .long-pop textarea.cell-input {
+            flex: 1 1 auto;
+            min-height: 0;
+            height: auto;
             padding: 6px var(--cell-padding-inline, 8px);
             resize: none;
             line-height: 1.45;
             white-space: pre-wrap;
+        }
+        /* Enter makes a new line in here: the footer says how to finish. */
+        .long-foot {
+            flex: none;
+            display: flex;
+            justify-content: flex-end;
+            gap: 6px;
+            padding: 6px;
+            border-top: 1px solid var(--border);
         }
         .row.deleted > .cell { text-decoration: line-through; color: var(--text-dim); }
         .row.created > .rh { color: var(--accent-warm-text); }
@@ -498,6 +527,23 @@
             white-space: nowrap;
         }
         .status .spacer { flex: 1 1 auto; }
+        /* Active filters: the column names in the header's filtered look,
+           each opening its filter, and a way to clear them all. */
+        .status .filters { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 2px 6px; white-space: normal; }
+        .status .filters[hidden] { display: none; }
+        .link {
+            padding: 0;
+            border: 0;
+            background: none;
+            font: inherit;
+            color: var(--accent-text);
+            text-decoration: underline dotted 1px;
+            text-underline-offset: 2px;
+            cursor: pointer;
+        }
+        .link:hover { text-decoration-style: solid; }
+        .link:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; border-radius: var(--radius-s); }
+        .link.err { color: var(--danger-text); }
         .status .selinfo { overflow: hidden; text-overflow: ellipsis; }
         .pager { display: flex; align-items: center; gap: 2px; }
         .pager button {
@@ -676,9 +722,18 @@
         return i;
     }
 
+    /** "1 row" / "{n} rows": the -one key for exactly one, else the plural key. */
+    function plural(n, key, one, many, vars) {
+        return n === 1 ? t(key + "-one", one, vars) : t(key, many, Object.assign({ n: int(n) }, vars));
+    }
+
+    /** What the column menu and the row menu are, for people who cannot see
+     *  the headers' tooltips (the grid's accessible description). */
+    const keysHint = () => t("data-grid.keys-hint", "Alt+Down opens the column menu: sort, filter, columns. Shift+F10 opens the row menu.");
+
 class SacDataGrid extends HTMLElement {
     static get observedAttributes() {
-        return ["mode", "save-mode", "paging", "page-size", "lines", "label", "mode-toggle", "compact-edit", "row-header"];
+        return ["mode", "save-mode", "paging", "page-size", "lines", "label", "mode-toggle", "compact-edit", "row-header", "unload-guard", "rows"];
     }
 
     constructor() {
@@ -782,11 +837,20 @@ class SacDataGrid extends HTMLElement {
                 break;
             case "save-mode":
             case "mode-toggle":
+            case "unload-guard":
                 this._renderStatus();
                 break;
             case "compact-edit":
                 this._stamp++;
                 this._scheduleRender();
+                break;
+            case "rows":
+                // The new-row line comes or goes; an open record's New and
+                // Delete follow.
+                this._clampSelection();
+                this._stamp++;
+                this._scheduleRender();
+                if (this._formState && this._formRefill) this._formRefill();
                 break;
             case "row-header":
                 this._layout();
@@ -895,6 +959,7 @@ class SacDataGrid extends HTMLElement {
                 </div>
                 <div class="status" part="status">
                     <span class="count"></span>
+                    <span class="filters" hidden></span>
                     <span class="selinfo"></span>
                     <span class="spacer"></span>
                     <span class="extra"></span>
@@ -915,6 +980,7 @@ class SacDataGrid extends HTMLElement {
         this._frow = $(".frow");
         this._status = $(".status");
         this._countEl = $(".count");
+        this._filtersEl = $(".filters");
         this._selEl = $(".selinfo");
         this._extraEl = $(".extra");
         this._modesEl = $(".modes");
@@ -950,6 +1016,7 @@ class SacDataGrid extends HTMLElement {
             this.shadowRoot.addEventListener(type, (e) => e.stopPropagation());
         }
         this._scroller.setAttribute("aria-label", this.getAttribute("label") || t("data-grid.label", "Data grid"));
+        this._scroller.setAttribute("aria-description", keysHint());
         this._scroller.addEventListener("scroll", () => this._onScroll(), { passive: true });
         this._scroller.addEventListener("keydown", (e) => this._onKeydown(e));
         this._scroller.addEventListener("focus", () => this._paintSelection());
@@ -1165,7 +1232,12 @@ class SacDataGrid extends HTMLElement {
             const h = this._hcells[c];
             const filtered = !!this._filter[col.field];
             h._lbl.textContent = col.labelText();
-            h.title = filtered ? `${col.labelText()} · ${t("data-grid.filtered", "Filtered")}` : col.labelText();
+            // The full title (a header may be cut short), then what the header does.
+            const hint = [
+                col.sortable ? t("data-grid.hint-sort", "Click to sort, Shift+click to add") : "",
+                col.filterable ? t("data-grid.hint-menu", "Right-click for filter and columns") : t("data-grid.hint-menu-columns", "Right-click for columns"),
+            ].filter(Boolean).join(" · ");
+            h.title = (filtered ? `${col.labelText()} · ${t("data-grid.filtered", "Filtered")}` : col.labelText()) + "\n" + hint;
             const s = sorted.get(col.field);
             h._sort.hidden = !s;
             h._sort.className = s ? "sort " + (s.dir === "desc" ? "desc" : "asc") : "sort";
@@ -1694,6 +1766,11 @@ class SacDataGrid extends HTMLElement {
             btn.append(icon("sync"), document.createTextNode(t("data-grid.retry", "Retry")));
             btn._block = note.block;
             box.append(el("span", "", t("data-grid.load-failed", "Couldn't load rows.")), btn);
+        } else if (Object.keys(this._filter).length) {
+            // Not an empty table: the filters hide every row.
+            const btn = el("button", "btn clear-filters", t("data-grid.clear-filters", "Clear filters"));
+            btn.type = "button";
+            box.append(el("span", "", t("data-grid.empty-filtered", "No rows match the filters.")), btn);
         } else {
             box.append(el("span", "", t("data-grid.empty", "No rows")));
         }
@@ -1852,10 +1929,51 @@ class SacDataGrid extends HTMLElement {
             }
         }
         if (this._countEl._t !== count) { this._countEl._t = count; this._countEl.textContent = count; }
+        this._renderFilters();
         this._renderSelInfo();
         this._renderPager();
         this._renderModes();
         if (this._renderExtra) this._renderExtra();
+    }
+
+    /**
+     * The active filters, hidden columns' too: "Filtered: City, Status ·
+     * Clear filters". A name opens that column's filter (under its header,
+     * or here when the column is hidden).
+     */
+    _renderFilters() {
+        const box = this._filtersEl;
+        const cols = Object.keys(this._filter).map((f) => this._all.find((c) => c.field === f)).filter(Boolean);
+        const key = cols.map((c) => c.labelText()).join("\u0000") + "|" + t("data-grid.filtered-by", "Filtered:");
+        if (box._t === key) return;
+        box._t = key;
+        box.hidden = !cols.length;
+        box.textContent = "";
+        if (!cols.length) return;
+        box.append(el("span", "", t("data-grid.filtered-by", "Filtered:")));
+        cols.forEach((col, i) => {
+            const b = el("button", "link", col.labelText() + (i < cols.length - 1 ? "," : ""));
+            b.type = "button";
+            b.setAttribute("aria-label", t("data-grid.filter-title", "Filter {label}", { label: col.labelText() }));
+            b.addEventListener("click", () => this._openFilter(col, b));
+            box.append(b);
+        });
+        const clear = el("button", "btn", t("data-grid.clear-filters", "Clear filters"));
+        clear.type = "button";
+        clear.addEventListener("click", () => { this._clearFilters(); this.focus(); });
+        box.append(clear);
+    }
+
+    _clearFilters() {
+        if (!Object.keys(this._filter).length) return;
+        this._closeFilter();
+        if (this._editor) this._commitEdit(null);
+        if (this._leaveRow) this._leaveRow(this._cur.r);
+        this._filter = {};
+        this._page = 0;
+        this._paintHead();
+        this._resetData();
+        this._emitView();
     }
 
     /** The optional mode switch (mode-toggle attribute): Read · Sheet · Form. */
@@ -2005,9 +2123,11 @@ class SacDataGrid extends HTMLElement {
     _relabel() {
         if (!this._built) return;
         this._scroller.setAttribute("aria-label", this.getAttribute("label") || t("data-grid.label", "Data grid"));
+        this._scroller.setAttribute("aria-description", keysHint());
         this._paintHead();
         for (const f of this._fcells || []) f._t = null;
         this._countEl._t = null;
+        this._filtersEl._t = null;
         this._selEl._t = null;
         this._pager._t = null;
         this._modesEl._t = null;
@@ -2028,6 +2148,43 @@ class SacDataGrid extends HTMLElement {
     _announce(text) {
         this._live.textContent = "";
         requestAnimationFrame(() => { this._live.textContent = text; });
+    }
+
+    /** Something people need to see (a copy that failed, a paste that did
+     *  not all fit): the kit's toast, which is also a live region; without
+     *  it, the grid's own live region. opts: sac.toast's (kind, action). */
+    _notify(text, opts) {
+        if (window.sac && typeof sac.toast === "function") return sac.toast(text, opts || {});
+        this._announce(text);
+        return null;
+    }
+
+    /** The blocks behind display rows r1…r2 that are not loaded. */
+    _missingBlocks(r1, r2) {
+        const out = [];
+        if (r2 < r1 || !this._source) return out;
+        const bs = this._bs, base = this._base();
+        for (let b = Math.floor((base + r1) / bs); b <= Math.floor((base + r2) / bs); b++) {
+            if (this._total != null && b * bs >= this._total) break;
+            const blk = this._blocks.get(b);
+            if (!blk || !blk.rows) out.push(b);
+        }
+        return out;
+    }
+
+    /**
+     * Load the rows r1…r2 before working on all of them (copy, paste,
+     * clear): resolves true once they are there (null: they already were,
+     * nothing waited), false when that is more than LOAD_CAP blocks, a load
+     * failed, or the data changed meanwhile (a new sort, filter or source).
+     */
+    _loadRows(r1, r2) {
+        const missing = this._missingBlocks(r1, r2);
+        if (!missing.length) return null;
+        if (missing.length > LOAD_CAP) return Promise.resolve(false);
+        const q = this._query;
+        return Promise.all(missing.map((b) => this._load(b, true)))
+            .then(() => q === this._query && !this._missingBlocks(r1, Math.min(r2, this._rowCount() - 1)).length);
     }
 
     /* -------------------------------------------------------- selection -- */
@@ -2356,6 +2513,7 @@ class SacDataGrid extends HTMLElement {
     _onBodyClick(e) {
         const retry = e.target.closest("button.retry");
         if (retry) { this._retry(retry._block); return; }
+        if (e.target.closest("button.clear-filters")) { this._clearFilters(); this.focus(); return; }
         const tap = this._tapCell;
         this._tapCell = null;
         if (tap && this._onCellClick && tap.r === this._cur.r && tap.c === this._cur.c) {
@@ -2592,11 +2750,13 @@ class SacDataGrid extends HTMLElement {
             ...(col.sortable ? [
                 this._menuItem("sort-asc", "chevron-up", t("data-grid.sort-asc", "Sort ascending"), () => this._setSort([{ field: f, dir: "asc" }])),
                 this._menuItem("sort-desc", "chevron-down", t("data-grid.sort-desc", "Sort descending"), () => this._setSort([{ field: f, dir: "desc" }])),
+                // Shift+click's job, for people who do not know it.
+                !sorted && this._sort.length ? this._menuItem("sort-add", "plus", t("data-grid.sort-add", "Add to sort"), () => this._setSort([...this._sort, { field: f, dir: "asc" }])) : null,
                 sorted ? this._menuItem("sort-clear", "close", t("data-grid.sort-clear", "Clear sort"), () => this._setSort(this._sort.filter((s) => s.field !== f))) : null,
                 el("hr"),
             ] : []),
             ...(col.filterable ? [
-                this._menuItem("filter", "search", t("data-grid.filter", "Filter…"), () => this._openFilter(this._cols.findIndex((x) => x.field === f))),
+                this._menuItem("filter", "search", t("data-grid.filter", "Filter…"), () => this._openFilter(col)),
                 this._filter[f] ? this._menuItem("filter-clear", "close", t("data-grid.filter-clear", "Clear filter"), () => this._setFilter(f, null)) : null,
                 el("hr"),
             ] : []),
@@ -2638,11 +2798,49 @@ class SacDataGrid extends HTMLElement {
         this._emitView();
     }
 
+    /** Rows can be added and deleted, unless rows="fixed". */
+    _fixedRows() { return this.getAttribute("rows") === "fixed"; }
+
+    /**
+     * The host's items for the row under the cursor (grid.rowMenu), as menu
+     * buttons, then a separator; [] without a hook or a row. "-" in the
+     * list is a separator; an item's onClick gets the row and the info.
+     */
+    _hostRowItems() {
+        if (typeof this.rowMenu !== "function") return [];
+        const r = this._cur.r, row = this._rowAt(r);
+        if (!row) return [];
+        const s = this._rect();
+        const rows = [];
+        for (let i = s.r1; i <= s.r2; i++) { const x = this._rowAt(i); if (x) rows.push(x); }
+        const col = this._cols[this._cur.c];
+        const info = { id: this._idOf(row), index: this._base() + r, field: col ? col.field : null, rows };
+        let list;
+        try { list = this.rowMenu(row, info); }
+        catch (err) { console.error("[sac-data-grid] rowMenu:", err); return []; }
+        if (!Array.isArray(list)) return [];
+        const out = [];
+        list.forEach((it, i) => {
+            if (it === "-") {
+                if (out.length && out[out.length - 1].tagName !== "HR") out.push(el("hr"));
+                return;
+            }
+            if (!it || it.label == null) return;
+            const label = it.labelKey ? t(it.labelKey, String(it.label)) : String(it.label);
+            out.push(this._menuItem("host:" + (it.id != null ? it.id : i), it.icon || null, label, () => {
+                if (typeof it.onClick !== "function") return;
+                try { it.onClick(row, info); } catch (err) { console.error("[sac-data-grid] rowMenu item:", err); }
+            }, { danger: !!it.danger, disabled: !!it.disabled }));
+        });
+        if (out.length && out[out.length - 1].tagName !== "HR") out.push(el("hr"));
+        return out;
+    }
+
     _openRowMenu(point) {
         const rows = this._rowCount();
         if (!rows) return;
         this._menuActions = {};
-        const items = this._rowMenuItems ? this._rowMenuItems() : [];
+        const items = [...this._hostRowItems(), ...(this._rowMenuItems ? this._rowMenuItems() : [])];
         items.push(this._menuItem("copy", "copy", t("data-grid.copy", "Copy"), () => this._copyToClipboard()));
         let pt = point;
         if (!pt) {
@@ -2659,10 +2857,14 @@ class SacDataGrid extends HTMLElement {
 
     /* ----------------------------------------------------------- filter -- */
 
-    _openFilter(c) {
-        const col = this._cols[c];
+    /** The filter popover for a column (a visible column's index, or the
+     *  column itself: a hidden column's filter opens from the status line,
+     *  anchored to `anchor`). */
+    _openFilter(c, anchor) {
+        const col = typeof c === "number" ? this._cols[c] : c;
         if (!col || !col.filterable) return;
         this._closeFilter();
+        this._popAnchor = anchor || null;
         const pop = this._pop;
         const f = col.field;
         const cur = this._filter[f] || null;
@@ -2811,7 +3013,8 @@ class SacDataGrid extends HTMLElement {
     _placePop() {
         const pop = this._pop;
         const c = this._cols.findIndex((x) => x.field === this._popField);
-        const h = c >= 0 ? this._hcells[c] : null;
+        const h = c >= 0 ? this._hcells[c]
+            : (this._popAnchor && this._popAnchor.isConnected ? this._popAnchor : this._filtersEl.hidden ? this._status : this._filtersEl);
         const r = (h || this._scroller).getBoundingClientRect();
         const pw = pop.offsetWidth, ph = pop.offsetHeight;
         const vv = window.visualViewport;
@@ -2849,34 +3052,62 @@ class SacDataGrid extends HTMLElement {
             if (this._paste) this._paste(e);
             return;
         }
-        const text = this._rangeTSV();
-        if (text == null) return;
+        const s = this._rect();
+        const text = this._rangeTSV(s);
         e.preventDefault();
+        if (text == null) {
+            // Rows of the range are still loading. The browser's own copy
+            // would leave the old clipboard in place, to be pasted by
+            // mistake: empty it, load the rows, then copy them.
+            e.clipboardData.setData("text/plain", "");
+            this._copyToClipboard(s, e.type === "cut");
+            return;
+        }
         e.clipboardData.setData("text/plain", text);
-        if (e.type === "cut" && this._cut) this._cut();
+        if (e.type === "cut" && this._cut) this._cut(s);
     }
 
     /** The range as TSV (Excel / Sheets quoting), or null while rows are missing. */
-    _rangeTSV() {
-        const s = this._rect();
+    _rangeTSV(s) {
         const cols = this._cols.slice(s.c1, s.c2 + 1);
         const lines = [];
         for (let r = s.r1; r <= s.r2; r++) {
             const row = this._rowAt(r);
-            if (row === undefined) {
-                this._announce(t("data-grid.copy-wait", "Some rows are still loading — try again in a moment."));
-                return null;
-            }
+            if (row === undefined) return null;
             lines.push(cols.map((col) => tsvField(col.copy(this._get(row, col), row))).join("\t"));
         }
         return lines.join("\r\n");
     }
 
-    async _copyToClipboard() {
-        const text = this._rangeTSV();
-        if (text == null) return;
+    /**
+     * Copy a range (default: the selection) through the async clipboard,
+     * loading its rows first; cut: clear it once copied. Every failure is
+     * shown, not only announced: a copy that silently did nothing gets the
+     * old clipboard pasted.
+     */
+    async _copyToClipboard(range, cut) {
+        const s = range || this._rect();
+        const loaded = await this._loadRows(s.r1, s.r2);
+        if (loaded === false) {
+            this._notify(this._missingBlocks(s.r1, s.r2).length > LOAD_CAP
+                ? t("data-grid.copy-too-many", "Too many of these rows are not loaded yet to copy them. Select fewer rows.")
+                : t("data-grid.copy-wait", "Some rows couldn't be loaded, so nothing was copied. Try again in a moment."), { kind: "error" });
+            return false;
+        }
+        const text = this._rangeTSV(s);
+        if (text == null) {
+            this._notify(t("data-grid.copy-wait", "Some rows couldn't be loaded, so nothing was copied. Try again in a moment."), { kind: "error" });
+            return false;
+        }
         try { await navigator.clipboard.writeText(text); }
-        catch (err) { this._announce(t("data-grid.copy-failed", "Couldn't copy.")); }
+        catch (err) {
+            this._notify(t("data-grid.copy-failed", "Couldn't copy: the browser did not allow it."), { kind: "error" });
+            return false;
+        }
+        if (cut && this._cut) this._cut(s);
+        // It took a moment: say when it is ready to paste.
+        if (loaded) this._notify(plural(s.r2 - s.r1 + 1, "data-grid.copied", "1 row copied.", "{n} rows copied."));
+        return true;
     }
 
     /* ------------------------------------------------------------ modes -- */
@@ -2967,6 +3198,7 @@ class SacDataGrid extends HTMLElement {
         }
     };
 
+    SacDataGrid.plural = plural;
     SacDataGrid.tsvField = tsvField;
     SacDataGrid.parseTSV = parseTSV;
     SacDataGrid.computeAggregate = computeAggregate;

@@ -49,8 +49,9 @@
         .sdg-form .sdg-ro { min-height: 2.2rem; padding: 0.5rem 0; color: var(--text-muted); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
         .sdg-form textarea { min-height: 96px; resize: vertical; }
         .sdg-form input[type="checkbox"] { width: 18px; height: 18px; margin: 0.45rem 0; }
-        .sdg-form .sdg-err { margin-top: 4px; font-size: 0.72rem; color: var(--danger-text); }
-        .sdg-form .sdg-err:empty { display: none; }
+        /* The kit's .field-error (kit ≥ 2.36), repeated for an older kit. */
+        .sdg-form .sdg-err { margin-top: 0.3rem; font-size: 0.8rem; line-height: 1.35; color: var(--danger-text); }
+        .sdg-form .sdg-err:empty { margin: 0; }
         @media (pointer: coarse) {
             .sdg-form input[type="checkbox"] { width: 24px; height: 24px; margin: 10px 0; }
         }
@@ -63,6 +64,18 @@
         s.textContent = CSS;
         document.head.appendChild(s);
     }
+
+    /** What a field says about text it holds but cannot take ("" = fine).
+     *  Kit ≥ 2.36: a form-size number, date, time or colour field keeps
+     *  invalid text, shows what it expects under it, and its `value` stays
+     *  the last valid one; an older kit reverts the text and has no such
+     *  property. */
+    function invalidText(el) {
+        return el && "validationMessage" in el && el.validationMessage ? String(el.validationMessage) : "";
+    }
+
+    /** A kit field shows its own message line; anything else needs the form's. */
+    const ownsError = (el) => /^SAC-/.test(el.tagName);
 
     const warned = new Set();
     function kit(tag, attrs) {
@@ -88,11 +101,12 @@
         return prevDblClick.call(this, r, c, e);
     };
 
-    /** Phones: a tap on the cell that was already active opens the record. */
+    /** Phones: a tap on a row opens its record (the way to edit there; a
+     *  long press is the row menu). */
     const prevCellClick = P._onCellClick;
     P._onCellClick = function (r, c, wasActive) {
         if (prevCellClick) prevCellClick.call(this, r, c, wasActive);
-        if (wasActive && this._compact() && !this._editor) this._openRecord(r);
+        if (this._compact() && !this._editor) this._openRecord(r);
     };
 
     const prevModeChanged = P._onModeChanged;
@@ -208,11 +222,18 @@
             : (this._total != null || this._paging() === "pages"
                 ? t("data-grid.record-of", "Record {n} of {m}", { n: int(r + 1), m: int(rows) })
                 : t("data-grid.record", "Record {n}", { n: int(r + 1) }));
+        // Delete is here as well as in the row menu (on a phone the form is
+        // where a row is edited); it stands apart from Save, with Undo after.
+        // Fixed rows (rows="fixed"): neither New nor Delete.
+        const fixed = this._fixedRows();
+        const del = !st.readOnly && !fixed ? btn("delete", "trash", t("data-grid.delete-record", "Delete"), false) : null;
+        if (del) del.classList.add("sdg-del");
         st.nav.replaceChildren(
             btn("prev", "chevron-left", t("data-grid.previous", "Previous"), r <= 0),
             btn("next", "chevron-right", t("data-grid.next", "Next"), r >= rows - 1, true),
-            ...(this._formEditable() ? [btn("new", "plus", t("data-grid.new", "New"), false)] : []),
+            ...(this._formEditable() && !fixed ? [btn("new", "plus", t("data-grid.new", "New"), false)] : []),
             pos,
+            ...(del ? [del] : []),
         );
 
         // Fields: every column, definition order (hidden ones too — the form
@@ -302,11 +323,15 @@
         }
 
         // A kit field whose value is the column's value (type conversions in
-        // and out); `into` and `out` default to the identity.
+        // and out); `into` and `out` default to the identity. Text the field
+        // holds but cannot take is an error, never its last valid value.
         const field = (el, into, out) => {
             el.value = into ? into(value) : value;
             f.focus = el;
-            f.get = () => ({ value: out ? out(el.value) : el.value });
+            f.get = () => {
+                const m = invalidText(el);
+                return m ? { error: m, own: ownsError(el) } : { value: out ? out(el.value) : el.value };
+            };
             f.snap = () => el.value;
             f.restore = (s) => { el.value = s; };
             return el;
@@ -323,7 +348,7 @@
                 const s = input.value;
                 if (type.plainEditor || type.longEditor) return { value: s };
                 const v = this._parseText(col, s, row);
-                return v === undefined ? { error: t("data-grid.invalid", "Not a valid value") } : { value: v };
+                return v === undefined ? { error: this._invalidMessage(col, null) } : { value: v };
             };
             f.snap = () => input.value;
             f.restore = (s) => { input.value = s; };
@@ -363,7 +388,11 @@
             pair.append(d, tm);
             wrap.append(pair);
             f.focus = d;
-            f.get = () => ({ value: d.value ? `${d.value}T${tm.value || "00:00"}` : "" });
+            f.get = () => {
+                const md = invalidText(d), mt = invalidText(tm);
+                if (md || mt) return { error: md || mt, own: true, at: md ? d : tm };
+                return { value: d.value ? `${d.value}T${tm.value || "00:00"}` : "" };
+            };
             f.snap = () => [d.value, tm.value];
             f.restore = (st2) => { d.value = st2[0]; tm.value = st2[1]; };
         } else if (name === "bool") {
@@ -392,23 +421,28 @@
             plain(false);
         }
         if (ro) { f.get = null; f.snap = null; f.restore = null; }
+        // The kit's field-error line (kit ≥ 2.36 styles .field-error): in the
+        // page from the start, so its live region announces new text.
         const err = document.createElement("div");
-        err.className = "sdg-err";
+        err.className = "sdg-err field-error";
         err.id = id + "-err";
-        err.setAttribute("role", "alert");
+        err.setAttribute("aria-live", "polite");
         wrap.append(err);
         f.err = err;
         if (f.focus && f.focus.setAttribute) f.focus.setAttribute("aria-describedby", err.id);
         return f;
     };
 
-    P._formShowErrors = function (errors) {
+    /** errors: field → message; own: the fields that show their message
+     *  themselves (a kit field's line), which the form's line leaves out. */
+    P._formShowErrors = function (errors, own) {
         const st = this._formState;
         if (!st) return;
         for (const f of st.fields) {
             if (!f.err) continue;
+            if (own && own.has(f.col.field)) { f.err.textContent = ""; continue; }
             const m = (errors && errors[f.col.field]) || "";
-            f.err.textContent = m;
+            if (f.err.textContent !== m) f.err.textContent = m;
             if (f.focus && f.focus.setAttribute) {
                 if (m) f.focus.setAttribute("aria-invalid", "true");
                 else f.focus.removeAttribute("aria-invalid");
@@ -425,12 +459,15 @@
         const st = this._formState;
         if (!st || st.readOnly) return true;
         const row = st.row;
-        const values = {}, errors = {};
+        const values = {}, errors = {}, own = new Set(), at = {};
         for (const f of st.fields) {
             if (!f.get) continue;
             const res = f.get();
-            if (res.error) errors[f.col.field] = res.error;
-            else values[f.col.field] = res.value;
+            if (res.error) {
+                errors[f.col.field] = res.error;
+                if (res.own) own.add(f.col.field);
+                if (res.at) at[f.col.field] = res.at;
+            } else values[f.col.field] = res.value;
         }
         const e0 = this._entryOf(row);
         if (forNav && e0 && e0.op === "create" && !Object.keys(e0.fields).length
@@ -444,10 +481,11 @@
             const m = this._check(f.col, values[f.col.field], view);
             if (m) errors[f.col.field] = m;
         }
-        this._formShowErrors(errors);
+        this._formShowErrors(errors, own);
         if (Object.keys(errors).length) {
+            // Nothing is saved; the first field that needs fixing has focus.
             const bad = st.fields.find((f) => errors[f.col.field] && f.focus);
-            if (bad) bad.focus.focus();
+            if (bad) (at[bad.col.field] || bad.focus).focus();
             this._announce(t("data-grid.form-errors", "Please fix the marked fields."));
             return false;
         }
@@ -469,6 +507,7 @@
     P._formNav = async function (act) {
         const st = this._formState;
         if (!st || st.busy) return;
+        if (act === "delete") { this._formDelete(); return; }
         st.busy = true;
         try {
             if (!(await this._formCommit(true))) return;
@@ -487,6 +526,18 @@
         } finally {
             st.busy = false;
         }
+    };
+
+    /** The form's Delete: closes the form (what was typed goes with the
+     *  row) and deletes the row the grid's way — sac:request-delete first,
+     *  then the Undo toast. A new record that was never saved just goes. */
+    P._formDelete = function () {
+        const st = this._formState;
+        if (!st || st.readOnly || this._fixedRows()) return;
+        const id = this._idOf(st.row);
+        st.dlg.close("delete");
+        const r = this._indexOfId(id);
+        if (r >= 0) this._deleteRows([r]);
     };
 
     /** After the dialog closed. Escape or the backdrop with changes in the

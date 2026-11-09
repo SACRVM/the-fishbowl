@@ -195,7 +195,11 @@ class FbTablesView extends HTMLElement {
         const viewKey = `fb.tables.view.${sac.scope.get().slug}.${def.name}`;
         try { const v = JSON.parse(localStorage.getItem(viewKey) || "null"); if (v) grid.view = v; } catch { /* storage off */ }
         grid.addEventListener("sac:view", (e) => { try { localStorage.setItem(viewKey, JSON.stringify(e.detail)); } catch { /* storage off */ } });
-        grid.addEventListener("sac:save", () => this.refreshCounts());
+        // Only the grid on screen refreshes the counts: one taken out saves
+        // its unsaved row as it goes (sac-data-grid 1.2), and its refresh
+        // would overtake a space switch's own list — the switch then opened
+        // the new space's table with the last space's columns.
+        grid.addEventListener("sac:save", () => { if (grid.isConnected) this.refreshCounts(); });
         slot.replaceChildren(grid);
         slot.style.flex = "1";
         slot.style.minHeight = "0";

@@ -32,6 +32,7 @@
         return s;
     };
     const int = (n) => (window.sac && sac.regional) ? sac.regional.formatNumber(n) : String(n);
+    const plural = Grid.plural;
     const has = (o, k) => Object.prototype.hasOwnProperty.call(o, k);
     const isBlank = (v) => v == null || v === "" || (Array.isArray(v) && !v.length);
     const same = (a, b) => a === b || (isBlank(a) && isBlank(b))
@@ -68,7 +69,7 @@
      *  belong to it, not to this one. Saves still in flight are ignored. */
     P._onSourceChange = function () {
         if (!this._edits) return;
-        if (this._editor) this._cancelEdit(this._editorHasFocus());
+        if (this._editor) this._cancelEdit(this._editorHasFocus(), true);
         for (const e of this._edits.values()) {
             if (e.toast) { try { e.toast.dismiss(); } catch (err) { /* gone */ } }
         }
@@ -164,9 +165,10 @@
         if (created) rowEl._rh.textContent = "*";
     };
 
-    /** The "new row" line: sheet mode, an editable source, the end in sight. */
+    /** The "new row" line: sheet mode, an editable source, rows that are
+     *  not fixed, the end in sight. */
     P._newLine = function () {
-        if (this.mode !== "sheet" || !this._editable() || this._compact()) return 0;
+        if (this.mode !== "sheet" || !this._editable() || this._compact() || this._fixedRows()) return 0;
         if (this._paging() === "pages") {
             if (this._total != null) return this._page >= Math.max(0, Math.ceil(this._total / this._pageSize()) - 1) ? 1 : 0;
             const blk = this._blocks.get(this._page);
@@ -230,6 +232,41 @@
         return !(e && e.op === "delete");
     };
 
+    /**
+     * An edit the grid cannot make here — read mode, a source without
+     * save(), form mode, a phone — says why instead of doing nothing; once
+     * per reason, so it does not nag.
+     */
+    P._blockedEdit = function () {
+        let reason, text;
+        if (!this._editable() || (this._compact() && this.getAttribute("compact-edit") === "read")) {
+            reason = "read";
+            text = t("data-grid.blocked-read", "This table is read-only.");
+        } else if (this._compact()) {
+            reason = "compact";
+            text = t("data-grid.blocked-compact", "Tap a row to edit it.");
+        } else if (this.mode === "form") {
+            reason = "form";
+            text = t("data-grid.blocked-form", "Press Enter to edit this row in a form.");
+        } else return;
+        this._blockedSaid = this._blockedSaid || new Set();
+        if (this._blockedSaid.has(reason)) return;
+        this._blockedSaid.add(reason);
+        this._notify(text);
+    };
+
+    /** "Not a valid value: 2026/28/09 – e.g. 25.09.2026": what was wrong,
+     *  and what the column takes. text null: the editor's own text. */
+    P._invalidMessage = function (col, text) {
+        const ex = col.type.example ? col.type.example(col) : "";
+        if (text == null) {
+            return ex ? t("data-grid.invalid-example", "Not a valid value – e.g. {example}", { example: ex })
+                : t("data-grid.invalid", "Not a valid value");
+        }
+        return ex ? t("data-grid.paste-invalid-example", "Not a valid value: {text} – e.g. {example}", { text, example: ex })
+            : t("data-grid.paste-invalid", "Not a valid value: {text}", { text });
+    };
+
     P._inEditor = function (e) {
         const ed = this._editor;
         if (!ed) return false;
@@ -284,7 +321,7 @@
             const s = ed.el.value;
             if (type.plainEditor || type.longEditor) return { value: s };
             const v = this._parseText(col, s, ed.row);
-            return v === undefined ? { error: t("data-grid.invalid", "Not a valid value") } : { value: v };
+            return v === undefined ? { error: this._invalidMessage(col, s) } : { value: v };
         }
         let v;
         try { v = ed.el.value; } catch (err) { v = ed.start; }
@@ -293,7 +330,7 @@
         // (or the column's) parse turns it into the value.
         if (ed.kind === "custom" && typeof v === "string" && (type.customParse || typeof col.def.parse === "function")) {
             const parsed = this._parseText(col, v, ed.row);
-            if (parsed === undefined) return { error: t("data-grid.invalid", "Not a valid value") };
+            if (parsed === undefined) return { error: this._invalidMessage(col, v) };
             v = parsed;
         }
         return { value: v === undefined ? ed.start : v };
@@ -344,10 +381,10 @@
             const pop = document.createElement("div");
             pop.className = "long-pop";
             pop.setAttribute("popover", "manual");
-            pop.appendChild(el);
+            pop.append(el, this._longFoot());
             cell.appendChild(pop);
             const rect = cell.getBoundingClientRect();
-            const w = Math.min(Math.max(rect.width, 320), innerWidth - 16), h = 144;
+            const w = Math.min(Math.max(rect.width, 320), innerWidth - 16), h = 184;
             pop.style.width = w + "px";
             pop.style.height = h + "px";
             pop.style.left = clamp(rect.left, 8, Math.max(8, innerWidth - w - 8)) + "px";
@@ -381,6 +418,34 @@
         }
         this._paintSelection();
         return true;
+    };
+
+    /**
+     * The long-text popover's footer: Enter makes a new line there, so it
+     * says how to finish — Done (Ctrl+Enter) and Cancel (Esc). The buttons
+     * do not take the focus from the text; the keys stay the keyboard way.
+     */
+    P._longFoot = function () {
+        const mac = /Mac|iPhone|iPad/.test(navigator.platform || "");
+        const foot = document.createElement("div");
+        foot.className = "long-foot";
+        const btn = (cls, text, keys, run) => {
+            const b = document.createElement("button");
+            b.type = "button";
+            b.className = cls;
+            b.tabIndex = -1;
+            b.textContent = text;
+            b.setAttribute("aria-keyshortcuts", keys);
+            b.addEventListener("pointerdown", (e) => e.preventDefault());
+            b.addEventListener("click", (e) => { e.stopPropagation(); run(); });
+            return b;
+        };
+        foot.append(
+            btn("btn", t("data-grid.cancel", "Cancel"), "Escape", () => this._cancelEdit(true)),
+            btn("btn primary", t("data-grid.long-done", "Done ({keys})", { keys: mac ? "⌘↩" : "Ctrl+Enter" }),
+                mac ? "Meta+Enter" : "Control+Enter", () => this._commitEdit(null, true)),
+        );
+        return foot;
     };
 
     /** How much wider an editor's content wants to be than it is: the most
@@ -524,11 +589,21 @@
         return true;
     };
 
-    P._cancelEdit = function (refocus) {
+    /** quiet: the grid itself drops the editor (a new source, revert()). */
+    P._cancelEdit = function (refocus, quiet) {
         const ed = this._editor;
         if (!ed) return;
         if (refocus || this._editorHasFocus()) this._scroller.focus({ preventScroll: true });
         this._closeEditor();
+        // A paragraph typed into the long-text editor is not lost to a
+        // stray Escape: Ctrl+Z (or the toast's Undo) opens it again.
+        if (!quiet && ed.kind === "long" && ed.el.value !== (ed.start == null ? "" : String(ed.start))) {
+            const step = { type: "draft", id: ed.id, field: ed.col.field, text: ed.el.value };
+            this._pushUndo(step);
+            this._notify(t("data-grid.draft-discarded", "Text discarded."), {
+                action: { label: t("data-grid.undo", "Undo"), labelKey: "data-grid.undo", onClick: () => { this._undoStep(false, step); } },
+            });
+        }
     };
 
     P._moveAfterEdit = function (move, r, c) {
@@ -664,25 +739,91 @@
         }
     };
 
-    /** Delete / Backspace: empty the editable cells of the range. */
-    P._clearRange = function () {
-        if (this.mode !== "sheet" || !this._editable() || this._compact()) return;
-        const s = this._rect();
-        const list = [];
-        for (let r = s.r1; r <= s.r2; r++) {
-            const row = this._rowAt(r);
-            if (!row) continue;
-            for (let c = s.c1; c <= s.c2; c++) {
-                if (!this._canEdit(r, c)) continue;
-                const col = this._cols[c];
-                list.push({ row, col, value: emptyOf(col) });
+    /**
+     * Work on the rows r1…r2 once they are loaded: at once when they are
+     * (the usual case), else after loading them. fn(stale) — stale: the
+     * data changed while they loaded (a new sort, filter or source), so the
+     * display rows are not the ones that were selected.
+     */
+    P._whenLoaded = function (r1, r2, fn) {
+        const q = this._query;
+        const wait = this._loadRows(r1, r2);
+        if (!wait) { fn(false); return; }
+        wait.then(() => fn(q !== this._query));
+    };
+
+    /** After a change over a range (clear, cut, paste, a bool flipped across
+     *  rows): one toast that says what happened and what did not, with Undo.
+     *  r: { verb, step, main?, notes: [], warn } — no toast for a change in
+     *  one row that left nothing out. */
+    P._bulkReport = function (r) {
+        const changed = r.step ? countCells(r.step) : 0;
+        const rows = r.step ? rowsOf(r.step) : 0;
+        const notes = (r.notes || []).filter(Boolean);
+        if (!notes.length && !r.main && rows < 2) return;
+        const lead = r.main || (changed ? plural(changed, `data-grid.cells-${r.verb}`,
+            { cleared: "1 cell cleared.", cut: "1 cell cut.", changed: "1 cell changed.", pasted: "1 cell pasted." }[r.verb],
+            { cleared: "{n} cells cleared.", cut: "{n} cells cut.", changed: "{n} cells changed.", pasted: "{n} cells pasted." }[r.verb])
+            : t("data-grid.nothing-pasted", "Nothing was pasted."));
+        if (this._bulkToast) { try { this._bulkToast.dismiss(); } catch (err) { /* gone */ } }
+        const step = r.step;
+        this._bulkToast = this._notify([lead, ...notes].join(" "), {
+            kind: r.warn ? "warn" : "info",
+            action: step ? {
+                label: t("data-grid.undo", "Undo"), labelKey: "data-grid.undo",
+                onClick: () => { this._undoStep(false, step); this.focus(); },
+            } : undefined,
+        });
+    };
+
+    const countCells = (s) => (s.type === "group" ? s.steps.reduce((n, x) => n + countCells(x), 0) : s.type === "cells" ? s.changes.length : 0);
+    const rowsOf = (s) => {
+        const ids = new Set();
+        const walk = (x) => {
+            if (x.type === "group") x.steps.forEach(walk);
+            else if (x.type === "cells") for (const ch of x.changes) ids.add(ch.id);
+            else if (x.type === "add") ids.add(x.id);
+        };
+        walk(s);
+        return ids.size;
+    };
+
+    /** "1 row was skipped: it isn't loaded yet." — rows a range operation
+     *  could not reach (more than the grid loads at once). */
+    const unloadedNote = (n) => (n ? plural(n, "data-grid.skipped-unloaded",
+        "1 row was skipped: it isn't loaded yet.", "{n} rows were skipped: they aren't loaded yet.") : "");
+
+    /** Delete / Backspace (cut: range given, after the copy): empty the
+     *  editable cells of the range, loading its rows first. */
+    P._clearRange = function (range, verb) {
+        if (this.mode !== "sheet" || !this._editable() || this._compact()) { this._blockedEdit(); return; }
+        const s = range || this._rect();
+        this._whenLoaded(s.r1, s.r2, (stale) => {
+            if (stale) {
+                this._notify(t("data-grid.changed-meanwhile", "The table changed while its rows were loading, so nothing was changed."), { kind: "warn" });
+                return;
             }
-        }
-        this._afterBulk(this._applyChanges(list, true));
+            const list = [];
+            let unloaded = 0;
+            for (let r = s.r1; r <= s.r2; r++) {
+                const row = this._rowAt(r);
+                if (!row) { if (row === undefined) unloaded++; continue; }
+                for (let c = s.c1; c <= s.c2; c++) {
+                    if (!this._canEdit(r, c)) continue;
+                    const col = this._cols[c];
+                    list.push({ row, col, value: emptyOf(col) });
+                }
+            }
+            const ids = this._applyChanges(list, false);
+            const step = this._lastChanges.length ? { type: "cells", changes: this._lastChanges } : null;
+            if (step) this._pushUndo(step);
+            this._bulkReport({ verb: verb || "cleared", step, notes: [unloadedNote(unloaded)], warn: unloaded > 0 });
+            this._afterBulk(ids);
+        });
     };
 
     /** Cut = copy (done by the core) + clear. */
-    P._cut = function () { this._clearRange(); };
+    P._cut = function (range) { this._clearRange(range, "cut"); };
 
     /**
      * Paste TSV (Excel, Google Sheets, SharePoint). One value fills the whole
@@ -690,11 +831,13 @@
      * lands at the range's top-left and extends from there — past the last
      * row it adds rows (sheet mode). Values are parsed per column type;
      * cells that fail parsing or validation are marked and not applied.
-     * One undo step.
+     * The rows it lands on are loaded first. One undo step; what did not
+     * fit (past the page's last row, past the last column, rows not loaded,
+     * read-only columns, invalid text) is said, not dropped silently.
      */
     P._paste = function (e) {
-        if (this.mode !== "sheet" || !this._editable() || this._compact()) return;
         const text = e.clipboardData ? e.clipboardData.getData("text/plain") : "";
+        if (this.mode !== "sheet" || !this._editable() || this._compact()) { if (text) this._blockedEdit(); return; }
         e.preventDefault();
         const data = Grid.parseTSV(text);
         if (!data.length) return;
@@ -705,8 +848,20 @@
         if ((R === 1 && C === 1) || (SR % R === 0 && SC % C === 0 && (SR > R || SC > C))) {
             rows = SR; cols = SC; tile = true;
         }
-        const r0 = s.r1, c0 = s.c1;
+        this._whenLoaded(s.r1, s.r1 + rows - 1, (stale) => {
+            if (stale) {
+                this._notify(t("data-grid.paste-changed", "The table changed while its rows were loading, so nothing was pasted."), { kind: "warn" });
+                return;
+            }
+            this._pasteAt(data, s.r1, s.c1, rows, cols, tile);
+        });
+    };
+
+    P._pasteAt = function (data, r0, c0, rows, cols, tile) {
+        const R = data.length;
         const c1 = Math.min(this._cols.length - 1, c0 + cols - 1);
+        const colsLeft = c0 + cols - 1 - c1;
+        const wanted = rows;
         const steps = [];
         const have = this._rowCount();
         if (r0 + rows > have) {
@@ -717,19 +872,22 @@
             }
         }
         const list = [], bad = [];
+        let unloaded = 0, deleted = 0, ro = 0;
         for (let i = 0; i < rows; i++) {
             const row = this._rowAt(r0 + i);
-            if (!row || this._isDeleted(row)) continue;
+            if (row === undefined) { unloaded++; continue; }
+            if (!row) continue;
+            if (this._isDeleted(row)) { deleted++; continue; }
             const line = data[i % R];
             for (let c = c0; c <= c1; c++) {
                 const col = this._cols[c];
-                if (col.readonly || !col.inline) continue;
                 const j = c - c0;
                 if (!tile && j >= line.length) continue;
+                if (col.readonly || !col.inline) { ro++; continue; }
                 const raw = line[j % line.length] != null ? line[j % line.length] : "";
                 const v = this._parseText(col, raw, row);
                 if (v === undefined) {
-                    bad.push({ row, col, message: t("data-grid.paste-invalid", "Not a valid value: {text}", { text: raw }) });
+                    bad.push({ row, col, message: this._invalidMessage(col, raw) });
                     continue;
                 }
                 const m = this._check(col, v, Object.assign({}, this._view(row), { [col.field]: v }));
@@ -739,14 +897,28 @@
         }
         const ids = this._applyChanges(list, false);
         if (this._lastChanges.length) steps.push({ type: "cells", changes: this._lastChanges });
-        if (steps.length) this._pushUndo(steps.length === 1 ? steps[0] : { type: "group", steps });
+        const step = steps.length ? (steps.length === 1 ? steps[0] : { type: "group", steps }) : null;
+        if (step) this._pushUndo(step);
         for (const b of bad) this._entryFor(b.row).errors[b.col.field] = b.message;
-        if (bad.length) {
-            this._stamp++;
-            this._announce(t("data-grid.paste-rejected", "{n} cells were not pasted.", { n: int(bad.length) }));
-        }
+        if (bad.length) this._stamp++;
         this._select({ r: r0, c: c0 }, { r: Math.max(r0, r0 + rows - 1), c: c1 }, true);
         this._scheduleRender();
+        const rowsLeft = wanted - rows;
+        this._bulkReport({
+            verb: "pasted",
+            step,
+            main: rowsLeft > 0 ? t(this._paging() === "pages" ? "data-grid.paste-past-page" : "data-grid.paste-past-end",
+                this._paging() === "pages" ? "Pasted {n} of {m} rows: the rest is past the end of this page." : "Pasted {n} of {m} rows: the rest is past the last row.",
+                { n: int(rows), m: int(wanted) }) : null,
+            notes: [
+                colsLeft > 0 ? plural(colsLeft, "data-grid.paste-cols-left", "1 column was left out: it is past the last column.", "{n} columns were left out: they are past the last column.") : "",
+                unloadedNote(unloaded),
+                deleted ? plural(deleted, "data-grid.skipped-deleted", "1 row marked for deletion was skipped.", "{n} rows marked for deletion were skipped.") : "",
+                ro ? plural(ro, "data-grid.skipped-readonly", "1 cell in a read-only column was skipped.", "{n} cells in read-only columns were skipped.") : "",
+                bad.length ? plural(bad.length, "data-grid.paste-rejected", "1 cell was not valid and is marked.", "{n} cells were not valid and are marked.") : "",
+            ],
+            warn: rowsLeft > 0 || colsLeft > 0 || unloaded > 0 || deleted > 0 || bad.length > 0,
+        });
         this._afterBulk(ids);
     };
 
@@ -778,7 +950,11 @@
      *  across the range, to the opposite of the active cell. */
     P._toggleBool = function () {
         const c = this._cur.c, col = this._cols[c];
-        if (!col || col.typeName !== "bool" || !this._canEdit(this._cur.r, c)) return false;
+        if (!col || col.typeName !== "bool") return false;
+        if (!this._canEdit(this._cur.r, c)) {
+            if (this.mode !== "sheet" || !this._editable() || this._compact()) this._blockedEdit();
+            return false;
+        }
         const row = this._rowAt(this._cur.r);
         if (!row) return false;
         const next = !this._get(row, col);
@@ -791,7 +967,11 @@
                 if (this._cols[cc].typeName === "bool" && this._canEdit(r, cc)) list.push({ row: rw, col: this._cols[cc], value: next });
             }
         }
-        this._afterBulk(this._applyChanges(list, true));
+        const ids = this._applyChanges(list, false);
+        const step = this._lastChanges.length ? { type: "cells", changes: this._lastChanges } : null;
+        if (step) this._pushUndo(step);
+        this._bulkReport({ verb: "changed", step });
+        this._afterBulk(ids);
         return true;
     };
 
@@ -850,7 +1030,7 @@
             return true;
         }
         if (k === "F2") {
-            if (!sheet) return true;
+            if (!sheet || !this._editable()) { this._blockedEdit(); return true; }
             if (col && col.typeName === "bool") this._toggleBool();
             else if (col && !col.inline && this._openRecord) this._openRecord(r);
             else this._startEdit(r, c, {});
@@ -861,6 +1041,7 @@
             return true;
         }
         const printable = k.length === 1 && !e.metaKey && !(e.ctrlKey && !e.altKey);
+        if (printable && col && (!sheet || !this._editable())) { this._blockedEdit(); return false; }
         if (printable && sheet && col && col.typeName !== "bool") return this._startEdit(r, c, { text: k });
         return false;
     };
@@ -888,6 +1069,35 @@
             return;
         }
         if (this.saveMode === "row" && this._isDirtyEntry(e) && e.op !== "delete") this._save([e.id]);
+    };
+
+    /**
+     * Leaving altogether — the grid is taken out of the page (a view
+     * change), the page hides or unloads: in cell and row save mode, save
+     * what is unsaved (the row the cursor is in, too); a new row nobody
+     * typed into just goes. Batch mode waits for its Save, guarded below.
+     */
+    P._saveOnLeave = function () {
+        if (!this._edits || !this._edits.size || this.saveMode === "batch" || !this._editable()) return;
+        if (this._editor) this._commitEdit(null);
+        for (const e of [...this._edits.values()]) {
+            if (e.op === "create" && !e.saving && !Object.keys(e.fields).length) this._dropCreate(e.id);
+        }
+        if (this._dirtyCount()) this._save(null);
+    };
+
+    /**
+     * While rows are unsaved (or saving), closing or reloading the page asks
+     * first — the browser's own question. unload-guard="off" leaves that to
+     * the host app (a desktop that asks for all its apps, say).
+     */
+    P._syncUnloadGuard = function () {
+        const on = this.isConnected && this.getAttribute("unload-guard") !== "off"
+            && (this._saving > 0 || this._dirtyCount() > 0);
+        if (on === !!this._guarded) return;
+        this._guarded = on;
+        if (on) window.addEventListener("beforeunload", this._onBeforeUnload);
+        else window.removeEventListener("beforeunload", this._onBeforeUnload);
     };
 
     /**
@@ -920,7 +1130,7 @@
         if (result.invalid.length) {
             this._stamp++;
             this._scheduleRender();
-            this._announce(t("data-grid.fix-errors", "Fix the marked cells: {n} rows were not saved.", { n: int(result.invalid.length) }));
+            this._announce(plural(result.invalid.length, "data-grid.fix-errors", "Fix the marked cells: 1 row was not saved.", "Fix the marked cells: {n} rows were not saved."));
         }
         if (!ready.length) { this._renderStatus(); return result; }
 
@@ -1006,7 +1216,7 @@
                 continue;
             }
             if (!saved.has(String(snap.id))) continue;          // the source said nothing: still dirty
-            this._dropUndo(snap.id);
+            this._dropUndo(snap.id, snap.op);
             if (snap.op === "delete") {
                 this._edits.delete(e.id);
                 reload = true;
@@ -1038,7 +1248,7 @@
         this._extraEl._t = null;
         this._scheduleRender();
         if (result.errors.length) {
-            this._announce(t("data-grid.save-failed", "{n} rows couldn't be saved.", { n: int(errors.size) }));
+            this._announce(plural(errors.size, "data-grid.save-failed", "1 row couldn't be saved.", "{n} rows couldn't be saved."));
         }
         this.dispatchEvent(new CustomEvent("sac:save", { detail: result, bubbles: true, composed: true }));
         if (reload) this.reload();
@@ -1099,7 +1309,7 @@
 
     P.revert = function () {
         this._edState();
-        if (this._editor) this._cancelEdit(this._editorHasFocus());
+        if (this._editor) this._cancelEdit(this._editorHasFocus(), true);
         for (const e of [...this._edits.values()]) {
             if (e.saving) continue;
             if (e.toast) { try { e.toast.dismiss(); } catch (err) { /* gone */ } }
@@ -1115,11 +1325,57 @@
         this._scheduleRender();
     };
 
+    /**
+     * The status line's Discard (batch mode): like revert(), but one undo
+     * step with an Undo toast — a slip of the pointer from Save must not
+     * cost a morning's edits.
+     */
+    P._discard = function () {
+        this._edState();
+        if (this._editor) this._cancelEdit(this._editorHasFocus(), true);
+        const n = this._dirtyCount();
+        if (!n) return;
+        const step = { type: "discard" };
+        this._applyDiscard(step);
+        this._undo.push(step);
+        this._notify(plural(n, "data-grid.discarded", "Changes in 1 row discarded.", "Changes in {n} rows discarded."), {
+            action: { label: t("data-grid.undo", "Undo"), labelKey: "data-grid.undo", onClick: () => { this._undoStep(false, step); this.focus(); } },
+        });
+    };
+
+    /** Throw the unsaved changes away, keeping them (and the undo history
+     *  before them) in the step; the stacks are emptied in place. */
+    P._applyDiscard = function (step) {
+        step.entries = [...this._edits.values()].filter((e) => !e.saving);
+        step.creates = this._creates.filter((row) => !this._savedCreates.has(row));
+        step.history = this._undo.slice();
+        for (const e of step.entries) this._edits.delete(e.id);
+        this._creates = this._creates.filter((row) => this._savedCreates.has(row));
+        this._undo.length = 0;
+        this._redo.length = 0;
+        this._afterDiscard();
+    };
+
+    P._restoreDiscard = function (step) {
+        for (const e of step.entries) if (!this._edits.has(e.id)) this._edits.set(e.id, e);
+        for (const row of step.creates) if (!this._creates.includes(row)) this._creates.push(row);
+        this._undo.push(...step.history);
+        this._afterDiscard();
+    };
+
+    P._afterDiscard = function () {
+        this._stamp++;
+        this._stats = null;
+        this._extraEl._t = null;
+        this._clampSelection();
+        this._scheduleRender();
+    };
+
     /* -------------------------------------------------------- add / delete -- */
 
     /** Append a new, unsaved row (optionally with values); the cursor moves to it. */
     P.addRow = function (values, opts) {
-        if (!this._built || !this._editable() || this.mode === "read") return null;
+        if (!this._built || !this._editable() || this.mode === "read" || this._fixedRows()) return null;
         this._edState();
         if (this._editor) this._commitEdit(null);
         const row = this._createRow(values);
@@ -1153,7 +1409,7 @@
      *  once, or after the Undo toast (row / cell save modes), or on save(). */
     P._deleteRows = function (rs) {
         this._edState();
-        if (!this._editable() || this.mode === "read") return;
+        if (!this._editable() || this.mode === "read" || this._fixedRows()) return;
         if (this._editor) this._commitEdit(null);
         const rows = [];
         for (const r of rs) {
@@ -1193,8 +1449,14 @@
         this._extraEl._t = null;
         this._clampSelection();
         this._scheduleRender();
-        if (this.saveMode === "batch") return;
         const n = step.items.length;
+        const said = n === 1 ? t("data-grid.deleted-one", "1 row deleted") : t("data-grid.deleted", "{n} rows deleted", { n: int(n) });
+        if (this.saveMode === "batch") {
+            // Nothing leaves before Save; the toast is the way back for
+            // people who do not know Ctrl+Z (the row menu has Restore too).
+            this._notify(said, { action: { label: t("data-grid.undo", "Undo"), labelKey: "data-grid.undo", onClick: () => { this._undoStep(false, step); this.focus(); } } });
+            return;
+        }
         const commit = () => {
             step.toast = null;
             const ids = [];
@@ -1207,8 +1469,7 @@
         };
         if (window.sac && typeof sac.toast === "function") {
             for (const e of marked) e.pendingDelete = true;
-            const toast = sac.toast(
-                n === 1 ? t("data-grid.deleted-one", "1 row deleted") : t("data-grid.deleted", "{n} rows deleted", { n: int(n) }),
+            const toast = sac.toast(said,
                 { action: { label: t("data-grid.undo", "Undo"), labelKey: "data-grid.undo", onClick: () => this._undoStep(false, step) } },
             );
             step.toast = toast;
@@ -1254,13 +1515,37 @@
         this._redo = [];
     };
 
-    /** Saved changes can no longer be undone. */
-    P._dropUndo = function (id) {
-        const touches = (s) => (s.type === "group" ? s.steps.some(touches)
-            : s.type === "cells" ? s.changes.some((ch) => ch.id === id)
-            : s.type === "add" ? s.id === id : s.items.some((it) => it.id === id));
-        this._undo = this._undo.filter((s) => !touches(s));
-        this._redo = this._redo.filter((s) => !touches(s));
+    /**
+     * After row id was saved (op: what was saved). A saved cell change stays
+     * undoable: undo writes the old value back as a new change, saved like
+     * any other — a bulk clear or paste in row / cell mode saves at once, and
+     * its Undo must not vanish with that. What the grid cannot take back
+     * goes: a saved new row's "add" (a removed row would be needed), and
+     * every step on a row the source has removed.
+     */
+    P._dropUndo = function (id, op) {
+        if (op === "update") return;
+        const gone = op === "delete";
+        const prune = (s) => {
+            switch (s.type) {
+                case "group":
+                    s.steps = s.steps.map(prune).filter(Boolean);
+                    return s.steps.length ? s : null;
+                case "add":
+                    return s.id === id ? null : s;
+                case "cells":
+                    if (gone) s.changes = s.changes.filter((ch) => ch.id !== id);
+                    return s.changes.length ? s : null;
+                case "draft":
+                    return gone && s.id === id ? null : s;
+                case "delete":
+                    return s.items.some((it) => it.id === id) ? null : s;
+                default:
+                    return s;
+            }
+        };
+        this._undo = this._undo.map(prune).filter(Boolean);
+        this._redo = this._redo.map(prune).filter(Boolean);
     };
 
     /** Undo (or redo) the last step — or a given step (the toast's Undo). */
@@ -1279,7 +1564,7 @@
         }
         if (!step) return false;
         this._runStep(step, redo);
-        to.push(step);
+        if (step.type !== "draft") to.push(step);          // a reopened draft has nothing to redo
         this._stamp++;
         this._scheduleRender();
         this._paintSelection();
@@ -1315,6 +1600,17 @@
         } else if (step.type === "delete") {
             if (redo) this._applyDelete(step);
             else this._restoreDelete(step);
+        } else if (step.type === "discard") {
+            if (redo) this._applyDiscard(step);
+            else this._restoreDiscard(step);
+        } else if (step.type === "draft" && !redo) {
+            // The long text Escape threw away: open its editor with it again.
+            const r = this._indexOfId(step.id);
+            const c = this._cols.findIndex((x) => x.field === step.field);
+            if (r < 0 || c < 0 || !this._startEdit(r, c, {})) return;
+            const el = this._editor.el;
+            el.value = step.text;
+            el.setSelectionRange(el.value.length, el.value.length);
         }
     };
 
@@ -1326,17 +1622,88 @@
             items.push(this._menuItem("open-record", "document", t("data-grid.open-record", "Open record"), () => this._openRecord(this._cur.r)));
         }
         if (this._editable() && this.mode !== "read") {
-            items.push(this._menuItem("insert-row", "plus", t("data-grid.insert-row", "New row"), () => { this.addRow(); this.focus(); }));
+            const fixed = this._fixedRows();
+            if (!fixed) items.push(this._menuItem("insert-row", "plus", t("data-grid.insert-row", "New row"), () => { this.addRow(); this.focus(); }));
             const s = this._rect();
-            const rs = [];
-            for (let r = s.r1; r <= s.r2; r++) if (this._rowAt(r)) rs.push(r);
+            const rs = [], dead = [];
+            // Fixed rows: nothing to delete, nothing marked for deletion.
+            for (let r = s.r1; !fixed && r <= s.r2; r++) {
+                const row = this._rowAt(r);
+                if (!row) continue;
+                if (this._isDeleted(row)) dead.push(row); else rs.push(r);
+            }
+            // Rows marked for deletion (batch mode, or while the toast is up)
+            // come back from here too, not only with Ctrl+Z.
+            if (dead.length) {
+                const label = dead.length === 1 ? t("data-grid.restore-row", "Restore row") : t("data-grid.restore-rows", "Restore {n} rows", { n: int(dead.length) });
+                items.push(this._menuItem("restore-rows", "undo", label, () => { this._restoreRows(dead); this.focus(); }));
+            }
             if (rs.length) {
                 const label = rs.length === 1 ? t("data-grid.delete-row", "Delete row") : t("data-grid.delete-rows", "Delete {n} rows", { n: int(rs.length) });
                 items.push(this._menuItem("delete-rows", "trash", label, () => { this._deleteRows(rs); this.focus(); }, { danger: true }));
             }
+            // Undo and redo for people who do not know Ctrl+Z / Ctrl+Y.
+            const undo = this._undo && this._undo.length, redo = this._redo && this._redo.length;
+            if (undo || redo) items.push(document.createElement("hr"));
+            if (undo) items.push(this._menuItem("undo", "undo", t("data-grid.undo", "Undo"), () => { this._undoStep(false); this.focus(); }));
+            if (redo) items.push(this._menuItem("redo", "redo", t("data-grid.redo", "Redo"), () => { this._undoStep(true); this.focus(); }));
         }
         if (items.length) items.push(document.createElement("hr"));
         return items;
+    };
+
+    /** Take rows out of their deletion (the row menu's Restore). */
+    P._restoreRows = function (rows) {
+        const ids = new Set();
+        for (const row of rows) {
+            const e = this._entryOf(row);
+            if (!e || e.op !== "delete" || e.saving) continue;
+            ids.add(e.id);
+            e.pendingDelete = false;
+            e.op = e.prevOp || "update";
+            delete e.prevOp;
+            this._tidy(e.id);
+        }
+        if (!ids.size) return;
+        // Their delete steps no longer hold them (a pending toast's commit
+        // skips them already: they are no longer marked).
+        const prune = (s) => {
+            if (s.type === "group") { s.steps = s.steps.map(prune).filter(Boolean); return s.steps.length ? s : null; }
+            if (s.type !== "delete") return s;
+            s.items = s.items.filter((it) => it.kind !== "delete" || !ids.has(it.id));
+            return s.items.length ? s : null;
+        };
+        this._undo = this._undo.map(prune).filter(Boolean);
+        this._redo = this._redo.map(prune).filter(Boolean);
+        this._afterDiscard();
+    };
+
+    /** The status line's "3 rows with errors": the next row with an error
+     *  (after the cursor, wrapping), on its first marked cell — or in the
+     *  record form when that field is not in the table (hidden, not
+     *  inline). */
+    P._nextError = function () {
+        const list = [];
+        for (const e of this._edits.values()) {
+            if (!Object.keys(e.errors).length) continue;
+            const r = this._indexOfId(e.id);
+            if (r >= 0) list.push({ r, e });
+        }
+        if (!list.length) {
+            this._notify(t("data-grid.errors-elsewhere", "The rows with errors are not on this page."));
+            return;
+        }
+        list.sort((a, b) => a.r - b.r);
+        const next = list.find((x) => x.r > this._cur.r) || list[0];
+        const c = this._cols.findIndex((col) => next.e.errors[col.field]);
+        this.focus();
+        if (c >= 0 && this._cols[c].inline) {
+            this._setCursor(next.r, c, false);
+            this._syncTip(true);
+        } else if (this._openRecord) {
+            this._setCursor(next.r, this._cur.c, false);
+            this._openRecord(next.r);
+        }
     };
 
     /* ------------------------------------------------------ status line -- */
@@ -1344,6 +1711,7 @@
     P._renderExtra = function () {
         const box = this._extraEl;
         if (!this._edits) { box.hidden = true; return; }
+        this._syncUnloadGuard();
         let errors = 0;
         for (const e of this._edits.values()) if (Object.keys(e.errors).length) errors++;
         const dirty = this._dirtyCount();
@@ -1362,26 +1730,32 @@
             box.appendChild(busy);
         }
         if (errors) {
-            const err = document.createElement("span");
-            err.className = "err";
+            // A way to them, not only a count: the next row with an error.
+            const err = document.createElement("button");
+            err.type = "button";
+            err.className = "link err";
             err.textContent = errors === 1 ? t("data-grid.errors-one", "1 row with errors") : t("data-grid.errors", "{n} rows with errors", { n: int(errors) });
+            err.title = t("data-grid.next-error", "Go to the next row with errors");
+            err.addEventListener("click", () => this._nextError());
             box.appendChild(err);
         }
         if (batch && dirty) {
             const info = document.createElement("span");
             info.textContent = dirty === 1 ? t("data-grid.unsaved-one", "1 unsaved row") : t("data-grid.unsaved", "{n} unsaved rows", { n: int(dirty) });
+            // Discard stands apart from Save (the count between them), and
+            // it can be undone.
             const revert = document.createElement("button");
             revert.type = "button";
             revert.className = "btn";
             revert.textContent = t("data-grid.revert", "Discard");
-            revert.addEventListener("click", () => { this.revert(); this.focus(); });
+            revert.addEventListener("click", () => { this._discard(); this.focus(); });
             const save = document.createElement("button");
             save.type = "button";
             save.className = "btn primary";
             save.textContent = t("data-grid.save", "Save");
             save.disabled = saving;
             save.addEventListener("click", () => { this.save(); this.focus(); });
-            box.append(info, revert, save);
+            box.append(revert, info, save);
         }
         box.hidden = !box.firstChild;
     };
@@ -1399,12 +1773,26 @@
                 this._stamp++;
                 this._scheduleRender();
             };
+            // The page goes (closed, reloaded, navigated away): save what
+            // can be. beforeunload also asks first while rows are unsaved.
+            this._onPageHide = () => this._saveOnLeave();
+            this._onBeforeUnload = (e) => {
+                this._saveOnLeave();
+                e.preventDefault();
+                e.returnValue = "";
+            };
         }
         this._compactMq.addEventListener("change", this._onCompact);
+        window.addEventListener("pagehide", this._onPageHide);
     });
 
     Grid.hook("disconnect", function () {
+        // Taken out of the page (a host's view change): what is unsaved is
+        // saved now, not lost with the element.
+        this._saveOnLeave();
         if (this._editor) this._commitEdit(null);
         if (this._compactMq) this._compactMq.removeEventListener("change", this._onCompact);   // no leak per removed grid
+        window.removeEventListener("pagehide", this._onPageHide);
+        this._syncUnloadGuard();
     });
 })();

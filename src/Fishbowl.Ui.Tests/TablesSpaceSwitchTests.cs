@@ -41,7 +41,7 @@ public class TablesSpaceSwitchTests
             a = (await Post("/api/v1/spaces", new { name = "Club " + Guid.NewGuid().ToString("N")[..6] })).GetProperty("slug").GetString()!;
             b = (await Post("/api/v1/spaces", new { name = "Club " + Guid.NewGuid().ToString("N")[..6] })).GetProperty("slug").GetString()!;
             await Post($"/api/v1/spaces/{a}/tables", new { name = "rooms", columns = new object[] { new { name = "seats", type = "integer" } } });
-            await Post($"/api/v1/spaces/{a}/tables/rooms/rows", new { title = "Hall", seats = 80 });
+            var hall = (await Post($"/api/v1/spaces/{a}/tables/rooms/rows", new { title = "Hall", seats = 80 })).GetProperty("id").GetString()!;
             await Post($"/api/v1/spaces/{b}/tables", new { name = "rooms", columns = new object[] { new { name = "colour", type = "text" } } });
             await Post($"/api/v1/spaces/{b}/tables/rooms/rows", new { title = "Stage", colour = "red" });
             // In the second space the test user only reads.
@@ -55,9 +55,23 @@ public class TablesSpaceSwitchTests
             await Assertions.Expect(grid).ToContainTextAsync("Hall", new() { Timeout = 10000 });
             await Assertions.Expect(grid).ToHaveAttributeAsync("mode", "sheet");
             await page.EvaluateAsync("() => { document.querySelector('fb-tables-view').dataset.mark = 'first'; }");
+            // An edit left unsaved: the grid saves it as it leaves — into the
+            // first space's table, though the hash names the other by then.
+            await page.EvaluateAsync("id => document.querySelector('fb-tables-view sac-data-grid').focusCell(id, 'seats')", hall);
+            await page.Keyboard.TypeAsync("81");
+            await page.Keyboard.PressAsync("Shift+Tab");   // the row's last column: Tab would leave the row
+            Assert.Equal(1, await grid.EvaluateAsync<int>("g => g.dirty"));
 
             await page.EvaluateAsync("slug => { location.hash = `#/space/${slug}/tables/rooms`; }", b);
             await Assertions.Expect(grid).ToContainTextAsync("Stage", new() { Timeout = 10000 });
+            long seats = 0;
+            for (var i = 0; i < 50 && seats != 81; i++)
+            {
+                if (i > 0) await Task.Delay(100, TestContext.Current.CancellationToken);
+                var r = await page.APIRequest.GetAsync($"{_fixture.BaseUrl}/api/v1/spaces/{a}/tables/rooms/rows/{hall}");
+                seats = (await r.JsonAsync())!.Value.GetProperty("seats").GetInt64();
+            }
+            Assert.Equal(81, seats);
             await Assertions.Expect(grid).ToHaveAttributeAsync("mode", "read");
             var fields = await grid.EvaluateAsync<string[]>("g => g.columns.map(c => c.field)");
             Assert.Contains("colour", fields);

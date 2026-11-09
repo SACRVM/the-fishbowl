@@ -7,7 +7,10 @@
  * ColumnKind → sac-data-grid type) and wraps fb.api.tables as the grid's
  * data source: sort and filters become the query DSL, edits become row
  * PATCH/POST/DELETE, and the server's refusals land on the cell they are
- * about. Links show their target's title, members their name.
+ * about. Links show their target's title, members their name. Every call
+ * goes to the workspace the grid was built in (`.in(ws)`): the grid saves
+ * an unsaved row when it leaves the page (sac-data-grid 1.2), and by then
+ * the hash may already name another space.
  */
 (function () {
     const LINK_OPTIONS = 500;   // the most targets a link's select offers
@@ -22,13 +25,13 @@
     const toIso = (local) => (local ? new Date(local).toISOString() : null);
 
     // What a link may point at, as select options (id → title).
-    async function linkOptions(target) {
+    async function linkOptions(target, ws) {
         try {
-            if (target === "notes") return (await fb.api.notes.list({ limit: LINK_OPTIONS })).map((n) => ({ value: n.id, label: n.title || n.id }));
-            if (target === "todos") return (await fb.api.todos.list({ includeCompleted: true })).slice(0, LINK_OPTIONS).map((x) => ({ value: x.id, label: x.title || x.id }));
-            if (target === "events") return (await fb.api.events.list()).slice(0, LINK_OPTIONS).map((x) => ({ value: x.id, label: x.title || x.id }));
-            if (target === "contacts") return (await fb.api.contacts.list()).slice(0, LINK_OPTIONS).map((x) => ({ value: x.id, label: x.name || x.id }));
-            const rows = await fb.api.tables.query(target, { limit: LINK_OPTIONS, orderBy: [{ field: "title", direction: "asc" }] });
+            if (target === "notes") return (await fb.api.notes.in(ws).list({ limit: LINK_OPTIONS })).map((n) => ({ value: n.id, label: n.title || n.id }));
+            if (target === "todos") return (await fb.api.todos.in(ws).list({ includeCompleted: true })).slice(0, LINK_OPTIONS).map((x) => ({ value: x.id, label: x.title || x.id }));
+            if (target === "events") return (await fb.api.events.in(ws).list()).slice(0, LINK_OPTIONS).map((x) => ({ value: x.id, label: x.title || x.id }));
+            if (target === "contacts") return (await fb.api.contacts.in(ws).list()).slice(0, LINK_OPTIONS).map((x) => ({ value: x.id, label: x.name || x.id }));
+            const rows = await fb.api.tables.in(ws).query(target, { limit: LINK_OPTIONS, orderBy: [{ field: "title", direction: "asc" }] });
             return rows.map((r) => ({ value: r.id, label: r.title }));
         } catch {
             return [];
@@ -37,6 +40,8 @@
 
     async function build(def) {
         const scope = sac.scope.get();
+        const ws = fb.api.workspace();
+        const api = fb.api.tables.in(ws);
         const members = scope.type === "scoped"
             ? ((await fb.api.spaces.members(scope.slug).catch(() => null))?.items || [])
             : [];
@@ -84,7 +89,7 @@
                 case "member":
                     map.push({ col: { ...base, type: "select", options: memberOptions }, ...same }); break;
                 case "link": {
-                    const opts = await linkOptions(c.link);
+                    const opts = await linkOptions(c.link, ws);
                     if (c.multiple) {
                         // Ids lower-cased are tag-safe; the map turns them back —
                         // also for a target beyond the loaded options, whose id
@@ -180,9 +185,9 @@
                 latest = key;
                 const count = counted?.key === key
                     ? Promise.resolve(counted.total)
-                    : fb.api.tables.count(def.name, w).then((r) => r.count);
+                    : api.count(def.name, w).then((r) => r.count);
                 const [rows, total] = await Promise.all([
-                    fb.api.tables.query(def.name, {
+                    api.query(def.name, {
                         where: w,
                         orderBy: (sort || []).map((s) => ({ field: s.field, direction: s.dir })),
                         limit, offset,
@@ -199,11 +204,11 @@
                     try {
                         if (c.op === "create") {
                             // A new row's typed values are in c.fields; c.row is the blank it started from.
-                            const created = await fb.api.tables.insert(def.name, toServer({ ...c.row, ...c.fields }));
+                            const created = await api.insert(def.name, toServer({ ...c.row, ...c.fields }));
                             Object.assign(c.row, fromServer(created));
                             if (counted) counted.total += 1;
                         } else if (c.op === "update") {
-                            const updated = await fb.api.tables.update(def.name, c.id, toServer(c.fields));
+                            const updated = await api.update(def.name, c.id, toServer(c.fields));
                             Object.assign(c.row, fromServer(updated));
                         }
                         // The id the grid knows the change by — a new row's
@@ -219,7 +224,7 @@
                 const removed = [];
                 const errors = [];
                 for (const id of ids) {
-                    try { await fb.api.tables.remove(def.name, id); removed.push(id); if (counted) counted.total -= 1; }
+                    try { await api.remove(def.name, id); removed.push(id); if (counted) counted.total -= 1; }
                     catch (err) { errors.push(refusal(id, err)); }
                 }
                 return { removed, errors };

@@ -601,16 +601,23 @@
     trash.in = trashIn;
 
     // A space's own tables (spaces only: the routes live under /spaces/<slug>/).
-    const t = (name) => ctx(`/tables/${encodeURIComponent(name)}`);
-    const tables = {
-        list:     ()             => request(ctx("/tables")),
-        describe: (name)         => request(t(name)),
-        query:    (name, spec)   => request(`${t(name)}/query`, { method: "POST", body: JSON.stringify(spec || {}) }),
-        count:    (name, where)  => request(`${t(name)}/count`, { method: "POST", body: JSON.stringify({ where }) }),
-        insert:   (name, values) => request(`${t(name)}/rows`, { method: "POST", body: JSON.stringify(values) }),
-        update:   (name, id, values) => request(`${t(name)}/rows/${encodeURIComponent(id)}`, { method: "PATCH", body: JSON.stringify(values) }),
-        remove:   (name, id)     => request(`${t(name)}/rows/${encodeURIComponent(id)}`, { method: "DELETE" }),
+    // Pinned with `fb.api.tables.in("space:<slug>")` like the records above:
+    // the grid saves an unsaved row when it is taken out of the page, by
+    // then the hash may name another space with a table of the same name.
+    const tablesIn = (ws) => {
+        const t = (name) => wsPath(ws, `/tables/${encodeURIComponent(name)}`);
+        return {
+            list:     ()             => request(wsPath(ws, "/tables")),
+            describe: (name)         => request(t(name)),
+            query:    (name, spec)   => request(`${t(name)}/query`, { method: "POST", body: JSON.stringify(spec || {}) }),
+            count:    (name, where)  => request(`${t(name)}/count`, { method: "POST", body: JSON.stringify({ where }) }),
+            insert:   (name, values) => request(`${t(name)}/rows`, { method: "POST", body: JSON.stringify(values) }),
+            update:   (name, id, values) => request(`${t(name)}/rows/${encodeURIComponent(id)}`, { method: "PATCH", body: JSON.stringify(values) }),
+            remove:   (name, id)     => request(`${t(name)}/rows/${encodeURIComponent(id)}`, { method: "DELETE" }),
+        };
     };
+    const tables = tablesIn(null);
+    tables.in = tablesIn;
 
     // One space's data, pinned to it whatever workspace is active — what a
     // space app gets over the bridge (fb.desktopApps, grant.api "space").
