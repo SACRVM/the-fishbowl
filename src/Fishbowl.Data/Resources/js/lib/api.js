@@ -497,10 +497,10 @@
     // Raw-body upload through XHR — fetch has no upload progress. `mode`
     // "create" sends If-None-Match: * (412 when the name is taken),
     // "replace" If-Match: * (the old one is overwritten).
-    function upload(path, blob, { mode = "create", onProgress, signal } = {}) {
+    function upload(path, blob, { mode = "create", onProgress, signal, method = "PUT" } = {}) {
         return new Promise((resolve, reject) => {
             const xhr = new XMLHttpRequest();
-            xhr.open("PUT", `${base}${path}`);
+            xhr.open(method, `${base}${path}`);
             xhr.setRequestHeader("X-Fishbowl-Upload", "1");
             if (mode === "replace") xhr.setRequestHeader("If-Match", "*");
             else xhr.setRequestHeader("If-None-Match", "*");
@@ -586,6 +586,44 @@
         method: "POST",
         body: JSON.stringify({ op, from: { workspace: from, paths }, to: { workspace: to, folder: folder || "" }, onConflict }),
     });
+
+    // The Photos app (spec 2026-10-30-photos-design): the library is every
+    // photo and video under the workspace's Photos/ folder. `in(ws)` pins a
+    // workspace like files.in; without it the active one. A filter is
+    // { favorites?: true, album?: <id> }.
+    function photosIn(workspace) {
+        const b = () => wsPath(workspace ?? currentWorkspace(), "/photos");
+        const filter = (f = {}) => {
+            const qs = new URLSearchParams();
+            if (f.favorites) qs.set("favorites", "true");
+            if (f.album) qs.set("album", f.album);
+            return qs;
+        };
+        const json = (method, body) => ({ method, body: JSON.stringify(body) });
+        return {
+            get workspace() { return workspace ?? currentWorkspace(); },
+            months: (f) => { const qs = filter(f).toString(); return request(`${b()}/months${qs ? `?${qs}` : ""}`); },
+            month:  (month, f) => { const qs = filter(f); qs.set("month", month); return request(`${b()}?${qs}`); },
+            get:    (id) => request(`${b()}/${encodeURIComponent(id)}`),
+            // "s" for the grid, "l" for the viewer; the version keeps it cached for good.
+            previewUrl: (photo, size = "s") => `${base}${b()}/${encodeURIComponent(photo.id)}/preview/${size}?v=${encodeURIComponent(photo.version || "")}`,
+            favorite: (ids, favorite) => request(`${b()}/favorite`, json("PUT", { ids, favorite })),
+            trash:  (ids) => request(`${b()}/trash`, json("POST", { ids })),
+            // One file as the body (XHR, for progress) → the photo as listed.
+            upload: (file, opts = {}) => upload(`${b()}/upload?name=${encodeURIComponent(file.name)}`, file, { ...opts, method: "POST" }),
+            status: () => request(`${b()}/status`),
+            albums: {
+                list:   () => request(`${b()}/albums`),
+                create: (name) => request(`${b()}/albums`, json("POST", { name })),
+                rename: (id, name) => request(`${b()}/albums/${encodeURIComponent(id)}`, json("PATCH", { name })),
+                remove: (id) => request(`${b()}/albums/${encodeURIComponent(id)}`, { method: "DELETE" }),
+                add:    (id, ids) => request(`${b()}/albums/${encodeURIComponent(id)}/items`, json("POST", { ids })),
+                take:   (id, ids) => request(`${b()}/albums/${encodeURIComponent(id)}/items/remove`, json("POST", { ids })),
+            },
+        };
+    }
+    const photos = photosIn(null);
+    photos.in = photosIn;
 
     // Todos list: open ones only, unless { includeCompleted: true } — the
     // server's default leaves completed todos out.
@@ -735,6 +773,7 @@
     fb.api = {
         secretBodies, secrets,
         files,
+        photos,
         notes,
         todos,
         trash,

@@ -177,6 +177,13 @@
         "cursor_expired": "The change feed moved on — reload.",
         "invalid_workspace": "That workspace doesn't exist or isn't yours.",
         "invalid_request": "That request isn't valid.",
+        // Photos
+        "not_a_photo": "Only photos and videos go into the library.",
+        "month_invalid": "A month is YYYY-MM.",
+        "preview_not_ready": "This photo's preview isn't made yet.",
+        "album_not_found": "That album isn't there any more.",
+        "name_required": "A name is missing.",
+        "name_too_long": "That name is too long.",
         // Desktop apps
         "invalid_manifest": "The app's manifest isn't valid.",
         "invalid_manifest_url": "That isn't an app address Fishbowl can use.",

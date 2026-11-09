@@ -16,7 +16,8 @@
  * .nuspec licence expressions for the versions the csproj files reference
  * (the ONNX Runtime package carries a licence file: MIT); the fonts from the
  * upstream licence files (vendor.lock.json holds the file hashes); the
- * embedding model from its model card. Re-check a line when its part is
+ * embedding model from its model card; Magick.NET's bundled libraries from
+ * the Notice.txt in its package. Re-check a line when its part is
  * updated — the versions are deliberately not repeated here.
  */
 (function () {
@@ -46,6 +47,13 @@
         ["MailKit",             "MIT", ".NET Foundation and Contributors"],
         ["MimeKit",             "MIT", ".NET Foundation and Contributors"],
         ["Markdig",             "BSD-2-Clause", "Alexandre Mutel"],
+        // Photos: Magick.NET's native library brings ImageMagick and the
+        // decoders it lists in its Notice.txt — HEIC through libheif + libde265.
+        ["Magick.NET",          "Apache-2.0", "Dirk Lemstra"],
+        ["ImageMagick",         "ImageMagick", "ImageMagick Studio LLC"],
+        ["libheif",             "LGPL-3.0", "struktur AG"],
+        ["libde265",            "LGPL-3.0", "struktur AG"],
+        ["MetadataExtractor",   "Apache-2.0", "Drew Noakes"],
         ["Discord.Net",         "MIT", "Discord.Net Contributors"],
         ["Serilog",             "Apache-2.0", "Serilog Contributors"],
     ];

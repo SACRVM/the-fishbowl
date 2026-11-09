@@ -1,6 +1,6 @@
 # Photos
 
-Status: **rough plan (2026-10-30), not yet built.**
+Status: **phase 3 (the look) and the upload of phase 4 built (2026-11-09)**; the export, the import, duplicates and search to come.
 A Photos app for a workspace: the whole library as a timeline, with albums,
 favourites and a viewer, shared with everyone in the space. The photos are
 real files in the workspace's Files. A one-time import brings an iCloud
@@ -221,14 +221,8 @@ The next context schema version:
 
 ## Open
 
-- **The decoders.** For HEIC, Magick.NET (Apache-2.0, libheif inside) or
-  NetVips (MIT, libvips with libheif). For video frames, ffmpeg (an external
-  binary). The open points are licences and the self-contained publish on
-  all four RIDs.
 - **The image model.** Which multilingual CLIP/SigLIP export, its size and
   licence.
-- **The folder.** Where the library sits in Files, and how freely people may
-  rearrange it there. The app follows either way.
 - **Places.** Whether GPS is shown to every member of a space, or can be
   switched off per space.
 - **The snapshot target.** The form of differential snapshots on an SMB
@@ -250,3 +244,24 @@ The next context schema version:
   a pass happens before the import is still open.
 - Snapshots become differential (to a NAS) before the library goes in. The
   details come later.
+
+## Decided on 2026-11-09
+
+- **The look comes first** (phase 3 with the upload of phase 4), before the
+  export: the app shows what is in the folder and what is uploaded, and the
+  import fills the same tables later.
+- **The folder is `Photos/`** in the workspace's Files (English, like
+  `Apps/`). Every image and video below it is a photo; a dot folder in it
+  (`Photos/.import/`) is not. Uploads go to `Photos/<year>/<month>/` by the
+  date the file says it was taken.
+- **The decoder is Magick.NET** (Apache-2.0), shipped with Fishbowl: 15.1
+  reads HEIC, HEIF, AVIF and RAW (DNG …) and writes WebP. It brings a native
+  library per platform (about 39 MB on linux-x64); there is none for
+  osx-x64, where photos show without thumbnails. Video frames come from
+  ffmpeg when the server has it, else a video shows without one.
+- **The grid is the app's own code** (light DOM, kit tokens), handed to the
+  kit afterwards as "how we do it", like the desktop's live tiles.
+- **Thumbnails live outside the workspace folder**, in
+  `fishbowl-data/cache/<users|spaces>/<id>/photos/`, so quota, archives,
+  exports and snapshots never see them and a cold import simply makes them
+  again.

@@ -642,6 +642,15 @@ public sealed class FileService : IFileService
         return new FileReadHandle(stream, entry with { Mime = mime }, mime);
     }
 
+    public Task<string> LocalPathAsync(ContextRef ctx, string path, CancellationToken ct = default)
+    {
+        var r = Open(ctx);
+        var p = r.Resolve(path, allowRoot: false);
+        var d = DiskFileStore.Stat(r, p.Rel) ?? throw FileStoreException.NotFound();
+        if (d.Kind != FileKinds.File) throw new FileStoreException(400, "not_a_file", "That isn't a file.");
+        return Task.FromResult(p.Full);
+    }
+
     public async Task<FileUsage> GetUsageAsync(ContextRef ctx, CancellationToken ct = default)
     {
         var r = Open(ctx);
@@ -1255,12 +1264,18 @@ public sealed class FileService : IFileService
     private static long Head(IDbConnection db, StateRow state)
         => Math.Max(db.ExecuteScalar<long?>("SELECT MAX(seq) FROM file_changes") ?? 0, state.FloorSeq);
 
-    public async Task<FileChangesPage> GetChangesAsync(ContextRef ctx, string? cursor, int? limit, CancellationToken ct = default)
+    public Task<FileChangesPage> GetChangesAsync(ContextRef ctx, string? cursor, int? limit, CancellationToken ct = default)
+        => GetChangesAsync(ctx, cursor, limit, reconcile: true, ct);
+
+    public async Task<FileChangesPage> GetChangesAsync(ContextRef ctx, string? cursor, int? limit, bool reconcile, CancellationToken ct = default)
     {
         var r = Open(ctx);
-        var s = await SettingsAsync(ct);
-        using (await LockAsync(r, ct))
-            await FullReconcileAsync(ctx, r, force: false, s, ct);
+        if (reconcile)
+        {
+            var s = await SettingsAsync(ct);
+            using (await LockAsync(r, ct))
+                await FullReconcileAsync(ctx, r, force: false, s, ct);
+        }
 
         using var db = _dbFactory.CreateContextConnection(ctx);
         var state = EnsureState(db, null, r);

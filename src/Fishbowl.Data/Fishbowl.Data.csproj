@@ -10,6 +10,7 @@
   <ItemGroup>
     <ProjectReference Include="..\Fishbowl.Core\Fishbowl.Core.csproj" />
     <ProjectReference Include="..\Fishbowl.Mail\Fishbowl.Mail.csproj" />
+    <ProjectReference Include="..\Fishbowl.Media\Fishbowl.Media.csproj" />
   </ItemGroup>
 
   <ItemGroup>

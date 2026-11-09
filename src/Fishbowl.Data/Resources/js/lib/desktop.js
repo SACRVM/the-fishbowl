@@ -43,6 +43,7 @@
         { key: "builtin:contacts", hash: "#/contacts",    name: "Contacts", icon: "contacts", desc: "People and organisations.", size: "medium" },
         { key: "builtin:mail",     hash: "#/mail",        name: "Mail",     icon: "mail",     desc: "Every mailbox in one list.", size: "medium" },
         { key: "builtin:files",    hash: "#/files",       name: "Files",    icon: "folder",   desc: "Real files, two panes, any workspace." },
+        { key: "builtin:photos",   hash: "#/photos",      name: "Photos",   icon: "image",    desc: "Every photo and video, by month." },
         { key: "builtin:tables",   hash: "#/tables",      name: "Tables",   icon: "grid",     desc: "This space's own tables, like a spreadsheet.", space: true },
         // Window apps (fb.windowApps): `open`, no address.
         { key: "builtin:messages", route: "messages", open: () => fb.windowApps.open("messages"), name: "Notifications", icon: "fb-bell",  desc: "What Fishbowl has to tell you." },

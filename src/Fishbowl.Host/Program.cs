@@ -233,6 +233,12 @@ builder.Services.AddScoped<IOAuthRepository, OAuthRepository>();
 // Every sign-in (Google, local) goes through the account rules here.
 builder.Services.AddScoped<AccountGate>();
 builder.Services.AddScoped<Fishbowl.Core.Files.IFileService, Fishbowl.Data.Files.FileService>();
+// Photos (spec 2026-10-30-photos-design): previews with Magick.NET (+ ffmpeg
+// when the server has it), the library following Photos/ in Files.
+builder.Services.AddSingleton<Fishbowl.Media.Thumbnailer>();
+builder.Services.AddScoped<Fishbowl.Data.Photos.PhotoIndexer>();
+builder.Services.AddScoped<Fishbowl.Data.Photos.PhotoPreviews>();
+builder.Services.AddScoped<Fishbowl.Data.Photos.PhotoRepository>();
 builder.Services.AddScoped<Fishbowl.Core.Files.ISpaceArchiveService, Fishbowl.Data.Files.SpaceArchiver>();
 builder.Services.AddScoped<Fishbowl.Core.Files.IUserArchiveService, Fishbowl.Data.Files.UserArchiver>();
 
@@ -998,6 +1004,7 @@ app.MapExportApi();
 app.MapArchiveApi();
 app.MapVaultApi();
 app.MapFilesApi();
+app.MapPhotosApi();
 app.MapDesktopApi();
 app.MapSpaceAppsApi();
 app.MapAppMessagesApi();

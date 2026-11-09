@@ -13,7 +13,7 @@ public class DatabaseFactory
 {
     /// <summary>The user/space schema head: the PRAGMA user_version a context
     /// DB has once it is open. Raise it with every ApplyUserVN.</summary>
-    public const int UserSchemaHead = 31;
+    public const int UserSchemaHead = 32;
 
     private readonly string _dataRoot;
     private readonly string _usersPath;
@@ -87,6 +87,17 @@ public class DatabaseFactory
     {
         ContextType.User => Path.Combine(_usersPath, ctx.Id),
         ContextType.Space => Path.Combine(_spacesPath, ctx.Id),
+        _ => throw new ArgumentException($"Context type {ctx.Type} has no folder of its own.", nameof(ctx)),
+    };
+
+    // Rebuildable data of a context that no quota, archive, export or
+    // snapshot should carry — photo previews: fishbowl-data/cache/users/{id}
+    // or cache/spaces/{id}, beside (not in) the context's own folder. A cold
+    // import doesn't bring it; it is made again.
+    public string ResolveCacheFolder(ContextRef ctx) => ctx.Type switch
+    {
+        ContextType.User => Path.Combine(_dataRoot, "cache", "users", ctx.Id),
+        ContextType.Space => Path.Combine(_dataRoot, "cache", "spaces", ctx.Id),
         _ => throw new ArgumentException($"Context type {ctx.Type} has no folder of its own.", nameof(ctx)),
     };
 
@@ -618,10 +629,96 @@ public class DatabaseFactory
         if (version < 31)
         {
             ApplyUserV31(connection);
-            connection.Execute($"PRAGMA user_version = {UserSchemaHead}");
+            connection.Execute("PRAGMA user_version = 31");
             _logger.LogInformation("Applied user schema v31 to {DbPath}", ((SqliteConnection)connection).DataSource);
+            version = 31;
+        }
+
+        if (version < 32)
+        {
+            ApplyUserV32(connection);
+            connection.Execute($"PRAGMA user_version = {UserSchemaHead}");
+            _logger.LogInformation("Applied user schema v32 to {DbPath}", ((SqliteConnection)connection).DataSource);
         }
     }
+
+    // Photos (spec 2026-10-30-photos-design): a photo is one or more files
+    // under the workspace's Photos/ folder — its parts (the original, an
+    // edit, a Live Photo's movie, a RAW) — plus what files can't hold. `path`
+    // is the part the timeline shows. `gone_at` marks a photo whose files
+    // left the library (the Files trash, a move out of Photos/): it comes
+    // back with its albums when its file does, and goes for good after the
+    // trash's retention. `thumb` says whether its previews are made (0 to
+    // make, 1 made, 2 couldn't). The indexer's place in the files journal is
+    // photo_state.cursor.
+    private static void ApplyUserV32(IDbConnection connection) => connection.Execute(@"
+        CREATE TABLE IF NOT EXISTS photos (
+            id            TEXT PRIMARY KEY,
+            kind          TEXT NOT NULL CHECK (kind IN ('photo','video','live')),
+            path          TEXT NOT NULL,
+            taken_at      TEXT NOT NULL,
+            taken_offset  INTEGER,
+            month         TEXT NOT NULL,
+            width         INTEGER,
+            height        INTEGER,
+            duration      REAL,
+            latitude      REAL,
+            longitude     REAL,
+            camera        TEXT,
+            favorite      INTEGER NOT NULL DEFAULT 0,
+            title         TEXT,
+            description   TEXT,
+            keywords      TEXT NOT NULL DEFAULT '[]',
+            source_id     TEXT,
+            content_id    TEXT,
+            burst_id      TEXT,
+            thumb         INTEGER NOT NULL DEFAULT 0,
+            gone_at       TEXT,
+            created_by    TEXT,
+            created_at    TEXT NOT NULL,
+            updated_at    TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS ix_photos_timeline ON photos (taken_at DESC, id DESC) WHERE gone_at IS NULL;
+        CREATE INDEX IF NOT EXISTS ix_photos_month ON photos (month) WHERE gone_at IS NULL;
+        CREATE INDEX IF NOT EXISTS ix_photos_thumb ON photos (taken_at) WHERE thumb = 0 AND gone_at IS NULL;
+        CREATE INDEX IF NOT EXISTS ix_photos_content ON photos (content_id) WHERE content_id IS NOT NULL;
+        CREATE UNIQUE INDEX IF NOT EXISTS ux_photos_source ON photos (source_id) WHERE source_id IS NOT NULL;
+
+        CREATE TABLE IF NOT EXISTS photo_parts (
+            photo_id  TEXT NOT NULL REFERENCES photos(id) ON DELETE CASCADE,
+            role      TEXT NOT NULL CHECK (role IN ('original','edited','live','raw')),
+            path      TEXT NOT NULL,
+            size      INTEGER,
+            sha256    TEXT,
+            PRIMARY KEY (photo_id, role)
+        );
+        CREATE UNIQUE INDEX IF NOT EXISTS ux_photo_parts_path ON photo_parts (path);
+        CREATE INDEX IF NOT EXISTS ix_photo_parts_sha ON photo_parts (sha256) WHERE sha256 IS NOT NULL;
+
+        CREATE TABLE IF NOT EXISTS photo_albums (
+            id          TEXT PRIMARY KEY,
+            name        TEXT NOT NULL,
+            parent_id   TEXT REFERENCES photo_albums(id) ON DELETE CASCADE,
+            kind        TEXT NOT NULL DEFAULT 'album' CHECK (kind IN ('album','folder','shared')),
+            position    REAL NOT NULL,
+            source_id   TEXT,
+            created_by  TEXT,
+            created_at  TEXT NOT NULL,
+            updated_at  TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS photo_album_items (
+            album_id  TEXT NOT NULL REFERENCES photo_albums(id) ON DELETE CASCADE,
+            photo_id  TEXT NOT NULL REFERENCES photos(id) ON DELETE CASCADE,
+            position  REAL NOT NULL,
+            added_at  TEXT NOT NULL,
+            PRIMARY KEY (album_id, photo_id)
+        );
+        CREATE INDEX IF NOT EXISTS ix_photo_album_items_photo ON photo_album_items (photo_id);
+
+        CREATE TABLE IF NOT EXISTS photo_state (
+            id      INTEGER PRIMARY KEY CHECK (id = 1),
+            cursor  TEXT
+        );");
 
     // Notes as documents for agents (spec 2026-11-06-notes-for-agents): tags
     // on todos, a note's slug (unique in any case) and lock, what agents

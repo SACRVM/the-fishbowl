@@ -27,6 +27,8 @@ public static class ServiceCollectionExtensions
         services.AddHostedService<MailPushService>();
         // Needs VectorBackfill (registered by the host).
         services.AddHostedService<EmbeddingBackfillService>();
+        // Needs the photo services (registered by the host).
+        services.AddHostedService<PhotosService>();
         return services;
     }
 }

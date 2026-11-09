@@ -23,6 +23,7 @@ window.sac?.i18n?.add?.("de", {
     "fb.route.admin-system": "System",
     "fb.route.calendar": "Kalender",
     "fb.route.files": "Dateien",
+    "fb.route.photos": "Fotos",
 
     // --- Shell: nav, account menu, workspace switcher -----------------------
     "fb.shell.account": "Konto",
@@ -88,6 +89,8 @@ window.sac?.i18n?.add?.("de", {
     "fb.app.mail.desc": "Alle Postfächer in einer Liste.",
     "fb.app.files.name": "Dateien",
     "fb.app.files.desc": "Echte Dateien, zwei Spalten, jeder Arbeitsbereich.",
+    "fb.app.photos.name": "Fotos",
+    "fb.app.photos.desc": "Jedes Foto und Video, nach Monaten.",
     "fb.app.trash.name": "Papierkorb",
     "fb.app.apps.name": "Apps",
     "fb.app.apps.desc": "Die Apps auf diesem Desktop.",

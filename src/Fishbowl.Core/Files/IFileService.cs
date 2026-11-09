@@ -47,6 +47,16 @@ public interface IFileService
     // server's cap, so back-to-back restores can't each pass on one total.
     Task ReserveNewSpaceAsync(string ownerId, long filesBytes, long totalBytes, CancellationToken ct = default);
     Task<FileChangesPage> GetChangesAsync(ContextRef ctx, string? cursor, int? limit, CancellationToken ct = default);
+
+    // The same feed without reconciling the tree first: for a reader that
+    // polls often (the Photos indexer), where what changed through the API
+    // is enough and changes made on the disk arrive with the next reconcile
+    // (a Files listing, the daily maintenance).
+    Task<FileChangesPage> GetChangesAsync(ContextRef ctx, string? cursor, int? limit, bool reconcile, CancellationToken ct = default);
+
+    // The absolute path of an existing file, for a reader that needs one on
+    // disk (a decoder, ffmpeg). Read only: nothing may write through it.
+    Task<string> LocalPathAsync(ContextRef ctx, string path, CancellationToken ct = default);
     Task<(string Cursor, IReadOnlyList<FileSnapshotEntry> Entries)> SnapshotAsync(ContextRef ctx, CancellationToken ct = default);
 
     Task<IReadOnlyList<FileTransferItemResult>> TransferAsync(ContextRef from, IReadOnlyList<string> paths,
