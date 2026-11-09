@@ -171,6 +171,51 @@ public class UiSmokeTests
         await context.CloseAsync();
     }
 
+    // A long note on a phone scrolls as one page under the split's sticky
+    // back bar; the editor's formatting toolbar is sticky too (sac-md-editor
+    // v1.1.0) and must stay in sight below the bar, never slide under it.
+    [Fact]
+    public async Task Phone_LongNote_EditorToolbarStaysBelowTheBackBar_Test()
+    {
+        var context = await _fixture.Browser!.NewContextAsync(Phone());
+        var page = await context.NewPageAsync();
+        var body = string.Join("\n\n", Enumerable.Range(1, 60).Select(i => $"Paragraph {i} of a long note."));
+        var created = await page.APIRequest.PostAsync(_fixture.BaseUrl + "/api/v1/notes", new APIRequestContextOptions
+        {
+            DataObject = new { title = "Long phone note", content = body },
+        });
+        Assert.True(created.Ok, $"seed note failed: {created.Status}");
+
+        await page.GotoAsync(_fixture.BaseUrl + "/#/notes");
+        await page.Locator(".nv-item", new PageLocatorOptions { HasText = "Long phone note" }).First.TapAsync();
+        await page.WaitForFunctionAsync("() => document.querySelector('fb-notes-view sac-split').getAttribute('show') === 'end'");
+
+        // Once the note has slid in, down to its end — the split's end pane
+        // is what a finger scrolls — then measure where the toolbar sits.
+        await page.WaitForFunctionAsync("() => !document.querySelector('fb-notes-view sac-split').hasAttribute('sliding')");
+        var at = await page.EvaluateAsync<double[]>(@"async () => {
+            const split = document.querySelector('fb-notes-view sac-split');
+            const host = document.querySelector('fb-notes-view sac-md-editor#content');
+            const pane = split.shadowRoot.querySelector('.pane.end');
+            pane.scrollTop = pane.scrollHeight;
+            await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+            const bar = split.shadowRoot.querySelector('.back').getBoundingClientRect();
+            const tools = host.shadowRoot.querySelector('.toolbar').getBoundingClientRect();
+            const hit = document.elementFromPoint(tools.left + tools.width / 2, tools.top + tools.height / 2);
+            return [bar.bottom, tools.top, tools.bottom, hit === host ? 1 : 0, host.getBoundingClientRect().top];
+        }");
+        var (barBottom, toolsTop, toolsBottom, onTop, hostTop) = (at[0], at[1], at[2], at[3], at[4]);
+        Assert.True(hostTop < barBottom, $"the note didn't scroll under the bar (editor top {hostTop}, bar bottom {barBottom})");
+        // Right below the bar: under it hides the toolbar, a gap shows text
+        // scrolling between the two (the offset mirrors the kit's bar).
+        Assert.True(Math.Abs(toolsTop - barBottom) <= 1, $"toolbar top {toolsTop}, back bar bottom {barBottom}");
+        Assert.True(toolsBottom > toolsTop && toolsBottom <= 740, $"toolbar out of sight ({toolsTop}–{toolsBottom})");
+        Assert.True(onTop == 1, "something covers the editor's toolbar");
+        await page.ScreenshotAsync(new() { Path = Path.Combine(Path.GetTempPath(), "fishbowl_ui_phone_long_note.png") });
+
+        await context.CloseAsync();
+    }
+
     [Theory]
     [InlineData("keys", "fb-keys-settings-view")]
     [InlineData("spaces", "fb-spaces-settings-view")]
